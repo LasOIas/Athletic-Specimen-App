@@ -1,0 +1,185 @@
+/* Core styles for Athletic Specimen */
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  margin: 0;
+  padding: 0;
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.title {
+  text-align: center;
+  font-size: 2rem;
+  margin-bottom: 1rem;
+  color: #1e293b;
+}
+
+.card {
+  background-color: #ffffff;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.admin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+
+input[type="text"],
+input[type="password"],
+input[type="number"] {
+  padding: 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.375rem;
+  flex: 1;
+  min-width: 0;
+}
+
+button {
+  padding: 0.5rem 0.75rem;
+  background-color: #3b82f6;
+  color: #ffffff;
+  border: none;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+button:hover {
+  background-color: #2563eb;
+}
+
+button.danger {
+  background-color: #dc2626;
+}
+
+button.danger:hover {
+  background-color: #b91c1c;
+}
+
+.msg {
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: #14b8a6;
+}
+
+.player-card {
+  border: 1px solid #e2e8f0;
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.player-card .row {
+  margin-top: 0.25rem;
+}
+
+.skill,
+.status {
+  display: block;
+  font-size: 0.875rem;
+  margin-top: 0.25rem;
+}
+
+.status.in {
+  color: #16a34a;
+}
+
+.status.out {
+  color: #64748b;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+@media (min-width: 640px) {
+  .grid-2 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.players {
+  display: flex;
+  flex-direction: column;
+}
+
+.team {
+  margin-top: 0.5rem;
+}
+
+.team h4 {
+  margin-bottom: 0.25rem;
+}
+
+ul {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.bracket {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.round {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.match {
+  border: 1px solid #e2e8f0;
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex: 1;
+  min-width: 150px;
+}
+
+.match input {
+  margin-bottom: 0.25rem;
+}
+
+.match .row {
+  justify-content: space-between;
+}
+
+button.winner {
+  background-color: #16a34a;
+  color: #ffffff;
+}
+
+.placeholder {
+  color: #cbd5e1;
+  display: block;
+  padding: 0.25rem 0;
+}
+
+.small {
+  font-size: 0.875rem;
+  color: #64748b;
+}
