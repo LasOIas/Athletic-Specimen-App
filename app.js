@@ -20,21 +20,14 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const supabaseClient = supabase; // it's already created at the top
+
 
 // Create Supabase client if credentials are provided. The global `supabase`
 // object is exported by vendor/supabase.js. When both values are falsy
 // (empty strings), supabaseClient will be null and no network calls will be
 // made. We wrap creation in a try/catch to avoid errors if supabase.js
 // fails to load.
-let supabaseClient = null;
-try {
-  if (SUPABASE_URL && SUPABASE_KEY && window.supabase) {
-    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-  }
-} catch (err) {
-  console.warn('Supabase client could not be created', err);
-  supabaseClient = null;
-}
 
 // Utility to normalise player names for case insensitive comparison
 function normalize(str) {
