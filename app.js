@@ -377,11 +377,12 @@ function attachHandlers() {
         // update remote
         if (supabaseClient && updated[idx].id) {
           try {
-            await supabaseClient.from('players').update({ skill }).eq('id', updated[idx].id);
+                await supabaseClient.from('players').update({ skill }).eq('id', updated[idx].id);
+                await syncFromSupabase(); // <–– stays inside the try block
           } catch (err) {
-            console.error('Supabase update error', err);
+                console.error('Supabase update error', err);
           }
-        }
+        }            
       } else {
         // insert new
         const newPlayer = { name, skill };
@@ -389,12 +390,14 @@ function attachHandlers() {
         if (supabaseClient) {
           try {
             const { data, error } = await supabaseClient.from('players').insert([newPlayer]).select();
+            await syncFromSupabase();
             if (!error && Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
           } catch (err) {
             console.error('Supabase insert error', err);
           }
         }
         state.players = [...state.players, inserted];
+        await syncFromSupabase();
       }
       nameInput.value = '';
       skillInput.value = '';
@@ -419,6 +422,7 @@ function attachHandlers() {
         if (supabaseClient) {
           try {
             const { data, error } = await supabaseClient.from('players').insert([newPlayer]).select();
+            await syncFromSupabase();
             if (!error && Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
           } catch (err) {
             console.error('Supabase insert error', err);
@@ -453,6 +457,7 @@ function attachHandlers() {
           if (supabaseClient && player.id) {
             try {
               await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+              await syncFromSupabase();
             } catch (err) {
               console.error('Supabase update error', err);
             }
@@ -484,6 +489,7 @@ function attachHandlers() {
         if (player && supabaseClient && player.id) {
           try {
             await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+            await syncFromSupabase();
           } catch (err) {
             console.error('Supabase update error', err);
           }
@@ -502,6 +508,7 @@ function attachHandlers() {
       if (player && supabaseClient && player.id) {
         try {
           await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+          await syncFromSupabase();
         } catch (err) {
           console.error('Supabase update error', err);
         }
@@ -524,9 +531,9 @@ function attachHandlers() {
         if (supabaseClient && removed.id) {
           try {
             await supabaseClient.from('players').delete().eq('id', removed.id);
+            await syncFromSupabase();
           } catch (err) {
-            console.error('Supabase delete error', err);
-          }
+            console.error('Supabase delete error', err);          }
         }
         // Remove from players and checkedIn
         state.players = state.players.filter((p) => normalize(p.name) !== normalize(name));
@@ -545,6 +552,7 @@ function attachHandlers() {
       if (supabaseClient) {
         try {
           await supabaseClient.from('players').update({ checked_in: false }).eq('checked_in', true);
+          await syncFromSupabase();
         } catch (err) {
           console.error('Supabase reset error', err);
         }
