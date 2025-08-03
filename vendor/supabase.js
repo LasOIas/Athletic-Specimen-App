@@ -1,5 +1,3 @@
-// supabase.js
-
 import { createClient } from './supabase-js.min.js';
 
 const supabase = createClient(
