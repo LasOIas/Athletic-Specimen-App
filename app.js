@@ -139,20 +139,18 @@ async function syncFromSupabase() {
       return;
     }
     if (!Array.isArray(data)) return;
-    // Merge remote players into local state.players
-    const merged = state.players.slice();
-    data.forEach((remote) => {
-      const idx = merged.findIndex((p) => normalize(p.name) === normalize(remote.name));
-      if (idx !== -1) {
-        merged[idx] = { ...merged[idx], ...remote };
-      } else {
-        merged.push({ name: remote.name, skill: Number(remote.skill) || 0, id: remote.id, checked_in: !!remote.checked_in });
-      }
-    });
-    state.players = merged;
-    // Build checkedIn from remote
-    const remoteChecked = data.filter((p) => p.checked_in).map((p) => p.name);
-    state.checkedIn = Array.from(new Set([...state.checkedIn, ...remoteChecked]));
+
+    // Replace state.players cleanly
+    state.players = data.map((p) => ({
+      name: p.name,
+      skill: Number(p.skill) || 0,
+      id: p.id,
+      checked_in: !!p.checked_in
+    }));
+
+    // Only set checkedIn once — no need to merge or deduplicate
+    state.checkedIn = data.filter((p) => p.checked_in).map((p) => p.name);
+
   } catch (err) {
     console.error('Error syncing from Supabase', err);
   }
@@ -396,8 +394,6 @@ function attachHandlers() {
             console.error('Supabase insert error', err);
           }
         }
-        state.players = [...state.players, inserted];
-        await syncFromSupabase();
       }
       nameInput.value = '';
       skillInput.value = '';
@@ -428,7 +424,6 @@ function attachHandlers() {
             console.error('Supabase insert error', err);
           }
         }
-        state.players = [...state.players, inserted];
         messages.registration = 'Player registered. Waiting for admin to assign skill.';
       }
       // clear message after 3 seconds
