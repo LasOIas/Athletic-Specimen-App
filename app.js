@@ -33,6 +33,7 @@ const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 // Utility to normalise player names for case insensitive comparison
 function normalize(str) {
   return String(str || '').trim().toLowerCase();
+}
 // Removed extra closing brace
 
 // Balanced group generation algorithm. Given a list of all players, the set
@@ -816,7 +817,6 @@ document.querySelectorAll('.btn-save-edit').forEach((btn) => {
     render();
   });
 });
-}
 
 
 // Initialise the app. Called once on page load. It loads stored data,
