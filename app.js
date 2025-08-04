@@ -361,8 +361,9 @@ ${state.isAdmin ? `
      <div class="card">
   <h3>Players</h3>
 
-<div class="card-section">
-  <h4 class="section-title">Sort Options</h4>
+<div>
+  <h4 style="margin-bottom: 0.5rem;">Filters</h4>
+
   <div class="row">
     <label for="sort-select">Sort By:</label>
     <select id="sort-select">
@@ -371,10 +372,7 @@ ${state.isAdmin ? `
       <option value="skill" ${state.sortMode === 'skill' ? 'selected' : ''}>Skill (High–Low)</option>
     </select>
   </div>
-</div>
 
-<div class="card-section">
-  <h4 class="section-title">Filter Players</h4>
   <div class="row">
     <label for="player-tab-select">Filter:</label>
     <select id="player-tab-select">
