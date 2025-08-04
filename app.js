@@ -41,7 +41,9 @@ function normalize(str) {
 // assigns each player to the group with the lowest total skill so far.
 function generateBalancedGroups(players, checkedInNames, groupCount) {
   const eligible = players.filter((p) => checkedInNames.some((n) => normalize(n) === normalize(p.name)));
-  const sorted = eligible.slice().sort((a, b) => b.skill - a.skill);
+  // Randomize player order first, then sort by skill
+const shuffled = eligible.slice().sort(() => Math.random() - 0.5);
+const sorted = shuffled.sort((a, b) => b.skill - a.skill);
   const teams = Array.from({ length: groupCount }, () => []);
   const teamSkills = new Array(groupCount).fill(0);
   for (const player of sorted) {
