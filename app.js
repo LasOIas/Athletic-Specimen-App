@@ -634,8 +634,7 @@ function attachHandlers() {
       setTimeout(() => window.scrollTo(0, scrollY), 0);
     });
   });
-}
-// Toggle edit row
+  // Toggle edit row (admin only)
 document.querySelectorAll('.btn-edit').forEach((btn) => {
   btn.addEventListener('click', (ev) => {
     const idx = ev.currentTarget.getAttribute('data-index');
@@ -673,6 +672,8 @@ document.querySelectorAll('.btn-save-edit').forEach((btn) => {
     render();
   });
 });
+}
+
 
 // Initialise the app. Called once on page load. It loads stored data,
 // optionally syncs with Supabase, registers the service worker and
