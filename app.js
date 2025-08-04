@@ -95,11 +95,7 @@ function renderFilteredPlayers() {
     filtered = filtered.filter(p => !p.skill || p.skill === 0);
   }
   
-  if (state.sortMode === 'name') {
-    filtered.sort((a, b) => a.name.localeCompare(b.name));
-  } else if (state.sortMode === 'skill') {
-    filtered.sort((a, b) => b.skill - a.skill);
-  }
+  filtered.sort((a, b) => b.skill - a.skill);
   
   if (filtered.length === 0) {
     return '<p>No players found.</p>';
@@ -167,7 +163,6 @@ const state = {
   groupCount: 2,      // number of teams requested when generating groups
 playerTab: 'all',       // current active tab: 'all', 'in', 'out', 'skill'
 skillSubTab: null,       // current skill range selected, like '1.0', '2.0', etc.
-sortMode: 'none', // options: 'none', 'name', 'skill'
 loaded: false, // becomes true after Supabase loads
 };
 
@@ -393,15 +388,6 @@ ${state.isAdmin ? `
 
 <div>
   <h4 style="margin-bottom: 0.5rem;">Filters</h4>
-
-  <div class="row">
-    <label for="sort-select">Sort By:</label>
-    <select id="sort-select">
-      <option value="none" ${state.sortMode === 'none' ? 'selected' : ''}>None</option>
-      <option value="name" ${state.sortMode === 'name' ? 'selected' : ''}>Name (A–Z)</option>
-      <option value="skill" ${state.sortMode === 'skill' ? 'selected' : ''}>Skill (High–Low)</option>
-    </select>
-  </div>
 
   <div class="row">
     <label for="player-tab-select">Filter:</label>
@@ -780,12 +766,6 @@ if (tabSelect) {
     state.playerTab = ev.target.value;
 sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
     state.skillSubTab = null;
-    render();
-  });
-  const sortSelect = document.getElementById('sort-select');
-if (sortSelect) {
-  sortSelect.addEventListener('change', (ev) => {
-    state.sortMode = ev.target.value;
     render();
   });
 }
