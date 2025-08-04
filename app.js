@@ -304,6 +304,7 @@ function render() {
   const html = `
     <div class="container">
       <h1 class="title">Athletic Specimen</h1>
+<p class="small" style="text-align:center;">Checked In: <strong>${state.checkedIn.length}</strong></p>
       ${adminLoginHTML}
       <div class="grid-2">
         <div class="card">
