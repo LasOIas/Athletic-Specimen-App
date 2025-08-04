@@ -57,7 +57,6 @@ const sorted = shuffled.sort((a, b) => b.skill - a.skill);
   }
   return teams;
 }
-if (!state.loaded) return '<p>Loading players...</p>';
 
 function renderFilteredPlayers() {
   let filtered = state.players;
