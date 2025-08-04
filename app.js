@@ -783,16 +783,17 @@ document.querySelectorAll('.btn-save-edit').forEach((btn) => {
     saveLocal();
     render();
   });
+
 });
-}
 }
 const subtabSelect = document.getElementById('skill-subtab-select');
 if (subtabSelect) {
   subtabSelect.addEventListener('change', (ev) => {
     state.skillSubTab = ev.target.value;
-sessionStorage.setItem(LS_SUBTAB_KEY, state.skillSubTab);
+    sessionStorage.setItem(LS_SUBTAB_KEY, state.skillSubTab);
     render();
   });
+}
 }
 
 // Initialise the app. Called once on page load. It loads stored data,
