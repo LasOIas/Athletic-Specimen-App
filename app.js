@@ -107,10 +107,13 @@ filtered = filtered
     const idx = state.players.findIndex(p => normalize(p.name) === normalize(player.name));
     const checked = state.checkedIn.includes(player.name);
     return `
-      <div class="player-card" data-index="${idx}">
+          <div class="player-card ${player.skill === 0 ? 'needs-skill' : ''}" data-index="${idx}">
         <div>
           <strong>${player.name}</strong>
-          <span class="skill">Skill: ${player.skill}</span>
+          <span class="skill ${player.skill === 0 ? 'unrated' : ''}">
+  Skill: ${player.skill === 0 ? 'Unset' : player.skill}
+</span>
+${player.skill === 0 && state.isAdmin ? '<p class="warning">Needs skill rating</p>' : ''}
           <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
         </div>
         <div class="row">
