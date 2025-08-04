@@ -338,18 +338,24 @@ function render() {
           <button id="btn-save-player">Save</button>
         </div>
       </div>
-      <div class="card">
-        <h3>Generate Teams</h3>
-        <div class="row">
-          <label>
-            Teams:
-            <input type="number" id="group-count" min="2" value="${escapeHTML(String(state.groupCount))}" />
-          </label>
-          <button id="btn-generate-teams">Generate</button>
-          <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
-        </div>
-        ${teamsHTML}
-      </div>
+     <div class="card">
+  <h3>Generate Teams</h3>
+  <p class="small" style="margin-top: -0.5rem; margin-bottom: 0.5rem;">
+    Teams of 6: <strong>${Math.floor(state.checkedIn.length / 6)}</strong> |
+    Teams of 4: <strong>${Math.floor(state.checkedIn.length / 4)}</strong> |
+    Teams of 2: <strong>${Math.floor(state.checkedIn.length / 2)}</strong>
+  </p>
+  <div class="row">
+    <label>
+      Teams:
+      <input type="number" id="group-count" min="2" value="${escapeHTML(String(state.groupCount))}" />
+    </label>
+    <button id="btn-generate-teams">Generate</button>
+    <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
+  </div>
+  ${teamsHTML}
+</div>
+
       <div class="card">
         <h3>Tournament Bracket</h3>
         <p class="small">Enter up to 8 teams below. Click team names to advance them.</p>
