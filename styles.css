@@ -183,3 +183,36 @@ button.winner {
   font-size: 0.875rem;
   color: #64748b;
 }
+.edit-row {
+  display: none;
+  flex-direction: column;
+  background: #f1f5f9;              /* light gray-blue background */
+  padding: 10px;
+  margin-top: 8px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;        /* soft border */
+}
+
+.edit-row input {
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid #94a3b8;        /* subtle input border */
+  border-radius: 4px;
+  width: 100%;
+  font-size: 14px;
+}
+
+.btn-save-edit {
+  align-self: flex-start;
+  background-color: #16a34a;       /* green save button */
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.btn-save-edit:hover {
+  background-color: #15803d;
+}
