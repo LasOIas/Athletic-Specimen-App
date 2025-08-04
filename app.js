@@ -42,20 +42,40 @@ function normalize(str) {
 // assigns each player to the group with the lowest total skill so far.
 function generateBalancedGroups(players, checkedInNames, groupCount) {
   const eligible = players.filter((p) => checkedInNames.some((n) => normalize(n) === normalize(p.name)));
-  // Randomize player order first, then sort by skill
-const shuffled = eligible.slice().sort(() => Math.random() - 0.5);
-const sorted = shuffled.sort((a, b) => b.skill - a.skill);
-  const teams = Array.from({ length: groupCount }, () => []);
-  const teamSkills = new Array(groupCount).fill(0);
-  for (const player of sorted) {
-    let target = 0;
-    for (let i = 1; i < groupCount; i++) {
-      if (teamSkills[i] < teamSkills[target]) target = i;
+  if (eligible.length === 0 || groupCount <= 1) return [];
+
+  const attempts = 50; // number of random shuffles to try
+  const groupings = [];
+
+  for (let a = 0; a < attempts; a++) {
+    const shuffled = eligible.slice().sort(() => Math.random() - 0.5);
+    const teams = Array.from({ length: groupCount }, () => []);
+    const teamSkills = new Array(groupCount).fill(0);
+
+    for (const player of shuffled) {
+      let target = 0;
+      for (let i = 1; i < groupCount; i++) {
+        if (teamSkills[i] < teamSkills[target]) target = i;
+      }
+      teams[target].push(player);
+      teamSkills[target] += player.skill;
     }
-    teams[target].push(player);
-    teamSkills[target] += player.skill;
+
+    const avg = teamSkills.reduce((a, b) => a + b, 0) / groupCount;
+    const variance = teamSkills.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / groupCount;
+    const stddev = Math.sqrt(variance);
+
+    groupings.push({ teams, stddev });
   }
-  return teams;
+
+  // Sort by standard deviation (lowest = most balanced)
+  groupings.sort((a, b) => a.stddev - b.stddev);
+
+  // Randomly pick from top 5 most balanced options
+  const topOptions = groupings.slice(0, 5);
+  const chosen = topOptions[Math.floor(Math.random() * topOptions.length)];
+
+  return chosen.teams;
 }
 
 function renderFilteredPlayers() {
