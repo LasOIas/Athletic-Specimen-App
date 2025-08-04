@@ -75,7 +75,8 @@ function renderFilteredPlayers() {
     return '<p>No players found.</p>';
   }
 
-  return filtered.map((player, idx) => {
+  return filtered.map((player) => {
+    const idx = state.players.findIndex(p => normalize(p.name) === normalize(player.name));
     const checked = state.checkedIn.includes(player.name);
     return `
       <div class="player-card" data-index="${idx}">
