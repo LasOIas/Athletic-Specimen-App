@@ -265,33 +265,6 @@ function render() {
   if (state.players.length === 0) {
     playersHTML = '<p>No players yet.</p>';
   } else {
-    playersHTML = state.players.map((player, idx) => {
-      const checked = state.checkedIn.some((n) => normalize(n) === normalize(player.name));
-      return `
-        <div class="player-card" data-index="${idx}">
-          <div>
-            <strong>${escapeHTML(player.name)}</strong>
-            <span class="skill">Skill: ${escapeHTML(String(player.skill))}</span>
-            <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
-          </div>
-         <div class="row">
-  <button class="btn-checkin" data-name="${escapeHTML(player.name)}">Check In</button>
-  <button class="btn-checkout" data-name="${escapeHTML(player.name)}">Check Out</button>
-  ${state.isAdmin ? `
-    <button class="btn-edit" data-index="${idx}">Edit</button>
-    <button class="btn-delete danger" data-name="${escapeHTML(player.name)}">Delete</button>
-  ` : ''}
-</div>
-${state.isAdmin ? `
-  <div class="edit-row" style="display:none" data-index="${idx}">
-    <input type="text" class="edit-name" value="${escapeHTML(player.name)}" />
-    <input type="number" class="edit-skill" value="${escapeHTML(String(player.skill))}" step="0.1" />
-    <button class="btn-save-edit" data-index="${idx}">Save</button>
-  </div>
-` : ''}
-        </div>
-      `;
-    }).join('');
   }
 
   // Build generated teams HTML
@@ -470,6 +443,15 @@ return `<option value="${base}" ${selected}>${label}</option>`;
 // Attach event listeners to the current DOM. This function should be
 // called after each call to render().
 function attachHandlers() {
+  // Toggle edit row (admin only)
+document.querySelectorAll('.btn-edit').forEach((btn) => {
+  btn.addEventListener('click', (ev) => {
+    const idx = ev.currentTarget.getAttribute('data-index');
+    const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+    if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+  });
+});
+
   // Admin login
   const loginBtn = document.getElementById('btn-admin-login');
   if (loginBtn) {
@@ -766,27 +748,8 @@ if (tabSelect) {
 sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
     state.skillSubTab = null;
     render();
-    // Toggle edit row (admin only)
-document.querySelectorAll('.btn-edit').forEach((btn) => {
-  btn.addEventListener('click', (ev) => {
-    const idx = ev.currentTarget.getAttribute('data-index');
-    const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-    if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
   });
-});
-  });
-}
-}
-const subtabSelect = document.getElementById('skill-subtab-select');
-if (subtabSelect) {
-  subtabSelect.addEventListener('change', (ev) => {
-    state.skillSubTab = ev.target.value;
-sessionStorage.setItem(LS_SUBTAB_KEY, state.skillSubTab);
-    render();
-  });
-}
-
-// Save edited player
+  // Save edited player
 document.querySelectorAll('.btn-save-edit').forEach((btn) => {
   btn.addEventListener('click', async (ev) => {
     const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
@@ -815,7 +778,16 @@ document.querySelectorAll('.btn-save-edit').forEach((btn) => {
     render();
   });
 });
-
+}
+}
+const subtabSelect = document.getElementById('skill-subtab-select');
+if (subtabSelect) {
+  subtabSelect.addEventListener('change', (ev) => {
+    state.skillSubTab = ev.target.value;
+sessionStorage.setItem(LS_SUBTAB_KEY, state.skillSubTab);
+    render();
+  });
+}
 
 // Initialise the app. Called once on page load. It loads stored data,
 // optionally syncs with Supabase, registers the service worker and
