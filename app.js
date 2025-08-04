@@ -410,8 +410,8 @@ ${state.isAdmin ? `
       <option value="in" ${state.playerTab === 'in' ? 'selected' : ''}>Checked In</option>
       <option value="out" ${state.playerTab === 'out' ? 'selected' : ''}>Checked Out</option>
       <option value="skill" ${state.playerTab === 'skill' ? 'selected' : ''}>Skill Number</option>
-    </select>
       <option value="unrated" ${state.playerTab === 'unrated' ? 'selected' : ''}>Unset Skill</option>
+    </select>
   </div>
 </div>
 
