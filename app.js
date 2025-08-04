@@ -109,9 +109,7 @@ function renderFilteredPlayers() {
           <div class="player-card" data-index="${idx}">
         <div>
           <strong>${player.name}</strong>
-          <span class="skill">Skill: ${player.skill}</span>
-  Skill: ${player.skill === 0 ? 'Unset' : player.skill}
-</span>
+          <span class="skill">Skill: ${player.skill === 0 ? 'Unset' : player.skill}</span>
           <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
         </div>
         <div class="row">
@@ -768,6 +766,14 @@ if (tabSelect) {
 sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
     state.skillSubTab = null;
     render();
+    // Toggle edit row (admin only)
+document.querySelectorAll('.btn-edit').forEach((btn) => {
+  btn.addEventListener('click', (ev) => {
+    const idx = ev.currentTarget.getAttribute('data-index');
+    const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+    if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+  });
+});
   });
 }
 }
@@ -779,14 +785,6 @@ sessionStorage.setItem(LS_SUBTAB_KEY, state.skillSubTab);
     render();
   });
 }
-// Toggle edit row (admin only)
-document.querySelectorAll('.btn-edit').forEach((btn) => {
-  btn.addEventListener('click', (ev) => {
-    const idx = ev.currentTarget.getAttribute('data-index');
-    const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-    if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
-  });
-});
 
 // Save edited player
 document.querySelectorAll('.btn-save-edit').forEach((btn) => {
