@@ -67,10 +67,11 @@ function renderFilteredPlayers() {
     filtered = filtered.filter(p => !state.checkedIn.includes(p.name));
   } else if (state.playerTab === 'skill' && state.skillSubTab) {
     const min = parseFloat(state.skillSubTab);
-    const max = min + 0.9;
-    filtered = filtered
-      .filter(p => p.skill >= min && p.skill <= max)
-      .sort((a, b) => b.skill - a.skill);
+const max = min === 9.0 ? 10 : min + 0.9;
+filtered = filtered
+  .filter(p => p.skill >= min && p.skill <= max)
+  .sort((a, b) => b.skill - a.skill);
+
   }
   if (state.sortMode === 'name') {
     filtered.sort((a, b) => a.name.localeCompare(b.name));
@@ -384,21 +385,6 @@ ${state.isAdmin ? `
     </select>
   </div>
 </div>
-    <option value="none" ${state.sortMode === 'none' ? 'selected' : ''}>None</option>
-    <option value="name" ${state.sortMode === 'name' ? 'selected' : ''}>Name (A–Z)</option>
-    <option value="skill" ${state.sortMode === 'skill' ? 'selected' : ''}>Skill (High–Low)</option>
-  </select>
-</div>
-<!-- Player Tab Dropdown -->
-<div class="row">
-  <label for="player-tab-select">Filter:</label>
-  <select id="player-tab-select">
-    <option value="all" ${state.playerTab === 'all' ? 'selected' : ''}>All Players</option>
-    <option value="in" ${state.playerTab === 'in' ? 'selected' : ''}>Checked In</option>
-    <option value="out" ${state.playerTab === 'out' ? 'selected' : ''}>Checked Out</option>
-    <option value="skill" ${state.playerTab === 'skill' ? 'selected' : ''}>Skill Number</option>
-  </select>
-</div>
 
   <!-- Skill Sub-Dropdown -->
 ${state.playerTab === 'skill' ? `
@@ -409,7 +395,8 @@ ${state.playerTab === 'skill' ? `
       ${Array.from({ length: 9 }, (_, i) => {
         const base = `${i + 1}.0`;
         const selected = state.skillSubTab === base ? 'selected' : '';
-        return `<option value="${base}" ${selected}>${base}–${i + 1}.9</option>`;
+        const label = base === '9.0' ? '9.0–10' : `${base}–${i + 1}.9`;
+return `<option value="${base}" ${selected}>${label}</option>`;
       }).join('')}
     </select>
   </div>
