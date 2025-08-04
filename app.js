@@ -21,7 +21,8 @@ const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const supabaseClient = supabase; // it's already created at the top
-
+const LS_TAB_KEY = 'athletic_specimen_tab';
+const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 
 // Create Supabase client if credentials are provided. The global `supabase`
 // object is exported by vendor/supabase.js. When both values are falsy
@@ -56,6 +57,8 @@ const sorted = shuffled.sort((a, b) => b.skill - a.skill);
   }
   return teams;
 }
+if (!state.loaded) return '<p>Loading players...</p>';
+
 function renderFilteredPlayers() {
   let filtered = state.players;
 
@@ -70,7 +73,12 @@ function renderFilteredPlayers() {
       .filter(p => p.skill >= min && p.skill <= max)
       .sort((a, b) => b.skill - a.skill);
   }
-
+  if (state.sortMode === 'name') {
+    filtered.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (state.sortMode === 'skill') {
+    filtered.sort((a, b) => b.skill - a.skill);
+  }
+  
   if (filtered.length === 0) {
     return '<p>No players found.</p>';
   }
@@ -133,8 +141,10 @@ const state = {
   bracket: createEmptyBracket(),
   generatedTeams: [], // result of the last team generation
   groupCount: 2,      // number of teams requested when generating groups
-  playerTab: 'all',       // current active tab: 'all', 'in', 'out', 'skill'
-skillSubTab: null       // current skill range selected, like '1.0', '2.0', etc.
+playerTab: 'all',       // current active tab: 'all', 'in', 'out', 'skill'
+skillSubTab: null,       // current skill range selected, like '1.0', '2.0', etc.
+sortMode: 'none', // options: 'none', 'name', 'skill'
+loaded: false, // becomes true after Supabase loads
 };
 
 // Message state used for transient user feedback; messages auto clear
@@ -164,6 +174,11 @@ function loadLocal() {
   } catch (err) {
     console.error('Error loading from localStorage', err);
   }
+  const storedTab = sessionStorage.getItem(LS_TAB_KEY);
+if (storedTab) state.playerTab = storedTab;
+
+const storedSubtab = sessionStorage.getItem(LS_SUBTAB_KEY);
+if (storedSubtab) state.skillSubTab = storedSubtab;
 }
 
 // Save current state players and checked in names to localStorage. Called
@@ -202,6 +217,7 @@ async function syncFromSupabase() {
 
     // Only set checkedIn once — no need to merge or deduplicate
     state.checkedIn = data.filter((p) => p.checked_in).map((p) => p.name);
+    state.loaded = true;
 
   } catch (err) {
     console.error('Error syncing from Supabase', err);
@@ -345,24 +361,60 @@ ${state.isAdmin ? `
      <div class="card">
   <h3>Players</h3>
 
-  <!-- Main Tabs -->
-  <div class="player-tabs">
-    <button class="${state.playerTab === 'all' ? 'active' : ''}" data-tab="all">All Players</button>
-    <button class="${state.playerTab === 'in' ? 'active' : ''}" data-tab="in">Checked In</button>
-    <button class="${state.playerTab === 'out' ? 'active' : ''}" data-tab="out">Checked Out</button>
-    <button class="${state.playerTab === 'skill' ? 'active' : ''}" data-tab="skill">Skill Number</button>
+<div class="card-section">
+  <h4 class="section-title">Sort Options</h4>
+  <div class="row">
+    <label for="sort-select">Sort By:</label>
+    <select id="sort-select">
+      <option value="none" ${state.sortMode === 'none' ? 'selected' : ''}>None</option>
+      <option value="name" ${state.sortMode === 'name' ? 'selected' : ''}>Name (A–Z)</option>
+      <option value="skill" ${state.sortMode === 'skill' ? 'selected' : ''}>Skill (High–Low)</option>
+    </select>
   </div>
+</div>
 
-  <!-- Skill Sub-Tabs -->
-  ${state.playerTab === 'skill' ? `
-    <div class="skill-subtabs">
+<div class="card-section">
+  <h4 class="section-title">Filter Players</h4>
+  <div class="row">
+    <label for="player-tab-select">Filter:</label>
+    <select id="player-tab-select">
+      <option value="all" ${state.playerTab === 'all' ? 'selected' : ''}>All Players</option>
+      <option value="in" ${state.playerTab === 'in' ? 'selected' : ''}>Checked In</option>
+      <option value="out" ${state.playerTab === 'out' ? 'selected' : ''}>Checked Out</option>
+      <option value="skill" ${state.playerTab === 'skill' ? 'selected' : ''}>Skill Number</option>
+    </select>
+  </div>
+</div>
+    <option value="none" ${state.sortMode === 'none' ? 'selected' : ''}>None</option>
+    <option value="name" ${state.sortMode === 'name' ? 'selected' : ''}>Name (A–Z)</option>
+    <option value="skill" ${state.sortMode === 'skill' ? 'selected' : ''}>Skill (High–Low)</option>
+  </select>
+</div>
+<!-- Player Tab Dropdown -->
+<div class="row">
+  <label for="player-tab-select">Filter:</label>
+  <select id="player-tab-select">
+    <option value="all" ${state.playerTab === 'all' ? 'selected' : ''}>All Players</option>
+    <option value="in" ${state.playerTab === 'in' ? 'selected' : ''}>Checked In</option>
+    <option value="out" ${state.playerTab === 'out' ? 'selected' : ''}>Checked Out</option>
+    <option value="skill" ${state.playerTab === 'skill' ? 'selected' : ''}>Skill Number</option>
+  </select>
+</div>
+
+  <!-- Skill Sub-Dropdown -->
+${state.playerTab === 'skill' ? `
+  <div class="row">
+    <label for="skill-subtab-select">Skill Range:</label>
+    <select id="skill-subtab-select">
+      <option value="">Select range</option>
       ${Array.from({ length: 9 }, (_, i) => {
         const base = `${i + 1}.0`;
-        const active = state.skillSubTab === base ? 'active' : '';
-        return `<button class="${active}" data-subtab="${base}">${base}–${i + 1}.9</button>`;
+        const selected = state.skillSubTab === base ? 'selected' : '';
+        return `<option value="${base}" ${selected}>${base}–${i + 1}.9</option>`;
       }).join('')}
-    </div>
-  ` : ''}
+    </select>
+  </div>
+` : ''}
 
   <!-- Filtered Player Cards -->
   <div class="players">
@@ -707,29 +759,37 @@ function attachHandlers() {
       setTimeout(() => window.scrollTo(0, scrollY), 0);
     });
   });
-  // Toggle edit row (admin only)
+  const tabSelect = document.getElementById('player-tab-select');
+if (tabSelect) {
+  tabSelect.addEventListener('change', (ev) => {
+    state.playerTab = ev.target.value;
+sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
+    state.skillSubTab = null;
+    render();
+  });
+  const sortSelect = document.getElementById('sort-select');
+if (sortSelect) {
+  sortSelect.addEventListener('change', (ev) => {
+    state.sortMode = ev.target.value;
+    render();
+  });
+}
+}
+const subtabSelect = document.getElementById('skill-subtab-select');
+if (subtabSelect) {
+  subtabSelect.addEventListener('change', (ev) => {
+    state.skillSubTab = ev.target.value;
+sessionStorage.setItem(LS_SUBTAB_KEY, state.skillSubTab);
+    render();
+  });
+}
+// Toggle edit row (admin only)
 document.querySelectorAll('.btn-edit').forEach((btn) => {
   btn.addEventListener('click', (ev) => {
     const idx = ev.currentTarget.getAttribute('data-index');
     const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
     if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
   });
-  // Handle main tab buttons
-document.querySelectorAll('.player-tabs button').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    state.playerTab = btn.getAttribute('data-tab');
-    state.skillSubTab = null;
-    render();
-  });
-});
-
-// Handle skill sub-tab buttons
-document.querySelectorAll('.skill-subtabs button').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    state.skillSubTab = btn.getAttribute('data-subtab');
-    render();
-  });
-});
 });
 
 // Save edited player
@@ -767,21 +827,20 @@ document.querySelectorAll('.btn-save-edit').forEach((btn) => {
 // Initialise the app. Called once on page load. It loads stored data,
 // optionally syncs with Supabase, registers the service worker and
 // renders the UI for the first time.
-async function init() {
+function init() {
   // Load from localStorage
   loadLocal();
   // Sync from supabase if available
-  await syncFromSupabase();
-  // Register service worker for PWA offline support
-  if ('serviceWorker' in navigator) {
-    try {
-      await navigator.serviceWorker.register('sw.js');
-    } catch (err) {
-      console.warn('Service worker registration failed', err);
+  syncFromSupabase().then(() => {
+    // Register service worker for PWA offline support
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch((err) => {
+        console.warn('Service worker registration failed', err);
+      });
     }
-  }
-  // Render UI
-  render();
+    // Render UI
+    render();
+  });
 }
 
 // Start the app once the DOM is ready
