@@ -190,11 +190,21 @@ function render() {
             <span class="skill">Skill: ${escapeHTML(String(player.skill))}</span>
             <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
           </div>
-          <div class="row">
-            <button class="btn-checkin" data-name="${escapeHTML(player.name)}">Check In</button>
-            <button class="btn-checkout" data-name="${escapeHTML(player.name)}">Check Out</button>
-            ${state.isAdmin ? `<button class="btn-delete danger" data-name="${escapeHTML(player.name)}">Delete</button>` : ''}
-          </div>
+         <div class="row">
+  <button class="btn-checkin" data-name="${escapeHTML(player.name)}">Check In</button>
+  <button class="btn-checkout" data-name="${escapeHTML(player.name)}">Check Out</button>
+  ${state.isAdmin ? `
+    <button class="btn-edit" data-index="${idx}">Edit</button>
+    <button class="btn-delete danger" data-name="${escapeHTML(player.name)}">Delete</button>
+  ` : ''}
+</div>
+${state.isAdmin ? `
+  <div class="edit-row" style="display:none" data-index="${idx}">
+    <input type="text" class="edit-name" value="${escapeHTML(player.name)}" />
+    <input type="number" class="edit-skill" value="${escapeHTML(String(player.skill))}" step="0.1" />
+    <button class="btn-save-edit" data-index="${idx}">Save</button>
+  </div>
+` : ''}
         </div>
       `;
     }).join('');
@@ -625,6 +635,44 @@ function attachHandlers() {
     });
   });
 }
+// Toggle edit row
+document.querySelectorAll('.btn-edit').forEach((btn) => {
+  btn.addEventListener('click', (ev) => {
+    const idx = ev.currentTarget.getAttribute('data-index');
+    const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+    if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+  });
+});
+
+// Save edited player
+document.querySelectorAll('.btn-save-edit').forEach((btn) => {
+  btn.addEventListener('click', async (ev) => {
+    const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
+    const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
+    const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
+    const name = nameInput.value.trim();
+    const skill = parseFloat(skillInput.value);
+
+    if (!name || isNaN(skill) || skill <= 0) return;
+
+    const updated = [...state.players];
+    const player = updated[idx];
+    updated[idx] = { ...player, name, skill };
+    state.players = updated;
+
+    if (supabaseClient && player.id) {
+      try {
+        await supabaseClient.from('players').update({ name, skill }).eq('id', player.id);
+        await syncFromSupabase();
+      } catch (err) {
+        console.error('Supabase edit error', err);
+      }
+    }
+
+    saveLocal();
+    render();
+  });
+});
 
 // Initialise the app. Called once on page load. It loads stored data,
 // optionally syncs with Supabase, registers the service worker and
