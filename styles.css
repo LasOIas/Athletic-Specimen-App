@@ -284,19 +284,3 @@ select {
   margin: 0.5rem 0 0.25rem;
   color: #334155;
 }
-
-.skill.unrated {
-  color: #eab308; /* yellow */
-  font-weight: bold;
-}
-
-.player-card .warning {
-  color: #dc2626; /* red */
-  font-size: 0.85rem;
-  margin-top: 4px;
-}
-
-.player-card.needs-skill {
-  border: 2px solid #dc2626 !important;
-  background-color: #fee2e2 !important;
-}

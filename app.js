@@ -87,12 +87,14 @@ function renderFilteredPlayers() {
     filtered = filtered.filter(p => !state.checkedIn.includes(p.name));
   } else if (state.playerTab === 'skill' && state.skillSubTab) {
     const min = parseFloat(state.skillSubTab);
-const max = min === 9.0 ? 10 : min + 0.9;
-filtered = filtered
-  .filter(p => p.skill >= min && p.skill <= max)
-  .sort((a, b) => b.skill - a.skill);
-
+    const max = min === 9.0 ? 10 : min + 0.9;
+    filtered = filtered
+      .filter(p => p.skill >= min && p.skill <= max)
+      .sort((a, b) => b.skill - a.skill);
+  } else if (state.playerTab === 'unrated') {
+    filtered = filtered.filter(p => !p.skill || p.skill === 0);
   }
+  
   if (state.sortMode === 'name') {
     filtered.sort((a, b) => a.name.localeCompare(b.name));
   } else if (state.sortMode === 'skill') {
@@ -107,13 +109,12 @@ filtered = filtered
     const idx = state.players.findIndex(p => normalize(p.name) === normalize(player.name));
     const checked = state.checkedIn.includes(player.name);
     return `
-          <div class="player-card ${player.skill === 0 ? 'needs-skill' : ''}" data-index="${idx}">
+          <div class="player-card" data-index="${idx}">
         <div>
           <strong>${player.name}</strong>
-          <span class="skill ${player.skill === 0 ? 'unrated' : ''}">
+          <span class="skill">Skill: ${player.skill}</span>
   Skill: ${player.skill === 0 ? 'Unset' : player.skill}
 </span>
-${player.skill === 0 && state.isAdmin ? '<p class="warning">Needs skill rating</p>' : ''}
           <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
         </div>
         <div class="row">
@@ -410,6 +411,7 @@ ${state.isAdmin ? `
       <option value="out" ${state.playerTab === 'out' ? 'selected' : ''}>Checked Out</option>
       <option value="skill" ${state.playerTab === 'skill' ? 'selected' : ''}>Skill Number</option>
     </select>
+      <option value="unrated" ${state.playerTab === 'unrated' ? 'selected' : ''}>Unset Skill</option>
   </div>
 </div>
 
