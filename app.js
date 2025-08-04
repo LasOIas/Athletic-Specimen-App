@@ -56,6 +56,53 @@ const sorted = shuffled.sort((a, b) => b.skill - a.skill);
   }
   return teams;
 }
+function renderFilteredPlayers() {
+  let filtered = state.players;
+
+  if (state.playerTab === 'in') {
+    filtered = filtered.filter(p => state.checkedIn.includes(p.name));
+  } else if (state.playerTab === 'out') {
+    filtered = filtered.filter(p => !state.checkedIn.includes(p.name));
+  } else if (state.playerTab === 'skill' && state.skillSubTab) {
+    const min = parseFloat(state.skillSubTab);
+    const max = min + 0.9;
+    filtered = filtered
+      .filter(p => p.skill >= min && p.skill <= max)
+      .sort((a, b) => b.skill - a.skill);
+  }
+
+  if (filtered.length === 0) {
+    return '<p>No players found.</p>';
+  }
+
+  return filtered.map((player, idx) => {
+    const checked = state.checkedIn.includes(player.name);
+    return `
+      <div class="player-card" data-index="${idx}">
+        <div>
+          <strong>${player.name}</strong>
+          <span class="skill">Skill: ${player.skill}</span>
+          <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
+        </div>
+        <div class="row">
+          <button class="btn-checkin" data-name="${player.name}">Check In</button>
+          <button class="btn-checkout" data-name="${player.name}">Check Out</button>
+          ${state.isAdmin ? `
+            <button class="btn-edit" data-index="${idx}">Edit</button>
+            <button class="btn-delete danger" data-name="${player.name}">Delete</button>
+          ` : ''}
+        </div>
+        ${state.isAdmin ? `
+          <div class="edit-row" style="display:none" data-index="${idx}">
+            <input type="text" class="edit-name" value="${player.name}" />
+            <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
+            <button class="btn-save-edit" data-index="${idx}">Save</button>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+}
 
 // Bracket helper: create a default 8‑team single elimination bracket. Each
 // match object tracks its two competitors and the winner. Rounds are
@@ -85,6 +132,8 @@ const state = {
   bracket: createEmptyBracket(),
   generatedTeams: [], // result of the last team generation
   groupCount: 2,      // number of teams requested when generating groups
+  playerTab: 'all',       // current active tab: 'all', 'in', 'out', 'skill'
+skillSubTab: null       // current skill range selected, like '1.0', '2.0', etc.
 };
 
 // Message state used for transient user feedback; messages auto clear
@@ -292,10 +341,33 @@ ${state.isAdmin ? `
         <p class="small">Enter up to 8 teams below. Click team names to advance them.</p>
         ${bracketHTML}
       </div>
-      <div class="card">
-        <h3>Players</h3>
-        <div class="players">${playersHTML}</div>
-      </div>
+     <div class="card">
+  <h3>Players</h3>
+
+  <!-- Main Tabs -->
+  <div class="player-tabs">
+    <button class="${state.playerTab === 'all' ? 'active' : ''}" data-tab="all">All Players</button>
+    <button class="${state.playerTab === 'in' ? 'active' : ''}" data-tab="in">Checked In</button>
+    <button class="${state.playerTab === 'out' ? 'active' : ''}" data-tab="out">Checked Out</button>
+    <button class="${state.playerTab === 'skill' ? 'active' : ''}" data-tab="skill">Skill Number</button>
+  </div>
+
+  <!-- Skill Sub-Tabs -->
+  ${state.playerTab === 'skill' ? `
+    <div class="skill-subtabs">
+      ${Array.from({ length: 9 }, (_, i) => {
+        const base = `${i + 1}.0`;
+        const active = state.skillSubTab === base ? 'active' : '';
+        return `<button class="${active}" data-subtab="${base}">${base}–${i + 1}.9</button>`;
+      }).join('')}
+    </div>
+  ` : ''}
+
+  <!-- Filtered Player Cards -->
+  <div class="players">
+    ${renderFilteredPlayers()}
+  </div>
+</div>
     </div>
   ` : '';
 
@@ -641,6 +713,22 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
     const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
     if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
   });
+  // Handle main tab buttons
+document.querySelectorAll('.player-tabs button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    state.playerTab = btn.getAttribute('data-tab');
+    state.skillSubTab = null;
+    render();
+  });
+});
+
+// Handle skill sub-tab buttons
+document.querySelectorAll('.skill-subtabs button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    state.skillSubTab = btn.getAttribute('data-subtab');
+    render();
+  });
+});
 });
 
 // Save edited player
