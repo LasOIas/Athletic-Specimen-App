@@ -281,7 +281,13 @@ ${state.isAdmin ? `
   if (state.generatedTeams.length > 0) {
     teamsHTML = '<div class="teams">' + state.generatedTeams.map((team, i) => {
       const members = team.map((p) => `<li>${escapeHTML(p.name)} (${escapeHTML(String(p.skill))})</li>`).join('');
-      return `<div class="team"><h4>Team ${i + 1}</h4><ul>${members}</ul></div>`;
+      const totalSkill = team.reduce((sum, p) => sum + p.skill, 0).toFixed(1);
+      return `
+  <div class="team">
+    <h4>Team ${i + 1} <span class="small" style="font-weight:normal;">(Total: ${totalSkill})</span></h4>
+    <ul>${members}</ul>
+  </div>
+`;
     }).join('') + '</div>';
   }
 
