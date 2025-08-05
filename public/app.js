@@ -421,17 +421,17 @@ return `<option value="${base}" ${selected}>${label}</option>`;
       ${adminLoginHTML}
       <div class="grid-2">
         <div class="card">
-          <h2>Check In</h2>
-          <input type="text" id="check-name" placeholder="Enter your name" />
-          <button id="btn-check-in">Check In</button>
-          ${checkMsg}
-        </div>
-        <div class="card">
-          <h2>Register Player</h2>
-          <input type="text" id="register-name" placeholder="Name" />
-          <button id="btn-register">Register</button>
-          ${regMsg}
-        </div>
+  <h2>Check In</h2>
+  <input type="text" id="check-name" placeholder="First and Last Name" />
+  <button id="btn-check-in">Check In</button>
+  ${checkMsg}
+</div>
+<div class="card">
+  <h2>Register Player</h2>
+  <input type="text" id="register-name" placeholder="First and Last Name" />
+  <button id="btn-register">Register</button>
+  ${regMsg}
+</div>
       </div>
       ${adminHTML}
     </div>
