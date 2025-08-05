@@ -285,9 +285,12 @@ select {
   color: #334155;
 }
 
+input[type="text"],
+input[type="password"],
+input[type="number"],
 input,
+textarea,
 select,
-button,
-textarea {
-  font-size: 16px;
+button {
+  font-size: 16px !important;
 }
