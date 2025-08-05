@@ -4,17 +4,34 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f172a" />
-  <link rel="manifest" href="public/manifest.json" />
-  <link rel="stylesheet" href="public/styles.css" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="styles.css" />
   <title>Athletic Specimen</title>
 </head>
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <div style="padding:2rem;text-align:center;font-family:sans-serif;color:#fff;">
+      Loading app, please wait...
+    </div>
+  </div>
 
-  <!-- Supabase UMD -->
+  <script>
+    // Fail-safe loader — show message if JS fails to load
+    window.addEventListener('error', function (e) {
+      if (e.target.tagName === 'SCRIPT') {
+        document.getElementById('root').innerHTML = `
+          <div style="padding:2rem;text-align:center;font-family:sans-serif;color:#fff;">
+            Failed to load app files. Try refreshing the page or check your connection.
+          </div>
+        `;
+      }
+    }, true);
+  </script>
+
+  <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.5/dist/umd/supabase.min.js"></script>
 
-  <!-- Main JS file -->
-  <script src="public/app.js"></script>
+  <!-- Main App -->
+  <script src="app.js" defer></script>
 </body>
 </html>

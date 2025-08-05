@@ -812,6 +812,11 @@ function init() {
     // Render UI
     render();
   });
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch((err) => {
+      console.warn('Service worker registration failed', err);
+    });
+  }   
 }
 
 // Start the app once the DOM is ready
