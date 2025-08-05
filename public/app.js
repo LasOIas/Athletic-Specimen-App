@@ -127,7 +127,6 @@ function renderFilteredPlayers() {
         <div>
           <strong>${player.name}</strong>
           <span class="skill">Skill: ${player.skill === 0 ? 'Unset' : player.skill}</span>
-          <span class="tag">Tag: ${player.tag || ''}</span>
           <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
         </div>
         <div class="row">
@@ -446,10 +445,13 @@ return `<option value="${base}" ${selected}>${label}</option>`;
 <p class="small" style="text-align:center;">Checked In: <strong>${state.checkedIn.length}</strong></p>
       ${adminLoginHTML}
       <div class="grid-2">
-        <div class="card">
+       <div class="card">
   <h2>Check In</h2>
   <input type="text" id="check-name" placeholder="First and Last Name" />
-  <button id="btn-check-in">Check In</button>
+  <div class="row">
+    <button id="btn-check-in">Check In</button>
+    <button id="btn-check-out">Check Out</button>
+  </div>
   ${checkMsg}
 </div>
 <div class="card">
@@ -625,6 +627,45 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
       render();
     });
   }
+  const checkOutBtn = document.getElementById('btn-check-out');
+if (checkOutBtn) {
+  checkOutBtn.addEventListener('click', async () => {
+    const input = document.getElementById('check-name');
+    const name = (input && input.value || '').trim();
+    if (!name) return;
+
+    // Find matching player
+    const player = state.players.find((p) => normalize(p.name) === normalize(name));
+    if (player) {
+      if (state.checkedIn.some((n) => normalize(n) === normalize(name))) {
+        state.checkedIn = state.checkedIn.filter((n) => normalize(n) !== normalize(name));
+        if (supabaseClient && player.id) {
+          try {
+            await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+            await syncFromSupabase();
+          } catch (err) {
+            console.error('Supabase check-out error', err);
+          }
+        }
+        messages.checkIn = 'You are now checked out.';
+      } else {
+        messages.checkIn = 'You were not checked in.';
+      }
+    } else {
+      messages.checkIn = 'Player not found.';
+    }
+
+    setTimeout(() => {
+      messages.checkIn = '';
+      render();
+    }, 3000);
+
+    input.value = '';
+    saveLocal();
+    queueSaveToSupabase();
+    render();
+  });
+}
 
   // Player card checkin/out buttons (delegated by class)
   document.querySelectorAll('.btn-checkin').forEach((btn) => {
