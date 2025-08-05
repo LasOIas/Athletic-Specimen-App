@@ -789,7 +789,12 @@ sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
   });
   const searchInput = document.getElementById('player-search');
 if (searchInput) {
-  searchInput.addEventListener('input', () => render());
+  searchInput.addEventListener('input', () => {
+    const container = document.querySelector('.players');
+    if (container) {
+      container.innerHTML = renderFilteredPlayers();
+    }
+  });
 }
 
   // Save edited player
