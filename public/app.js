@@ -41,41 +41,35 @@ function normalize(str) {
 // possible. The algorithm sorts players by skill descending then greedily
 // assigns each player to the group with the lowest total skill so far.
 function generateBalancedGroups(players, checkedInNames, groupCount) {
-  const eligible = players.filter((p) => checkedInNames.some((n) => normalize(n) === normalize(p.name)));
-  if (eligible.length === 0 || groupCount <= 1) return [];
+  const eligible = players.filter(p =>
+    checkedInNames.some(n => normalize(n) === normalize(p.name))
+  );
 
-  const attempts = 50; // number of random shuffles to try
-  const groupings = [];
+  // 1) Sort by descending skill, but randomize equal-skill ties
+  const sorted = eligible.slice().sort((a, b) => {
+    const skillDiff = b.skill - a.skill;
+    return skillDiff !== 0 ? skillDiff : Math.random() - 0.5;
+  });
 
-  for (let a = 0; a < attempts; a++) {
-    const shuffled = eligible.slice().sort(() => Math.random() - 0.5);
-    const teams = Array.from({ length: groupCount }, () => []);
-    const teamSkills = new Array(groupCount).fill(0);
+  const teams = Array.from({ length: groupCount }, () => []);
+  const teamSkills = new Array(groupCount).fill(0);
 
-    for (const player of shuffled) {
-      let target = 0;
-      for (let i = 1; i < groupCount; i++) {
-        if (teamSkills[i] < teamSkills[target]) target = i;
-      }
-      teams[target].push(player);
-      teamSkills[target] += player.skill;
-    }
+  for (const player of sorted) {
+    // 2) Find the current minimum total skill
+    const minSkill = Math.min(...teamSkills);
+    // 3) Gather all teams at that minimum
+    const candidates = teamSkills
+      .map((s, idx) => (s === minSkill ? idx : -1))
+      .filter(idx => idx !== -1);
+    // 4) Randomly choose among them
+    const target =
+      candidates[Math.floor(Math.random() * candidates.length)];
 
-    const avg = teamSkills.reduce((a, b) => a + b, 0) / groupCount;
-    const variance = teamSkills.reduce((sum, val) => sum + Math.pow(val - avg, 2), 0) / groupCount;
-    const stddev = Math.sqrt(variance);
-
-    groupings.push({ teams, stddev });
+    teams[target].push(player);
+    teamSkills[target] += player.skill;
   }
 
-  // Sort by standard deviation (lowest = most balanced)
-  groupings.sort((a, b) => a.stddev - b.stddev);
-
-  // Randomly pick from top 5 most balanced options
-  const topOptions = groupings.slice(0, 5);
-  const chosen = topOptions[Math.floor(Math.random() * topOptions.length)];
-
-  return chosen.teams;
+  return teams;
 }
 
 function renderFilteredPlayers() {
