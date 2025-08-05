@@ -28,6 +28,14 @@
     }, true);
   </script>
 
+  ]<script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('input, textarea, select, button').forEach(el => {
+        el.style.fontSize = '16px';
+      });
+    });
+  </script>  
+
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.5/dist/umd/supabase.min.js"></script>
 
