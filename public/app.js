@@ -33,7 +33,19 @@ const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 function normalize(str) {
   return String(str || '').trim().toLowerCase();
 }
-// Removed extra closing brace
+
+let saveTimeout;
+function queueSaveToSupabase() {
+  if (!supabaseClient) return;
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(async () => {
+    try {
+      await supabaseClient.from('players').upsert(state.players, { onConflict: ['name'] });
+    } catch (err) {
+      console.error('Auto-save error:', err);
+    }
+  }, 1000);
+}
 
 // Balanced group generation algorithm. Given a list of all players, the set
 // of names that are currently checked in and a desired number of groups,
@@ -88,9 +100,21 @@ function renderFilteredPlayers() {
   } else if (state.playerTab === 'unrated') {
     filtered = filtered.filter(p => !p.skill || p.skill === 0);
   }
-  
+
+  // Apply search filter
+  const searchInput = document.getElementById('player-search');
+  if (searchInput) {
+    const query = searchInput.value.toLowerCase().trim();
+    if (query) {
+      filtered = filtered.filter(p =>
+        p.name.toLowerCase().includes(query) ||
+        (p.tag || '').toLowerCase().includes(query)
+      );
+    }
+  }
+
   filtered.sort((a, b) => b.skill - a.skill);
-  
+
   if (filtered.length === 0) {
     return '<p>No players found.</p>';
   }
@@ -99,10 +123,11 @@ function renderFilteredPlayers() {
     const idx = state.players.findIndex(p => normalize(p.name) === normalize(player.name));
     const checked = state.checkedIn.includes(player.name);
     return `
-          <div class="player-card" data-index="${idx}">
+      <div class="player-card" data-index="${idx}">
         <div>
           <strong>${player.name}</strong>
           <span class="skill">Skill: ${player.skill === 0 ? 'Unset' : player.skill}</span>
+          <span class="tag">Tag: ${player.tag || ''}</span>
           <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
         </div>
         <div class="row">
@@ -117,6 +142,7 @@ function renderFilteredPlayers() {
           <div class="edit-row" style="display:none" data-index="${idx}">
             <input type="text" class="edit-name" value="${player.name}" />
             <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
+            <input type="text" class="edit-tag" value="${player.tag || ''}" />
             <button class="btn-save-edit" data-index="${idx}">Save</button>
           </div>
         ` : ''}
@@ -387,6 +413,12 @@ return `<option value="${base}" ${selected}>${label}</option>`;
     </select>
   </div>
 ` : ''}
+<input
+  type="text"
+  id="player-search"
+  placeholder="Search name or tag"
+  style="margin: 0.5rem 0; padding: 0.5rem; width: 100%; max-width: 400px;"
+/>
 
   <!-- Filtered Player Cards -->
   <div class="players">
@@ -517,6 +549,7 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
       nameInput.value = '';
       skillInput.value = '';
       saveLocal();
+      queueSaveToSupabase();
       render();
     });
   }
@@ -552,6 +585,7 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
       }, 3000);
       input.value = '';
       saveLocal();
+      queueSaveToSupabase();
       render();
     });
   }
@@ -587,6 +621,7 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
       }, 3000);
       input.value = '';
       saveLocal();
+      queueSaveToSupabase();
       render();
     });
   }
@@ -610,6 +645,7 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
         }
       }
       saveLocal();
+      queueSaveToSupabase();
       render();
     });
   });
@@ -628,6 +664,7 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
         }
       }
       saveLocal();
+      queueSaveToSupabase();
       render();
     });
   });
@@ -653,6 +690,7 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
         state.players = state.players.filter((p) => normalize(p.name) !== normalize(name));
         state.checkedIn = state.checkedIn.filter((n) => normalize(n) !== normalize(name));
         saveLocal();
+        queueSaveToSupabase();
         render();
       }
     });
@@ -672,6 +710,7 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
         }
       }
       saveLocal();
+      queueSaveToSupabase();
       render();
     });
   }
@@ -748,6 +787,11 @@ sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
     state.skillSubTab = null;
     render();
   });
+  const searchInput = document.getElementById('player-search');
+if (searchInput) {
+  searchInput.addEventListener('input', () => render());
+}
+
   // Save edited player
 document.querySelectorAll('.btn-save-edit').forEach((btn) => {
   btn.addEventListener('click', async (ev) => {
@@ -774,6 +818,7 @@ document.querySelectorAll('.btn-save-edit').forEach((btn) => {
     }
 
     saveLocal();
+    queueSaveToSupabase();
     render();
   });
 
