@@ -829,14 +829,15 @@ sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
     render();
   });
   const searchInput = document.getElementById('player-search');
-if (searchInput) {
-  searchInput.addEventListener('input', () => {
-    render(); // Full render needed to reattach all button handlers
-    const scrollY = window.scrollY;
-render();
-setTimeout(() => window.scrollTo(0, scrollY), 0);
-  });  
-}
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      const container = document.querySelector('.players');
+      if (container) {
+        container.innerHTML = renderFilteredPlayers();
+        attachPlayerEditHandlers(); // reattach edit/save buttons
+      }
+    });
+  }  
 
   // Save edited player
 document.querySelectorAll('.btn-save-edit').forEach((btn) => {
@@ -878,6 +879,50 @@ if (subtabSelect) {
     render();
   });
 }
+}
+
+function attachPlayerEditHandlers() {
+  // Edit button toggles
+  document.querySelectorAll('.btn-edit').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      const idx = ev.currentTarget.getAttribute('data-index');
+      const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+      if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+    });
+  });
+
+  // Save edited player
+  document.querySelectorAll('.btn-save-edit').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
+      const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
+      const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
+      const tagInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-tag`);
+      const name = nameInput.value.trim();
+      const skill = parseFloat(skillInput.value);
+      const tag = tagInput ? tagInput.value.trim() : '';
+
+      if (!name || isNaN(skill) || skill <= 0) return;
+
+      const updated = [...state.players];
+      const player = updated[idx];
+      updated[idx] = { ...player, name, skill, tag };
+      state.players = updated;
+
+      if (supabaseClient && player.id) {
+        try {
+          await supabaseClient.from('players').update({ name, skill, tag }).eq('id', player.id);
+          await syncFromSupabase();
+        } catch (err) {
+          console.error('Supabase edit error', err);
+        }
+      }
+
+      saveLocal();
+      queueSaveToSupabase();
+      render();
+    });
+  });
 }
 
 // Initialise the app. Called once on page load. It loads stored data,
