@@ -141,7 +141,6 @@ function renderFilteredPlayers() {
           <div class="edit-row" style="display:none" data-index="${idx}">
             <input type="text" class="edit-name" value="${player.name}" />
             <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
-            <input type="text" class="edit-tag" value="${player.tag || ''}" />
             <button class="btn-save-edit" data-index="${idx}">Save</button>
           </div>
         ` : ''}
@@ -464,7 +463,9 @@ return `<option value="${base}" ${selected}>${label}</option>`;
       ${adminHTML}
     </div>
   `;
-  root.innerHTML = html;
+  // Strip any trailing stray ']' that might have slipped into the template
+const sanitized = html.replace(/\n?\]\s*$/, '');
+root.innerHTML = sanitized;
 
   // After DOM has been updated, attach event listeners to interactive
   // elements. Because content is rebuilt on every render call, we must
