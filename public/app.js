@@ -23,6 +23,30 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 
+// expected DOM targets
+const listEl = document.getElementById('playerList');
+const searchInput = document.getElementById('searchInput');
+const addNameInput = document.getElementById('newPlayerName');
+const addBtn = document.getElementById('addPlayerBtn');
+
+function upsertPlayer(row) {
+  if (!row || !row.id) return;
+  state.playersById.set(row.id, row);
+  render();
+}
+
+function removePlayer(id) {
+  state.playersById.delete(id);
+  render();
+}
+
+function visiblePlayers() {
+  const term = state.searchTerm.trim().toLowerCase();
+  const all = Array.from(state.playersById.values());
+  if (!term) return all;
+  return all.filter(p => (p.name || '').toLowerCase().includes(term));
+}
+
 // Create Supabase client if credentials are provided. The global `supabase`
 // object is exported by vendor/supabase.js. When both values are falsy
 // (empty strings), supabaseClient will be null and no network calls will be
@@ -40,7 +64,15 @@ function queueSaveToSupabase() {
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {
     try {
-      await supabaseClient.from('players').upsert(state.players, { onConflict: ['name'] });
+      // Deduplicate players by name before saving
+const uniquePlayers = state.players.reduce((acc, p) => {
+  if (!acc.some(x => normalize(x.name) === normalize(p.name))) {
+    acc.push(p);
+  }
+  return acc;
+}, []);
+
+await supabaseClient.from('players').upsert(uniquePlayers, { onConflict: ['name'] });      
     } catch (err) {
       console.error('Auto-save error:', err);
     }
@@ -120,21 +152,21 @@ function renderFilteredPlayers() {
   }
 
   return filtered.map((player) => {
-    const idx = state.players.findIndex(p => normalize(p.name) === normalize(player.name));
+    const idx = state.players.findIndex(p => p.id === player.id);
     const checked = state.checkedIn.includes(player.name);
     return `
-      <div class="player-card" data-index="${idx}">
+      <div class="player-card" data-id="${player.id}" data-index="${idx}">
         <div>
           <strong>${player.name}</strong>
           <span class="skill">Skill: ${player.skill === 0 ? 'Unset' : player.skill}</span>
           <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
         </div>
         <div class="row">
-          <button class="btn-checkin" data-name="${player.name}">Check In</button>
-          <button class="btn-checkout" data-name="${player.name}">Check Out</button>
+          <button class="btn-checkin" data-id="${player.id}">Check In</button>
+          <button class="btn-checkout" data-id="${player.id}">Check Out</button>
           ${state.isAdmin ? `
             <button class="btn-edit" data-index="${idx}">Edit</button>
-            <button class="btn-delete danger" data-name="${player.name}">Delete</button>
+            <button class="btn-delete danger" data-id="${player.id}">Delete</button>
           ` : ''}
         </div>
         ${state.isAdmin ? `
@@ -563,24 +595,25 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
     registerBtn.addEventListener('click', async () => {
       const input = document.getElementById('register-name');
       const name = (input && input.value || '').trim();
-      if (!name) return;
-      const exists = state.players.some((p) => normalize(p.name) === normalize(name));
-      if (exists) {
-        messages.registration = 'Player already registered.';
-      } else {
-        const newPlayer = { name, skill: 0 };
-        let inserted = { ...newPlayer };
-        if (supabaseClient) {
-          try {
-            const { data, error } = await supabaseClient.from('players').insert([newPlayer]).select();
-            await syncFromSupabase();
-            if (!error && Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
-          } catch (err) {
-            console.error('Supabase insert error', err);
-          }
-        }
-        messages.registration = 'Player registered. Waiting for admin to assign skill.';
+if (!name) return;
+// find matching player by normalized name
+const player = state.players.find((p) => normalize(p.name) === normalize(name));
+if (player) {
+  if (!state.checkedIn.includes(player.name)) {
+    state.checkedIn = [...state.checkedIn, player.name];
+    if (supabaseClient && player.id) {
+      try {
+        await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+        await syncFromSupabase();
+      } catch (err) {
+        console.error('Supabase update error', err);
       }
+    }
+  }
+  messages.checkIn = 'You are checked in';
+} else {
+  messages.checkIn = 'Player not found in history';
+}
       // clear message after 3 seconds
       setTimeout(() => {
         messages.registration = '';
@@ -599,25 +632,28 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
     checkInBtn.addEventListener('click', async () => {
       const input = document.getElementById('check-name');
       const name = (input && input.value || '').trim();
-      if (!name) return;
-      // find matching player
-      const player = state.players.find((p) => normalize(p.name) === normalize(name));
-      if (player) {
-        if (!state.checkedIn.some((n) => normalize(n) === normalize(player.name))) {
-          state.checkedIn = [...state.checkedIn, player.name];
-          if (supabaseClient && player.id) {
-            try {
-              await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
-              await syncFromSupabase();
-            } catch (err) {
-              console.error('Supabase update error', err);
-            }
-          }
-        }
-        messages.checkIn = 'You are checked in';
-      } else {
-        messages.checkIn = 'Player not found in history';
+if (!name) return;
+
+// Find matching player by normalized name
+const player = state.players.find((p) => normalize(p.name) === normalize(name));
+if (player) {
+  if (state.checkedIn.includes(player.name)) {
+    state.checkedIn = state.checkedIn.filter((n) => n !== player.name);
+    if (supabaseClient && player.id) {
+      try {
+        await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+        await syncFromSupabase();
+      } catch (err) {
+        console.error('Supabase check-out error', err);
       }
+    }
+    messages.checkIn = 'You are now checked out.';
+  } else {
+    messages.checkIn = 'You were not checked in.';
+  }
+} else {
+  messages.checkIn = 'Player not found.';
+}
       setTimeout(() => {
         messages.checkIn = '';
         render();
@@ -671,12 +707,12 @@ if (checkOutBtn) {
   // Player card checkin/out buttons (delegated by class)
   document.querySelectorAll('.btn-checkin').forEach((btn) => {
     btn.addEventListener('click', async (ev) => {
-      const name = ev.currentTarget.getAttribute('data-name');
+      const id = ev.currentTarget.getAttribute('data-id');
       if (!name) return;
       // call check in logic
       if (!state.checkedIn.some((n) => normalize(n) === normalize(name))) {
-        state.checkedIn = [...state.checkedIn, name];
-        const player = state.players.find((p) => normalize(p.name) === normalize(name));
+        state.checkedIn = [...state.checkedIn, player.name];
+        const player = state.players.find((p) => p.id == id);
         if (player && supabaseClient && player.id) {
           try {
             await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
@@ -693,10 +729,10 @@ if (checkOutBtn) {
   });
   document.querySelectorAll('.btn-checkout').forEach((btn) => {
     btn.addEventListener('click', async (ev) => {
-      const name = ev.currentTarget.getAttribute('data-name');
+      const id = ev.currentTarget.getAttribute('data-id');
       if (!name) return;
-      state.checkedIn = state.checkedIn.filter((n) => normalize(n) !== normalize(name));
-      const player = state.players.find((p) => normalize(p.name) === normalize(name));
+      state.checkedIn = state.checkedIn.filter((n) => n !== player.name);
+      const player = state.players.find((p) => p.id == id);
       if (player && supabaseClient && player.id) {
         try {
           await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
@@ -714,10 +750,10 @@ if (checkOutBtn) {
   // Delete player buttons (admin only)
   document.querySelectorAll('.btn-delete').forEach((btn) => {
     btn.addEventListener('click', async (ev) => {
-      const name = ev.currentTarget.getAttribute('data-name');
+      const id = ev.currentTarget.getAttribute('data-id');
       if (!name) return;
       // Remove player from state.players
-      const idx = state.players.findIndex((p) => normalize(p.name) === normalize(name));
+      const idx = state.players.findIndex((p) => p.id == id);
       if (idx !== -1) {
         const removed = state.players[idx];
         // Delete from Supabase if configured and id exists
