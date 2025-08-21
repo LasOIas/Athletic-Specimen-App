@@ -72,7 +72,7 @@ const uniquePlayers = state.players.reduce((acc, p) => {
   return acc;
 }, []);
 
-await supabaseClient.from('players').upsert(uniquePlayers, { onConflict: ['name'] });      
+await supabaseClient.from('players').upsert(uniquePlayers, { onConflict:'name' });      
     } catch (err) {
       console.error('Auto-save error:', err);
     }
@@ -715,77 +715,83 @@ if (checkOutBtn) {
   });
 }
 
-  // Player card checkin/out buttons (delegated by class)
-  document.querySelectorAll('.btn-checkin').forEach((btn) => {
-    btn.addEventListener('click', async (ev) => {
-      const id = ev.currentTarget.getAttribute('data-id');
-      const player = state.players.find((p) => String(p.id) === String(id));
-      if (!player) return;
+  // Player card checkin/out buttons (delegated by class)  
+  attachPlayerRowHandlers();
+  function attachPlayerRowHandlers() {
+    // Card check-in
+    document.querySelectorAll('.btn-checkin').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        const id = ev.currentTarget.getAttribute('data-id');
+        const player = state.players.find((p) => String(p.id) === String(id));
+        if (!player) return;
   
-      if (!state.checkedIn.includes(player.name)) {
-        state.checkedIn = [...state.checkedIn, player.name];
+        if (!state.checkedIn.includes(player.name)) {
+          state.checkedIn = [...state.checkedIn, player.name];
+          if (supabaseClient && player.id) {
+            try {
+              await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+              await syncFromSupabase();
+            } catch (err) {
+              console.error('Supabase update error', err);
+            }
+          }
+        }
+        saveLocal();
+        queueSaveToSupabase();
+        render();
+      });
+    });
+  
+    // Card check-out
+    document.querySelectorAll('.btn-checkout').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        const id = ev.currentTarget.getAttribute('data-id');
+        const player = state.players.find((p) => String(p.id) === String(id));
+        if (!player) return;
+  
+        state.checkedIn = state.checkedIn.filter((n) => n !== player.name);
         if (supabaseClient && player.id) {
           try {
-            await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+            await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
             await syncFromSupabase();
           } catch (err) {
             console.error('Supabase update error', err);
           }
         }
-      }
-      saveLocal();
-      queueSaveToSupabase();
-      render();
+        saveLocal();
+        queueSaveToSupabase();
+        render();
+      });
     });
-  });  
-  document.querySelectorAll('.btn-checkout').forEach((btn) => {
-    btn.addEventListener('click', async (ev) => {
-      const id = ev.currentTarget.getAttribute('data-id');
-      const player = state.players.find((p) => String(p.id) === String(id));
-      if (!player) return;
   
-      state.checkedIn = state.checkedIn.filter((n) => n !== player.name);
-      if (supabaseClient && player.id) {
-        try {
-          await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
-          await syncFromSupabase();
-        } catch (err) {
-          console.error('Supabase update error', err);
+    // Card delete (admin)
+    document.querySelectorAll('.btn-delete').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        const id = ev.currentTarget.getAttribute('data-id');
+        const idx = state.players.findIndex((p) => String(p.id) === String(id));
+        if (idx === -1) return;
+  
+        const removed = state.players[idx];
+  
+        if (supabaseClient && removed.id) {
+          try {
+            await supabaseClient.from('players').delete().eq('id', removed.id);
+            await syncFromSupabase();
+          } catch (err) {
+            console.error('Supabase delete error', err);
+          }
         }
-      }
-      saveLocal();
-      queueSaveToSupabase();
-      render();
+  
+        state.players = state.players.filter((p) => String(p.id) !== String(id));
+        state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
+  
+        saveLocal();
+        queueSaveToSupabase();
+        render();
+      });
     });
-  });  
-
-  // Delete player buttons (admin only)
-  document.querySelectorAll('.btn-delete').forEach((btn) => {
-    btn.addEventListener('click', async (ev) => {
-      const id = ev.currentTarget.getAttribute('data-id');
-      const idx = state.players.findIndex((p) => String(p.id) === String(id));
-      if (idx === -1) return;
+  }
   
-      const removed = state.players[idx];
-  
-      if (supabaseClient && removed.id) {
-        try {
-          await supabaseClient.from('players').delete().eq('id', removed.id);
-          await syncFromSupabase();
-        } catch (err) {
-          console.error('Supabase delete error', err);
-        }
-      }
-  
-      state.players = state.players.filter((p) => String(p.id) !== String(id));
-      state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
-  
-      saveLocal();
-      queueSaveToSupabase();
-      render();
-    });
-  });  
-
   // Reset all checkins
   const resetBtn = document.getElementById('btn-reset-checkins');
   if (resetBtn) {
@@ -880,9 +886,14 @@ sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
   const searchInput = document.getElementById('player-search');
 if (searchInput) {
   searchInput.addEventListener('input', () => {
-    render(); // re-render entire admin section so all handlers (checkin/checkout/delete) rebind
+    const container = document.querySelector('.players');
+    if (container) {
+      container.innerHTML = renderFilteredPlayers();
+      attachPlayerRowHandlers();   // re-bind row buttons
+      attachPlayerEditHandlers();  // keep edit buttons working
+    }
   });
-}  
+} 
 
   // Save edited player
 document.querySelectorAll('.btn-save-edit').forEach((btn) => {
@@ -986,12 +997,7 @@ function init() {
     }
     // Render UI
     render();
-  });
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch((err) => {
-      console.warn('Service worker registration failed', err);
-    });
-  }   
+  });  
 }
 
 // Start the app once the DOM is ready
