@@ -209,9 +209,12 @@ const state = {
   bracket: createEmptyBracket(),
   generatedTeams: [], // result of the last team generation
   groupCount: 2,      // number of teams requested when generating groups
-playerTab: 'all',       // current active tab: 'all', 'in', 'out', 'skill'
-skillSubTab: null,       // current skill range selected, like '1.0', '2.0', etc.
-loaded: false, // becomes true after Supabase loads
+  playerTab: 'all',   // current active tab: 'all', 'in', 'out', 'skill'
+  skillSubTab: null,  // current skill range selected, like '1.0', '2.0', etc.
+  loaded: false,      // becomes true after Supabase loads
+  // safe defaults for older helpers that reference these:
+  playersById: new Map(),
+  searchTerm: ''
 };
 
 // Message state used for transient user feedback; messages auto clear
@@ -595,36 +598,44 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
     registerBtn.addEventListener('click', async () => {
       const input = document.getElementById('register-name');
       const name = (input && input.value || '').trim();
-if (!name) return;
-// find matching player by normalized name
-const player = state.players.find((p) => normalize(p.name) === normalize(name));
-if (player) {
-  if (!state.checkedIn.includes(player.name)) {
-    state.checkedIn = [...state.checkedIn, player.name];
-    if (supabaseClient && player.id) {
-      try {
-        await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
-        await syncFromSupabase();
-      } catch (err) {
-        console.error('Supabase update error', err);
+      if (!name) return;
+  
+      // prevent duplicates by name
+      if (state.players.some((p) => normalize(p.name) === normalize(name))) {
+        messages.registration = 'Player already registered.';
+      } else {
+        // add locally and in Supabase (skill = 0)
+        const newPlayer = { name, skill: 0 };
+        if (supabaseClient) {
+          try {
+            const { data, error } = await supabaseClient
+              .from('players')
+              .insert([newPlayer])
+              .select();
+            await syncFromSupabase();
+            if (error) console.error('Supabase insert error', error);
+          } catch (err) {
+            console.error('Supabase insert error', err);
+          }
+        } else {
+          // offline fallback
+          state.players = [...state.players, newPlayer];
+        }
+        messages.registration = 'Player registered. Waiting for admin to assign skill.';
       }
-    }
-  }
-  messages.checkIn = 'You are checked in';
-} else {
-  messages.checkIn = 'Player not found in history';
-}
+  
       // clear message after 3 seconds
       setTimeout(() => {
         messages.registration = '';
         render();
       }, 3000);
+  
       input.value = '';
       saveLocal();
       queueSaveToSupabase();
       render();
     });
-  }
+  }  
 
   // Check in button (big button on form)
   const checkInBtn = document.getElementById('btn-check-in');
@@ -637,22 +648,22 @@ if (!name) return;
 // Find matching player by normalized name
 const player = state.players.find((p) => normalize(p.name) === normalize(name));
 if (player) {
-  if (state.checkedIn.includes(player.name)) {
-    state.checkedIn = state.checkedIn.filter((n) => n !== player.name);
+  if (!state.checkedIn.includes(player.name)) {
+    state.checkedIn = [...state.checkedIn, player.name];
     if (supabaseClient && player.id) {
       try {
-        await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+        await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
         await syncFromSupabase();
       } catch (err) {
-        console.error('Supabase check-out error', err);
+        console.error('Supabase update error', err);
       }
     }
-    messages.checkIn = 'You are now checked out.';
+    messages.checkIn = 'You are checked in';
   } else {
-    messages.checkIn = 'You were not checked in.';
+    messages.checkIn = 'You are already checked in.';
   }
 } else {
-  messages.checkIn = 'Player not found.';
+  messages.checkIn = 'Player not found in history';
 }
       setTimeout(() => {
         messages.checkIn = '';
@@ -708,12 +719,12 @@ if (checkOutBtn) {
   document.querySelectorAll('.btn-checkin').forEach((btn) => {
     btn.addEventListener('click', async (ev) => {
       const id = ev.currentTarget.getAttribute('data-id');
-      if (!name) return;
-      // call check in logic
-      if (!state.checkedIn.some((n) => normalize(n) === normalize(name))) {
+      const player = state.players.find((p) => String(p.id) === String(id));
+      if (!player) return;
+  
+      if (!state.checkedIn.includes(player.name)) {
         state.checkedIn = [...state.checkedIn, player.name];
-        const player = state.players.find((p) => p.id == id);
-        if (player && supabaseClient && player.id) {
+        if (supabaseClient && player.id) {
           try {
             await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
             await syncFromSupabase();
@@ -726,14 +737,15 @@ if (checkOutBtn) {
       queueSaveToSupabase();
       render();
     });
-  });
+  });  
   document.querySelectorAll('.btn-checkout').forEach((btn) => {
     btn.addEventListener('click', async (ev) => {
       const id = ev.currentTarget.getAttribute('data-id');
-      if (!name) return;
+      const player = state.players.find((p) => String(p.id) === String(id));
+      if (!player) return;
+  
       state.checkedIn = state.checkedIn.filter((n) => n !== player.name);
-      const player = state.players.find((p) => p.id == id);
-      if (player && supabaseClient && player.id) {
+      if (supabaseClient && player.id) {
         try {
           await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
           await syncFromSupabase();
@@ -745,34 +757,34 @@ if (checkOutBtn) {
       queueSaveToSupabase();
       render();
     });
-  });
+  });  
 
   // Delete player buttons (admin only)
   document.querySelectorAll('.btn-delete').forEach((btn) => {
     btn.addEventListener('click', async (ev) => {
       const id = ev.currentTarget.getAttribute('data-id');
-      if (!name) return;
-      // Remove player from state.players
-      const idx = state.players.findIndex((p) => p.id == id);
-      if (idx !== -1) {
-        const removed = state.players[idx];
-        // Delete from Supabase if configured and id exists
-        if (supabaseClient && removed.id) {
-          try {
-            await supabaseClient.from('players').delete().eq('id', removed.id);
-            await syncFromSupabase();
-          } catch (err) {
-            console.error('Supabase delete error', err);          }
+      const idx = state.players.findIndex((p) => String(p.id) === String(id));
+      if (idx === -1) return;
+  
+      const removed = state.players[idx];
+  
+      if (supabaseClient && removed.id) {
+        try {
+          await supabaseClient.from('players').delete().eq('id', removed.id);
+          await syncFromSupabase();
+        } catch (err) {
+          console.error('Supabase delete error', err);
         }
-        // Remove from players and checkedIn
-        state.players = state.players.filter((p) => normalize(p.name) !== normalize(name));
-        state.checkedIn = state.checkedIn.filter((n) => normalize(n) !== normalize(name));
-        saveLocal();
-        queueSaveToSupabase();
-        render();
       }
+  
+      state.players = state.players.filter((p) => String(p.id) !== String(id));
+      state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
+  
+      saveLocal();
+      queueSaveToSupabase();
+      render();
     });
-  });
+  });  
 
   // Reset all checkins
   const resetBtn = document.getElementById('btn-reset-checkins');
@@ -866,15 +878,11 @@ sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
     render();
   });
   const searchInput = document.getElementById('player-search');
-  if (searchInput) {
-    searchInput.addEventListener('input', () => {
-      const container = document.querySelector('.players');
-      if (container) {
-        container.innerHTML = renderFilteredPlayers();
-        attachPlayerEditHandlers(); // reattach edit/save buttons
-      }
-    });
-  }  
+if (searchInput) {
+  searchInput.addEventListener('input', () => {
+    render(); // re-render entire admin section so all handlers (checkin/checkout/delete) rebind
+  });
+}  
 
   // Save edited player
 document.querySelectorAll('.btn-save-edit').forEach((btn) => {
