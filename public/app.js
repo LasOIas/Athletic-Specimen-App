@@ -134,16 +134,14 @@ function renderFilteredPlayers() {
   }
 
   // Apply search filter
-  const searchInput = document.getElementById('player-search');
-  if (searchInput) {
-    const query = searchInput.value.toLowerCase().trim();
+    // Apply search filter (from state so it persists across renders)
+    const query = (state.searchTerm || '').toLowerCase().trim();
     if (query) {
       filtered = filtered.filter(p =>
         p.name.toLowerCase().includes(query) ||
         (p.tag || '').toLowerCase().includes(query)
       );
-    }
-  }
+    }  
 
   filtered.sort((a, b) => b.skill - a.skill);
 
@@ -447,10 +445,13 @@ return `<option value="${base}" ${selected}>${label}</option>`;
   </div>
 ` : ''}
 <input
+  <input
   type="text"
   id="player-search"
   placeholder="Search name or tag"
+  value="${escapeHTML(state.searchTerm || '')}"
   style="margin: 0.5rem 0; padding: 0.5rem; width: 100%; max-width: 400px;"
+/>
 />
 
   <!-- Filtered Player Cards -->
@@ -886,6 +887,7 @@ sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
   const searchInput = document.getElementById('player-search');
 if (searchInput) {
   searchInput.addEventListener('input', () => {
+    state.searchTerm = searchInput.value; // persist value
     const container = document.querySelector('.players');
     if (container) {
       container.innerHTML = renderFilteredPlayers();
@@ -893,7 +895,7 @@ if (searchInput) {
       attachPlayerEditHandlers();  // keep edit buttons working
     }
   });
-} 
+}
 
   // Save edited player
 document.querySelectorAll('.btn-save-edit').forEach((btn) => {
