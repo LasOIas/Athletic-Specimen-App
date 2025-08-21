@@ -444,14 +444,20 @@ return `<option value="${base}" ${selected}>${label}</option>`;
     </select>
   </div>
 ` : ''}
-<input
+<!-- SEARCH WITH CLEAR (✕) -->
+<div id="player-search-container" style="position:relative; display:inline-block; width:100%; max-width:400px; margin:0.5rem 0;">
   <input
-  type="text"
-  id="player-search"
-  placeholder="Search name or tag"
-  value="${escapeHTML(state.searchTerm || '')}"
-  style="margin: 0.5rem 0; padding: 0.5rem; width: 100%; max-width: 400px;"
-/>
+    type="text"
+    id="player-search"
+    placeholder="Search name or tag"
+    value="${escapeHTML(state.searchTerm || '')}"
+    style="padding: 0.5rem 2rem 0.5rem 0.5rem; width: 100%;"
+  />
+  <span
+    id="player-search-clear"
+    style="position:absolute; right:8px; top:50%; transform:translateY(-50%); cursor:pointer; user-select:none; ${state.searchTerm ? '' : 'display:none;'}"
+  >✕</span>
+</div>
 
   <!-- Filtered Player Cards -->
   <div class="players">
