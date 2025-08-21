@@ -884,7 +884,13 @@ sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
     render();
   });
   const searchInput = document.getElementById('player-search');
+const clearBtn = document.getElementById('player-search-clear');
+
 if (searchInput) {
+  const toggleClear = () => {
+    if (clearBtn) clearBtn.style.display = searchInput.value.trim() ? 'inline' : 'none';
+  };
+
   searchInput.addEventListener('input', () => {
     state.searchTerm = searchInput.value; // persist value
     const container = document.querySelector('.players');
@@ -893,6 +899,28 @@ if (searchInput) {
       attachPlayerRowHandlers();   // re-bind row buttons
       attachPlayerEditHandlers();  // keep edit buttons working
     }
+    toggleClear();
+  });
+
+  // ensure correct initial visibility after render
+  toggleClear();
+}
+
+if (clearBtn) {
+  clearBtn.addEventListener('click', () => {
+    state.searchTerm = '';
+    const si = document.getElementById('player-search');
+    if (si) {
+      si.value = '';
+      si.focus();
+    }
+    const container = document.querySelector('.players');
+    if (container) {
+      container.innerHTML = renderFilteredPlayers();
+      attachPlayerRowHandlers();   // re-bind row buttons
+      attachPlayerEditHandlers();  // keep edit buttons working
+    }
+    clearBtn.style.display = 'none';
   });
 }
 
