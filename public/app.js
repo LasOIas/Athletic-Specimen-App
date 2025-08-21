@@ -452,7 +452,6 @@ return `<option value="${base}" ${selected}>${label}</option>`;
   value="${escapeHTML(state.searchTerm || '')}"
   style="margin: 0.5rem 0; padding: 0.5rem; width: 100%; max-width: 400px;"
 />
-/>
 
   <!-- Filtered Player Cards -->
   <div class="players">
