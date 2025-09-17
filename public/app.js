@@ -215,6 +215,12 @@ const state = {
   searchTerm: ''
 };
 
+function showTournamentView(show) {
+  const v = document.getElementById('view-tournament');
+  if (!v) return;
+  v.style.display = show ? 'block' : 'none';
+}
+
 // Message state used for transient user feedback; messages auto clear
 const messages = {
   registration: '',
@@ -291,6 +297,251 @@ async function syncFromSupabase() {
     console.error('Error syncing from Supabase', err);
   }
 }
+
+const TournamentManager = (() => {
+  const LS_KEY = 'nvlb_tournaments_v1';
+
+  function uid() {
+    return Math.random().toString(36).slice(2, 10);
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      return raw ? JSON.parse(raw) : { tournaments: [], scoreSubmissions: {} };
+    } catch(e) {
+      return { tournaments: [], scoreSubmissions: {} };
+    }
+  }
+
+  function save(state) {
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+  }
+
+  function getAll() {
+    return load().tournaments;
+  }
+
+  function getById(id) {
+    return getAll().find(t => t.id === id) || null;
+  }
+
+  function upsertTournament(t) {
+    const state = load();
+    const i = state.tournaments.findIndex(x => x.id === t.id);
+    if (i >= 0) state.tournaments[i] = t; else state.tournaments.push(t);
+    save(state);
+  }
+
+  function createTournament(name, netsCount) {
+    const t = {
+      id: uid(),
+      name,
+      nets: Array.from({length: Number(netsCount||1)}, (_,i)=> i+1),
+      teams: [],
+      pools: [],
+      poolMatches: [],
+      createdAt: Date.now()
+    };
+    upsertTournament(t);
+    return t;
+  }
+
+  function addTeams(tournamentId, teamNames) {
+    const t = getById(tournamentId);
+    if (!t) return;
+    const existingNames = new Set(t.teams.map(x => x.name.toLowerCase()));
+    teamNames.forEach(n => {
+      const name = String(n || '').trim();
+      if (!name) return;
+      if (existingNames.has(name.toLowerCase())) return;
+      t.teams.push({ id: uid(), name });
+    });
+    upsertTournament(t);
+  }
+
+  function setPools(tournamentId, poolsSpec) {
+    const t = getById(tournamentId);
+    if (!t) return;
+    const nameToId = Object.fromEntries(t.teams.map(tm => [tm.name, tm.id]));
+    t.pools = poolsSpec.map(p => ({
+      id: uid(),
+      name: p.name,
+      teamIds: p.teams.map(n => nameToId[n]).filter(Boolean)
+    }));
+    upsertTournament(t);
+  }
+
+  function roundRobinPairs(teamIds) {
+    const ids = [...teamIds];
+    if (ids.length % 2 === 1) ids.push(null);
+    const n = ids.length;
+    const rounds = [];
+    for (let r = 0; r < n - 1; r++) {
+      const pairs = [];
+      for (let i = 0; i < n / 2; i++) {
+        const a = ids[i];
+        const b = ids[n - 1 - i];
+        if (a && b) pairs.push([a, b]);
+      }
+      rounds.push(pairs);
+      const fixed = ids[0];
+      const rest = ids.slice(1);
+      rest.unshift(rest.pop());
+      ids.splice(0, ids.length, fixed, ...rest);
+    }
+    return rounds;
+  }
+
+  function generatePoolSchedule(tournamentId) {
+    const t = getById(tournamentId);
+    if (!t) return;
+    const nets = t.nets;
+    const matches = [];
+    let matchIdCounter = 1;
+    t.pools.forEach(pool => {
+      const rr = roundRobinPairs(pool.teamIds);
+      rr.forEach((pairs, roundIndex) => {
+        pairs.forEach((pair, pairIndex) => {
+          const net = nets[(pairIndex) % nets.length];
+          matches.push({
+            id: uid(),
+            label: `M${matchIdCounter++}`,
+            poolId: pool.id,
+            round: roundIndex + 1,
+            net,
+            teamAId: pair[0],
+            teamBId: pair[1],
+            status: 'scheduled',
+            scoreA: null,
+            scoreB: null
+          });
+        });
+      });
+    });
+    t.poolMatches = matches;
+    upsertTournament(t);
+  }
+
+  function teamRecord(tournamentId, teamId) {
+    const t = getById(tournamentId);
+    if (!t) return { wins:0, losses:0, pf:0, pa:0, pd:0 };
+    let wins = 0, losses = 0, pf = 0, pa = 0;
+    t.poolMatches.forEach(m => {
+      if (m.status !== 'final') return;
+      if (m.teamAId === teamId) {
+        pf += m.scoreA; pa += m.scoreB;
+        if (m.scoreA > m.scoreB) wins++; else if (m.scoreA < m.scoreB) losses++;
+      } else if (m.teamBId === teamId) {
+        pf += m.scoreB; pa += m.scoreA;
+        if (m.scoreB > m.scoreA) wins++; else if (m.scoreB < m.scoreA) losses++;
+      }
+    });
+    const pd = pf - pa;
+    return { wins, losses, pf, pa, pd };
+  }
+
+  function poolStandings(tournamentId) {
+    const t = getById(tournamentId);
+    if (!t) return [];
+    const byPool = t.pools.map(pool => {
+      const rows = pool.teamIds.map(teamId => {
+        const rec = teamRecord(t.id, teamId);
+        const tm = t.teams.find(x => x.id === teamId);
+        return { teamId, teamName: tm ? tm.name : 'Unknown', ...rec };
+      });
+      rows.sort((a,b) => {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        if (b.pd !== a.pd) return b.pd - a.pd;
+        if (b.pf !== a.pf) return b.pf - a.pf;
+        return a.teamName.localeCompare(b.teamName);
+      });
+      return { poolId: pool.id, poolName: pool.name, rows };
+    });
+    return byPool;
+  }
+
+  function allTeamsRanked(tournamentId) {
+    const t = getById(tournamentId);
+    if (!t) return [];
+    const rows = t.teams.map(tm => {
+      const rec = teamRecord(t.id, tm.id);
+      return { teamId: tm.id, teamName: tm.name, ...rec };
+    });
+    rows.sort((a,b) => {
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      if (b.pd !== a.pd) return b.pd - a.pd;
+      if (b.pf !== a.pf) return b.pf - a.pf;
+      return a.teamName.localeCompare(b.teamName);
+    });
+    return rows;
+  }
+
+  function nextMatchForTeam(tournamentId, teamId) {
+    const t = getById(tournamentId);
+    if (!t) return null;
+    const upcoming = t.poolMatches
+      .filter(m => m.status === 'scheduled' && (m.teamAId === teamId || m.teamBId === teamId))
+      .sort((a,b) => {
+        if (a.round !== b.round) return a.round - b.round;
+        return String(a.label).localeCompare(String(b.label));
+      });
+    return upcoming[0] || null;
+  }
+
+  function submitScoreDualEntry(tournamentId, matchId, reporterTeamName, scoreA, scoreB) {
+    const state = load();
+    const key = `${tournamentId}:${matchId}`;
+    if (!state.scoreSubmissions[key]) state.scoreSubmissions[key] = [];
+    state.scoreSubmissions[key].push({
+      by: String(reporterTeamName || '').trim(),
+      scoreA: Number(scoreA),
+      scoreB: Number(scoreB),
+      ts: Date.now()
+    });
+    save(state);
+
+    const subs = state.scoreSubmissions[key];
+    if (subs.length >= 2) {
+      for (let i=0; i<subs.length; i++) {
+        for (let j=i+1; j<subs.length; j++) {
+          if (subs[i].scoreA === subs[j].scoreA && subs[i].scoreB === subs[j].scoreB) {
+            finalizeMatchScore(tournamentId, matchId, subs[i].scoreA, subs[i].scoreB);
+            state.scoreSubmissions[key] = [{ finalized: true, scoreA: subs[i].scoreA, scoreB: subs[i].scoreB, ts: Date.now() }];
+            save(state);
+            return { status:'finalized', message:'Scores matched from two teams and have been recorded.' };
+          }
+        }
+      }
+      return { status:'pending', message:'Second submission received but does not match another. Admin review required.' };
+    }
+    return { status:'pending', message:'First submission recorded. Waiting for the second team to submit the same score.' };
+  }
+
+  function finalizeMatchScore(tournamentId, matchId, scoreA, scoreB) {
+    const t = getById(tournamentId);
+    if (!t) return;
+    const m = t.poolMatches.find(x => x.id === matchId);
+    if (!m) return;
+    m.status = 'final';
+    m.scoreA = Number(scoreA);
+    m.scoreB = Number(scoreB);
+    upsertTournament(t);
+  }
+
+  return {
+    getAll,
+    getById,
+    createTournament,
+    addTeams,
+    setPools,
+    generatePoolSchedule,
+    poolStandings,
+    allTeamsRanked,
+    nextMatchForTeam,
+    submitScoreDualEntry
+  };
+})();
 
 // -----------------------------------------------------------------------------
 // UI Helpers
@@ -1016,6 +1267,170 @@ function attachPlayerEditHandlers() {
   });
 }
 
+function initTournamentView() {
+  const adminBox = document.getElementById('adminTournament');
+  if (adminBox) adminBox.style.display = state.isAdmin ? 'block' : 'none';
+
+  const tSelect = document.getElementById('tournamentSelect');
+  const publicNext = document.getElementById('publicNextMatches');
+  const poolStand = document.getElementById('poolStandings');
+  const reportMatchSelect = document.getElementById('reportMatchSelect');
+  const reportStatus = document.getElementById('reportStatus');
+
+  const openBtn = document.getElementById('tab-tournament');
+  if (openBtn) openBtn.addEventListener('click', () => showTournamentView(true));
+  const closeBtn = document.getElementById('closeTournamentBtn');
+  if (closeBtn) closeBtn.addEventListener('click', () => showTournamentView(false));
+
+  function refreshTournamentSelect() {
+    const all = TournamentManager.getAll();
+    tSelect.innerHTML = all.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+    if (all.length === 0) {
+      tSelect.innerHTML = `<option value="">No tournaments</option>`;
+    }
+  }
+
+  function renderPublicNextAndStandings() {
+    const id = tSelect.value;
+    const t = TournamentManager.getById(id);
+    if (!t) {
+      publicNext.innerHTML = '';
+      poolStand.innerHTML = '';
+      reportMatchSelect.innerHTML = '';
+      return;
+    }
+
+    const rows = t.teams.map(tm => {
+      const nm = TournamentManager.nextMatchForTeam(t.id, tm.id);
+      if (!nm) {
+        return `<tr><td>${tm.name}</td><td><span class="badge">No more pool matches</span></td><td>–</td></tr>`;
+      } else {
+        const oppId = nm.teamAId === tm.id ? nm.teamBId : nm.teamAId;
+        const opp = t.teams.find(x => x.id === oppId);
+        return `<tr><td>${tm.name}</td><td>${opp ? opp.name : 'TBD'}</td><td>Net ${nm.net}  Round ${nm.round}  ${nm.label}</td></tr>`;
+      }
+    }).join('');
+    publicNext.innerHTML = `
+      <table class="table">
+        <thead><tr><th>Team</th><th>Next opponent</th><th>Net and round</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+
+    const pools = TournamentManager.poolStandings(t.id);
+    poolStand.innerHTML = pools.map(p => {
+      const r = p.rows.map((row, idx) => {
+        return `<tr>
+          <td>${idx+1}</td>
+          <td>${row.teamName}</td>
+          <td>${row.wins}-${row.losses}</td>
+          <td>${row.pf}</td>
+          <td>${row.pa}</td>
+          <td>${row.pd}</td>
+        </tr>`;
+      }).join('');
+      return `
+        <h4>${p.poolName}</h4>
+        <table class="table">
+          <thead><tr><th>#</th><th>Team</th><th>Record</th><th>PF</th><th>PA</th><th>PD</th></tr></thead>
+          <tbody>${r}</tbody>
+        </table>
+      `;
+    }).join('');
+
+    const sched = (t.poolMatches || []).filter(m => m.status === 'scheduled');
+    reportMatchSelect.innerHTML = sched.map(m => {
+      const a = t.teams.find(x => x.id === m.teamAId)?.name || 'TBD';
+      const b = t.teams.find(x => x.id === m.teamBId)?.name || 'TBD';
+      return `<option value="${m.id}">${m.label}  ${a} vs ${b}  Net ${m.net}  Round ${m.round}</option>`;
+    }).join('');
+    if (sched.length === 0) {
+      reportMatchSelect.innerHTML = `<option value="">No scheduled pool matches</option>`;
+    }
+
+    renderAdminRankings();
+  }
+
+  function renderAdminRankings() {
+    const box = document.getElementById('adminRankings');
+    if (!box) return;
+    const id = tSelect.value;
+    const t = TournamentManager.getById(id);
+    if (!t) { box.innerHTML = ''; return; }
+    const rows = TournamentManager.allTeamsRanked(id).map((r, i) => {
+      return `<tr><td>${i+1}</td><td>${r.teamName}</td><td>${r.wins}-${r.losses}</td><td>${r.pf}</td><td>${r.pa}</td><td>${r.pd}</td></tr>`;
+    }).join('');
+    box.innerHTML = `
+      <table class="table">
+        <thead><tr><th>#</th><th>Team</th><th>Record</th><th>PF</th><th>PA</th><th>PD</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  const createBtn = document.getElementById('createTournamentBtn');
+  if (createBtn) createBtn.onclick = () => {
+    const name = document.getElementById('newTournamentName').value.trim();
+    const nets = document.getElementById('newTournamentNets').value;
+    if (!name) return;
+    TournamentManager.createTournament(name, nets || 1);
+    refreshTournamentSelect();
+    renderPublicNextAndStandings();
+  };
+
+  const addTeamsBtn = document.getElementById('addTeamsBtn');
+  if (addTeamsBtn) addTeamsBtn.onclick = () => {
+    const id = tSelect.value;
+    if (!id) return;
+    const text = document.getElementById('bulkTeams').value;
+    const names = text.split('\n').map(s => s.trim()).filter(Boolean);
+    TournamentManager.addTeams(id, names);
+    renderPublicNextAndStandings();
+  };
+
+  const savePoolsBtn = document.getElementById('savePoolsBtn');
+  if (savePoolsBtn) savePoolsBtn.onclick = () => {
+    const id = tSelect.value;
+    if (!id) return;
+    try {
+      const spec = JSON.parse(document.getElementById('poolsJson').value);
+      TournamentManager.setPools(id, spec);
+      renderPublicNextAndStandings();
+    } catch(e) {
+      alert('Pools JSON invalid');
+    }
+  };
+
+  const genBtn = document.getElementById('generatePoolScheduleBtn');
+  if (genBtn) genBtn.onclick = () => {
+    const id = tSelect.value;
+    if (!id) return;
+    TournamentManager.generatePoolSchedule(id);
+    renderPublicNextAndStandings();
+  };
+
+  const submitScoreBtn = document.getElementById('submitScoreBtn');
+  if (submitScoreBtn) submitScoreBtn.onclick = () => {
+    const id = tSelect.value;
+    const matchId = document.getElementById('reportMatchSelect').value;
+    const a = Number(document.getElementById('teamA_score').value);
+    const b = Number(document.getElementById('teamB_score').value);
+    const who = document.getElementById('reporterTeam').value.trim();
+    if (!id || !matchId || Number.isNaN(a) || Number.isNaN(b) || !who) {
+      reportStatus.textContent = 'Complete all fields to submit a score.';
+      return;
+    }
+    const res = TournamentManager.submitScoreDualEntry(id, matchId, who, a, b);
+    reportStatus.textContent = res.message;
+    renderPublicNextAndStandings();
+  };
+
+  tSelect.onchange = () => renderPublicNextAndStandings();
+
+  refreshTournamentSelect();
+  renderPublicNextAndStandings();
+}
+
 // Initialise the app. Called once on page load. It loads stored data,
 // optionally syncs with Supabase, registers the service worker and
 // renders the UI for the first time.
@@ -1037,7 +1452,11 @@ function init() {
 
 // Start the app once the DOM is ready
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
+  document.addEventListener('DOMContentLoaded', () => {
+    init();
+    initTournamentView();
+  });
 } else {
   init();
+  initTournamentView();
 }
