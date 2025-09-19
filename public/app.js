@@ -633,12 +633,11 @@ function ensureTournamentUI() {
     lbl.style.marginRight = '8px';
   };
 
-  // Report row fields we care about
+  // Report row fields
   const specs = [
     { id: 'reportMatchSelect', text: 'Net number',     ph: 'Number' },
     { id: 'teamA_score',       text: 'Team A',         ph: 'Team A'     },
     { id: 'teamB_score',       text: 'Team B',         ph: 'Team B'     },
-    { id: 'reporterTeam',      text: 'Your team name', ph: 'Your team name' }
   ];
 
   specs.forEach(({ id, text, ph }) => {
