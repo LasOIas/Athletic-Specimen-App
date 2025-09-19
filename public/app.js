@@ -797,15 +797,20 @@ function initTournamentView() {
       `).join('');
     }
 
+    // after you finish populating publicNext, poolStand, and report match select
+fixTournamentFading();
+
     // REPORTING SELECT
     populateReportMatchSelect(t);
   }
 
   // initial paint
-  refreshTournamentSelect();
-  renderAdminRankings();
-  renderPublicNextAndStandings();
-  updateReportPreview();
+ // end of initTournamentView
+refreshTournamentSelect();
+renderAdminRankings();
+renderPublicNextAndStandings();
+updateReportPreview();
+fixTournamentFading();
 }
 
 // -----------------------------------------------------------------------------
