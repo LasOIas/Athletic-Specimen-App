@@ -620,42 +620,10 @@ function fixTournamentFading() {
 
 // Make sure section titles and inline labels exist and are visible
 function ensureTournamentUI() {
-  // Section titles
-  const sections = [
-    { anchor: document.getElementById('publicNextMatches'), text: 'Public Schedule and Next Match' },
-    { anchor: document.getElementById('poolStandings'),     text: 'Pool Standings' },
-    { anchor: document.getElementById('reportMatchSelect'), text: 'Report Score' }
-  ];
-  sections.forEach(({ anchor, text }) => {
-    if (!anchor) return;
-    const card = anchor.closest('.card') || anchor;
-    if (!card.querySelector('.section-title')) {
-      const h = document.createElement('h3');
-      h.className = 'section-title';
-      h.textContent = text;
-      card.insertBefore(h, card.firstChild);
-    }
-  });
+  const root = document.getElementById('view-tournament');
+  if (!root) return;
 
-  // Inline labels + placeholders for Report Score
-  const fields = [
-    { id: 'reportMatchSelect', text: 'Net',     ph: 'Net number' },
-    { id: 'teamA_score',       text: 'Team A',  ph: 'Team A'     },
-    { id: 'teamB_score',       text: 'Team B',  ph: 'Team B'     },
-    { id: 'reporterTeam',      text: 'Your team name', ph: 'Your team name' }
-  ];
-  fields.forEach(({ id, text, ph }) => {
-    const input = document.getElementById(id);
-    if (!input) return;
-    if (ph && !input.placeholder) input.placeholder = ph;
-
-    let lbl = input.previousElementSibling;
-    if (!(lbl && lbl.tagName && lbl.tagName.toLowerCase() === 'label')) {
-      lbl = document.createElement('label');
-      lbl.setAttribute('for', id);
-      input.insertAdjacentElement('beforebegin', lbl);
-    }
-    lbl.textContent = text;
+  const styleLabel = (lbl) => {
     lbl.style.opacity = '1';
     lbl.style.filter = 'none';
     lbl.style.color = '#111';
@@ -663,6 +631,51 @@ function ensureTournamentUI() {
     lbl.style.display = 'inline-block';
     lbl.style.minWidth = '72px';
     lbl.style.marginRight = '8px';
+  };
+
+  // Report row fields we care about
+  const specs = [
+    { id: 'reportMatchSelect', text: 'Net',            ph: 'Net number' },
+    { id: 'teamA_score',       text: 'Team A',         ph: 'Team A'     },
+    { id: 'teamB_score',       text: 'Team B',         ph: 'Team B'     },
+    { id: 'reporterTeam',      text: 'Your team name', ph: 'Your team name' }
+  ];
+
+  specs.forEach(({ id, text, ph }) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+
+    if (ph) input.placeholder = ph;
+
+    // Prefer existing label[for] if present
+    let lbl = root.querySelector(`label[for="${id}"]`);
+
+    // Or use the previous sibling if it's already a <label>
+    if (!lbl && input.previousElementSibling && input.previousElementSibling.tagName.toLowerCase() === 'label') {
+      lbl = input.previousElementSibling;
+    }
+
+    // Otherwise create one
+    if (!lbl) {
+      lbl = document.createElement('label');
+      lbl.setAttribute('for', id);
+      input.insertAdjacentElement('beforebegin', lbl);
+    }
+
+    // Set text + style
+    lbl.textContent = text;
+    styleLabel(lbl);
+
+    // Remove any extra duplicate labels targeting the same control
+    const dups = [...root.querySelectorAll(`label[for="${id}"]`)];
+    dups.slice(1).forEach(d => d.remove());
+
+    // Make sure "Match" field behaves as numeric net input
+    if (id === 'reportMatchSelect') {
+      input.setAttribute('type', 'number');
+      input.setAttribute('min', '1');
+      input.setAttribute('inputmode', 'numeric');
+    }
   });
 }
 
@@ -704,21 +717,13 @@ function initTournamentView() {
 const reportMatchLabel = document.querySelector('label[for="reportMatchSelect"], #reportMatchLabel');
 if (reportMatchLabel) reportMatchLabel.textContent = 'Net';
 
-  const openBtn = document.getElementById('tab-tournament');
-  if (openBtn) openBtn.onclick = () => showTournamentView(true);
-  const closeBtn = document.getElementById('closeTournamentBtn');
-  if (closeBtn) closeBtn.onclick = () => showTournamentView(false);
-
-  if (reportNetSelect) {
-    reportNetSelect.innerHTML = Array.from({ length: 15 }, (_, i) =>
-      `<option value="${i + 1}">Net ${i + 1}</option>`
-    ).join('');
-  }
-
+  // REPLACE your openBtn handler with this single version
+const openBtn = document.getElementById('tab-tournament');
 if (openBtn) openBtn.onclick = () => {
-    showTournamentView(true);
+  showTournamentView(true);
   fixTournamentFading();
   ensureTournamentUI();
+  dedupeSectionTitles();
 };
 
   function refreshTournamentSelect() {
@@ -796,7 +801,15 @@ ensureTournamentUI();
     const t = TournamentManager.getById(id);
 
     // clear areas by default
-    if (publicNext) publicNext.innerHTML = '';
+    if (publicNext) {
+  const nets = t.nets && t.nets.length ? t.nets : [1];
+  const rows = nets.map(n => {
+    const m = TournamentManager.findNextScheduledMatchByNet(t.id, n);
+    if (!m) return `<li>Net ${n}: no scheduled match</li>`;
+    return `<li>${matchLabel(t, m)}</li>`;
+  }).join('');
+  publicNext.innerHTML = `<ul class="list">${rows}</ul>`;
+}
     if (poolStand) poolStand.innerHTML = '';
     if (reportTeamsPreview) reportTeamsPreview.textContent = '—';
 
@@ -909,34 +922,29 @@ if (submitScoreBtn) submitScoreBtn.onclick = () => {
     // POOL STANDINGS
 if (poolStand) {
   const standings = TournamentManager.poolStandings(t.id);
-  poolStand.innerHTML = `
-    <h3 class="section-title">Pool Standings</h3>
-    ${
-      standings.length
-        ? standings.map(s => `
-            <div class="card">
-              <h4>${s.poolName}</h4>
-              <table class="table">
-                <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>PF</th><th>PA</th><th>PD</th></tr></thead>
-                <tbody>
-                  ${s.rows.map((r,i)=>`
-                    <tr>
-                      <td>${i+1}</td>
-                      <td>${r.teamName}</td>
-                      <td>${r.wins}</td>
-                      <td>${r.losses}</td>
-                      <td>${r.pf}</td>
-                      <td>${r.pa}</td>
-                      <td>${r.pd}</td>
-                    </tr>
-                  `).join('')}
-                </tbody>
-              </table>
-            </div>
-          `).join('')
-        : `<p class="small">No pools yet.</p>`
-    }
-  `;
+  poolStand.innerHTML = standings.length
+    ? standings.map(s => `
+        <div class="card">
+          <h4>${s.poolName}</h4>
+          <table class="table">
+            <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>PF</th><th>PA</th><th>PD</th></tr></thead>
+            <tbody>
+              ${s.rows.map((r,i)=>`
+                <tr>
+                  <td>${i+1}</td>
+                  <td>${r.teamName}</td>
+                  <td>${r.wins}</td>
+                  <td>${r.losses}</td>
+                  <td>${r.pf}</td>
+                  <td>${r.pa}</td>
+                  <td>${r.pd}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `).join('')
+    : `<p class="small">No pools yet.</p>`;
 }
 
     // after you finish populating publicNext, poolStand, and report match select
@@ -946,14 +954,14 @@ fixTournamentFading();
     populateReportMatchSelect(t);
   }
 
-  // initial paint
- // end of initTournamentView
+// end of initTournamentView
 refreshTournamentSelect();
 renderAdminRankings();
 renderPublicNextAndStandings();
 updateReportPreview();
 fixTournamentFading();
 ensureTournamentUI();
+dedupeSectionTitles();
 }
 
 // -----------------------------------------------------------------------------
