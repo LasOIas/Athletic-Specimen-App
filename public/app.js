@@ -598,6 +598,10 @@ function initTournamentView() {
   const reportStatus = document.getElementById('reportStatus');
   const reportMatchSelect = document.getElementById('reportMatchSelect');
 
+  // add at the top of initTournamentView after the other const element lookups
+const reportMatchLabel = document.querySelector('label[for="reportMatchSelect"], #reportMatchLabel');
+if (reportMatchLabel) reportMatchLabel.textContent = 'Net';
+
   const openBtn = document.getElementById('tab-tournament');
   if (openBtn) openBtn.onclick = () => showTournamentView(true);
   const closeBtn = document.getElementById('closeTournamentBtn');
