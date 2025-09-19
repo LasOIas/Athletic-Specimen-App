@@ -705,6 +705,7 @@ function initTournamentView() {
     input.setAttribute('inputmode', 'numeric');
     el.replaceWith(input);
     el = input;
+    input.style.width = '100px'; // adjust as needed
   }
 
   el.setAttribute('type', 'number');
@@ -757,6 +758,7 @@ if (openBtn) openBtn.onclick = () => {
     input.min = '1';
     input.setAttribute('inputmode', 'numeric');
     el.replaceWith(input);
+    input.style.width = '100px'; // adjust as needed
     return;
   }
 
