@@ -617,6 +617,24 @@ function fixTournamentFading() {
   });
 }
 
+// Ensure Report Score labels exist and are readable
+function ensureReportLabels() {
+  const L = (sel, text) => {
+    const el = document.querySelector(sel);
+    if (el) {
+      el.textContent = text;
+      el.style.opacity = '1';
+      el.style.filter = 'none';
+      el.style.color = '#111';
+      el.style.fontWeight = '600';
+    }
+  };
+  L('label[for="reportMatchSelect"], #reportMatchLabel', 'Net');
+  L('label[for="teamA_score"]', 'Team A');
+  L('label[for="teamB_score"]', 'Team B');
+  L('label[for="reporterTeam"]', 'Your team name');
+}
+
 function initTournamentView() {
   const adminBox = document.getElementById('adminTournament');
   if (adminBox) adminBox.style.display = state.isAdmin ? 'block' : 'none';
@@ -889,6 +907,7 @@ refreshTournamentSelect();
 renderAdminRankings();
 renderPublicNextAndStandings();
 updateReportPreview();
+ensureReportLabels();   // <— add this
 fixTournamentFading();
 }
 
