@@ -635,6 +635,61 @@ function ensureReportLabels() {
   L('label[for="reporterTeam"]', 'Your team name');
 }
 
+// Make sure section titles and inline labels exist and are visible
+function ensureTournamentUI() {
+  // 1) Section titles (insert into the nearest .card wrapper if missing)
+  const sections = [
+    { anchor: document.getElementById('publicNextMatches'), text: 'Public Schedule and Next Match' },
+    { anchor: document.getElementById('poolStandings'),     text: 'Pool Standings' },
+    { anchor: document.getElementById('reportMatchSelect'), text: 'Report Score' }
+  ];
+  sections.forEach(({ anchor, text }) => {
+    if (!anchor) return;
+    const card = anchor.closest('.card') || anchor;
+    if (!card.querySelector('.section-title')) {
+      const h = document.createElement('h3');
+      h.className = 'section-title';
+      h.textContent = text;
+      card.insertBefore(h, card.firstChild);
+    }
+  });
+
+  // 2) Inline labels for the Report Score row
+  const fields = [
+    { id: 'reportMatchSelect', text: 'Net' },
+    { id: 'teamA_score',       text: 'Team A' },
+    { id: 'teamB_score',       text: 'Team B' },
+    { id: 'reporterTeam',      text: 'Your team name' }
+  ];
+  fields.forEach(({ id, text }) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+    // make placeholders obvious too
+    if (id === 'teamA_score') input.placeholder = 'Team A';
+    if (id === 'teamB_score') input.placeholder = 'Team B';
+    if (id === 'reporterTeam') input.placeholder = 'Your team name';
+
+    let lbl = input.previousElementSibling;
+    if (!(lbl && lbl.tagName && lbl.tagName.toLowerCase() === 'label')) {
+      lbl = document.createElement('label');
+      lbl.setAttribute('for', id);
+      lbl.className = 'label-inline';
+      input.insertAdjacentElement('beforebegin', lbl);
+    }
+    lbl.textContent = text;
+    // visible styles (in case other CSS tries to fade them)
+    lbl.style.opacity = '1';
+    lbl.style.filter = 'none';
+    lbl.style.color = '#111';
+    lbl.style.fontWeight = '600';
+    lbl.style.pointerEvents = 'auto';
+    lbl.style.display = 'inline-block';
+    lbl.style.minWidth = '72px';
+    lbl.style.textAlign = 'right';
+    lbl.style.marginRight = '8px';
+  });
+}
+
 function initTournamentView() {
   const adminBox = document.getElementById('adminTournament');
   if (adminBox) adminBox.style.display = state.isAdmin ? 'block' : 'none';
@@ -865,34 +920,44 @@ if (submitScoreBtn) submitScoreBtn.onclick = () => {
         if (!m) return `<li>Net ${n}: no scheduled match</li>`;
         return `<li>${matchLabel(t, m)}</li>`;
       }).join('');
-      publicNext.innerHTML = `<ul class="list">${rows}</ul>`;
+      publicNext.innerHTML = `
+  <h3 class="section-title">Public Schedule and Next Match</h3>
+  <ul class="list">${rows}</ul>
+`;
     }
 
     // POOL STANDINGS
-    if (poolStand) {
-      const standings = TournamentManager.poolStandings(t.id);
-      poolStand.innerHTML = standings.map(s => `
-        <div class="card">
-          <h4>${s.poolName}</h4>
-          <table class="table">
-            <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>PF</th><th>PA</th><th>PD</th></tr></thead>
-            <tbody>
-              ${s.rows.map((r,i)=>`
-                <tr>
-                  <td>${i+1}</td>
-                  <td>${r.teamName}</td>
-                  <td>${r.wins}</td>
-                  <td>${r.losses}</td>
-                  <td>${r.pf}</td>
-                  <td>${r.pa}</td>
-                  <td>${r.pd}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        </div>
-      `).join('');
+if (poolStand) {
+  const standings = TournamentManager.poolStandings(t.id);
+  poolStand.innerHTML = `
+    <h3 class="section-title">Pool Standings</h3>
+    ${
+      standings.length
+        ? standings.map(s => `
+            <div class="card">
+              <h4>${s.poolName}</h4>
+              <table class="table">
+                <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>PF</th><th>PA</th><th>PD</th></tr></thead>
+                <tbody>
+                  ${s.rows.map((r,i)=>`
+                    <tr>
+                      <td>${i+1}</td>
+                      <td>${r.teamName}</td>
+                      <td>${r.wins}</td>
+                      <td>${r.losses}</td>
+                      <td>${r.pf}</td>
+                      <td>${r.pa}</td>
+                      <td>${r.pd}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `).join('')
+        : `<p class="small">No pools yet.</p>`
     }
+  `;
+}
 
     // after you finish populating publicNext, poolStand, and report match select
 fixTournamentFading();
