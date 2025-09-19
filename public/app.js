@@ -586,6 +586,19 @@ const TournamentManager = (() => {
   };
 })();
 
+// Ensure tournament modal cards aren't faded (used later)
+function fixTournamentFading() {
+  const root = document.getElementById('view-tournament');
+  if (!root) return;
+  root.querySelectorAll('.card').forEach(el => {
+    el.classList.remove('muted', 'disabled', 'is-disabled');
+    el.removeAttribute('aria-disabled');
+    el.style.opacity = '1';
+    el.style.filter = 'none';
+    el.style.pointerEvents = 'auto';
+  });
+}
+
 function initTournamentView() {
   const adminBox = document.getElementById('adminTournament');
   if (adminBox) adminBox.style.display = state.isAdmin ? 'block' : 'none';
@@ -597,6 +610,28 @@ function initTournamentView() {
   const reportTeamsPreview = document.getElementById('reportTeamsPreview');
   const reportStatus = document.getElementById('reportStatus');
   const reportMatchSelect = document.getElementById('reportMatchSelect');
+
+  // Force "Match" control to be a numeric Net input
+(function ensureReportMatchIsInput() {
+  let el = document.getElementById('reportMatchSelect');
+  if (!el) return;
+
+  if (el.tagName.toLowerCase() === 'select') {
+    const input = document.createElement('input');
+    input.id = el.id;
+    input.type = 'number';
+    input.placeholder = 'Net number';
+    input.min = '1';
+    input.setAttribute('inputmode', 'numeric');
+    el.replaceWith(input);
+    el = input;
+  }
+
+  el.setAttribute('type', 'number');
+  el.setAttribute('min', '1');
+  el.setAttribute('inputmode', 'numeric');
+  el.setAttribute('placeholder', 'Net number');
+})();
 
   // add at the top of initTournamentView after the other const element lookups
 const reportMatchLabel = document.querySelector('label[for="reportMatchSelect"], #reportMatchLabel');
@@ -632,17 +667,26 @@ if (reportMatchLabel) reportMatchLabel.textContent = 'Net';
     return `${m.label} • ${a} vs ${b} • Net ${m.net} • R${m.round}`;
   }
 
-  function populateReportMatchSelect(t) {
-    if (!reportMatchSelect) return;
-    if (!t) {
-      reportMatchSelect.innerHTML = `<option value="">No matches</option>`;
-      return;
-    }
-    const scheduled = (t.poolMatches || []).filter(m => m.status === 'scheduled');
-    reportMatchSelect.innerHTML = scheduled.length
-      ? scheduled.map(m => `<option value="${m.id}">${matchLabel(t, m)}</option>`).join('')
-      : `<option value="">No scheduled matches</option>`;
+  function populateReportMatchSelect() {
+  const el = document.getElementById('reportMatchSelect');
+  if (!el) return;
+
+  if (el.tagName.toLowerCase() === 'select') {
+    const input = document.createElement('input');
+    input.id = el.id;
+    input.type = 'number';
+    input.placeholder = 'Net number';
+    input.min = '1';
+    input.setAttribute('inputmode', 'numeric');
+    el.replaceWith(input);
+    return;
   }
+
+  el.setAttribute('type', 'number');
+  el.setAttribute('min', '1');
+  el.setAttribute('inputmode', 'numeric');
+  el.setAttribute('placeholder', 'Net number');
+}
 
   function updateReportPreview() {
     const id = tSelect ? tSelect.value : '';
@@ -729,22 +773,30 @@ if (reportMatchLabel) reportMatchLabel.textContent = 'Net';
     };
 
     const submitScoreBtn = document.getElementById('submitScoreBtn');
-    if (submitScoreBtn) submitScoreBtn.onclick = () => {
-      const id = tSelect ? tSelect.value : '';
-      const matchId = reportMatchSelect ? reportMatchSelect.value : '';
-      const a = Number(document.getElementById('teamA_score').value);
-      const b = Number(document.getElementById('teamB_score').value);
-      const who = (document.getElementById('reporterTeam').value || '').trim();
-      if (!id || !matchId || Number.isNaN(a) || Number.isNaN(b) || !who) {
-        if (reportStatus) reportStatus.textContent = 'Complete all fields to submit a score.';
-        return;
-      }
-      const res = TournamentManager.submitScoreDualEntry(id, matchId, who, a, b);
-      if (reportStatus) reportStatus.textContent = res.message;
-      renderAdminRankings();
-      renderPublicNextAndStandings();
-      updateReportPreview();
-    };
+if (submitScoreBtn) submitScoreBtn.onclick = () => {
+  const id = tSelect ? tSelect.value : '';
+  const netVal = Number(document.getElementById('reportMatchSelect').value);
+  const a = Number(document.getElementById('teamA_score').value);
+  const b = Number(document.getElementById('teamB_score').value);
+  const who = (document.getElementById('reporterTeam').value || '').trim();
+
+  if (!id || Number.isNaN(netVal) || Number.isNaN(a) || Number.isNaN(b) || !who) {
+    if (reportStatus) reportStatus.textContent = 'Complete all fields to submit a score.';
+    return;
+  }
+
+  const next = TournamentManager.findNextScheduledMatchByNet(id, netVal);
+  if (!next) {
+    if (reportStatus) reportStatus.textContent = `No scheduled match on Net ${netVal}.`;
+    return;
+  }
+
+  const res = TournamentManager.submitScoreDualEntry(id, next.id, who, a, b);
+  if (reportStatus) reportStatus.textContent = res.message;
+  renderAdminRankings();
+  renderPublicNextAndStandings();
+  updateReportPreview();
+};
 
     if (tSelect) tSelect.onchange = () => {
       renderAdminRankings();
