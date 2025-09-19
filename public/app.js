@@ -635,7 +635,7 @@ function ensureTournamentUI() {
 
   // Report row fields we care about
   const specs = [
-    { id: 'reportMatchSelect', text: 'Net',            ph: 'Net number' },
+    { id: 'reportMatchSelect', text: 'Net number',     ph: 'Number' },
     { id: 'teamA_score',       text: 'Team A',         ph: 'Team A'     },
     { id: 'teamB_score',       text: 'Team B',         ph: 'Team B'     },
     { id: 'reporterTeam',      text: 'Your team name', ph: 'Your team name' }
@@ -716,7 +716,7 @@ function initTournamentView() {
 
   // add at the top of initTournamentView after the other const element lookups
 const reportMatchLabel = document.querySelector('label[for="reportMatchSelect"], #reportMatchLabel');
-if (reportMatchLabel) reportMatchLabel.textContent = 'Net';
+if (reportMatchLabel) reportMatchLabel.textContent = 'Net number';
 
   // REPLACE your openBtn handler with this single version
 const openBtn = document.getElementById('tab-tournament');
