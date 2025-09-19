@@ -593,51 +593,34 @@ function fixTournamentFading() {
   const root = document.getElementById('view-tournament');
   if (!root) return;
 
-  // Remove any disabling attributes/classes
-  root.querySelectorAll('[aria-disabled], [data-disabled]').forEach(el => {
+  // Remove disabled flags/classes
+  root.querySelectorAll('[aria-disabled],[data-disabled]').forEach(el => {
     el.removeAttribute('aria-disabled');
     el.removeAttribute('data-disabled');
   });
-  root.querySelectorAll('.muted, .is-disabled, .disabled').forEach(el => {
-    el.classList.remove('muted', 'is-disabled', 'disabled');
+  root.querySelectorAll('.muted,.is-disabled,.disabled').forEach(el => {
+    el.classList.remove('muted','is-disabled','disabled');
   });
 
-  // Re-enable any disabled fieldsets/controls (this often causes faded labels)
+  // Re-enable controls
   root.querySelectorAll('fieldset, input, select, textarea, button').forEach(el => {
     if (el.disabled) el.disabled = false;
     el.style.pointerEvents = 'auto';
-  });
-
-  // Force full-contrast on headings and labels
-  root.querySelectorAll('h2, h3, h4, label').forEach(el => {
     el.style.opacity = '1';
     el.style.filter = 'none';
-    el.style.color = '#fff';
-    el.style.fontWeight = '600';
   });
-}
 
-// Ensure Report Score labels exist and are readable
-function ensureReportLabels() {
-  const L = (sel, text) => {
-    const el = document.querySelector(sel);
-    if (el) {
-      el.textContent = text;
-      el.style.opacity = '1';
-      el.style.filter = 'none';
-      el.style.color = '#111';
-      el.style.fontWeight = '600';
-    }
-  };
-  L('label[for="reportMatchSelect"], #reportMatchLabel', 'Net');
-  L('label[for="teamA_score"]', 'Team A');
-  L('label[for="teamB_score"]', 'Team B');
-  L('label[for="reporterTeam"]', 'Your team name');
+  // Let CSS control colors (do NOT force white again)
+  root.querySelectorAll('h2, h3, h4, label, .field-label, .section-title').forEach(el => {
+    el.style.opacity = '1';
+    el.style.filter = 'none';
+    el.style.color = ''; // reset any inline color that was set before
+  });
 }
 
 // Make sure section titles and inline labels exist and are visible
 function ensureTournamentUI() {
-  // 1) Section titles (insert into the nearest .card wrapper if missing)
+  // Section titles
   const sections = [
     { anchor: document.getElementById('publicNextMatches'), text: 'Public Schedule and Next Match' },
     { anchor: document.getElementById('poolStandings'),     text: 'Pool Standings' },
@@ -654,38 +637,31 @@ function ensureTournamentUI() {
     }
   });
 
-  // 2) Inline labels for the Report Score row
+  // Inline labels + placeholders for Report Score
   const fields = [
-    { id: 'reportMatchSelect', text: 'Net' },
-    { id: 'teamA_score',       text: 'Team A' },
-    { id: 'teamB_score',       text: 'Team B' },
-    { id: 'reporterTeam',      text: 'Your team name' }
+    { id: 'reportMatchSelect', text: 'Net',     ph: 'Net number' },
+    { id: 'teamA_score',       text: 'Team A',  ph: 'Team A'     },
+    { id: 'teamB_score',       text: 'Team B',  ph: 'Team B'     },
+    { id: 'reporterTeam',      text: 'Your team name', ph: 'Your team name' }
   ];
-  fields.forEach(({ id, text }) => {
+  fields.forEach(({ id, text, ph }) => {
     const input = document.getElementById(id);
     if (!input) return;
-    // make placeholders obvious too
-    if (id === 'teamA_score') input.placeholder = 'Team A';
-    if (id === 'teamB_score') input.placeholder = 'Team B';
-    if (id === 'reporterTeam') input.placeholder = 'Your team name';
+    if (ph && !input.placeholder) input.placeholder = ph;
 
     let lbl = input.previousElementSibling;
     if (!(lbl && lbl.tagName && lbl.tagName.toLowerCase() === 'label')) {
       lbl = document.createElement('label');
       lbl.setAttribute('for', id);
-      lbl.className = 'label-inline';
       input.insertAdjacentElement('beforebegin', lbl);
     }
     lbl.textContent = text;
-    // visible styles (in case other CSS tries to fade them)
     lbl.style.opacity = '1';
     lbl.style.filter = 'none';
     lbl.style.color = '#111';
     lbl.style.fontWeight = '600';
-    lbl.style.pointerEvents = 'auto';
     lbl.style.display = 'inline-block';
     lbl.style.minWidth = '72px';
-    lbl.style.textAlign = 'right';
     lbl.style.marginRight = '8px';
   });
 }
@@ -740,8 +716,9 @@ if (reportMatchLabel) reportMatchLabel.textContent = 'Net';
   }
 
 if (openBtn) openBtn.onclick = () => {
-  showTournamentView(true);
+    showTournamentView(true);
   fixTournamentFading();
+  ensureTournamentUI();
 };
 
   function refreshTournamentSelect() {
@@ -783,6 +760,9 @@ if (openBtn) openBtn.onclick = () => {
   el.setAttribute('inputmode', 'numeric');
   el.setAttribute('placeholder', 'Net number');
 }
+
+fixTournamentFading();
+ensureTournamentUI();
 
   function updateReportPreview() {
     const id = tSelect ? tSelect.value : '';
@@ -972,8 +952,8 @@ refreshTournamentSelect();
 renderAdminRankings();
 renderPublicNextAndStandings();
 updateReportPreview();
-ensureReportLabels();   // <— add this
 fixTournamentFading();
+ensureTournamentUI();
 }
 
 // -----------------------------------------------------------------------------
