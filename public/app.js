@@ -587,15 +587,32 @@ const TournamentManager = (() => {
 })();
 
 // Ensure tournament modal cards aren't faded (used later)
+// Ensure tournament modal content is not dimmed or disabled anywhere
 function fixTournamentFading() {
   const root = document.getElementById('view-tournament');
   if (!root) return;
-  root.querySelectorAll('.card').forEach(el => {
-    el.classList.remove('muted', 'disabled', 'is-disabled');
+
+  // 1) Remove any "muted/disabled" classes & attributes that dim things
+  root.querySelectorAll('.muted, .is-disabled, .disabled').forEach(el => {
+    el.classList.remove('muted', 'is-disabled', 'disabled');
+  });
+  root.querySelectorAll('[aria-disabled], [data-disabled]').forEach(el => {
     el.removeAttribute('aria-disabled');
+    el.removeAttribute('data-disabled');
+  });
+
+  // 2) Re-enable any accidental disables on form controls/fieldset
+  root.querySelectorAll('fieldset, button, input, select, textarea').forEach(el => {
+    if (el.disabled) el.disabled = false;
+    el.style.pointerEvents = 'auto';
     el.style.opacity = '1';
     el.style.filter = 'none';
-    el.style.pointerEvents = 'auto';
+  });
+
+  // 3) Clear inline opacity/filter on cards and headings
+  root.querySelectorAll('.card, .card *').forEach(el => {
+    el.style.opacity = '1';
+    el.style.filter = 'none';
   });
 }
 
@@ -647,6 +664,11 @@ if (reportMatchLabel) reportMatchLabel.textContent = 'Net';
       `<option value="${i + 1}">Net ${i + 1}</option>`
     ).join('');
   }
+
+if (openBtn) openBtn.onclick = () => {
+  showTournamentView(true);
+  fixTournamentFading();
+};
 
   function refreshTournamentSelect() {
     if (!tSelect) return;
