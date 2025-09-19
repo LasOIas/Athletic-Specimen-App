@@ -588,31 +588,32 @@ const TournamentManager = (() => {
 
 // Ensure tournament modal cards aren't faded (used later)
 // Ensure tournament modal content is not dimmed or disabled anywhere
+// Ensure tournament modal content is never dimmed
 function fixTournamentFading() {
   const root = document.getElementById('view-tournament');
   if (!root) return;
 
-  // 1) Remove any "muted/disabled" classes & attributes that dim things
-  root.querySelectorAll('.muted, .is-disabled, .disabled').forEach(el => {
-    el.classList.remove('muted', 'is-disabled', 'disabled');
-  });
+  // Remove any disabling attributes/classes
   root.querySelectorAll('[aria-disabled], [data-disabled]').forEach(el => {
     el.removeAttribute('aria-disabled');
     el.removeAttribute('data-disabled');
   });
-
-  // 2) Re-enable any accidental disables on form controls/fieldset
-  root.querySelectorAll('fieldset, button, input, select, textarea').forEach(el => {
-    if (el.disabled) el.disabled = false;
-    el.style.pointerEvents = 'auto';
-    el.style.opacity = '1';
-    el.style.filter = 'none';
+  root.querySelectorAll('.muted, .is-disabled, .disabled').forEach(el => {
+    el.classList.remove('muted', 'is-disabled', 'disabled');
   });
 
-  // 3) Clear inline opacity/filter on cards and headings
-  root.querySelectorAll('.card, .card *').forEach(el => {
+  // Re-enable any disabled fieldsets/controls (this often causes faded labels)
+  root.querySelectorAll('fieldset, input, select, textarea, button').forEach(el => {
+    if (el.disabled) el.disabled = false;
+    el.style.pointerEvents = 'auto';
+  });
+
+  // Force full-contrast on headings and labels
+  root.querySelectorAll('h2, h3, h4, label').forEach(el => {
     el.style.opacity = '1';
     el.style.filter = 'none';
+    el.style.color = '#fff';
+    el.style.fontWeight = '600';
   });
 }
 
