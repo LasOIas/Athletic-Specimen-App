@@ -686,9 +686,21 @@ function initTournamentView() {
   const publicNext = document.getElementById('publicNextMatches');
   const poolStand = document.getElementById('poolStandings');
   const reportNetSelect = document.getElementById('reportNetSelect');
-  const reportTeamsPreview = document.getElementById('reportTeamsPreview');
   const reportStatus = document.getElementById('reportStatus');
   const reportMatchSelect = document.getElementById('reportMatchSelect');
+  const reporterTeamInput = document.getElementById('reporterTeam');
+
+  // Hide the preview chip and reporter team input completely
+if (reportTeamsPreview) {
+  const container = reportTeamsPreview.closest('.row') || reportTeamsPreview.parentElement;
+  if (container) container.style.display = 'none'; 
+  else reportTeamsPreview.style.display = 'none';
+}
+if (reporterTeamInput) {
+  const lbl = document.querySelector('label[for="reporterTeam"]');
+  if (lbl) lbl.remove();
+  reporterTeamInput.remove();
+}
 
   // Force "Match" control to be a numeric Net input
 (function ensureReportMatchIsInput() {
@@ -868,9 +880,10 @@ if (submitScoreBtn) submitScoreBtn.onclick = () => {
   const netVal = Number(document.getElementById('reportMatchSelect').value);
   const a = Number(document.getElementById('teamA_score').value);
   const b = Number(document.getElementById('teamB_score').value);
-  const who = (document.getElementById('reporterTeam').value || '').trim();
+  const whoEl = document.getElementById('reporterTeam'); 
+  const who = whoEl ? whoEl.value.trim() : 'System';
 
-  if (!id || Number.isNaN(netVal) || Number.isNaN(a) || Number.isNaN(b) || !who) {
+  if (!id || Number.isNaN(netVal) || Number.isNaN(a) || Number.isNaN(b)) {
     if (reportStatus) reportStatus.textContent = 'Complete all fields to submit a score.';
     return;
   }
