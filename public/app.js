@@ -677,6 +677,53 @@ function ensureTournamentUI() {
     }
   });
 }
+function ensureTournamentTabClickable() {
+  const btn = document.getElementById('tab-tournament');
+  if (!btn) return;
+  btn.style.pointerEvents = 'auto';
+  btn.style.opacity = '';
+  btn.style.filter = 'none';
+  btn.classList.remove('disabled', 'is-disabled', 'muted');
+  btn.setAttribute('aria-disabled', 'false');
+  btn.setAttribute('tabindex', '0');
+  btn.setAttribute('role', 'button');
+  // help if something is overlaying it
+  btn.style.position = btn.style.position || 'relative';
+  btn.style.zIndex = '10';
+}
+
+function openTournamentView() {
+  showTournamentView(true);
+  try { fixTournamentFading(); } catch {}
+  try { ensureTournamentUI(); } catch {}
+  try { dedupeSectionTitles(); } catch {}
+}
+
+function bindTournamentTab() {
+  // 1) direct by id
+  const byId = document.getElementById('tab-tournament');
+  if (byId) {
+    byId.onclick = (e) => { if (e) e.preventDefault(); openTournamentView(); };
+    ensureTournamentTabClickable();
+  }
+
+  // 2) direct by data attribute
+  const byData = document.querySelector('[data-tab="tournament"], [data-action="open-tournament"]');
+  if (byData) {
+    byData.onclick = (e) => { if (e) e.preventDefault(); openTournamentView(); };
+  }
+
+  // 3) delegated fallback for dynamically created elements
+  if (!bindTournamentTab._delegated) {
+    document.addEventListener('click', (e) => {
+      const el = e.target.closest('#tab-tournament, [data-tab="tournament"], [data-action="open-tournament"], a[href="#tournament"]');
+      if (!el) return;
+      e.preventDefault();
+      openTournamentView();
+    });
+    bindTournamentTab._delegated = true;
+  }
+}
 
 function initTournamentView() {
   const adminBox = document.getElementById('adminTournament');
@@ -729,14 +776,8 @@ if (reporterTeamInput) {
 const reportMatchLabel = document.querySelector('label[for="reportMatchSelect"], #reportMatchLabel');
 if (reportMatchLabel) reportMatchLabel.textContent = 'Net number';
 
-  // REPLACE your openBtn handler with this single version
 const openBtn = document.getElementById('tab-tournament');
-if (openBtn) openBtn.onclick = () => {
-  showTournamentView(true);
-  fixTournamentFading();
-  ensureTournamentUI();
-  dedupeSectionTitles();
-};
+bindTournamentTab();
 
   function refreshTournamentSelect() {
     if (!tSelect) return;
@@ -1199,6 +1240,7 @@ root.innerHTML = sanitized;
   // reattach handlers each time. Listeners reference functions defined
   // below.
   attachHandlers();
+bindTournamentTab();
 }
 
 // Attach event listeners to the current DOM. This function should be
@@ -1721,13 +1763,14 @@ function init() {
   });  
 }
 
-// Start the app once the DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     init();
     initTournamentView();
+    bindTournamentTab();
   });
 } else {
   init();
   initTournamentView();
+  bindTournamentTab();
 }
