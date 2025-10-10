@@ -29,6 +29,7 @@ const listEl = document.getElementById('playerList');
 const searchInput = document.getElementById('searchInput');
 const addNameInput = document.getElementById('newPlayerName');
 const addBtn = document.getElementById('addPlayerBtn');
+const selectedSet = () => new Set(state.selectedIds || []);
 
 function upsertPlayer(row) {
   if (!row || !row.id) return;
@@ -117,75 +118,42 @@ function generateBalancedGroups(players, checkedInNames, groupCount) {
   return teams;
 }
 
-function renderFilteredPlayers() {
-  let filtered = state.players.slice();
+return filtered.map((player) => {
+  const idx = state.players.findIndex(p => p.id === player.id);
+  const checked = state.checkedIn.includes(player.name);
+  const isSelected = selectedSet().has(String(player.id));
 
-  // Group filter
-  if (state.activeGroup && state.activeGroup !== 'All') {
-    filtered = filtered.filter(p => String(p.group || '').trim() === state.activeGroup);
-  }
-
-  // Tab filters
-  if (state.playerTab === 'in') {
-    filtered = filtered.filter(p => state.checkedIn.includes(p.name));
-  } else if (state.playerTab === 'out') {
-    filtered = filtered.filter(p => !state.checkedIn.includes(p.name));
-  } else if (state.playerTab === 'skill' && state.skillSubTab) {
-    const min = parseFloat(state.skillSubTab);
-    const max = min === 9.0 ? 10 : min + 0.9;
-    filtered = filtered
-      .filter(p => p.skill >= min && p.skill <= max)
-      .sort((a, b) => b.skill - a.skill);
-  } else if (state.playerTab === 'unrated') {
-    filtered = filtered.filter(p => !p.skill || p.skill === 0);
-  }
-
-  // Search (name, tag, group)
-  const q = (state.searchTerm || '').toLowerCase().trim();
-  if (q) {
-    filtered = filtered.filter(p => {
-      const nm = (p.name || '').toLowerCase();
-      const tg = (p.tag || '').toLowerCase();
-      const gp = (p.group || '').toLowerCase();
-      return nm.includes(q) || tg.includes(q) || gp.includes(q);
-    });
-  }
-
-  // Sort by skill desc
-  filtered.sort((a, b) => b.skill - a.skill);
-
-  if (filtered.length === 0) return '<p>No players found.</p>';
-
-  return filtered.map((player) => {
-    const idx = state.players.findIndex(p => p.id === player.id);
-    const checked = state.checkedIn.includes(player.name);
-    return `
-      <div class="player-card" data-id="${player.id}" data-index="${idx}">
+  return `
+    <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
+      <div class="row" style="align-items:center; gap:8px;">
+        <input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />
         <div>
           <strong>${player.name}</strong>
           <span class="skill">Skill: ${player.skill === 0 ? 'Unset' : player.skill}</span>
           <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
+          ${player.group ? `<span class="badge" style="margin-left:6px;">${player.group}</span>` : ''}
         </div>
-        <div class="row">
-          <button class="btn-checkin" data-id="${player.id}">Check In</button>
-          <button class="btn-checkout" data-id="${player.id}">Check Out</button>
-          ${state.isAdmin ? `
-            <button class="btn-edit" data-index="${idx}">Edit</button>
-            <button class="btn-delete danger" data-id="${player.id}">Delete</button>
-          ` : ''}
-        </div>
+      </div>
+
+      <div class="row" style="margin-top:6px;">
+        <button class="btn-checkin" data-id="${player.id}">Check In</button>
+        <button class="btn-checkout" data-id="${player.id}">Check Out</button>
         ${state.isAdmin ? `
-          <div class="edit-row" style="display:none" data-index="${idx}">
-            <input type="text" class="edit-name" value="${player.name}" />
-            <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
-            <input type="text" class="edit-group" placeholder="Group" value="${player.group ? player.group : ''}" />
-            <button class="btn-save-edit" data-index="${idx}">Save</button>
-          </div>
+          <button class="btn-edit" data-index="${idx}">Edit</button>
+          <button class="btn-delete danger" data-id="${player.id}">Delete</button>
         ` : ''}
       </div>
-    `;
-  }).join('');
-}
+
+      ${state.isAdmin ? `
+      <div class="edit-row" style="display:none" data-index="${idx}">
+        <input type="text" class="edit-name" value="${player.name}" />
+        <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
+        <input type="text" class="edit-group" placeholder="Group" value="${player.group ? player.group : ''}" />
+        <button class="btn-save-edit" data-index="${idx}">Save</button>
+      </div>` : ''}
+    </div>
+  `;
+}).join('');
 
 // Bracket helper: create a default 8‑team single elimination bracket. Each
 // match object tracks its two competitors and the winner. Rounds are
@@ -222,7 +190,8 @@ const state = {
   playersById: new Map(),
   searchTerm: '',
   groups: ['All', 'Athletic Specimen'],
-  activeGroup: 'All'
+  activeGroup: 'All',
+  selectedIds: [], // player.id[] currently selected (admin bulk)
 };
 
 function showTournamentView(show) {
@@ -1139,6 +1108,23 @@ return `<option value="${base}" ${selected}>${label}</option>`;
   >✕</span>
 </div>
 
+<!-- Bulk actions -->
+<div class="row" style="margin: 0.5rem 0 0.75rem;">
+  <button id="btn-select-all-visible">Select all visible</button>
+  <button id="btn-clear-selection" class="secondary">Clear selection</button>
+
+  <span style="margin-left:auto;"></span>
+
+  <label for="bulk-dest-group">Move to group:</label>
+  <select id="bulk-dest-group">
+    <option value="">— choose —</option>
+    ${state.groups.filter(g => g && g !== 'All').map(g => `<option value="${g}">${g}</option>`).join('')}
+  </select>
+  <input id="bulk-new-group" type="text" placeholder="or type new group" />
+  <button id="btn-assign-to-group">Add</button>
+  <button id="btn-remove-from-group" class="danger">Remove from group</button>
+</div>
+
   <!-- Filtered Player Cards -->
   <div class="players">
     ${renderFilteredPlayers()}
@@ -1717,6 +1703,111 @@ function attachHandlers() {
       render();
     });
   }
+  // --- Selection checkboxes on player cards ---
+document.querySelectorAll('.player-select').forEach(cb => {
+  cb.addEventListener('change', (e) => {
+    const id = String(e.currentTarget.getAttribute('data-id'));
+    const set = selectedSet();
+    if (e.currentTarget.checked) set.add(id); else set.delete(id);
+    state.selectedIds = Array.from(set);
+    // just toggle the class without re-rendering the world
+    const card = e.currentTarget.closest('.player-card');
+    if (card) card.classList.toggle('is-selected', e.currentTarget.checked);
+  });
+});
+
+// --- Select all visible ---
+const selectAllBtn = document.getElementById('btn-select-all-visible');
+if (selectAllBtn) {
+  selectAllBtn.addEventListener('click', () => {
+    const visibleCards = document.querySelectorAll('.players .player-card');
+    const ids = Array.from(visibleCards).map(el => String(el.getAttribute('data-id')));
+    state.selectedIds = ids;
+    visibleCards.forEach(el => el.classList.add('is-selected'));
+    document.querySelectorAll('.player-select').forEach(cb => {
+      cb.checked = true;
+    });
+  });
+}
+
+// --- Clear selection ---
+const clearSelBtn = document.getElementById('btn-clear-selection');
+if (clearSelBtn) {
+  clearSelBtn.addEventListener('click', () => {
+    state.selectedIds = [];
+    document.querySelectorAll('.player-select').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.player-card').forEach(el => el.classList.remove('is-selected'));
+  });
+}
+
+// --- Assign/move to group ---
+const assignBtn = document.getElementById('btn-assign-to-group');
+if (assignBtn) {
+  assignBtn.addEventListener('click', async () => {
+    const sel = selectedSet();
+    if (!sel.size) return;
+
+    const selEl = document.getElementById('bulk-dest-group');
+    const newEl = document.getElementById('bulk-new-group');
+    const typed = (newEl && newEl.value || '').trim();
+    const chosen = selEl ? selEl.value : '';
+    const dest = typed || chosen;
+
+    if (!dest || dest === 'All') return;
+
+    // Ensure group exists in dropdown
+    if (!state.groups.includes(dest)) {
+      state.groups = Array.from(new Set([...state.groups, dest]));
+    }
+
+    // Local update
+    const ids = Array.from(sel);
+    state.players = state.players.map(p =>
+      ids.includes(String(p.id)) ? { ...p, group: dest } : p
+    );
+
+    // Supabase updates
+    try {
+      for (const id of ids) {
+        await updatePlayerFieldsSupabase(id, { group: dest });
+      }
+      await syncFromSupabase();
+    } catch (e) {
+      console.error('Supabase bulk assign error', e);
+    }
+
+    saveLocal();
+    render();
+  });
+}
+
+// --- Remove from group ---
+const removeBtn = document.getElementById('btn-remove-from-group');
+if (removeBtn) {
+  removeBtn.addEventListener('click', async () => {
+    const sel = selectedSet();
+    if (!sel.size) return;
+
+    const ids = Array.from(sel);
+    // Local update
+    state.players = state.players.map(p =>
+      ids.includes(String(p.id)) ? { ...p, group: '' } : p
+    );
+
+    // Supabase updates
+    try {
+      for (const id of ids) {
+        await updatePlayerFieldsSupabase(id, { group: '' });
+      }
+      await syncFromSupabase();
+    } catch (e) {
+      console.error('Supabase bulk remove group error', e);
+    }
+
+    saveLocal();
+    render();
+  });
+}
 }
 
 function attachPlayerEditHandlers() {

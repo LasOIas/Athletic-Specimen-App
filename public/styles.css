@@ -303,3 +303,5 @@ body {
   -webkit-text-size-adjust: 100%;
   overscroll-behavior: none;
 }
+
+.player-card.is-selected { outline: 2px solid #3b82f6; border-radius: 6px; }
