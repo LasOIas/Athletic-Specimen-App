@@ -118,42 +118,85 @@ function generateBalancedGroups(players, checkedInNames, groupCount) {
   return teams;
 }
 
-return filtered.map((player) => {
-  const idx = state.players.findIndex(p => p.id === player.id);
-  const checked = state.checkedIn.includes(player.name);
-  const isSelected = selectedSet().has(String(player.id));
+function renderFilteredPlayers() {
+  // start from all players
+  let filtered = state.players.slice();
 
-  return `
-    <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
-      <div class="row" style="align-items:center; gap:8px;">
-        <input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />
-        <div>
-          <strong>${player.name}</strong>
-          <span class="skill">Skill: ${player.skill === 0 ? 'Unset' : player.skill}</span>
-          <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
-          ${player.group ? `<span class="badge" style="margin-left:6px;">${player.group}</span>` : ''}
+  // group filter
+  if (state.activeGroup && state.activeGroup !== 'All') {
+    filtered = filtered.filter(p => String(p.group || '').trim() === state.activeGroup);
+  }
+
+  // tab filters
+  if (state.playerTab === 'in') {
+    filtered = filtered.filter(p => state.checkedIn.includes(p.name));
+  } else if (state.playerTab === 'out') {
+    filtered = filtered.filter(p => !state.checkedIn.includes(p.name));
+  } else if (state.playerTab === 'skill' && state.skillSubTab) {
+    const min = parseFloat(state.skillSubTab);
+    const max = min === 9.0 ? 10 : min + 0.9;
+    filtered = filtered
+      .filter(p => p.skill >= min && p.skill <= max)
+      .sort((a, b) => b.skill - a.skill);
+  } else if (state.playerTab === 'unrated') {
+    filtered = filtered.filter(p => !p.skill || p.skill === 0);
+  }
+
+  // search
+  const q = (state.searchTerm || '').toLowerCase().trim();
+  if (q) {
+    filtered = filtered.filter(p => {
+      const nm = (p.name || '').toLowerCase();
+      const tg = (p.tag  || '').toLowerCase();
+      const gp = (p.group|| '').toLowerCase();
+      return nm.includes(q) || tg.includes(q) || gp.includes(q);
+    });
+  }
+
+  // sort by skill desc
+  filtered.sort((a, b) => b.skill - a.skill);
+
+  if (!filtered.length) {
+    return '<p>No players found.</p>';
+  }
+
+  return filtered.map((player) => {
+    const idx = state.players.findIndex(p => p.id === player.id);
+    const checked = state.checkedIn.includes(player.name);
+    const isSelected = selectedSet().has(String(player.id));
+
+    return `
+      <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
+        <div class="row" style="align-items:center; gap:8px;">
+          <input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />
+          <div>
+            <strong>${player.name}</strong>
+            <span class="skill">Skill: ${player.skill === 0 ? 'Unset' : player.skill}</span>
+            <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
+            ${player.group ? `<span class="badge" style="margin-left:6px;">${player.group}</span>` : ''}
+          </div>
         </div>
-      </div>
 
-      <div class="row" style="margin-top:6px;">
-        <button class="btn-checkin" data-id="${player.id}">Check In</button>
-        <button class="btn-checkout" data-id="${player.id}">Check Out</button>
+        <div class="row" style="margin-top:6px;">
+          <button class="btn-checkin" data-id="${player.id}">Check In</button>
+          <button class="btn-checkout" data-id="${player.id}">Check Out</button>
+          ${state.isAdmin ? `
+            <button class="btn-edit" data-index="${idx}">Edit</button>
+            <button class="btn-delete danger" data-id="${player.id}">Delete</button>
+          ` : ''}
+        </div>
+
         ${state.isAdmin ? `
-          <button class="btn-edit" data-index="${idx}">Edit</button>
-          <button class="btn-delete danger" data-id="${player.id}">Delete</button>
-        ` : ''}
+        <div class="edit-row" style="display:none" data-index="${idx}">
+          <input type="text" class="edit-name" value="${player.name}" />
+          <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
+          <input type="text" class="edit-group" placeholder="Group" value="${player.group ? player.group : ''}" />
+          <button class="btn-save-edit" data-index="${idx}">Save</button>
+        </div>` : ''}
       </div>
-
-      ${state.isAdmin ? `
-      <div class="edit-row" style="display:none" data-index="${idx}">
-        <input type="text" class="edit-name" value="${player.name}" />
-        <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
-        <input type="text" class="edit-group" placeholder="Group" value="${player.group ? player.group : ''}" />
-        <button class="btn-save-edit" data-index="${idx}">Save</button>
-      </div>` : ''}
-    </div>
-  `;
-}).join('');
+    `;
+  }).join('');
+}
 
 // Bracket helper: create a default 8‑team single elimination bracket. Each
 // match object tracks its two competitors and the winner. Rounds are
@@ -1674,8 +1717,8 @@ function attachHandlers() {
       const container = document.querySelector('.players');
       if (container) {
         container.innerHTML = renderFilteredPlayers();
-        // re-bind row buttons for newly rendered cards
-        attachHandlers();
+        bindPlayerRowHandlers();
+        bindSelectionHandlers();
       }
       toggleClear();
     });
@@ -1689,7 +1732,8 @@ function attachHandlers() {
       const container = document.querySelector('.players');
       if (container) {
         container.innerHTML = renderFilteredPlayers();
-        attachHandlers();
+        bindPlayerRowHandlers();
+        bindSelectionHandlers();
       }
       clearBtn.style.display = 'none';
     });
@@ -1715,6 +1759,97 @@ document.querySelectorAll('.player-select').forEach(cb => {
     if (card) card.classList.toggle('is-selected', e.currentTarget.checked);
   });
 });
+
+function bindPlayerRowHandlers() {
+  // check-in
+  document.querySelectorAll('.btn-checkin').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      const id = ev.currentTarget.getAttribute('data-id');
+      const player = state.players.find((p) => String(p.id) === String(id));
+      if (!player) return;
+      if (!state.checkedIn.includes(player.name)) {
+        state.checkedIn = [...state.checkedIn, player.name];
+        if (supabaseClient && player.id) {
+          try { await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id); await syncFromSupabase(); } catch(e){ console.error(e); }
+        }
+        saveLocal(); queueSaveToSupabase(); render();
+      }
+    });
+  });
+
+  // check-out
+  document.querySelectorAll('.btn-checkout').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      const id = ev.currentTarget.getAttribute('data-id');
+      const player = state.players.find((p) => String(p.id) === String(id));
+      if (!player) return;
+      state.checkedIn = state.checkedIn.filter((n) => n !== player.name);
+      if (supabaseClient && player.id) {
+        try { await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id); await syncFromSupabase(); } catch(e){ console.error(e); }
+      }
+      saveLocal(); queueSaveToSupabase(); render();
+    });
+  });
+
+  // edit toggle
+  document.querySelectorAll('.btn-edit').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      const idx = ev.currentTarget.getAttribute('data-index');
+      const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+      if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+    });
+  });
+
+  // save inline edit
+  document.querySelectorAll('.btn-save-edit').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
+      const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
+      const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
+      const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
+      const name = nameInput.value.trim();
+      const skill = parseFloat(skillInput.value);
+      const group = groupInput ? groupInput.value.trim() : '';
+      if (!name || isNaN(skill) || skill <= 0) return;
+      const updated = [...state.players];
+      const player = updated[idx];
+      updated[idx] = { ...player, name, skill, group };
+      state.players = updated;
+      if (player && player.id) { await updatePlayerFieldsSupabase(player.id, { name, skill, group }); await syncFromSupabase(); }
+      saveLocal(); queueSaveToSupabase(); render();
+    });
+  });
+
+  // delete
+  document.querySelectorAll('.btn-delete').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      const id = ev.currentTarget.getAttribute('data-id');
+      const idx = state.players.findIndex((p) => String(p.id) === String(id));
+      if (idx === -1) return;
+      const removed = state.players[idx];
+      if (supabaseClient && removed.id) {
+        try { await supabaseClient.from('players').delete().eq('id', removed.id); await syncFromSupabase(); } catch(e){ console.error(e); }
+      }
+      state.players = state.players.filter((p) => String(p.id) !== String(id));
+      state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
+      saveLocal(); queueSaveToSupabase(); render();
+    });
+  });
+}
+
+function bindSelectionHandlers() {
+  // checkbox toggle
+  document.querySelectorAll('.player-select').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const id = String(e.currentTarget.getAttribute('data-id'));
+      const set = selectedSet();
+      if (e.currentTarget.checked) set.add(id); else set.delete(id);
+      state.selectedIds = Array.from(set);
+      const card = e.currentTarget.closest('.player-card');
+      if (card) card.classList.toggle('is-selected', e.currentTarget.checked);
+    });
+  });
+}
 
 // --- Select all visible ---
 const selectAllBtn = document.getElementById('btn-select-all-visible');
