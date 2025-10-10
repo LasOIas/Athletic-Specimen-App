@@ -1199,99 +1199,94 @@ bindTournamentTab();
 // Attach event listeners to the current DOM. This function should be
 // called after each call to render().
 function attachHandlers() {
-  // Toggle edit row (admin only)
+  // --- Group controls (Admin Players) ---
   const groupSelect = document.getElementById('group-filter-select');
-if (groupSelect) {
-  groupSelect.addEventListener('change', () => {
-    state.activeGroup = groupSelect.value || 'All';
-    saveLocal();
-    render();
-  });
-}}
+  if (groupSelect) {
+    groupSelect.addEventListener('change', () => {
+      state.activeGroup = groupSelect.value || 'All';
+      saveLocal();
+      render();
+    });
+  }
 
-const addGroupBtn = document.getElementById('btn-add-group');
-if (addGroupBtn) {
-  addGroupBtn.addEventListener('click', () => {
-    const input = document.getElementById('new-group-name');
-    const name = (input && input.value || '').trim();
-    if (!name) return;
-    if (!state.groups.includes(name)) {
-      state.groups = Array.from(new Set([...state.groups, name])).filter(Boolean);
-    }
-    state.activeGroup = name;
-    input.value = '';
-    saveLocal();
-    render();
-  });
-}
-
-const renameGroupBtn = document.getElementById('btn-rename-group');
-if (renameGroupBtn) {
-  renameGroupBtn.addEventListener('click', async () => {
-    const oldName = state.activeGroup;
-    if (!oldName || oldName === 'All') return;
-    const input = document.getElementById('new-group-name');
-    const newName = (input && input.value || '').trim();
-    if (!newName) return;
-    if (state.groups.includes(newName)) return;
-
-    state.groups = state.groups.map(g => g === oldName ? newName : g);
-    state.players = state.players.map(p => (String(p.group || '') === oldName ? { ...p, group: newName } : p));
-
-    try {
-      if (supabaseClient) {
-        const ids = state.players.filter(p => p.group === newName || p.group === oldName).map(p => p.id).filter(Boolean);
-        for (const id of ids) {
-          await updatePlayerFieldsSupabase(id, { group: newName });
-        }
-        await syncFromSupabase();
+  const addGroupBtn = document.getElementById('btn-add-group');
+  if (addGroupBtn) {
+    addGroupBtn.addEventListener('click', () => {
+      const input = document.getElementById('new-group-name');
+      const name = (input && input.value || '').trim();
+      if (!name) return;
+      if (!state.groups.includes(name)) {
+        state.groups = Array.from(new Set([...state.groups, name])).filter(Boolean);
       }
-    } catch (e) {
-      console.error('Supabase bulk rename error', e);
-    }
+      state.activeGroup = name;
+      input.value = '';
+      saveLocal();
+      render();
+    });
+  }
 
-    state.activeGroup = newName;
-    saveLocal();
-    render();
-  });
-}
+  const renameGroupBtn = document.getElementById('btn-rename-group');
+  if (renameGroupBtn) {
+    renameGroupBtn.addEventListener('click', async () => {
+      const oldName = state.activeGroup;
+      if (!oldName || oldName === 'All') return;
+      const input = document.getElementById('new-group-name');
+      const newName = (input && input.value || '').trim();
+      if (!newName) return;
+      if (state.groups.includes(newName)) return;
 
-const deleteGroupBtn = document.getElementById('btn-delete-group');
-if (deleteGroupBtn) {
-  deleteGroupBtn.addEventListener('click', async () => {
-    const name = state.activeGroup;
-    if (!name || name === 'All') return;
+      state.groups = state.groups.map(g => g === oldName ? newName : g);
+      state.players = state.players.map(p => (String(p.group || '') === oldName ? { ...p, group: newName } : p));
 
-    state.groups = state.groups.filter(g => g !== name);
-    state.players = state.players.map(p => (String(p.group || '') === name ? { ...p, group: '' } : p));
-    state.activeGroup = 'All';
-
-    try {
-      if (supabaseClient) {
-        const ids = state.players.filter(p => !p.group || p.group === '').map(p => p.id).filter(Boolean);
-        for (const id of ids) {
-          await updatePlayerFieldsSupabase(id, { group: '' });
+      try {
+        if (supabaseClient) {
+          const ids = state.players
+            .filter(p => p.group === newName || p.group === oldName)
+            .map(p => p.id)
+            .filter(Boolean);
+          for (const id of ids) {
+            await updatePlayerFieldsSupabase(id, { group: newName });
+          }
+          await syncFromSupabase();
         }
-        await syncFromSupabase();
+      } catch (e) {
+        console.error('Supabase bulk rename error', e);
       }
-    } catch (e) {
-      console.error('Supabase bulk clear group error', e);
-    }
 
-    saveLocal();
-    render();
-  });
-}
+      state.activeGroup = newName;
+      saveLocal();
+      render();
+    });
+  }
 
-document.querySelectorAll('.btn-edit').forEach((btn) => {
-  btn.addEventListener('click', (ev) => {
-    const idx = ev.currentTarget.getAttribute('data-index');
-    const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-    if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
-  });
-});
+  const deleteGroupBtn = document.getElementById('btn-delete-group');
+  if (deleteGroupBtn) {
+    deleteGroupBtn.addEventListener('click', async () => {
+      const name = state.activeGroup;
+      if (!name || name === 'All') return;
 
-  // Admin login
+      state.groups = state.groups.filter(g => g !== name);
+      state.players = state.players.map(p => (String(p.group || '') === name ? { ...p, group: '' } : p));
+      state.activeGroup = 'All';
+
+      try {
+        if (supabaseClient) {
+          const ids = state.players.filter(p => !p.group || p.group === '').map(p => p.id).filter(Boolean);
+          for (const id of ids) {
+            await updatePlayerFieldsSupabase(id, { group: '' });
+          }
+          await syncFromSupabase();
+        }
+      } catch (e) {
+        console.error('Supabase bulk clear group error', e);
+      }
+
+      saveLocal();
+      render();
+    });
+  }
+
+  // --- Admin login/logout ---
   const loginBtn = document.getElementById('btn-admin-login');
   if (loginBtn) {
     loginBtn.addEventListener('click', () => {
@@ -1306,7 +1301,6 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
     });
   }
 
-  // Admin logout
   const logoutBtn = document.getElementById('btn-logout');
   if (logoutBtn) {
     logoutBtn.addEventListener('click', () => {
@@ -1316,200 +1310,215 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
     });
   }
 
-  // Save player (admin add/update)
-  // Save player (admin add/update)
-const savePlayerBtn = document.getElementById('btn-save-player');
-if (savePlayerBtn) {
-  savePlayerBtn.addEventListener('click', async () => {
-    const nameInput = document.getElementById('admin-player-name');
-    const skillInput = document.getElementById('admin-player-skill');
-    const name = (nameInput && nameInput.value || '').trim();
-    const skill = parseFloat(skillInput && skillInput.value || '');
-    if (!name || isNaN(skill) || skill <= 0) return;
+  // --- Admin: Save player (add/update) ---
+  const savePlayerBtn = document.getElementById('btn-save-player');
+  if (savePlayerBtn) {
+    savePlayerBtn.addEventListener('click', async () => {
+      const nameInput = document.getElementById('admin-player-name');
+      const skillInput = document.getElementById('admin-player-skill');
+      const name = (nameInput && nameInput.value || '').trim();
+      const skill = parseFloat(skillInput && skillInput.value || '');
+      if (!name || isNaN(skill) || skill <= 0) return;
 
-    const idx = state.players.findIndex((p) => normalize(p.name) === normalize(name));
+      const idx = state.players.findIndex((p) => normalize(p.name) === normalize(name));
 
-    if (idx !== -1) {
-      // update existing
-      const updated = state.players.slice();
-      updated[idx] = { ...updated[idx], name, skill };
-      state.players = updated;
+      if (idx !== -1) {
+        // update existing
+        const updated = state.players.slice();
+        updated[idx] = { ...updated[idx], name, skill };
+        state.players = updated;
 
-      if (supabaseClient && updated[idx].id) {
-        try {
-          await supabaseClient.from('players').update({ name, skill }).eq('id', updated[idx].id);
-          await syncFromSupabase();
-        } catch (err) {
-          console.error('Supabase update error', err);
-        }
-      }
-    } else {
-      // insert new
-      const group = state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '';
-      const newPlayer = { name, skill, group };
-      let inserted = { ...newPlayer };
-
-      if (supabaseClient) {
-        try {
+        if (supabaseClient && updated[idx].id) {
           try {
-            const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+            await supabaseClient.from('players').update({ name, skill }).eq('id', updated[idx].id);
             await syncFromSupabase();
-            if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
-          } catch {
-            const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-            await syncFromSupabase();
-            if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+          } catch (err) {
+            console.error('Supabase update error', err);
           }
-        } catch (err) {
-          console.error('Supabase insert error', err);
-          state.players = [...state.players, inserted];
         }
       } else {
-        state.players = [...state.players, inserted];
+        // insert new
+        const group = state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '';
+        const newPlayer = { name, skill, group };
+        let inserted = { ...newPlayer };
+
+        if (supabaseClient) {
+          try {
+            try {
+              const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+              await syncFromSupabase();
+              if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+            } catch {
+              const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+              await syncFromSupabase();
+              if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+            }
+          } catch (err) {
+            console.error('Supabase insert error', err);
+            state.players = [...state.players, inserted];
+          }
+        } else {
+          state.players = [...state.players, inserted];
+        }
       }
-    }
 
-    nameInput.value = '';
-    skillInput.value = '';
-    saveLocal();
-    queueSaveToSupabase();
-    render();
-  });
-}
+      if (nameInput) nameInput.value = '';
+      if (skillInput) skillInput.value = '';
+      saveLocal();
+      queueSaveToSupabase();
+      render();
+    });
+  }
 
-  // Register player (user side, skill=0)
+  // --- Public: Register player ---
   const registerBtn = document.getElementById('btn-register');
   if (registerBtn) {
     registerBtn.addEventListener('click', async () => {
       const input = document.getElementById('register-name');
       const name = (input && input.value || '').trim();
       if (!name) return;
-  
-      // prevent duplicates by name
+
       if (state.players.some((p) => normalize(p.name) === normalize(name))) {
         messages.registration = 'Player already registered.';
       } else {
-        // add locally and in Supabase (skill = 0)
         const newPlayer = { name, skill: 0 };
         if (supabaseClient) {
           try {
-            const { data, error } = await supabaseClient
-              .from('players')
-              .insert([newPlayer])
-              .select();
+            const { data, error } = await supabaseClient.from('players').insert([newPlayer]).select();
             await syncFromSupabase();
             if (error) console.error('Supabase insert error', error);
           } catch (err) {
             console.error('Supabase insert error', err);
           }
         } else {
-          // offline fallback
           state.players = [...state.players, newPlayer];
         }
         messages.registration = 'Player registered. Waiting for admin to assign skill.';
       }
-  
-      // clear message after 3 seconds
-      setTimeout(() => {
-        messages.registration = '';
-        render();
-      }, 3000);
-  
-      input.value = '';
+
+      setTimeout(() => { messages.registration = ''; render(); }, 3000);
+      if (input) input.value = '';
       saveLocal();
       queueSaveToSupabase();
       render();
     });
-  }  
+  }
 
-  // Check in button (big button on form)
+  // --- Public: Check in/out ---
   const checkInBtn = document.getElementById('btn-check-in');
   if (checkInBtn) {
     checkInBtn.addEventListener('click', async () => {
       const input = document.getElementById('check-name');
       const name = (input && input.value || '').trim();
-if (!name) return;
+      if (!name) return;
 
-// Find matching player by normalized name
-const player = state.players.find((p) => normalize(p.name) === normalize(name));
-if (player) {
-  if (!state.checkedIn.includes(player.name)) {
-    state.checkedIn = [...state.checkedIn, player.name];
-    if (supabaseClient && player.id) {
-      try {
-        await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
-        await syncFromSupabase();
-      } catch (err) {
-        console.error('Supabase update error', err);
+      const player = state.players.find((p) => normalize(p.name) === normalize(name));
+      if (player) {
+        if (!state.checkedIn.includes(player.name)) {
+          state.checkedIn = [...state.checkedIn, player.name];
+          if (supabaseClient && player.id) {
+            try {
+              await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+              await syncFromSupabase();
+            } catch (err) {
+              console.error('Supabase update error', err);
+            }
+          }
+          messages.checkIn = 'You are checked in';
+        } else {
+          messages.checkIn = 'You are already checked in.';
+        }
+      } else {
+        messages.checkIn = 'Player not found in history';
       }
-    }
-    messages.checkIn = 'You are checked in';
-  } else {
-    messages.checkIn = 'You are already checked in.';
-  }
-} else {
-  messages.checkIn = 'Player not found in history';
-}
-      setTimeout(() => {
-        messages.checkIn = '';
-        render();
-      }, 3000);
-      input.value = '';
+
+      setTimeout(() => { messages.checkIn = ''; render(); }, 3000);
+      if (input) input.value = '';
       saveLocal();
       queueSaveToSupabase();
       render();
     });
   }
+
   const checkOutBtn = document.getElementById('btn-check-out');
-if (checkOutBtn) {
-  checkOutBtn.addEventListener('click', async () => {
-    const input = document.getElementById('check-name');
-    const name = (input && input.value || '').trim();
-    if (!name) return;
+  if (checkOutBtn) {
+    checkOutBtn.addEventListener('click', async () => {
+      const input = document.getElementById('check-name');
+      const name = (input && input.value || '').trim();
+      if (!name) return;
 
-    // Find matching player
-    const player = state.players.find((p) => normalize(p.name) === normalize(name));
-    if (player) {
-      if (state.checkedIn.some((n) => normalize(n) === normalize(name))) {
-        state.checkedIn = state.checkedIn.filter((n) => normalize(n) !== normalize(name));
-        if (supabaseClient && player.id) {
-          try {
-            await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
-            await syncFromSupabase();
-          } catch (err) {
-            console.error('Supabase check-out error', err);
+      const player = state.players.find((p) => normalize(p.name) === normalize(name));
+      if (player) {
+        if (state.checkedIn.some((n) => normalize(n) === normalize(name))) {
+          state.checkedIn = state.checkedIn.filter((n) => normalize(n) !== normalize(name));
+          if (supabaseClient && player.id) {
+            try {
+              await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+              await syncFromSupabase();
+            } catch (err) {
+              console.error('Supabase check-out error', err);
+            }
           }
+          messages.checkIn = 'You are now checked out.';
+        } else {
+          messages.checkIn = 'You were not checked in.';
         }
-        messages.checkIn = 'You are now checked out.';
       } else {
-        messages.checkIn = 'You were not checked in.';
+        messages.checkIn = 'Player not found.';
       }
-    } else {
-      messages.checkIn = 'Player not found.';
-    }
 
-    setTimeout(() => {
-      messages.checkIn = '';
+      setTimeout(() => { messages.checkIn = ''; render(); }, 3000);
+      if (input) input.value = '';
+      saveLocal();
+      queueSaveToSupabase();
       render();
-    }, 3000);
+    });
+  }
 
-    input.value = '';
-    saveLocal();
-    queueSaveToSupabase();
-    render();
-  });
-}
-
-  // Player card checkin/out buttons (delegated by class)  
-  attachPlayerRowHandlers();
+  // --- Player cards: inline actions ---
   function attachPlayerRowHandlers() {
-    // Card check-in
+    document.querySelectorAll('.btn-edit').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        const idx = ev.currentTarget.getAttribute('data-index');
+        const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+        if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+      });
+    });
+
+    // Save edited player (inline)
+    document.querySelectorAll('.btn-save-edit').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
+        const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
+        const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
+        const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
+        const name = nameInput.value.trim();
+        const skill = parseFloat(skillInput.value);
+        const group = groupInput ? groupInput.value.trim() : '';
+        if (!name || isNaN(skill) || skill <= 0) return;
+
+        const updated = [...state.players];
+        const player = updated[idx];
+        updated[idx] = { ...player, name, skill, group };
+        state.players = updated;
+
+        if (player && player.id) {
+          await updatePlayerFieldsSupabase(player.id, { name, skill, group });
+          await syncFromSupabase();
+        }
+
+        saveLocal();
+        queueSaveToSupabase();
+        render();
+      });
+    });
+
     document.querySelectorAll('.btn-checkin').forEach((btn) => {
       btn.addEventListener('click', async (ev) => {
         const id = ev.currentTarget.getAttribute('data-id');
         const player = state.players.find((p) => String(p.id) === String(id));
         if (!player) return;
-  
+
         if (!state.checkedIn.includes(player.name)) {
           state.checkedIn = [...state.checkedIn, player.name];
           if (supabaseClient && player.id) {
@@ -1526,14 +1535,13 @@ if (checkOutBtn) {
         render();
       });
     });
-  
-    // Card check-out
+
     document.querySelectorAll('.btn-checkout').forEach((btn) => {
       btn.addEventListener('click', async (ev) => {
         const id = ev.currentTarget.getAttribute('data-id');
         const player = state.players.find((p) => String(p.id) === String(id));
         if (!player) return;
-  
+
         state.checkedIn = state.checkedIn.filter((n) => n !== player.name);
         if (supabaseClient && player.id) {
           try {
@@ -1548,16 +1556,15 @@ if (checkOutBtn) {
         render();
       });
     });
-  
-    // Card delete (admin)
+
     document.querySelectorAll('.btn-delete').forEach((btn) => {
       btn.addEventListener('click', async (ev) => {
         const id = ev.currentTarget.getAttribute('data-id');
         const idx = state.players.findIndex((p) => String(p.id) === String(id));
         if (idx === -1) return;
-  
+
         const removed = state.players[idx];
-  
+
         if (supabaseClient && removed.id) {
           try {
             await supabaseClient.from('players').delete().eq('id', removed.id);
@@ -1566,18 +1573,19 @@ if (checkOutBtn) {
             console.error('Supabase delete error', err);
           }
         }
-  
+
         state.players = state.players.filter((p) => String(p.id) !== String(id));
         state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
-  
+
         saveLocal();
         queueSaveToSupabase();
         render();
       });
     });
   }
-  
-  // Reset all checkins
+  attachPlayerRowHandlers();
+
+  // --- Reset all checkins ---
   const resetBtn = document.getElementById('btn-reset-checkins');
   if (resetBtn) {
     resetBtn.addEventListener('click', async () => {
@@ -1596,7 +1604,7 @@ if (checkOutBtn) {
     });
   }
 
-  // Group count input and generate teams
+  // --- Team generator controls ---
   const groupCountInput = document.getElementById('group-count');
   if (groupCountInput) {
     groupCountInput.addEventListener('change', () => {
@@ -1604,6 +1612,7 @@ if (checkOutBtn) {
       state.groupCount = isNaN(val) ? 2 : Math.max(2, val);
     });
   }
+
   const generateBtn = document.getElementById('btn-generate-teams');
   if (generateBtn) {
     generateBtn.addEventListener('click', () => {
@@ -1612,7 +1621,7 @@ if (checkOutBtn) {
     });
   }
 
-  // Bracket input changes (only for round 1)
+  // --- Bracket inline editing ---
   document.querySelectorAll('.match input').forEach((input) => {
     input.addEventListener('input', (ev) => {
       const matchIndex = parseInt(ev.target.getAttribute('data-match'));
@@ -1621,22 +1630,19 @@ if (checkOutBtn) {
       if (isNaN(matchIndex) || !field) return;
       const updated = state.bracket.slice();
       updated[matchIndex] = { ...updated[matchIndex], [field]: value, winner: updated[matchIndex].winner === value ? value : null };
-      // if editing round 1, clear downstream matches
       if (matchIndex < 4) {
         const dest = 4 + Math.floor(matchIndex / 2);
         const destField = matchIndex % 2 === 0 ? 'team1' : 'team2';
         updated[dest] = { ...updated[dest], [destField]: '', winner: null };
         updated[6] = { ...updated[6], team1: '', team2: '', winner: null };
       }
-      // Preserve scroll position during re‑render
       const scrollY = window.scrollY;
       state.bracket = updated;
       render();
-      // Restore scroll position asynchronously to allow DOM to settle
       setTimeout(() => window.scrollTo(0, scrollY), 0);
     });
   });
-  // Advance winner buttons
+
   document.querySelectorAll('.btn-advance').forEach((btn) => {
     btn.addEventListener('click', (ev) => {
       const matchIndex = parseInt(ev.currentTarget.getAttribute('data-match'));
@@ -1644,7 +1650,6 @@ if (checkOutBtn) {
       if (isNaN(matchIndex) || !team) return;
       const updated = state.bracket.slice();
       updated[matchIndex] = { ...updated[matchIndex], winner: team };
-      // Propagate winner
       if (matchIndex < 4) {
         const dest = 4 + Math.floor(matchIndex / 2);
         const destField = matchIndex % 2 === 0 ? 'team1' : 'team2';
@@ -1660,92 +1665,58 @@ if (checkOutBtn) {
       setTimeout(() => window.scrollTo(0, scrollY), 0);
     });
   });
+
+  // --- Filters & search ---
   const tabSelect = document.getElementById('player-tab-select');
-if (tabSelect) {
-  tabSelect.addEventListener('change', (ev) => {
-    state.playerTab = ev.target.value;
-sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
-    state.skillSubTab = null;
-    render();
-  });
+  if (tabSelect) {
+    tabSelect.addEventListener('change', (ev) => {
+      state.playerTab = ev.target.value;
+      sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
+      state.skillSubTab = null;
+      render();
+    });
+  }
+
   const searchInput = document.getElementById('player-search');
-const clearBtn = document.getElementById('player-search-clear');
-
-if (searchInput) {
-  const toggleClear = () => {
-    if (clearBtn) clearBtn.style.display = searchInput.value.trim() ? 'inline' : 'none';
-  };
-
-  searchInput.addEventListener('input', () => {
-    state.searchTerm = searchInput.value; // persist value
-    const container = document.querySelector('.players');
-    if (container) {
-      container.innerHTML = renderFilteredPlayers();
-      attachPlayerRowHandlers();   // re-bind row buttons
-      attachPlayerEditHandlers();  // keep edit buttons working
-    }
+  const clearBtn = document.getElementById('player-search-clear');
+  if (searchInput) {
+    const toggleClear = () => {
+      if (clearBtn) clearBtn.style.display = searchInput.value.trim() ? 'inline' : 'none';
+    };
+    searchInput.addEventListener('input', () => {
+      state.searchTerm = searchInput.value;
+      const container = document.querySelector('.players');
+      if (container) {
+        container.innerHTML = renderFilteredPlayers();
+        // re-bind row buttons for newly rendered cards
+        attachHandlers();
+      }
+      toggleClear();
+    });
     toggleClear();
-  });
+  }
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      state.searchTerm = '';
+      const si = document.getElementById('player-search');
+      if (si) { si.value = ''; si.focus(); }
+      const container = document.querySelector('.players');
+      if (container) {
+        container.innerHTML = renderFilteredPlayers();
+        attachHandlers();
+      }
+      clearBtn.style.display = 'none';
+    });
+  }
 
-  // ensure correct initial visibility after render
-  toggleClear();
-}
-
-if (clearBtn) {
-  clearBtn.addEventListener('click', () => {
-    state.searchTerm = '';
-    const si = document.getElementById('player-search');
-    if (si) {
-      si.value = '';
-      si.focus();
-    }
-    const container = document.querySelector('.players');
-    if (container) {
-      container.innerHTML = renderFilteredPlayers();
-      attachPlayerRowHandlers();   // re-bind row buttons
-      attachPlayerEditHandlers();  // keep edit buttons working
-    }
-    clearBtn.style.display = 'none';
-  });
-}
-
-  // Save edited player
-document.querySelectorAll('.btn-save-edit').forEach((btn) => {
-  btn.addEventListener('click', async (ev) => {
-    const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
-    const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
-    const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
-    const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
-    const name = nameInput.value.trim();
-    const skill = parseFloat(skillInput.value);
-    const group = groupInput ? groupInput.value.trim() : '';
-
-    if (!name || isNaN(skill) || skill <= 0) return;
-
-    const updated = [...state.players];
-    const player = updated[idx];
-    updated[idx] = { ...player, name, skill, group };
-    state.players = updated;
-
-    if (player && player.id) {
-      await updatePlayerFieldsSupabase(player.id, { name, skill, group });
-      await syncFromSupabase();
-    }
-
-    saveLocal();
-    queueSaveToSupabase();
-    render();
-  });
-});
-
-const subtabSelect = document.getElementById('skill-subtab-select');
-if (subtabSelect) {
-  subtabSelect.addEventListener('change', (ev) => {
-    state.skillSubTab = ev.target.value;
-    sessionStorage.setItem(LS_SUBTAB_KEY, state.skillSubTab);
-    render();
-  });
-}
+  const subtabSelect = document.getElementById('skill-subtab-select');
+  if (subtabSelect) {
+    subtabSelect.addEventListener('change', (ev) => {
+      state.skillSubTab = ev.target.value;
+      sessionStorage.setItem(LS_SUBTAB_KEY, state.skillSubTab);
+      render();
+    });
+  }
 }
 
 function attachPlayerEditHandlers() {
