@@ -13,7 +13,6 @@
 
 // -----------------------------------------------------------------------------
 // Configuration
-//
 // To enable cloud sync via Supabase, supply your project URL and anon key
 // below. If left blank the app will continue to function fully offline
 // using browser storage. See https://supabase.io for more information.
@@ -22,6 +21,8 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
+const LS_GROUPS_KEY = 'athletic_specimen_groups';
+const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
 
 // expected DOM targets
 const listEl = document.getElementById('playerList');
@@ -67,7 +68,7 @@ function queueSaveToSupabase() {
       // Deduplicate players by name before saving
 const uniquePlayers = state.players.reduce((acc, p) => {
   if (!acc.some(x => normalize(x.name) === normalize(p.name))) {
-    acc.push(p);
+    acc.push({ ...p, group: p.group || '' });
   }
   return acc;
 }, []);
@@ -118,7 +119,18 @@ function generateBalancedGroups(players, checkedInNames, groupCount) {
 
 function renderFilteredPlayers() {
   let filtered = state.players;
-
+  if (state.activeGroup && state.activeGroup !== 'All') {
+  filtered = filtered.filter(p => String(p.group || '').trim() === state.activeGroup);
+  const query = (state.searchTerm || '').toLowerCase().trim();
+if (query) {
+  filtered = filtered.filter(p => {
+    const nm = (p.name || '').toLowerCase();
+    const tg = (p.tag || '').toLowerCase();
+    const gp = (p.group || '').toLowerCase();
+    return nm.includes(query) || tg.includes(query) || gp.includes(query);
+  });
+}
+}
   if (state.playerTab === 'in') {
     filtered = filtered.filter(p => state.checkedIn.includes(p.name));
   } else if (state.playerTab === 'out') {
@@ -169,10 +181,11 @@ function renderFilteredPlayers() {
         </div>
         ${state.isAdmin ? `
           <div class="edit-row" style="display:none" data-index="${idx}">
-            <input type="text" class="edit-name" value="${player.name}" />
-            <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
-            <button class="btn-save-edit" data-index="${idx}">Save</button>
-          </div>
+  <input type="text" class="edit-name" value="${player.name}" />
+  <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
+  <input type="text" class="edit-group" placeholder="Group" value="${player.group ? player.group : ''}" />
+  <button class="btn-save-edit" data-index="${idx}">Save</button>
+</div>
         ` : ''}
       </div>
     `;
@@ -212,7 +225,9 @@ const state = {
   loaded: false,      // becomes true after Supabase loads
   // safe defaults for older helpers that reference these:
   playersById: new Map(),
-  searchTerm: ''
+  searchTerm: '',
+  groups: ['All', 'Athletic Specimen'],
+  activeGroup: 'All'
 };
 
 function showTournamentView(show) {
@@ -250,11 +265,19 @@ function loadLocal() {
     console.error('Error loading from localStorage', err);
   }
   const storedTab = sessionStorage.getItem(LS_TAB_KEY);
-if (storedTab) state.playerTab = storedTab;
+  if (storedTab) state.playerTab = storedTab;
 
-const storedSubtab = sessionStorage.getItem(LS_SUBTAB_KEY);
-if (storedSubtab) state.skillSubTab = storedSubtab;
+  const storedSubtab = sessionStorage.getItem(LS_SUBTAB_KEY);
+  if (storedSubtab) state.skillSubTab = storedSubtab;
+
+  try {
+    const groups = JSON.parse(localStorage.getItem(LS_GROUPS_KEY) || '[]');
+    if (Array.isArray(groups) && groups.length) state.groups = Array.from(new Set(['All', ...groups.filter(Boolean)]));
+  } catch {}
+  const ag = localStorage.getItem(LS_ACTIVE_GROUP_KEY);
+  if (ag) state.activeGroup = ag;
 }
+
 
 // Save current state players and checked in names to localStorage. Called
 // whenever state.players or state.checkedIn changes.
@@ -262,6 +285,8 @@ function saveLocal() {
   try {
     localStorage.setItem(LS_PLAYERS_KEY, JSON.stringify(state.players));
     localStorage.setItem(LS_CHECKIN_KEY, JSON.stringify(state.checkedIn));
+    localStorage.setItem(LS_GROUPS_KEY, JSON.stringify(state.groups.filter(g => g && g !== 'All')));
+    localStorage.setItem(LS_ACTIVE_GROUP_KEY, state.activeGroup || 'All');
   } catch (err) {
     console.error('Error saving to localStorage', err);
   }
@@ -272,6 +297,7 @@ function saveLocal() {
 // function is a no‑op. When remote data is retrieved it merges into
 // state.players and updates state.checkedIn with any players marked
 // checked_in.
+
 async function syncFromSupabase() {
   if (!supabaseClient) return;
   try {
@@ -284,11 +310,12 @@ async function syncFromSupabase() {
 
     // Replace state.players cleanly
     state.players = data.map((p) => ({
-      name: p.name,
-      skill: Number(p.skill) || 0,
-      id: p.id,
-      checked_in: !!p.checked_in
-    }));
+  name: p.name,
+  skill: Number(p.skill) || 0,
+  id: p.id,
+  checked_in: !!p.checked_in,
+  group: String(p.group || p.tag || '').trim()
+}));
 
     // Only set checkedIn once — no need to merge or deduplicate
     state.checkedIn = data.filter((p) => p.checked_in).map((p) => p.name);
@@ -296,6 +323,26 @@ async function syncFromSupabase() {
 
   } catch (err) {
     console.error('Error syncing from Supabase', err);
+  }
+}
+
+async function updatePlayerFieldsSupabase(id, fields) {
+  if (!supabaseClient || !id) return;
+  try {
+    await supabaseClient.from('players').update(fields).eq('id', id);
+  } catch (e) {
+    if (fields.group) {
+      try {
+        const alt = { ...fields };
+        delete alt.group;
+        alt.tag = fields.group;
+        await supabaseClient.from('players').update(alt).eq('id', id);
+      } catch (e2) {
+        console.error('Supabase update fallback failed', e2);
+      }
+    } else {
+      console.error('Supabase update error', e);
+    }
   }
 }
 
@@ -1075,20 +1122,31 @@ function render() {
      <div class="card">
   <h3>Players</h3>
 
-<div>
-  <h4 style="margin-bottom: 0.5rem;">Filters</h4>
+  <div>
+    <h4 style="margin-bottom: 0.5rem;">Filters</h4>
 
-  <div class="row">
-    <label for="player-tab-select">Filter:</label>
-    <select id="player-tab-select">
-      <option value="all" ${state.playerTab === 'all' ? 'selected' : ''}>All Players</option>
-      <option value="in" ${state.playerTab === 'in' ? 'selected' : ''}>Checked In</option>
-      <option value="out" ${state.playerTab === 'out' ? 'selected' : ''}>Checked Out</option>
-      <option value="skill" ${state.playerTab === 'skill' ? 'selected' : ''}>Skill Number</option>
-      <option value="unrated" ${state.playerTab === 'unrated' ? 'selected' : ''}>Unset Skill</option>
-    </select>
+    <div class="row">
+      <label for="player-tab-select">Filter:</label>
+      <select id="player-tab-select">
+        <option value="all" ${state.playerTab === 'all' ? 'selected' : ''}>All Players</option>
+        <option value="in" ${state.playerTab === 'in' ? 'selected' : ''}>Checked In</option>
+        <option value="out" ${state.playerTab === 'out' ? 'selected' : ''}>Checked Out</option>
+        <option value="skill" ${state.playerTab === 'skill' ? 'selected' : ''}>Skill Number</option>
+        <option value="unrated" ${state.playerTab === 'unrated' ? 'selected' : ''}>Unset Skill</option>
+      </select>
+    </div>
+
+    <div class="row" style="margin-top: 0.5rem;">
+      <label for="group-filter-select">Group:</label>
+      <select id="group-filter-select">
+        ${state.groups.map(g => `<option value="${g}" ${state.activeGroup === g ? 'selected' : ''}>${g}</option>`).join('')}
+      </select>
+      <input type="text" id="new-group-name" placeholder="New group name" />
+      <button id="btn-add-group">Add Group</button>
+      <button id="btn-rename-group" class="secondary">Rename Selected</button>
+      <button id="btn-delete-group" class="danger">Delete Selected</button>
+    </div>
   </div>
-</div>
 
   <!-- Skill Sub-Dropdown -->
 ${state.playerTab === 'skill' ? `
@@ -1181,6 +1239,89 @@ bindTournamentTab();
 // called after each call to render().
 function attachHandlers() {
   // Toggle edit row (admin only)
+  const groupSelect = document.getElementById('group-filter-select');
+if (groupSelect) {
+  groupSelect.addEventListener('change', () => {
+    state.activeGroup = groupSelect.value || 'All';
+    saveLocal();
+    render();
+  });
+}
+
+const addGroupBtn = document.getElementById('btn-add-group');
+if (addGroupBtn) {
+  addGroupBtn.addEventListener('click', () => {
+    const input = document.getElementById('new-group-name');
+    const name = (input && input.value || '').trim();
+    if (!name) return;
+    if (!state.groups.includes(name)) {
+      state.groups = Array.from(new Set([...state.groups, name])).filter(Boolean);
+    }
+    state.activeGroup = name;
+    input.value = '';
+    saveLocal();
+    render();
+  });
+}
+
+const renameGroupBtn = document.getElementById('btn-rename-group');
+if (renameGroupBtn) {
+  renameGroupBtn.addEventListener('click', async () => {
+    const oldName = state.activeGroup;
+    if (!oldName || oldName === 'All') return;
+    const input = document.getElementById('new-group-name');
+    const newName = (input && input.value || '').trim();
+    if (!newName) return;
+    if (state.groups.includes(newName)) return;
+
+    state.groups = state.groups.map(g => g === oldName ? newName : g);
+    state.players = state.players.map(p => (String(p.group || '') === oldName ? { ...p, group: newName } : p));
+
+    try {
+      if (supabaseClient) {
+        const ids = state.players.filter(p => p.group === newName || p.group === oldName).map(p => p.id).filter(Boolean);
+        for (const id of ids) {
+          await updatePlayerFieldsSupabase(id, { group: newName });
+        }
+        await syncFromSupabase();
+      }
+    } catch (e) {
+      console.error('Supabase bulk rename error', e);
+    }
+
+    state.activeGroup = newName;
+    saveLocal();
+    render();
+  });
+}
+
+const deleteGroupBtn = document.getElementById('btn-delete-group');
+if (deleteGroupBtn) {
+  deleteGroupBtn.addEventListener('click', async () => {
+    const name = state.activeGroup;
+    if (!name || name === 'All') return;
+
+    state.groups = state.groups.filter(g => g !== name);
+    state.players = state.players.map(p => (String(p.group || '') === name ? { ...p, group: '' } : p));
+    state.activeGroup = 'All';
+
+    try {
+      if (supabaseClient) {
+        const ids = state.players.filter(p => !p.group || p.group === '').map(p => p.id).filter(Boolean);
+        for (const id of ids) {
+          await updatePlayerFieldsSupabase(id, { group: '' });
+        }
+        await syncFromSupabase();
+      }
+    } catch (e) {
+      console.error('Supabase bulk clear group error', e);
+    }
+
+    saveLocal();
+    render();
+  });
+}
+}
 document.querySelectorAll('.btn-edit').forEach((btn) => {
   btn.addEventListener('click', (ev) => {
     const idx = ev.currentTarget.getAttribute('data-index');
@@ -1239,19 +1380,31 @@ document.querySelectorAll('.btn-edit').forEach((btn) => {
           }
         }            
       } else {
-        // insert new
-        const newPlayer = { name, skill };
-        let inserted = { ...newPlayer };
-        if (supabaseClient) {
-          try {
-            const { data, error } = await supabaseClient.from('players').insert([newPlayer]).select();
-            await syncFromSupabase();
-            if (!error && Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
-          } catch (err) {
-            console.error('Supabase insert error', err);
-          }
-        }
-      }
+      }    
+// insert new
+const group = state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '';
+const newPlayer = { name, skill, group };
+let inserted = { ...newPlayer };
+if (supabaseClient) {
+  try {
+    // try with group then fall back to tag
+    try {
+      const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+      await syncFromSupabase();
+      if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+    } catch {
+      const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+      await syncFromSupabase();
+      if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+    }
+  } catch (err) {
+    console.error('Supabase insert error', err);
+    state.players = [...state.players, inserted];
+  }
+} else {
+  state.players = [...state.players, inserted];
+}
+
       nameInput.value = '';
       skillInput.value = '';
       saveLocal();
@@ -1598,32 +1751,29 @@ document.querySelectorAll('.btn-save-edit').forEach((btn) => {
     const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
     const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
     const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
+    const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
     const name = nameInput.value.trim();
     const skill = parseFloat(skillInput.value);
+    const group = groupInput ? groupInput.value.trim() : '';
 
     if (!name || isNaN(skill) || skill <= 0) return;
 
     const updated = [...state.players];
     const player = updated[idx];
-    updated[idx] = { ...player, name, skill };
+    updated[idx] = { ...player, name, skill, group };
     state.players = updated;
 
-    if (supabaseClient && player.id) {
-      try {
-        await supabaseClient.from('players').update({ name, skill }).eq('id', player.id);
-        await syncFromSupabase();
-      } catch (err) {
-        console.error('Supabase edit error', err);
-      }
+    if (player && player.id) {
+      await updatePlayerFieldsSupabase(player.id, { name, skill, group });
+      await syncFromSupabase();
     }
 
     saveLocal();
     queueSaveToSupabase();
     render();
   });
-
 });
-}
+
 const subtabSelect = document.getElementById('skill-subtab-select');
 if (subtabSelect) {
   subtabSelect.addEventListener('change', (ev) => {
@@ -1646,36 +1796,32 @@ function attachPlayerEditHandlers() {
 
   // Save edited player
   document.querySelectorAll('.btn-save-edit').forEach((btn) => {
-    btn.addEventListener('click', async (ev) => {
-      const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
-      const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
-      const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
-      const tagInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-tag`);
-      const name = nameInput.value.trim();
-      const skill = parseFloat(skillInput.value);
-      const tag = tagInput ? tagInput.value.trim() : '';
+  btn.addEventListener('click', async (ev) => {
+    const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
+    const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
+    const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
+    const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
+    const name = nameInput.value.trim();
+    const skill = parseFloat(skillInput.value);
+    const group = groupInput ? groupInput.value.trim() : '';
 
-      if (!name || isNaN(skill) || skill <= 0) return;
+    if (!name || isNaN(skill) || skill <= 0) return;
 
-      const updated = [...state.players];
-      const player = updated[idx];
-      updated[idx] = { ...player, name, skill, tag };
-      state.players = updated;
+    const updated = [...state.players];
+    const player = updated[idx];
+    updated[idx] = { ...player, name, skill, group };
+    state.players = updated;
 
-      if (supabaseClient && player.id) {
-        try {
-          await supabaseClient.from('players').update({ name, skill, tag }).eq('id', player.id);
-          await syncFromSupabase();
-        } catch (err) {
-          console.error('Supabase edit error', err);
-        }
-      }
+    if (player && player.id) {
+      await updatePlayerFieldsSupabase(player.id, { name, skill, group });
+      await syncFromSupabase();
+    }
 
-      saveLocal();
-      queueSaveToSupabase();
-      render();
-    });
+    saveLocal();
+    queueSaveToSupabase();
+    render();
   });
+});
 }
 
 // Initialise the app. Called once on page load. It loads stored data,
