@@ -31,6 +31,29 @@ const addNameInput = document.getElementById('newPlayerName');
 const addBtn = document.getElementById('addPlayerBtn');
 const selectedSet = () => new Set(state.selectedIds || []);
 
+function updateBulkBarVisibility() {
+  const bar = document.getElementById('bulkBar');
+  const countEl = document.getElementById('bulkCount');
+  const n = (state.selectedIds || []).length;
+  if (!bar || !countEl) return;
+  if (n > 0) {
+    bar.style.display = 'block';
+    countEl.textContent = `${n} selected`;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function bindFiltersCollapsible() {
+  const btn = document.getElementById('filtersToggle');
+  const body = document.getElementById('filtersBody');
+  if (!btn || !body) return;
+  btn.addEventListener('click', () => {
+    const collapsed = body.getAttribute('data-collapsed') === 'true';
+    body.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+  });
+}
+
 function upsertPlayer(row) {
   if (!row || !row.id) return;
   state.playersById.set(row.id, row);
@@ -166,35 +189,46 @@ function renderFilteredPlayers() {
     const isSelected = selectedSet().has(String(player.id));
 
     return `
-      <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
-        <div class="row" style="align-items:center; gap:8px;">
-          <input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />
-          <div>
-            <strong>${player.name}</strong>
-            <span class="skill">Skill: ${player.skill === 0 ? 'Unset' : player.skill}</span>
-            <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
-            ${player.group ? `<span class="badge" style="margin-left:6px;">${player.group}</span>` : ''}
-          </div>
+  <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
+    <div class="row" style="align-items:center; gap:8px;">
+      <input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />
+      <div>
+        <strong>${player.name}</strong>
+        <div class="meta">
+          Skill: ${player.skill === 0 ? 'Unset' : player.skill}
+          • <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
+          ${player.group ? ` • <span class="badge">${player.group}</span>` : ''}
         </div>
-
-        <div class="row" style="margin-top:6px;">
-          <button class="btn-checkin" data-id="${player.id}">Check In</button>
-          <button class="btn-checkout" data-id="${player.id}">Check Out</button>
-          ${state.isAdmin ? `
-            <button class="btn-edit" data-index="${idx}">Edit</button>
-            <button class="btn-delete danger" data-id="${player.id}">Delete</button>
-          ` : ''}
-        </div>
-
-        ${state.isAdmin ? `
-        <div class="edit-row" style="display:none" data-index="${idx}">
-          <input type="text" class="edit-name" value="${player.name}" />
-          <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
-          <input type="text" class="edit-group" placeholder="Group" value="${player.group ? player.group : ''}" />
-          <button class="btn-save-edit" data-index="${idx}">Save</button>
-        </div>` : ''}
       </div>
-    `;
+    </div>
+
+    <div class="card-actions">
+      ${
+        checked
+          ? `<button class="btn-checkout primary" data-id="${player.id}">Check Out</button>`
+          : `<button class="btn-checkin primary" data-id="${player.id}">Check In</button>`
+      }
+      <span class="spacer"></span>
+      ${
+        state.isAdmin
+          ? `
+            <button class="btn-edit icon" title="Edit" data-index="${idx}">✎</button>
+            <button class="btn-delete icon danger" title="Delete" data-id="${player.id}">🗑</button>
+            `
+          : ''
+      }
+    </div>
+
+    ${state.isAdmin ? `
+      <div class="edit-row" style="display:none; gap:6px; margin-top:8px;" data-index="${idx}">
+        <input type="text" class="edit-name" value="${player.name}" />
+        <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
+        <input type="text" class="edit-group" placeholder="Group" value="${player.group ? player.group : ''}" />
+        <button class="btn-save-edit success" data-index="${idx}">Save</button>
+      </div>` : ''
+    }
+  </div>
+`;
   }).join('');
 }
 
@@ -1093,11 +1127,16 @@ function render() {
         ${bracketHTML}
       </div>
      <div class="card">
-  <h3>Players</h3>
+  <div class="row" style="justify-content:space-between;">
+    <h3>Players</h3>
+    <button id="filtersToggle" class="secondary">Filters</button>
+  </div>
 
-  <div>
+  <!-- Collapsible body: put ALL your filter controls INSIDE this div -->
+  <div id="filtersBody">
     <h4 style="margin-bottom: 0.5rem;">Filters</h4>
 
+    <!-- Filter select (All / In / Out / Skill / Unset) -->
     <div class="row">
       <label for="player-tab-select">Filter:</label>
       <select id="player-tab-select">
@@ -1109,6 +1148,7 @@ function render() {
       </select>
     </div>
 
+    <!-- Group filter + group management -->
     <div class="row" style="margin-top: 0.5rem;">
       <label for="group-filter-select">Group:</label>
       <select id="group-filter-select">
@@ -1119,54 +1159,56 @@ function render() {
       <button id="btn-rename-group" class="secondary">Rename Selected</button>
       <button id="btn-delete-group" class="danger">Delete Selected</button>
     </div>
+
+    <!-- Skill range sub-filter (only when Filter = Skill) -->
+    ${state.playerTab === 'skill' ? `
+      <div class="row" style="margin-top: 0.5rem;">
+        <label for="skill-subtab-select">Skill Range:</label>
+        <select id="skill-subtab-select">
+          ${Array.from({ length: 9 }, (_, i) => {
+            const base = `${i + 1}.0`;
+            const selected = state.skillSubTab === base ? 'selected' : '';
+            const label = base === '9.0' ? '9.0–10' : `${base}–${i + 1}.9`;
+            return `<option value="${base}" ${selected}>${label}</option>`;
+          }).join('')}
+        </select>
+      </div>
+    ` : ''}
+
+    <!-- Search -->
+    <div id="player-search-container" style="position:relative; display:inline-block; width:100%; max-width:400px; margin:0.5rem 0;">
+      <input
+        type="text"
+        id="player-search"
+        placeholder="Search name or tag"
+        value="${escapeHTML(state.searchTerm || '')}"
+        style="padding: 0.5rem 2rem 0.5rem 0.5rem; width: 100%;"
+      />
+      <span
+        id="player-search-clear"
+        style="position:absolute; right:8px; top:50%; transform:translateY(-50%); cursor:pointer; user-select:none; ${state.searchTerm ? '' : 'display:none;'}"
+      >✕</span>
+    </div>
+  </div> <!-- /#filtersBody -->
+
+  <!-- Sticky Bulk Bar (shows only when you select players) -->
+  <div id="bulkBar" class="card" style="display:none; position:sticky; bottom:0; z-index:5;">
+    <div class="row">
+      <strong id="bulkCount">0 selected</strong>
+      <span style="flex:1"></span>
+
+      <label for="bulk-dest-group">Move to group:</label>
+      <select id="bulk-dest-group">
+        <option value="">— choose —</option>
+        ${state.groups.filter(g => g && g !== 'All').map(g => `<option value="${g}">${g}</option>`).join('')}
+      </select>
+      <input id="bulk-new-group" type="text" placeholder="or type new group" />
+
+      <button id="btn-assign-to-group" class="primary">Add</button>
+      <button id="btn-remove-from-group" class="danger">Remove</button>
+      <button id="btn-clear-selection" class="secondary">Clear</button>
+    </div>
   </div>
-
-  <!-- Skill Sub-Dropdown -->
-${state.playerTab === 'skill' ? `
-  <div class="row">
-    <label for="skill-subtab-select">Skill Range:</label>
-    <select id="skill-subtab-select">
-      <option value="">Select range</option>
-      ${Array.from({ length: 9 }, (_, i) => {
-        const base = `${i + 1}.0`;
-        const selected = state.skillSubTab === base ? 'selected' : '';
-        const label = base === '9.0' ? '9.0–10' : `${base}–${i + 1}.9`;
-return `<option value="${base}" ${selected}>${label}</option>`;
-      }).join('')}
-    </select>
-  </div>
-` : ''}
-<!-- SEARCH WITH CLEAR (✕) -->
-<div id="player-search-container" style="position:relative; display:inline-block; width:100%; max-width:400px; margin:0.5rem 0;">
-  <input
-    type="text"
-    id="player-search"
-    placeholder="Search name or tag"
-    value="${escapeHTML(state.searchTerm || '')}"
-    style="padding: 0.5rem 2rem 0.5rem 0.5rem; width: 100%;"
-  />
-  <span
-    id="player-search-clear"
-    style="position:absolute; right:8px; top:50%; transform:translateY(-50%); cursor:pointer; user-select:none; ${state.searchTerm ? '' : 'display:none;'}"
-  >✕</span>
-</div>
-
-<!-- Bulk actions -->
-<div class="row" style="margin: 0.5rem 0 0.75rem;">
-  <button id="btn-select-all-visible">Select all visible</button>
-  <button id="btn-clear-selection" class="secondary">Clear selection</button>
-
-  <span style="margin-left:auto;"></span>
-
-  <label for="bulk-dest-group">Move to group:</label>
-  <select id="bulk-dest-group">
-    <option value="">— choose —</option>
-    ${state.groups.filter(g => g && g !== 'All').map(g => `<option value="${g}">${g}</option>`).join('')}
-  </select>
-  <input id="bulk-new-group" type="text" placeholder="or type new group" />
-  <button id="btn-assign-to-group">Add</button>
-  <button id="btn-remove-from-group" class="danger">Remove from group</button>
-</div>
 
   <!-- Filtered Player Cards -->
   <div class="players">
@@ -1223,6 +1265,8 @@ root.innerHTML = sanitized;
   // below.
   attachHandlers();
 bindTournamentTab();
+bindFiltersCollapsible();
+updateBulkBarVisibility();
 }
 
 // Attach event listeners to the current DOM. This function should be
