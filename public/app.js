@@ -29,6 +29,8 @@ const searchInput = document.getElementById('searchInput');
 const addNameInput = document.getElementById('newPlayerName');
 const addBtn = document.getElementById('addPlayerBtn');
 
+import { SpeedInsights } from "@vercel/speed-insights/next"
+
 function upsertPlayer(row) {
   if (!row || !row.id) return;
   state.playersById.set(row.id, row);
