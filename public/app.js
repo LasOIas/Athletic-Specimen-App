@@ -449,22 +449,27 @@ async function syncFromSupabase() {
 }
 
 async function updatePlayerFieldsSupabase(id, fields) {
-  if (!supabaseClient || !id) return;
+  if (!supabaseClient || !id) return false;
   try {
-    await supabaseClient.from('players').update(fields).eq('id', id);
+    const { error } = await supabaseClient.from('players').update(fields).eq('id', id);
+    if (error) throw error;
+    return true;
   } catch (e) {
     if (fields.group) {
       try {
         const alt = { ...fields };
         delete alt.group;
         alt.tag = fields.group;
-        await supabaseClient.from('players').update(alt).eq('id', id);
+        const { error } = await supabaseClient.from('players').update(alt).eq('id', id);
+        if (error) throw error;
+        return true;
       } catch (e2) {
         console.error('Supabase update fallback failed', e2);
       }
     } else {
       console.error('Supabase update error', e);
     }
+    return false;
   }
 }
 
@@ -1474,6 +1479,17 @@ const cssText = `
 /* prevent any ancestor overlay from eating clicks */
 .player-card .menu-wrap { pointer-events: auto; }
 
+/* --- Dropdown 'Delete' should NOT look like a big red button --- */
+.card-menu .menu-item.danger {
+  background: transparent !important;
+  color: #dc2626 !important;
+  font-weight: 600;
+  border-radius: 8px;
+}
+.card-menu .menu-item.danger:hover {
+  background: #fee2e2 !important;
+  color: #b91c1c !important;
+}
 `;
 
 if (!menuStyle) {
@@ -2136,30 +2152,32 @@ if (removeBtn) {
 function attachPlayerEditHandlers() {
   document.querySelectorAll('.btn-save-edit').forEach((btn) => {
     btn.addEventListener('click', async (ev) => {
-      const idx = parseInt(ev.currentTarget.getAttribute('data-index'), 10);
-      const nameInput  = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
-      const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
-      const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
-      const name  = nameInput.value.trim();
-      const skill = parseFloat(skillInput.value);
-      const group = groupInput ? groupInput.value.trim() : '';
+  const idx = parseInt(ev.currentTarget.getAttribute('data-index'), 10);
+  const nameInput  = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
+  const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
+  const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
+  const name  = nameInput.value.trim();
+  const skill = parseFloat(skillInput.value);
+  const group = groupInput ? groupInput.value.trim() : '';
 
-      if (!name || Number.isNaN(skill) || skill <= 0) return;
+  if (!name || Number.isNaN(skill) || skill <= 0) return;
 
-      const updated = [...state.players];
-      const player  = updated[idx];
-      updated[idx]  = { ...player, name, skill, group };
-      state.players = updated;
+  // optimistic local update
+  const copy = [...state.players];
+  const player = copy[idx];
+  copy[idx] = { ...player, name, skill, group };
+  state.players = copy;
 
-      if (player && player.id) {
-        await updatePlayerFieldsSupabase(player.id, { name, skill, group });
-        await syncFromSupabase();
-      }
+  // attempt remote update (optional)
+  let ok = true;
+  if (player && player.id) {
+    ok = await updatePlayerFieldsSupabase(player.id, { name, skill, group });
+  }
 
-      saveLocal();
-      queueSaveToSupabase();
-      render();
-    });
+  saveLocal();
+  queueSaveToSupabase(); // debounce/try later if needed
+  render();              // do NOT call syncFromSupabase() here
+});
   });
 }
 
