@@ -31,6 +31,87 @@ const addNameInput = document.getElementById('newPlayerName');
 const addBtn = document.getElementById('addPlayerBtn');
 const selectedSet = () => new Set(state.selectedIds || []);
 
+// -- Robust global click handler for player card menus (capture phase) --
+(function ensureMenuActionsBound() {
+  if (window.__menusBound) return;
+  window.__menusBound = true;
+
+  document.addEventListener('click', async function onGlobalClick(e) {
+    // 1) Toggle the dropdown when ⋮ is clicked
+    const dots = e.target.closest('.btn-actions');
+    if (dots) {
+      e.stopPropagation();
+      e.preventDefault();
+      const wrap = dots.closest('.menu-wrap');
+      const isOpen = wrap && wrap.classList.contains('menu-open');
+      // close all others
+      document.querySelectorAll('.menu-wrap.menu-open').forEach(w => w.classList.remove('menu-open'));
+      if (wrap) {
+        wrap.classList.toggle('menu-open', !isOpen);
+        dots.setAttribute('aria-expanded', String(!isOpen));
+      }
+      return;
+    }
+
+    // 2) Keep clicks inside an open dropdown from closing it via bubbling
+    if (e.target.closest('.card-menu')) {
+      e.stopPropagation();
+    }
+
+    // 3) Edit action
+    const editBtn = e.target.closest('[data-role="menu-edit"]');
+    if (editBtn) {
+      e.stopPropagation();
+      e.preventDefault();
+      const idx = parseInt(editBtn.getAttribute('data-index'), 10);
+      const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+      if (row) {
+        row.style.display = row.style.display === 'none' || row.style.display === '' ? 'flex' : 'none';
+      }
+      // close menu
+      const wrap = editBtn.closest('.menu-wrap');
+      if (wrap) wrap.classList.remove('menu-open');
+      return;
+    }
+
+    // 4) Delete action
+    const delBtn = e.target.closest('[data-role="menu-delete"]');
+    if (delBtn) {
+      e.stopPropagation();
+      e.preventDefault();
+      const id = String(delBtn.getAttribute('data-id') || '');
+      if (!id) return;
+
+      const idx = state.players.findIndex(p => String(p.id) === id);
+      if (idx === -1) return;
+
+      const removed = state.players[idx];
+
+      try {
+        if (supabaseClient && removed.id) {
+          await supabaseClient.from('players').delete().eq('id', removed.id);
+          await syncFromSupabase();
+        }
+      } catch (err) {
+        console.error('Supabase delete error', err);
+      }
+
+      state.players = state.players.filter(p => String(p.id) !== id);
+      state.checkedIn = state.checkedIn.filter(n => n !== removed.name);
+      saveLocal();
+
+      // close any open menu and re-render
+      document.querySelectorAll('.menu-wrap.menu-open').forEach(w => w.classList.remove('menu-open'));
+      queueSaveToSupabase();
+      render();
+      return;
+    }
+
+    // 5) Clicked anywhere else: close any open menus
+    document.querySelectorAll('.menu-wrap.menu-open').forEach(w => w.classList.remove('menu-open'));
+  }, true); // capture phase so we always see the click
+})();
+
 function updateBulkBarVisibility() {
   const bar = document.getElementById('bulkBar');
   const countEl = document.getElementById('bulkCount');
@@ -189,15 +270,15 @@ function renderFilteredPlayers() {
     return `
       <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
         ${state.isAdmin ? `
-          <div class="menu-wrap">
-            <button type="button" class="btn-actions icon" aria-haspopup="true" aria-expanded="false"
-                    data-id="${player.id}" title="More actions">⋮</button>
-            <div class="card-menu" role="menu">
-              <button type="button" class="menu-item" data-role="menu-edit" data-index="${idx}">Edit</button>
-              <button type="button" class="menu-item" data-role="menu-delete" data-id="${player.id}">Delete</button>
-            </div>
-          </div>
-        ` : ''}
+  <div class="menu-wrap">
+    <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
+            data-id="${player.id}" title="More actions">⋮</button>
+    <div class="card-menu" role="menu">
+      <button type="button" class="menu-item" data-role="menu-edit" data-index="${idx}">Edit</button>
+      <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
+    </div>
+  </div>
+` : ''}
 
         <div class="row" style="align-items:center; gap:8px;">
           <input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />
@@ -1022,7 +1103,7 @@ function bindPlayerRowHandlers() {
     btn.replaceWith(clone);
   });
 
-  // Toggle the dropdown for this card
+  // Toggle the dropdown for this card (local; global handler will also catch)
   document.querySelectorAll('.btn-actions').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1041,63 +1122,8 @@ function bindPlayerRowHandlers() {
     menu.addEventListener('click', (e) => e.stopPropagation());
   });
 
-  // One-time global close and delegated actions
-  if (!bindPlayerRowHandlers._globalsBound) {
-    document.addEventListener('click', () => closeAllMenus());
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeAllMenus();
-    });
-
-    // Delegated Edit and Delete
-    document.addEventListener('click', async (e) => {
-      const editBtn = e.target.closest('[data-role="menu-edit"]');
-      const delBtn  = e.target.closest('[data-role="menu-delete"]');
-
-      // Edit opens the inline editor row for this card
-      if (editBtn) {
-        e.stopPropagation();
-        const idx = parseInt(editBtn.getAttribute('data-index'), 10);
-        const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-        if (row) {
-          row.style.display = row.style.display === 'none' || row.style.display === '' ? 'flex' : 'none';
-        }
-        closeAllMenus();
-        return;
-      }
-
-      // Delete removes player locally and in Supabase, then re-renders
-      if (delBtn) {
-        e.stopPropagation();
-        const id = String(delBtn.getAttribute('data-id') || '');
-        if (!id) { closeAllMenus(); return; }
-
-        const idx = state.players.findIndex(p => String(p.id) === id);
-        if (idx === -1) { closeAllMenus(); return; }
-
-        const removed = state.players[idx];
-
-        try {
-          if (supabaseClient && removed.id) {
-            await supabaseClient.from('players').delete().eq('id', removed.id);
-            await syncFromSupabase();
-          }
-        } catch (err) {
-          console.error('Supabase delete error', err);
-        }
-
-        state.players = state.players.filter(p => String(p.id) !== id);
-        state.checkedIn = state.checkedIn.filter(n => n !== removed.name);
-
-        saveLocal();
-        queueSaveToSupabase();
-        closeAllMenus();
-        render();
-        return;
-      }
-    });
-
-    bindPlayerRowHandlers._globalsBound = true;
-  }
+  // ❌ REMOVE the entire block that adds document-level listeners:
+  // if (!bindPlayerRowHandlers._globalsBound) { document.addEventListener(...); ... }
 }
 
 // Render the entire application into the root element. Each call replaces
@@ -1443,6 +1469,11 @@ const cssText = `
 .menu-wrap, .card-menu, .btn-actions {
   z-index: 10000;
 }
+  /* ensure clicks land on the menu */
+.card-menu, .menu-item, .btn-actions { pointer-events: auto; z-index: 10000; }
+/* prevent any ancestor overlay from eating clicks */
+.player-card .menu-wrap { pointer-events: auto; }
+
 `;
 
 if (!menuStyle) {
