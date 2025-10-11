@@ -107,62 +107,7 @@ const selectedSet = () => new Set(state.selectedIds || []);
       return;
     }
 
-    // 4.5) SAVE from inline editor (delegated, capture-phase)
-const saveBtn = e.target.closest('.btn-save-edit');
-if (saveBtn) {
-  e.stopPropagation();
-  e.preventDefault();
-
-  // Prefer a stable id over positional index
-  const idAttr = saveBtn.getAttribute('data-id')
-            || saveBtn.closest('.player-card')?.getAttribute('data-id') || '';
-  const id = String(idAttr || '');
-  let idx = -1;
-
-  if (id) {
-    idx = state.players.findIndex(p => String(p.id) === id);
-  } else {
-    // fallback: positional index if id is missing
-    idx = parseInt(saveBtn.getAttribute('data-index'), 10);
-  }
-  if (Number.isNaN(idx) || idx < 0) return;
-
-  const rowSel = `.edit-row[data-index="${idx}"]`;
-  const row = document.querySelector(rowSel);
-  if (!row) return;
-
-  const nameInput  = row.querySelector('.edit-name');
-  const skillInput = row.querySelector('.edit-skill');
-  const groupInput = row.querySelector('.edit-group');
-
-  const name  = (nameInput?.value || '').trim();
-  const skill = parseFloat(skillInput?.value || '');
-  const group = (groupInput?.value || '').trim();
-
-  // allow 0 if you want “Unset” — otherwise keep > 0
-  if (!name || Number.isNaN(skill) /* || skill <= 0 */) return;
-
-  // Optimistic local update
-  const copy   = [...state.players];
-  const player = copy[idx];
-  if (!player) return;
-
-  copy[idx] = { ...player, name, skill, group };
-  state.players = copy;
-
-  // Best-effort remote update (non-blocking)
-  if (player.id) {
-    updatePlayerFieldsSupabase(player.id, { name, skill, group })
-      .catch(err => console.error('Supabase update failed:', err));
-  }
-
-  saveLocal();
-  queueSaveToSupabase();   // keep your debounce
-  render();
-  return;
-}
-
-    // 5) Clicked anywhere else: close any open menus
+    // 4) Clicked anywhere else: close any open menus
     document.querySelectorAll('.menu-wrap.menu-open').forEach(w => w.classList.remove('menu-open'));
   }, true); // capture phase so we always see the click
 })();
@@ -1568,34 +1513,38 @@ if (!menuStyle) {
 menuStyle.textContent = cssText;
 let editStyle = document.getElementById('edit-css');
 const editCss = `
+/* ----- Compact inline edit row ----- */
 .player-card .edit-row{
   display:flex;
-  flex-wrap:wrap;
+  align-items:center;
   gap:8px;
-  margin-top:10px;
-  padding:10px;
-  background:#fff;
-  border:1px solid #e5e7eb;
-  border-radius:8px;
-  box-shadow:0 2px 6px rgba(0,0,0,.04);
+  margin-top:8px;
+  flex-wrap:wrap;           /* wrap nicely on narrow screens */
 }
 
-/* shorter inputs (desktop), but expand on small screens */
+/* kill any global “giant input” rules */
 .player-card .edit-row input{
-  flex:0 0 240px;
-  max-width:240px;
-}
-.player-card .edit-row .btn-save-edit{
-  flex:0 0 auto;
-  padding:8px 14px;
+  box-sizing:border-box;
+  height:36px;              /* fixed, tidy height */
+  line-height:1.2;
+  padding:6px 10px;
+  border-radius:6px;
+  max-width:240px;          /* stop them stretching full card width */
+  width: clamp(120px, 30vw, 220px);
+  min-width:120px;
+  appearance:textfield;     /* in case a lib styled them strangely */
 }
 
-/* mobile: let them go full width */
-@media (max-width: 640px){
-  .player-card .edit-row input{
-    flex:1 1 100%;
-    max-width:100%;
-  }
+/* per-field widths that feel right */
+.player-card .edit-row .edit-name{ flex:1 1 220px; min-width:220px; max-width:360px; }
+.player-card .edit-row .edit-skill{ width:90px; text-align:right; }
+.player-card .edit-row .edit-group{ width:160px; }
+
+/* Save button lines up with the inputs */
+.player-card .edit-row .btn-save-edit{
+  height:36px;
+  padding:0 12px;
+  border-radius:6px;
 }
 `;
 if (!editStyle) {
