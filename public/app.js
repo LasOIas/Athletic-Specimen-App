@@ -210,13 +210,18 @@ function renderFilteredPlayers() {
       }
       <span class="spacer"></span>
       ${
-        state.isAdmin
-          ? `
-            <button class="btn-edit icon" title="Edit" data-index="${idx}">✎</button>
-            <button class="btn-delete icon danger" title="Delete" data-id="${player.id}">🗑</button>
-            `
-          : ''
-      }
+  state.isAdmin
+    ? `
+      <div class="menu-wrap" style="position:relative; display:inline-block;">
+        <button class="btn-actions icon" aria-haspopup="true" aria-expanded="false" data-id="${player.id}" title="More actions">⋮</button>
+        <div class="card-menu" role="menu" style="display:none; position:absolute; right:0; top:110%; min-width:120px; background:#fff; border:1px solid rgba(0,0,0,0.1); border-radius:6px; padding:4px; box-shadow:0 6px 20px rgba(0,0,0,0.12); z-index:20;">
+          <button class="menu-item btn-edit" role="menuitem" data-index="${idx}" style="width:100%; text-align:left; padding:6px 10px; border:none; background:transparent; cursor:pointer;">Edit</button>
+          <button class="menu-item btn-delete danger" role="menuitem" data-id="${player.id}" style="width:100%; text-align:left; padding:6px 10px; border:none; background:transparent; cursor:pointer; color:#b91c1c;">Delete</button>
+        </div>
+      </div>
+      `
+    : ''
+}
     </div>
 
     ${state.isAdmin ? `
@@ -1804,7 +1809,33 @@ document.querySelectorAll('.player-select').forEach(cb => {
   });
 });
 
+function closeAllMenus() {
+  document.querySelectorAll('.card-menu').forEach(m => m.style.display = 'none');
+  document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
+
 function bindPlayerRowHandlers() {
+  // open or close the per-card dropdown menu
+document.querySelectorAll('.btn-actions').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const wrap = btn.closest('.menu-wrap');
+    const menu = wrap ? wrap.querySelector('.card-menu') : null;
+    const wasOpen = menu && menu.style.display !== 'none';
+    closeAllMenus();
+    if (menu) {
+      menu.style.display = wasOpen ? 'none' : 'block';
+      btn.setAttribute('aria-expanded', wasOpen ? 'false' : 'true');
+    }
+  });
+});
+
+// one global outside-click closer, attached only once
+if (!bindPlayerRowHandlers._menuGlobal) {
+  document.addEventListener('click', () => closeAllMenus());
+  bindPlayerRowHandlers._menuGlobal = true;
+}
+
   // check-in
   document.querySelectorAll('.btn-checkin').forEach((btn) => {
     btn.addEventListener('click', async (ev) => {
