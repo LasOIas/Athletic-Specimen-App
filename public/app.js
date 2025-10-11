@@ -339,8 +339,8 @@ function renderFilteredPlayers() {
     const min = parseFloat(state.skillSubTab);
     const max = min === 9.0 ? 10 : min + 0.9;
     filtered = filtered
-      .filter(p => p.skill >= min && p.skill <= max)
-      .sort((a, b) => b.skill - a.skill);
+  .filter(p => p.skill >= min && p.skill <= max)
+  .sort((a, b) => (b.skill - a.skill) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   } else if (state.playerTab === 'unrated') {
     filtered = filtered.filter(p => !p.skill || p.skill === 0);
   }
@@ -357,7 +357,7 @@ function renderFilteredPlayers() {
   }
 
   // sort by skill desc
-  filtered.sort((a, b) => b.skill - a.skill);
+  filtered.sort((a, b) => (b.skill - a.skill) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
   if (!filtered.length) return '<p>No players found.</p>';
 
@@ -1389,10 +1389,9 @@ function render() {
         ${bracketHTML}
       </div>
      <div class="card">
-  <div class="row" style="justify-content:space-between; gap:8px; align-items:center;">
+  <div class="row" style="justify-content:space-between;">
   <h3>Players</h3>
-  <div style="display:flex; gap:8px; align-items:center;">
-    <button id="filtersToggle" class="secondary">Filters</button>
+</div>
     <button id="btn-select-all-visible" class="secondary" title="Select all players currently shown by your filters/search">
       Select All Shown
     </button>
