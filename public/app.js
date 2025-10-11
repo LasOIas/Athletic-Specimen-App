@@ -112,6 +112,98 @@ const selectedSet = () => new Set(state.selectedIds || []);
   }, true); // capture phase so we always see the click
 })();
 
+// -- One delegated Save handler for inline edit rows (capture phase) --
+(function ensureSaveDelegationBound() {
+  if (window.__saveDelegated) return;
+  window.__saveDelegated = true;
+
+  document.addEventListener('click', async function onSaveDelegated(e) {
+    const btn = e.target.closest('.btn-save-edit');
+    if (!btn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const idxAttr = parseInt(btn.getAttribute('data-index'), 10);
+    const idAttr  = btn.getAttribute('data-id');
+    const idxFromData = Number.isNaN(idxAttr) ? -1 : idxAttr;
+
+    // Locate the edit row using the index we render onto it
+    const row = document.querySelector(`.edit-row[data-index="${idxFromData}"]`) || btn.closest('.edit-row');
+    if (!row) return;
+
+    const nameInput  = row.querySelector('.edit-name');
+    const skillInput = row.querySelector('.edit-skill');
+    const groupInput = row.querySelector('.edit-group');
+
+    const name  = (nameInput?.value || '').trim();
+    let   skill = parseFloat(skillInput?.value);
+    const group = (groupInput?.value || '').trim();
+
+    if (!name || Number.isNaN(skill)) return;
+    // Clamp and keep one decimal place
+    skill = Math.max(0, Math.min(10, Math.round(skill * 10) / 10));
+
+    // Prefer updating by id; fall back to idx
+    let idx = -1;
+    if (idAttr) idx = state.players.findIndex(p => String(p.id) === String(idAttr));
+    if (idx === -1) idx = idxFromData;
+    if (idx < 0 || !state.players[idx]) return;
+
+    const prev = state.players[idx];
+    const next = { ...prev, name, skill, group };
+
+    // Optimistic local update
+    const copy = state.players.slice();
+    copy[idx] = next;
+    state.players = copy;
+
+    // Persist local
+    try { localStorage.setItem('athletic_specimen_players', JSON.stringify(state.players)); } catch {}
+
+    // Remote sync (with group->tag fallback handled inside helper)
+    let remoteOK = false;
+    try {
+      if (supabaseClient) {
+        if (next.id) {
+          remoteOK = await updatePlayerFieldsSupabase(next.id, { name, skill, group });
+        } else {
+          try {
+            const { error } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+            if (error) throw error;
+            remoteOK = true;
+          } catch {
+            const { error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+            if (error) throw error;
+            remoteOK = true;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Supabase save error', err);
+    }
+
+    // Best-effort background upsert batch too
+    try { queueSaveToSupabase(); } catch {}
+
+    if (remoteOK) {
+      try { await syncFromSupabase(); } catch {}
+    }
+
+    // Close row and show small toast
+    if (row) row.style.display = 'none';
+    try {
+      const toast = document.createElement('div');
+      toast.textContent = remoteOK ? 'Saved to Supabase' : 'Saved locally';
+      toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 1100);
+    } catch {}
+
+    render();
+  }, true);
+})();
+
 function updateBulkBarVisibility() {
   const bar = document.getElementById('bulkBar');
   const countEl = document.getElementById('bulkCount');
@@ -319,7 +411,7 @@ function renderFilteredPlayers() {
   <input type="text" class="edit-name" placeholder="Name" value="${player.name}" style="width:150px; height:32px; padding:4px 8px; border-radius:6px; border:1px solid #ccc;" />
   <input type="number" class="edit-skill" placeholder="Skill" step="0.1" value="${player.skill}" style="width:70px; height:32px; padding:4px 8px; border-radius:6px; border:1px solid #ccc; text-align:center;" />
   <input type="text" class="edit-group" placeholder="Group" value="${player.group || ''}" style="width:120px; height:32px; padding:4px 8px; border-radius:6px; border:1px solid #ccc;" />
-  <button class="btn-save-edit success" data-index="${idx}" data-id="${player.id}" style="height:32px; padding:0 10px; border-radius:6px;">Save</button>
+  <button type="button" class="btn-save-edit success" data-index="${idx}" data-id="${player.id}" style="height:32px; padding:0 10px; border-radius:6px;">Save</button>
 </div>
         ` : ''}
       </div>
@@ -1561,7 +1653,6 @@ bindTournamentTab();
 bindFiltersCollapsible();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
-attachPlayerEditHandlers();
 updateBulkBarVisibility();
 }
 
@@ -2171,110 +2262,6 @@ if (removeBtn) {
     render();
   });
 }
-
-// --- Inline Edit Save ---
-document.querySelectorAll('.btn-save-edit').forEach(btn => {
-  btn.addEventListener('click', async (ev) => {
-    const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
-    const id = ev.currentTarget.getAttribute('data-id');
-    const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
-    const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
-    const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
-
-    const name = nameInput.value.trim();
-    const skill = parseFloat(skillInput.value);
-    const group = groupInput.value.trim();
-
-    if (!name || isNaN(skill)) return;
-
-    const player = state.players[idx];
-    if (!player) return;
-
-    state.players[idx] = { ...player, name, skill, group };
-    saveLocal();
-
-    if (supabaseClient && player.id) {
-      try {
-        await supabaseClient.from('players').update({ name, skill, group }).eq('id', player.id);
-        await syncFromSupabase();
-      } catch (err) {
-        console.error('Supabase update error', err);
-      }
-    }
-
-    render();
-  });
-});
-}
-
-function attachPlayerEditHandlers() {
-  document.querySelectorAll('.btn-save-edit').forEach((btn) => {
-    btn.addEventListener('click', async (ev) => {
-      const idx = parseInt(ev.currentTarget.getAttribute('data-index'), 10);
-      const nameInput  = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
-      const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
-      const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
-      const name  = nameInput.value.trim();
-      const skill = parseFloat(skillInput.value);
-      const group = groupInput ? groupInput.value.trim() : '';
-      if (!name || Number.isNaN(skill) || skill <= 0) return;
-
-      // Optimistic local update
-      const copy   = [...state.players];
-      const player = copy[idx];
-      copy[idx]    = { ...player, name, skill, group };
-      state.players = copy;
-
-      let remoteOK = false;
-
-      if (supabaseClient) {
-        try {
-          if (player && player.id) {
-            // update by id (with group->tag fallback inside the helper)
-            remoteOK = await updatePlayerFieldsSupabase(player.id, { name, skill, group });
-          } else {
-            // no id yet -> insert first (try group then tag)
-            try {
-              const { data, error } = await supabaseClient
-                .from('players')
-                .insert([{ name, skill, group }])
-                .select();
-              if (error) throw error;
-              remoteOK = true;
-            } catch {
-              const { data, error } = await supabaseClient
-                .from('players')
-                .insert([{ name, skill, tag: group }])
-                .select();
-              if (error) throw error;
-              remoteOK = true;
-            }
-          }
-        } catch (e) {
-          console.error('Supabase save error', e);
-        }
-      }
-
-      saveLocal();
-      queueSaveToSupabase(); // still useful for bulk changes
-
-      // If remote worked, refresh to capture ids and server truth
-      if (remoteOK) await syncFromSupabase();
-
-      // close editor row + tiny toast
-      const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-      if (row) row.style.display = 'none';
-      try {
-        const toast = document.createElement('div');
-        toast.textContent = remoteOK ? 'Saved to Supabase ✅' : 'Saved locally ✅';
-        toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 1200);
-      } catch {}
-
-      render();
-    });
-  });
 }
 
 // Initialise the app. Called once on page load. It loads stored data,
