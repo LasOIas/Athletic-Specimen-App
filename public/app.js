@@ -1640,42 +1640,64 @@ if (!menuStyle) {
   document.head.appendChild(menuStyle);
 }
 menuStyle.textContent = cssText;
+
 let editStyle = document.getElementById('edit-css');
 const editCss = `
-/* ----- Compact inline edit row ----- */
+/* --- Keep player cards compact, ignore any global min-height --- */
+.players .player-card { min-height: auto !important; }
+.players .player-card .row { min-height: 0 !important; }
+
+/* ----- Compact inline edit row (grid) ----- */
 .player-card .edit-row{
-  display:flex;
+  display:grid;
+  grid-template-columns: minmax(220px, 1fr) 90px 160px auto; /* name | skill | group | save */
   align-items:center;
   gap:8px;
   margin-top:8px;
-  flex-wrap:wrap;           /* wrap nicely on narrow screens */
+  padding:8px;
+  border-radius:8px;
+  background:#f8fafc;            /* subtle background so it reads as an editor */
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
 }
 
-/* kill any global “giant input” rules */
+/* Inputs: kill any giant/global styles */
 .player-card .edit-row input{
   box-sizing:border-box;
-  height:36px;              /* fixed, tidy height */
+  height:36px !important;
   line-height:1.2;
   padding:6px 10px;
   border-radius:6px;
-  max-width:240px;          /* stop them stretching full card width */
-  width: clamp(120px, 30vw, 220px);
-  min-width:120px;
-  appearance:textfield;     /* in case a lib styled them strangely */
+  border:1px solid #d1d5db;
+  background:#fff;
+  max-width:unset;
+  width:100%;
+  appearance:textfield;
 }
 
-/* per-field widths that feel right */
-.player-card .edit-row .edit-name{ flex:1 1 220px; min-width:220px; max-width:360px; }
+/* Per-field sizing still feels right */
+.player-card .edit-row .edit-name{ min-width:220px; }
 .player-card .edit-row .edit-skill{ width:90px; text-align:right; }
 .player-card .edit-row .edit-group{ width:160px; }
 
-/* Save button lines up with the inputs */
+/* Save button aligns with inputs and stays small */
 .player-card .edit-row .btn-save-edit{
-  height:36px;
+  height:36px !important;
   padding:0 12px;
   border-radius:6px;
+  justify-self:start;
 }
+
+/* Don't let any nested .row inside the edit area expand vertically */
+.player-card .edit-row .row{ min-height:0 !important; }
 `;
+if (!editStyle) {
+  editStyle = document.createElement('style');
+  editStyle.id = 'edit-css';
+  editStyle.type = 'text/css';
+  document.head.appendChild(editStyle);
+}
+editStyle.textContent = editCss;
+
 if (!editStyle) {
   editStyle = document.createElement('style');
   editStyle.id = 'edit-css';
