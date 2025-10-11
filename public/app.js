@@ -1014,6 +1014,95 @@ function closeAllMenus() {
   document.querySelectorAll('.menu-wrap').forEach(w => w.classList.remove('menu-open'));
   document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
 }
+
+function bindPlayerRowHandlers() {
+  // Rebind ⋮ buttons created by render (remove stale listeners)
+  document.querySelectorAll('.btn-actions').forEach(btn => {
+    const clone = btn.cloneNode(true);
+    btn.replaceWith(clone);
+  });
+
+  // Toggle this card's menu on button click
+  document.querySelectorAll('.btn-actions').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wrap = btn.closest('.menu-wrap');
+      const isOpen = wrap && wrap.classList.contains('menu-open');
+      closeAllMenus();
+      if (wrap) {
+        wrap.classList.toggle('menu-open', !isOpen);
+        btn.setAttribute('aria-expanded', String(!isOpen));
+      }
+    });
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        btn.click();
+      }
+    });
+  });
+
+  // Keep menu clicks from bubbling/closing
+  document.querySelectorAll('.card-menu').forEach(menu => {
+    const clone = menu.cloneNode(true);
+    clone.innerHTML = menu.innerHTML;
+    menu.replaceWith(clone);
+  });
+  document.querySelectorAll('.card-menu').forEach(menu => {
+    menu.addEventListener('click', (e) => e.stopPropagation());
+  });
+
+  // One-time global closers & delegated actions
+  if (!bindPlayerRowHandlers._globalsBound) {
+    document.addEventListener('click', () => closeAllMenus());
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllMenus(); });
+
+    document.addEventListener('click', async (e) => {
+      const editBtn = e.target.closest('[data-role="menu-edit"]');
+      const delBtn  = e.target.closest('[data-role="menu-delete"]');
+
+      if (editBtn) {
+        e.stopPropagation();
+        const idx = parseInt(editBtn.getAttribute('data-index'));
+        const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+        if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+        closeAllMenus();
+        return;
+      }
+
+      if (delBtn) {
+        e.stopPropagation();
+        const id = String(delBtn.getAttribute('data-id') || '');
+        if (!id) return;
+
+        const idx = state.players.findIndex((p) => String(p.id) === id);
+        if (idx === -1) { closeAllMenus(); return; }
+
+        const removed = state.players[idx];
+
+        try {
+          if (supabaseClient && removed.id) {
+            await supabaseClient.from('players').delete().eq('id', removed.id);
+            await syncFromSupabase();
+          }
+        } catch (err) {
+          console.error('Supabase delete error', err);
+        }
+
+        state.players = state.players.filter((p) => String(p.id) !== id);
+        state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
+        saveLocal();
+        queueSaveToSupabase();
+        closeAllMenus();
+        render();
+        return;
+      }
+    });
+
+    bindPlayerRowHandlers._globalsBound = true;
+  }
+}
+
 // Render the entire application into the root element. Each call replaces
 // existing content to reflect the current state. Event handlers are
 // attached inline within this function. To minimize reflows, we build
@@ -1271,8 +1360,8 @@ const cssText = `
 
 .player-card {
   position: relative;
-  overflow: hidden;   /* prevents page stretching */
-  padding-top: 32px;  /* room for the ⋮ button */
+  overflow: visible;   /* allow dropdown to extend beyond card */
+  padding-top: 32px;   /* room for the ⋮ button */
 }
 .player-card .card-actions { position: relative; }
 .player-card .menu-wrap {
@@ -1281,7 +1370,6 @@ const cssText = `
   right: 8px;
   z-index: 10000;
 }
-/* Three-dots button is always visible */
 .btn-actions {
   display: inline-block;
   opacity: 1;
@@ -1298,21 +1386,6 @@ const cssText = `
 }
 .btn-actions:hover { background: rgba(0,0,0,0.05); }
 
-/* Card and menu positioning */
-.player-card {
-  position: relative;
-  overflow: visible;   /* important: allow dropdown to extend beyond card */
-  padding-top: 32px;   /* room for the ⋮ button */
-}
-.player-card .card-actions { position: relative; }
-.player-card .menu-wrap {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 10000;
-}
-
-/* Dropdown hidden by default */
 .card-menu {
   display: none;
   position: absolute;
@@ -1326,11 +1399,8 @@ const cssText = `
   box-shadow: 0 10px 24px rgba(0,0,0,0.16);
   z-index: 10001;
 }
-
-/* Show only when the wrapper is "open" */
 .menu-wrap.menu-open .card-menu { display: block; }
 
-/* Menu items */
 .menu-item {
   width: 100%;
   text-align: left;
@@ -1343,7 +1413,6 @@ const cssText = `
 .menu-item:hover { background: rgba(0,0,0,0.05); }
 .menu-item[data-role="menu-delete"] { color: #b91c1c; }
 `;
-
 if (!menuStyle) {
   menuStyle = document.createElement('style');
   menuStyle.id = 'menu-css';
@@ -1887,96 +1956,6 @@ function attachHandlers() {
       render();
     });
   }
-
-function bindPlayerRowHandlers() {
-  // Rebind ⋮ buttons created by render (remove stale listeners)
-  document.querySelectorAll('.btn-actions').forEach(btn => {
-    const clone = btn.cloneNode(true);
-    btn.replaceWith(clone);
-  });
-
-  // Toggle this card's menu on button click
-  document.querySelectorAll('.btn-actions').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const wrap = btn.closest('.menu-wrap');
-      const isOpen = wrap && wrap.classList.contains('menu-open');
-      closeAllMenus();
-      if (wrap) {
-        wrap.classList.toggle('menu-open', !isOpen);
-        btn.setAttribute('aria-expanded', String(!isOpen));
-      }
-    });
-    btn.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        btn.click();
-      }
-    });
-  });
-
-  // Keep menu clicks from bubbling/closing
-  document.querySelectorAll('.card-menu').forEach(menu => {
-    const clone = menu.cloneNode(true);
-    clone.innerHTML = menu.innerHTML;
-    menu.replaceWith(clone);
-  });
-  document.querySelectorAll('.card-menu').forEach(menu => {
-    menu.addEventListener('click', (e) => e.stopPropagation());
-  });
-
-  // One-time global closers & delegated actions
-  if (!bindPlayerRowHandlers._globalsBound) {
-    document.addEventListener('click', () => closeAllMenus());
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllMenus(); });
-
-    // Delegated Edit/Delete actions inside the dropdown
-    document.addEventListener('click', async (e) => {
-      const editBtn = e.target.closest('[data-role="menu-edit"]');
-      const delBtn  = e.target.closest('[data-role="menu-delete"]');
-
-      if (editBtn) {
-        e.stopPropagation();
-        const idx = parseInt(editBtn.getAttribute('data-index'));
-        const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-        if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
-        closeAllMenus();
-        return;
-      }
-
-      if (delBtn) {
-        e.stopPropagation();
-        const id = String(delBtn.getAttribute('data-id') || '');
-        if (!id) return;
-
-        const idx = state.players.findIndex((p) => String(p.id) === id);
-        if (idx === -1) { closeAllMenus(); return; }
-
-        const removed = state.players[idx];
-
-        try {
-          if (supabaseClient && removed.id) {
-            await supabaseClient.from('players').delete().eq('id', removed.id);
-            await syncFromSupabase();
-          }
-        } catch (err) {
-          console.error('Supabase delete error', err);
-        }
-
-        state.players = state.players.filter((p) => String(p.id) !== id);
-        state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
-        saveLocal();
-        queueSaveToSupabase();
-        closeAllMenus();
-        render();
-        return;
-      }
-    });
-
-    bindPlayerRowHandlers._globalsBound = true;
-  }
-}
-
 
 function bindSelectionHandlers() {
   // checkbox toggle for selected state (bulk bar)
