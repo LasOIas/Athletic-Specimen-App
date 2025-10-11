@@ -1356,65 +1356,95 @@ root.innerHTML = sanitized;
 // ---- dropdown menu CSS (keep ONLY this block) ----
 let menuStyle = document.getElementById('menu-css');
 const cssText = `
-/* ---- existing styles above ---- */
+/* ---------------- Player card menu styling ---------------- */
 
-/* Visible admin buttons on player cards */
-.visible-actions {
-  display: flex;
-  gap: 10px;
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 20;
-}
-
-/* Edit button — vivid blue, strong contrast */
-.btn-edit {
-  background: #2563eb;
-  color: #ffffff;
-  border: none;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  transition: background 0.2s, transform 0.1s;
-}
-.btn-edit:hover {
-  background: #1e40af;
-  transform: translateY(-1px);
-}
-.btn-edit:active {
-  background: #1e3a8a;
-  transform: translateY(0);
-}
-
-/* Delete button — bright red, bold */
-.btn-delete {
-  background: #dc2626;
-  color: #ffffff;
-  border: none;
-  border-radius: 8px;
-  padding: 6px 12px;
-  font-weight: 700;
-  cursor: pointer;
-  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  transition: background 0.2s, transform 0.1s;
-}
-.btn-delete:hover {
-  background: #b91c1c;
-  transform: translateY(-1px);
-}
-.btn-delete:active {
-  background: #991b1b;
-  transform: translateY(0);
-}
-
-/* Make sure player card has room for buttons */
 .player-card {
   position: relative;
   overflow: visible;
-  padding-top: 56px;
+  padding-top: 36px; /* space for the menu */
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.player-card .menu-wrap {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 50;
+}
+
+.btn-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  color: #2563eb;
+  background: #e0e7ff;
+  border: none;
+  border-radius: 8px;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  transition: background 0.2s ease, transform 0.1s ease;
+}
+.btn-actions:hover {
+  background: #c7d2fe;
+  transform: translateY(-1px);
+}
+
+/* Dropdown box */
+.card-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 38px;
+  min-width: 150px;
+  background: #ffffff;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  padding: 4px 0;
+  z-index: 1000;
+}
+
+/* Open state */
+.menu-wrap.menu-open .card-menu {
+  display: block;
+}
+
+/* Menu item buttons */
+.menu-item {
+  display: block;
+  width: 100%;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 15px;
+  color: #111827;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.menu-item:hover {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.menu-item.danger {
+  color: #dc2626;
+  font-weight: 600;
+}
+.menu-item.danger:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* Make sure dropdown appears above everything */
+.menu-wrap, .card-menu, .btn-actions {
+  z-index: 10000;
 }
 `;
 
