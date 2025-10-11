@@ -107,6 +107,61 @@ const selectedSet = () => new Set(state.selectedIds || []);
       return;
     }
 
+    // 4.5) SAVE from inline editor (delegated, capture-phase)
+const saveBtn = e.target.closest('.btn-save-edit');
+if (saveBtn) {
+  e.stopPropagation();
+  e.preventDefault();
+
+  // Prefer a stable id over positional index
+  const idAttr = saveBtn.getAttribute('data-id')
+            || saveBtn.closest('.player-card')?.getAttribute('data-id') || '';
+  const id = String(idAttr || '');
+  let idx = -1;
+
+  if (id) {
+    idx = state.players.findIndex(p => String(p.id) === id);
+  } else {
+    // fallback: positional index if id is missing
+    idx = parseInt(saveBtn.getAttribute('data-index'), 10);
+  }
+  if (Number.isNaN(idx) || idx < 0) return;
+
+  const rowSel = `.edit-row[data-index="${idx}"]`;
+  const row = document.querySelector(rowSel);
+  if (!row) return;
+
+  const nameInput  = row.querySelector('.edit-name');
+  const skillInput = row.querySelector('.edit-skill');
+  const groupInput = row.querySelector('.edit-group');
+
+  const name  = (nameInput?.value || '').trim();
+  const skill = parseFloat(skillInput?.value || '');
+  const group = (groupInput?.value || '').trim();
+
+  // allow 0 if you want “Unset” — otherwise keep > 0
+  if (!name || Number.isNaN(skill) /* || skill <= 0 */) return;
+
+  // Optimistic local update
+  const copy   = [...state.players];
+  const player = copy[idx];
+  if (!player) return;
+
+  copy[idx] = { ...player, name, skill, group };
+  state.players = copy;
+
+  // Best-effort remote update (non-blocking)
+  if (player.id) {
+    updatePlayerFieldsSupabase(player.id, { name, skill, group })
+      .catch(err => console.error('Supabase update failed:', err));
+  }
+
+  saveLocal();
+  queueSaveToSupabase();   // keep your debounce
+  render();
+  return;
+}
+
     // 5) Clicked anywhere else: close any open menus
     document.querySelectorAll('.menu-wrap.menu-open').forEach(w => w.classList.remove('menu-open'));
   }, true); // capture phase so we always see the click
@@ -305,7 +360,7 @@ function renderFilteredPlayers() {
             <input type="text" class="edit-name" value="${player.name}" />
             <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
             <input type="text" class="edit-group" placeholder="Group" value="${player.group ? player.group : ''}" />
-            <button class="btn-save-edit success" data-index="${idx}">Save</button>
+            <button class="btn-save-edit success" data-index="${idx}" data-id="${player.id}">Save</button>
           </div>
         ` : ''}
       </div>
@@ -1127,8 +1182,6 @@ function bindPlayerRowHandlers() {
     menu.addEventListener('click', (e) => e.stopPropagation());
   });
 
-  // ❌ REMOVE the entire block that adds document-level listeners:
-  // if (!bindPlayerRowHandlers._globalsBound) { document.addEventListener(...); ... }
 }
 
 // Render the entire application into the root element. Each call replaces
