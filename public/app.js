@@ -209,7 +209,6 @@ function renderFilteredPlayers() {
           : `<button class="btn-checkin primary" data-id="${player.id}">Check In</button>`
       }
       <span class="spacer"></span>
-      // inside renderFilteredPlayers() where the per-card actions are built
 ${
   state.isAdmin
     ? `
