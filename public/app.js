@@ -1009,7 +1009,11 @@ function initTournamentView() {
 
 // -----------------------------------------------------------------------------
 // UI Helpers
-//
+// Keep exactly ONE copy of this
+function closeAllMenus() {
+  document.querySelectorAll('.menu-wrap').forEach(w => w.classList.remove('menu-open'));
+  document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
 // Render the entire application into the root element. Each call replaces
 // existing content to reflect the current state. Event handlers are
 // attached inline within this function. To minimize reflows, we build
@@ -1277,10 +1281,11 @@ const cssText = `
   right: 8px;
   z-index: 10000;
 }
+/* Three-dots button is always visible */
 .btn-actions {
   display: inline-block;
-  opacity: 1;                 /* Always visible */
-  visibility: visible;        /* Never hidden */
+  opacity: 1;
+  visibility: visible;
   position: relative;
   line-height: 1;
   padding: 4px 8px;
@@ -1289,14 +1294,27 @@ const cssText = `
   border: none;
   cursor: pointer;
   font-size: 18px;
-  color: #444;                /* Darker for visibility */
-  transition: none;           /* No fading or hover delay */
+  color: #444;
 }
-.btn-actions:hover {
-  background: rgba(0, 0, 0, 0.05);
+.btn-actions:hover { background: rgba(0,0,0,0.05); }
+
+/* Card and menu positioning */
+.player-card {
+  position: relative;
+  overflow: visible;   /* important: allow dropdown to extend beyond card */
+  padding-top: 32px;   /* room for the ⋮ button */
 }
+.player-card .card-actions { position: relative; }
+.player-card .menu-wrap {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10000;
+}
+
+/* Dropdown hidden by default */
 .card-menu {
-  display: block;
+  display: none;
   position: absolute;
   right: 0;
   top: 28px;
@@ -1305,10 +1323,14 @@ const cssText = `
   border: 1px solid rgba(0,0,0,0.12);
   border-radius: 8px;
   padding: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.16);
   z-index: 10001;
 }
+
+/* Show only when the wrapper is "open" */
 .menu-wrap.menu-open .card-menu { display: block; }
+
+/* Menu items */
 .menu-item {
   width: 100%;
   text-align: left;
@@ -1321,6 +1343,7 @@ const cssText = `
 .menu-item:hover { background: rgba(0,0,0,0.05); }
 .menu-item[data-role="menu-delete"] { color: #b91c1c; }
 `;
+
 if (!menuStyle) {
   menuStyle = document.createElement('style');
   menuStyle.id = 'menu-css';
@@ -1866,17 +1889,33 @@ function attachHandlers() {
   }
 
 function bindPlayerRowHandlers() {
-  // Rebind ⋮ buttons created by render
+  // Rebind ⋮ buttons created by render (remove stale listeners)
   document.querySelectorAll('.btn-actions').forEach(btn => {
     const clone = btn.cloneNode(true);
     btn.replaceWith(clone);
   });
 
+  // Toggle this card's menu on button click
   document.querySelectorAll('.btn-actions').forEach(btn => {
-    cloneButtonBehavior(btn);
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wrap = btn.closest('.menu-wrap');
+      const isOpen = wrap && wrap.classList.contains('menu-open');
+      closeAllMenus();
+      if (wrap) {
+        wrap.classList.toggle('menu-open', !isOpen);
+        btn.setAttribute('aria-expanded', String(!isOpen));
+      }
+    });
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        btn.click();
+      }
+    });
   });
 
-  // Keep menu clicks from closing before firing
+  // Keep menu clicks from bubbling/closing
   document.querySelectorAll('.card-menu').forEach(menu => {
     const clone = menu.cloneNode(true);
     clone.innerHTML = menu.innerHTML;
@@ -1891,7 +1930,7 @@ function bindPlayerRowHandlers() {
     document.addEventListener('click', () => closeAllMenus());
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllMenus(); });
 
-    // Delegated Edit/Delete actions
+    // Delegated Edit/Delete actions inside the dropdown
     document.addEventListener('click', async (e) => {
       const editBtn = e.target.closest('[data-role="menu-edit"]');
       const delBtn  = e.target.closest('[data-role="menu-delete"]');
@@ -1930,33 +1969,14 @@ function bindPlayerRowHandlers() {
         queueSaveToSupabase();
         closeAllMenus();
         render();
+        return;
       }
     });
 
     bindPlayerRowHandlers._globalsBound = true;
   }
-
-  function cloneButtonBehavior(btn) {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const wrap = btn.closest('.menu-wrap');
-      const isOpen = wrap && wrap.classList.contains('menu-open');
-      closeAllMenus();
-      if (wrap) {
-        if (!isOpen) {
-          wrap.classList.add('menu-open');
-          btn.setAttribute('aria-expanded', 'true');
-        } else {
-          wrap.classList.remove('menu-open');
-          btn.setAttribute('aria-expanded', 'false');
-        }
-      }
-    });
-    btn.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click(); }
-    });
-  }
 }
+
 
 function bindSelectionHandlers() {
   // checkbox toggle for selected state (bulk bar)
@@ -1973,20 +1993,6 @@ function bindSelectionHandlers() {
       const card = e.currentTarget.closest('.player-card');
       if (card) card.classList.toggle('is-selected', e.currentTarget.checked);
       updateBulkBarVisibility();
-    });
-  });
-}
-
-function bindSelectionHandlers() {
-  // checkbox toggle
-  document.querySelectorAll('.player-select').forEach(cb => {
-    cb.addEventListener('change', (e) => {
-      const id = String(e.currentTarget.getAttribute('data-id'));
-      const set = selectedSet();
-      if (e.currentTarget.checked) set.add(id); else set.delete(id);
-      state.selectedIds = Array.from(set);
-      const card = e.currentTarget.closest('.player-card');
-      if (card) card.classList.toggle('is-selected', e.currentTarget.checked);
     });
   });
 }
