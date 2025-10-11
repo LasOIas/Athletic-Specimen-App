@@ -1389,10 +1389,15 @@ function render() {
         ${bracketHTML}
       </div>
      <div class="card">
-  <div class="row" style="justify-content:space-between;">
-    <h3>Players</h3>
+  <div class="row" style="justify-content:space-between; gap:8px; align-items:center;">
+  <h3>Players</h3>
+  <div style="display:flex; gap:8px; align-items:center;">
     <button id="filtersToggle" class="secondary">Filters</button>
+    <button id="btn-select-all-visible" class="secondary" title="Select all players currently shown by your filters/search">
+      Select All Shown
+    </button>
   </div>
+</div>
 
   <!-- Collapsible body: put ALL your filter controls INSIDE this div -->
   <div id="filtersBody">
