@@ -212,11 +212,11 @@ function renderFilteredPlayers() {
 ${
   state.isAdmin
     ? `
-      <div class="menu-wrap" style="position:relative; display:inline-block;">
+      <div class="menu-wrap">
         <button class="btn-actions icon" aria-haspopup="true" aria-expanded="false" data-id="${player.id}" title="More actions">⋮</button>
-        <div class="card-menu" role="menu" style="display:none; position:absolute; right:0; top:110%; min-width:140px; background:#fff; border:1px solid rgba(0,0,0,0.1); border-radius:6px; padding:4px; box-shadow:0 6px 20px rgba(0,0,0,0.12); z-index:9999;">
-          <button class="menu-item" data-role="menu-edit" data-index="${idx}" style="width:100%; text-align:left; padding:6px 10px; border:none; background:transparent; cursor:pointer;">Edit</button>
-          <button class="menu-item" data-role="menu-delete" data-id="${player.id}" style="width:100%; text-align:left; padding:6px 10px; border:none; background:transparent; cursor:pointer; color:#b91c1c;">Delete</button>
+        <div class="card-menu" role="menu">
+          <button class="menu-item" data-role="menu-edit" data-index="${idx}">Edit</button>
+          <button class="menu-item" data-role="menu-delete" data-id="${player.id}">Delete</button>
         </div>
       </div>
       `
@@ -1261,6 +1261,7 @@ function render() {
       ${adminHTML}
     </div>
   `;
+
   // Strip any trailing stray ']' that might have slipped into the template
 const sanitized = html.replace(/\n?\]\s*$/, '');
 root.innerHTML = sanitized;
@@ -1277,6 +1278,25 @@ bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
 }
+
+// inject or refresh menu CSS so dropdowns are not clipped
+let menuStyle = document.getElementById('menu-css');
+const cssText = `
+.player-card { position: relative; overflow: visible; }
+.player-card .card-actions { position: relative; overflow: visible; }
+.menu-wrap { position: relative; }
+.card-menu { display: none; position: absolute; right: 0; top: 110%; min-width: 140px; background: #fff; border: 1px solid rgba(0,0,0,0.1); border-radius: 6px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,0.12); z-index: 9999; }
+.menu-open > .card-menu { display: block; }
+.menu-item { width: 100%; text-align: left; padding: 6px 10px; border: none; background: transparent; cursor: pointer; }
+.menu-item[data-role="menu-delete"] { color: #b91c1c; }
+`;
+if (!menuStyle) {
+  menuStyle = document.createElement('style');
+  menuStyle.id = 'menu-css';
+  menuStyle.type = 'text/css';
+  document.head.appendChild(menuStyle);
+}
+menuStyle.textContent = cssText;
 
 // Attach event listeners to the current DOM. This function should be
 // called after each call to render().
@@ -1818,182 +1838,112 @@ function closeAllMenus() {
   document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
 }
 
-function bindPlayerRowHandlers() {
-  // open or close the per-card dropdown menu
-// at the top of bindPlayerRowHandlers()
-document.querySelectorAll('.btn-actions').forEach(btn => {
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const wrap = btn.closest('.menu-wrap');
-    const menu = wrap ? wrap.querySelector('.card-menu') : null;
-    const wasOpen = menu && menu.style.display !== 'none';
-    closeAllMenus();
-    if (menu) {
-      menu.style.display = wasOpen ? 'none' : 'block';
-      btn.setAttribute('aria-expanded', wasOpen ? 'false' : 'true');
-    }
-  });
-});
-
-// prevent outside-click from closing the menu before item handlers run
-document.querySelectorAll('.card-menu').forEach(menu => {
-  menu.addEventListener('click', (e) => {
-    e.stopPropagation(); // allow item handlers below to run first
-  });
-});
-
-// attach a single, once-only outside click closer
-if (!bindPlayerRowHandlers._menuGlobalOutside) {
-  document.addEventListener('click', () => closeAllMenus());
-  bindPlayerRowHandlers._menuGlobalOutside = true;
-}
-
-// keyboard support for ⋮
-document.querySelectorAll('.btn-actions').forEach(btn => {
-  btn.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      btn.click();
-    }
-  });
-});
-
-// global delegated handler for menu actions and legacy buttons
-if (!bindPlayerRowHandlers._delegatedActions) {
-  document.addEventListener('click', async (e) => {
-    const editBtn = e.target.closest('[data-role="menu-edit"], .btn-edit');
-    const delBtn  = e.target.closest('[data-role="menu-delete"], .btn-delete');
-
-    if (editBtn) {
-      e.stopPropagation();
-      // open inline editor row for this index
-      const idx = parseInt(editBtn.getAttribute('data-index'));
-      const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-      if (row) {
-        row.style.display = row.style.display === 'none' ? 'flex' : 'none';
-        closeAllMenus();
-      }
-      return;
-    }
-
-    if (delBtn) {
-      e.stopPropagation();
-      const id = String(delBtn.getAttribute('data-id') || '');
-      if (!id) return;
-
-      // delete exactly like your existing .btn-delete logic
-      const idx = state.players.findIndex((p) => String(p.id) === id);
-      if (idx === -1) { closeAllMenus(); return; }
-
-      const removed = state.players[idx];
-
-      try {
-        if (supabaseClient && removed.id) {
-          await supabaseClient.from('players').delete().eq('id', removed.id);
-          await syncFromSupabase();
-        }
-      } catch (err) {
-        console.error('Supabase delete error', err);
-      }
-
-      state.players = state.players.filter((p) => String(p.id) !== id);
-      state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
-      saveLocal();
-      queueSaveToSupabase();
-      closeAllMenus();
-      render();
-      return;
-    }
-  });
-
-  bindPlayerRowHandlers._delegatedActions = true;
-}
-
 function closeAllMenus() {
-  document.querySelectorAll('.card-menu').forEach(m => m.style.display = 'none');
+  document.querySelectorAll('.menu-wrap').forEach(w => {
+    w.classList.remove('menu-open');
+  });
   document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
 }
 
-// one global outside-click closer, attached only once
-if (!bindPlayerRowHandlers._menuGlobal) {
-  document.addEventListener('click', () => closeAllMenus());
-  bindPlayerRowHandlers._menuGlobal = true;
-}
-
-  // check-in
-  document.querySelectorAll('.btn-checkin').forEach((btn) => {
-    btn.addEventListener('click', async (ev) => {
-      const id = ev.currentTarget.getAttribute('data-id');
-      const player = state.players.find((p) => String(p.id) === String(id));
-      if (!player) return;
-      if (!state.checkedIn.includes(player.name)) {
-        state.checkedIn = [...state.checkedIn, player.name];
-        if (supabaseClient && player.id) {
-          try { await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id); await syncFromSupabase(); } catch(e){ console.error(e); }
+function bindPlayerRowHandlers() {
+  // open or close the per-card dropdown menu
+  document.querySelectorAll('.btn-actions').forEach(btn => {
+    // remove old listeners to avoid stacking on re-render
+    btn.replaceWith(btn.cloneNode(true));
+  });
+  document.querySelectorAll('.btn-actions').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wrap = btn.closest('.menu-wrap');
+      const isOpen = wrap && wrap.classList.contains('menu-open');
+      closeAllMenus();
+      if (wrap) {
+        if (!isOpen) {
+          wrap.classList.add('menu-open');
+          btn.setAttribute('aria-expanded', 'true');
+        } else {
+          wrap.classList.remove('menu-open');
+          btn.setAttribute('aria-expanded', 'false');
         }
-        saveLocal(); queueSaveToSupabase(); render();
+      }
+    });
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        btn.click();
       }
     });
   });
 
-  // check-out
-  document.querySelectorAll('.btn-checkout').forEach((btn) => {
-    btn.addEventListener('click', async (ev) => {
-      const id = ev.currentTarget.getAttribute('data-id');
-      const player = state.players.find((p) => String(p.id) === String(id));
-      if (!player) return;
-      state.checkedIn = state.checkedIn.filter((n) => n !== player.name);
-      if (supabaseClient && player.id) {
-        try { await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id); await syncFromSupabase(); } catch(e){ console.error(e); }
+  // keep clicks inside the menu from bubbling to the outside-closer
+  document.querySelectorAll('.card-menu').forEach(menu => {
+    // rebuild listener to avoid duplicates
+    menu.replaceWith(menu.cloneNode(true));
+  });
+  document.querySelectorAll('.card-menu').forEach(menu => {
+    menu.addEventListener('click', (e) => {
+      e.stopPropagation();
+    });
+  });
+
+  // one global outside click closer, attach once
+  if (!bindPlayerRowHandlers._outsideBound) {
+    document.addEventListener('click', () => closeAllMenus());
+    bindPlayerRowHandlers._outsideBound = true;
+  }
+
+  // one global delegated handler for Edit and Delete that survives re-renders
+  if (!bindPlayerRowHandlers._delegatedBound) {
+    document.addEventListener('click', async (e) => {
+      const editBtn = e.target.closest('[data-role="menu-edit"], .btn-edit');
+      const delBtn  = e.target.closest('[data-role="menu-delete"], .btn-delete');
+
+      if (editBtn) {
+        e.stopPropagation();
+        const idx = parseInt(editBtn.getAttribute('data-index'));
+        // open the inline edit row for this player
+        const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+        if (row) {
+          row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+        }
+        closeAllMenus();
+        return;
       }
-      saveLocal(); queueSaveToSupabase(); render();
-    });
-  });
 
-  // edit toggle
-  document.querySelectorAll('.btn-edit').forEach((btn) => {
-    btn.addEventListener('click', (ev) => {
-      const idx = ev.currentTarget.getAttribute('data-index');
-      const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-      if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
-    });
-  });
+      if (delBtn) {
+        e.stopPropagation();
+        const id = String(delBtn.getAttribute('data-id') || '');
+        if (!id) return;
 
-  // save inline edit
-  document.querySelectorAll('.btn-save-edit').forEach((btn) => {
-    btn.addEventListener('click', async (ev) => {
-      const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
-      const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
-      const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
-      const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
-      const name = nameInput.value.trim();
-      const skill = parseFloat(skillInput.value);
-      const group = groupInput ? groupInput.value.trim() : '';
-      if (!name || isNaN(skill) || skill <= 0) return;
-      const updated = [...state.players];
-      const player = updated[idx];
-      updated[idx] = { ...player, name, skill, group };
-      state.players = updated;
-      if (player && player.id) { await updatePlayerFieldsSupabase(player.id, { name, skill, group }); await syncFromSupabase(); }
-      saveLocal(); queueSaveToSupabase(); render();
-    });
-  });
+        const idx = state.players.findIndex((p) => String(p.id) === id);
+        if (idx === -1) {
+          closeAllMenus();
+          return;
+        }
 
-  // delete
-  document.querySelectorAll('.btn-delete').forEach((btn) => {
-    btn.addEventListener('click', async (ev) => {
-      const id = ev.currentTarget.getAttribute('data-id');
-      const idx = state.players.findIndex((p) => String(p.id) === String(id));
-      if (idx === -1) return;
-      const removed = state.players[idx];
-      if (supabaseClient && removed.id) {
-        try { await supabaseClient.from('players').delete().eq('id', removed.id); await syncFromSupabase(); } catch(e){ console.error(e); }
+        const removed = state.players[idx];
+
+        try {
+          if (supabaseClient && removed.id) {
+            await supabaseClient.from('players').delete().eq('id', removed.id);
+            await syncFromSupabase();
+          }
+        } catch (err) {
+          console.error('Supabase delete error', err);
+        }
+
+        state.players = state.players.filter((p) => String(p.id) !== id);
+        state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
+
+        saveLocal();
+        queueSaveToSupabase();
+        closeAllMenus();
+        render();
+        return;
       }
-      state.players = state.players.filter((p) => String(p.id) !== String(id));
-      state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
-      saveLocal(); queueSaveToSupabase(); render();
     });
-  });
+    bindPlayerRowHandlers._delegatedBound = true;
+  }
 }
 
 function bindSelectionHandlers() {
