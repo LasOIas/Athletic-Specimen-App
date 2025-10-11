@@ -179,9 +179,7 @@ function renderFilteredPlayers() {
   // sort by skill desc
   filtered.sort((a, b) => b.skill - a.skill);
 
-  if (!filtered.length) {
-    return '<p>No players found.</p>';
-  }
+  if (!filtered.length) return '<p>No players found.</p>';
 
   return filtered.map((player) => {
     const idx = state.players.findIndex(p => p.id === player.id);
@@ -189,55 +187,48 @@ function renderFilteredPlayers() {
     const isSelected = selectedSet().has(String(player.id));
 
     return `
-  <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
-    <div class="row" style="align-items:center; gap:8px;">
-      <input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />
-      <div>
-        <strong>${player.name}</strong>
-        <div class="meta">
-          Skill: ${player.skill === 0 ? 'Unset' : player.skill}
-          • <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
-          ${player.group ? ` • <span class="badge">${player.group}</span>` : ''}
+      <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
+        ${state.isAdmin ? `
+          <div class="menu-wrap">
+            <button type="button" class="btn-actions icon" aria-haspopup="true" aria-expanded="false"
+                    data-id="${player.id}" title="More actions">⋮</button>
+            <div class="card-menu" role="menu">
+              <button type="button" class="menu-item" data-role="menu-edit" data-index="${idx}">Edit</button>
+              <button type="button" class="menu-item" data-role="menu-delete" data-id="${player.id}">Delete</button>
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="row" style="align-items:center; gap:8px;">
+          <input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />
+          <div>
+            <strong>${player.name}</strong>
+            <div class="meta">
+              Skill: ${player.skill === 0 ? 'Unset' : player.skill}
+              • <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
+              ${player.group ? ` • <span class="badge">${player.group}</span>` : ''}
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
 
-    <div class="card-actions">
-      ${
-        checked
-          ? `<button class="btn-checkout primary" data-id="${player.id}">Check Out</button>`
-          : `<button class="btn-checkin primary" data-id="${player.id}">Check In</button>`
-      }
-      <span class="spacer"></span>
-${
-  state.isAdmin
-    ? `
-      <div class="menu-wrap">
-        <button class="btn-actions icon" aria-haspopup="true" aria-expanded="false" data-id="${player.id}" title="More actions">⋮</button>
-        <div class="card-menu" role="menu">
-          <button class="menu-item" data-role="menu-edit" data-index="${idx}">Edit</button>
-          <button class="menu-item" data-role="menu-delete" data-id="${player.id}">Delete</button>
+        <div class="card-actions">
+          ${checked
+            ? `<button class="btn-checkout primary" data-id="${player.id}">Check Out</button>`
+            : `<button class="btn-checkin primary" data-id="${player.id}">Check In</button>`
+          }
+          <span class="spacer"></span>
         </div>
+
+        ${state.isAdmin ? `
+          <div class="edit-row" style="display:none; gap:6px; margin-top:8px;" data-index="${idx}">
+            <input type="text" class="edit-name" value="${player.name}" />
+            <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
+            <input type="text" class="edit-group" placeholder="Group" value="${player.group ? player.group : ''}" />
+            <button class="btn-save-edit success" data-index="${idx}">Save</button>
+          </div>
+        ` : ''}
       </div>
-      `
-    : ''
-}
-
-    </div>
-
-    ${state.isAdmin ? `
-  <div class="menu-wrap">
-    <button type="button" class="btn-actions icon" aria-haspopup="true" aria-expanded="false"
-            data-id="${player.id}" title="More actions">⋮</button>
-    <div class="card-menu" role="menu">
-      <button type="button" class="menu-item" data-role="menu-edit" data-index="${idx}">Edit</button>
-      <button type="button" class="menu-item" data-role="menu-delete" data-id="${player.id}">Delete</button>
-  </div>
-  `
-  : ''
-  }
-</div>
-`;
+    `;
   }).join('');
 }
 
@@ -1269,14 +1260,15 @@ function render() {
 const sanitized = html.replace(/\n?\]\s*$/, '');
 root.innerHTML = sanitized;
 
-// immediately after: root.innerHTML = sanitized;
-
-// inject or refresh menu CSS so dropdowns are visible, clickable, and top-right
+// ---- dropdown menu CSS (keep ONLY this block) ----
 let menuStyle = document.getElementById('menu-css');
 const cssText = `
-.players { position: relative; overflow: visible; }
-.player-card { position: relative; overflow: visible; }
-.player-card .card-actions { position: relative; overflow: visible; }
+.player-card {
+  position: relative;
+  overflow: hidden;   /* prevents page stretching */
+  padding-top: 32px;  /* room for the ⋮ button */
+}
+.player-card .card-actions { position: relative; }
 .player-card .menu-wrap {
   position: absolute;
   top: 8px;
@@ -1287,12 +1279,16 @@ const cssText = `
   line-height: 1;
   padding: 4px 8px;
   border-radius: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
 }
 .card-menu {
   display: none;
   position: absolute;
   right: 0;
-  top: 28px; /* below the button */
+  top: 28px; /* under the button */
   min-width: 140px;
   background: #fff;
   border: 1px solid rgba(0,0,0,0.12);
@@ -1301,7 +1297,7 @@ const cssText = `
   box-shadow: 0 10px 24px rgba(0,0,0,0.16);
   z-index: 10001;
 }
-.menu-open > .card-menu { display: block; }
+.menu-wrap.menu-open .card-menu { display: block; }
 .menu-item {
   width: 100%;
   text-align: left;
@@ -1334,25 +1330,6 @@ bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
 }
-
-// inject or refresh menu CSS so dropdowns are not clipped
-let menuStyle = document.getElementById('menu-css');
-const cssText = `
-.player-card { position: relative; overflow: visible; }
-.player-card .card-actions { position: relative; overflow: visible; }
-.menu-wrap { position: relative; }
-.card-menu { display: none; position: absolute; right: 0; top: 110%; min-width: 140px; background: #fff; border: 1px solid rgba(0,0,0,0.1); border-radius: 6px; padding: 4px; box-shadow: 0 6px 20px rgba(0,0,0,0.12); z-index: 9999; }
-.menu-open > .card-menu { display: block; }
-.menu-item { width: 100%; text-align: left; padding: 6px 10px; border: none; background: transparent; cursor: pointer; }
-.menu-item[data-role="menu-delete"] { color: #b91c1c; }
-`;
-if (!menuStyle) {
-  menuStyle = document.createElement('style');
-  menuStyle.id = 'menu-css';
-  menuStyle.type = 'text/css';
-  document.head.appendChild(menuStyle);
-}
-menuStyle.textContent = cssText;
 
 // Attach event listeners to the current DOM. This function should be
 // called after each call to render().
@@ -1890,19 +1867,13 @@ document.querySelectorAll('.player-select').forEach(cb => {
 });
 
 function closeAllMenus() {
-  document.querySelectorAll('.card-menu').forEach(m => m.style.display = 'none');
-  document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
-}
-
-function closeAllMenus() {
   document.querySelectorAll('.menu-wrap').forEach(w => w.classList.remove('menu-open'));
   document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
 }
 
 function bindPlayerRowHandlers() {
-  // Rebind ⋮ buttons created by render
+  // rebind ⋮ buttons created by render
   document.querySelectorAll('.btn-actions').forEach(btn => {
-    // ensure no duplicate listeners from prior renders
     const clone = btn.cloneNode(true);
     btn.replaceWith(clone);
   });
@@ -1923,17 +1894,13 @@ function bindPlayerRowHandlers() {
       }
     });
     btn.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        btn.click();
-      }
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click(); }
     });
   });
 
-  // prevent clicks inside menu from closing it before items fire
+  // prevent menu clicks from closing before firing
   document.querySelectorAll('.card-menu').forEach(menu => {
     const clone = menu.cloneNode(true);
-    // copy child nodes to keep buttons
     clone.innerHTML = menu.innerHTML;
     menu.replaceWith(clone);
   });
@@ -1941,15 +1908,11 @@ function bindPlayerRowHandlers() {
     menu.addEventListener('click', (e) => e.stopPropagation());
   });
 
-  // attach global closers and action handlers once
   if (!bindPlayerRowHandlers._globalsBound) {
-    // close menus on outside click or Esc
     document.addEventListener('click', () => closeAllMenus());
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeAllMenus();
-    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllMenus(); });
 
-    // delegated actions: Edit / Delete
+    // delegated Edit/Delete
     document.addEventListener('click', async (e) => {
       const editBtn = e.target.closest('[data-role="menu-edit"]');
       const delBtn  = e.target.closest('[data-role="menu-delete"]');
@@ -1988,7 +1951,6 @@ function bindPlayerRowHandlers() {
         queueSaveToSupabase();
         closeAllMenus();
         render();
-        return;
       }
     });
 
