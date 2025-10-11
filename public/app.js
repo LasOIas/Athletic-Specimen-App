@@ -315,12 +315,12 @@ function renderFilteredPlayers() {
         </div>
 
         ${state.isAdmin ? `
-          <div class="edit-row" style="display:none; gap:6px; margin-top:8px;" data-index="${idx}">
-            <input type="text" class="edit-name" value="${player.name}" />
-            <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
-            <input type="text" class="edit-group" placeholder="Group" value="${player.group ? player.group : ''}" />
-            <button class="btn-save-edit success" data-index="${idx}" data-id="${player.id}">Save</button>
-          </div>
+          <div class="edit-row" style="display:none; align-items:center; gap:8px; margin-top:8px;" data-index="${idx}">
+  <input type="text" class="edit-name" placeholder="Name" value="${player.name}" style="width:150px; height:32px; padding:4px 8px; border-radius:6px; border:1px solid #ccc;" />
+  <input type="number" class="edit-skill" placeholder="Skill" step="0.1" value="${player.skill}" style="width:70px; height:32px; padding:4px 8px; border-radius:6px; border:1px solid #ccc; text-align:center;" />
+  <input type="text" class="edit-group" placeholder="Group" value="${player.group || ''}" style="width:120px; height:32px; padding:4px 8px; border-radius:6px; border:1px solid #ccc;" />
+  <button class="btn-save-edit success" data-index="${idx}" data-id="${player.id}" style="height:32px; padding:0 10px; border-radius:6px;">Save</button>
+</div>
         ` : ''}
       </div>
     `;
@@ -2171,6 +2171,40 @@ if (removeBtn) {
     render();
   });
 }
+
+// --- Inline Edit Save ---
+document.querySelectorAll('.btn-save-edit').forEach(btn => {
+  btn.addEventListener('click', async (ev) => {
+    const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
+    const id = ev.currentTarget.getAttribute('data-id');
+    const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
+    const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
+    const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
+
+    const name = nameInput.value.trim();
+    const skill = parseFloat(skillInput.value);
+    const group = groupInput.value.trim();
+
+    if (!name || isNaN(skill)) return;
+
+    const player = state.players[idx];
+    if (!player) return;
+
+    state.players[idx] = { ...player, name, skill, group };
+    saveLocal();
+
+    if (supabaseClient && player.id) {
+      try {
+        await supabaseClient.from('players').update({ name, skill, group }).eq('id', player.id);
+        await syncFromSupabase();
+      } catch (err) {
+        console.error('Supabase update error', err);
+      }
+    }
+
+    render();
+  });
+});
 }
 
 function attachPlayerEditHandlers() {
