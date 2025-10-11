@@ -1278,6 +1278,10 @@ const cssText = `
   z-index: 10000;
 }
 .btn-actions {
+  display: inline-block;
+  opacity: 1;                 /* Always visible */
+  visibility: visible;        /* Never hidden */
+  position: relative;
   line-height: 1;
   padding: 4px 8px;
   border-radius: 8px;
@@ -1285,6 +1289,11 @@ const cssText = `
   border: none;
   cursor: pointer;
   font-size: 18px;
+  color: #444;                /* Darker for visibility */
+  transition: none;           /* No fading or hover delay */
+}
+.btn-actions:hover {
+  background: rgba(0, 0, 0, 0.05);
 }
 .card-menu {
   display: block;
