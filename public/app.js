@@ -165,19 +165,26 @@ const selectedSet = () => new Set(state.selectedIds || []);
     let remoteOK = false;
     try {
       if (supabaseClient) {
-        if (next.id) {
-          remoteOK = await updatePlayerFieldsSupabase(next.id, { name, skill, group });
-        } else {
-          try {
-            const { error } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
-            if (error) throw error;
-            remoteOK = true;
-          } catch {
-            const { error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-            if (error) throw error;
-            remoteOK = true;
-          }
-        }
+        if (!next.id) {
+  try {
+    try {
+      const { error } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+      if (error) throw error;
+    } catch {
+      try {
+        const { error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+        if (error) throw error;
+      } catch {
+        // 3rd fallback: table has neither 'group' nor 'tag'
+        const { error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+        if (error) throw error;
+      }
+    }
+    remoteOK = true;
+  } catch (e) {
+    console.error('Supabase save error', e);
+  }
+}
       }
     } catch (err) {
       console.error('Supabase save error', err);
@@ -265,8 +272,9 @@ function queueSaveToSupabase() {
       const rows = state.players.map(p => {
         const base = { id: p.id || undefined, name: p.name, skill: p.skill };
         const grp = String(p.group || '').trim();
-        if (PREFER_TAG_COLUMN) return { ...base, tag: grp };
-        return { ...base, group: grp };
+        if (HAS_GROUP)      return { ...base, group: grp };
+        if (HAS_TAG)        return { ...base, tag: grp };
+        return base; // no group-like column in table
       });
 
       await supabaseClient.from('players').upsert(rows, { onConflict: 'id' });
@@ -540,34 +548,44 @@ async function syncFromSupabase() {
 }
 
 // Detect whether the 'players' table uses 'group' or 'tag'
-let PREFER_TAG_COLUMN = false; // when true, use 'tag' instead of 'group'
+
+let HAS_GROUP = false;
+let HAS_TAG = false;
+let PREFER_TAG_COLUMN = false;
 
 async function detectPlayersSchema() {
   if (!supabaseClient) return;
+  HAS_GROUP = false;
+  HAS_TAG = false;
+
   try {
-    // If this succeeds, 'group' exists
     const { error } = await supabaseClient.from('players').select('group').limit(1);
-    if (error) throw error;
-    PREFER_TAG_COLUMN = false;
-  } catch {
-    // Fall back to 'tag' column if 'group' is missing
-    PREFER_TAG_COLUMN = true;
+    HAS_GROUP = !error; // if no error, column exists
+  } catch {}
+
+  try {
+    const { error } = await supabaseClient.from('players').select('tag').limit(1);
+    HAS_TAG = !error;
+  } catch {}
+
+  // prefer tag only if tag exists and group does not
+  PREFER_TAG_COLUMN = HAS_TAG && !HAS_GROUP;
+
+  if (!HAS_GROUP && !HAS_TAG) {
+    console.warn('[players] No group-like column found (neither "group" nor "tag"). Group changes will be local-only.');
   }
 }
 
 async function updatePlayerFieldsSupabase(id, fields) {
   if (!supabaseClient || !id) return false;
 
-  // Split out group so we can map to tag when needed
   const { group, ...rest } = fields || {};
   const payload = { ...rest };
 
   if (typeof group !== 'undefined') {
-    if (PREFER_TAG_COLUMN) {
-      payload.tag = group || '';
-    } else {
-      payload.group = group || '';
-    }
+    if (HAS_GROUP)      payload.group = group || '';
+    else if (HAS_TAG)   payload.tag   = group || '';
+    // else: table has neither -> don’t send a group-like column
   }
 
   try {
@@ -1823,19 +1841,26 @@ function attachHandlers() {
 
         if (supabaseClient) {
           try {
-            try {
-              const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
-              await syncFromSupabase();
-              if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
-            } catch {
-              const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-              await syncFromSupabase();
-              if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
-            }
-          } catch (err) {
-            console.error('Supabase insert error', err);
-            state.players = [...state.players, inserted];
-          }
+  try {
+    const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+    await syncFromSupabase();
+    if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+  } catch {
+    try {
+      const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+      await syncFromSupabase();
+      if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+    } catch {
+      // 3rd fallback: table has neither 'group' nor 'tag'
+      const { data } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+      await syncFromSupabase();
+      if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+    }
+  }
+} catch (err) {
+  console.error('Supabase insert error', err);
+  state.players = [...state.players, inserted];
+}
         } else {
           state.players = [...state.players, inserted];
         }
