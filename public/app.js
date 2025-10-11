@@ -1356,63 +1356,68 @@ root.innerHTML = sanitized;
 // ---- dropdown menu CSS (keep ONLY this block) ----
 let menuStyle = document.getElementById('menu-css');
 const cssText = `
-.btn-actions { font-weight: 700; }
+/* ---- existing styles above ---- */
 
-.player-card {
-  position: relative;
-  overflow: visible;   /* allow dropdown to extend beyond card */
-  padding-top: 32px;   /* room for the ⋮ button */
-}
-.player-card .card-actions { position: relative; }
-.player-card .menu-wrap {
+/* Visible admin buttons on player cards */
+.visible-actions {
+  display: flex;
+  gap: 10px;
   position: absolute;
   top: 8px;
   right: 8px;
-  z-index: 10000;
+  z-index: 20;
 }
-.btn-actions {
-  display: inline-block;
-  opacity: 1;
-  visibility: visible;
+
+/* Edit button — vivid blue, strong contrast */
+.btn-edit {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  transition: background 0.2s, transform 0.1s;
+}
+.btn-edit:hover {
+  background: #1e40af;
+  transform: translateY(-1px);
+}
+.btn-edit:active {
+  background: #1e3a8a;
+  transform: translateY(0);
+}
+
+/* Delete button — bright red, bold */
+.btn-delete {
+  background: #dc2626;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  transition: background 0.2s, transform 0.1s;
+}
+.btn-delete:hover {
+  background: #b91c1c;
+  transform: translateY(-1px);
+}
+.btn-delete:active {
+  background: #991b1b;
+  transform: translateY(0);
+}
+
+/* Make sure player card has room for buttons */
+.player-card {
   position: relative;
-  line-height: 1;
-  padding: 4px 8px;
-  border-radius: 8px;
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  font-size: 18px;
-  color: #444;
+  overflow: visible;
+  padding-top: 56px;
 }
-.btn-actions:hover { background: rgba(0,0,0,0.05); }
-
-.card-menu {
-  display: none;
-  position: absolute;
-  right: 0;
-  top: 28px;
-  min-width: 140px;
-  background: #fff;
-  border: 1px solid rgba(0,0,0,0.12);
-  border-radius: 8px;
-  padding: 4px;
-  box-shadow: 0 10px 24px rgba(0,0,0,0.16);
-  z-index: 10001;
-}
-.menu-wrap.menu-open .card-menu { display: block; }
-
-.menu-item {
-  width: 100%;
-  text-align: left;
-  padding: 8px 10px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  border-radius: 6px;
-}
-.menu-item:hover { background: rgba(0,0,0,0.05); }
-.menu-item[data-role="menu-delete"] { color: #b91c1c; }
 `;
+
 if (!menuStyle) {
   menuStyle = document.createElement('style');
   menuStyle.id = 'menu-css';
