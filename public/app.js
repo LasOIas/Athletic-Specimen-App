@@ -1287,16 +1287,16 @@ const cssText = `
   font-size: 18px;
 }
 .card-menu {
-  display: none;
+  display: block;
   position: absolute;
   right: 0;
-  top: 28px; /* under the button */
+  top: 28px;
   min-width: 140px;
   background: #fff;
   border: 1px solid rgba(0,0,0,0.12);
   border-radius: 8px;
   padding: 4px;
-  box-shadow: 0 10px 24px rgba(0,0,0,0.16);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
   z-index: 10001;
 }
 .menu-wrap.menu-open .card-menu { display: block; }
