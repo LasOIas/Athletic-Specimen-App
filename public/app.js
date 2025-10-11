@@ -1263,6 +1263,8 @@ root.innerHTML = sanitized;
 // ---- dropdown menu CSS (keep ONLY this block) ----
 let menuStyle = document.getElementById('menu-css');
 const cssText = `
+.btn-actions { font-weight: 700; }
+
 .player-card {
   position: relative;
   overflow: hidden;   /* prevents page stretching */
@@ -1853,52 +1855,19 @@ function attachHandlers() {
       render();
     });
   }
-  // --- Selection checkboxes on player cards ---
-document.querySelectorAll('.player-select').forEach(cb => {
-  cb.addEventListener('change', (e) => {
-    const id = String(e.currentTarget.getAttribute('data-id'));
-    const set = selectedSet();
-    if (e.currentTarget.checked) set.add(id); else set.delete(id);
-    state.selectedIds = Array.from(set);
-    // just toggle the class without re-rendering the world
-    const card = e.currentTarget.closest('.player-card');
-    if (card) card.classList.toggle('is-selected', e.currentTarget.checked);
-  });
-});
-
-function closeAllMenus() {
-  document.querySelectorAll('.menu-wrap').forEach(w => w.classList.remove('menu-open'));
-  document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
-}
 
 function bindPlayerRowHandlers() {
-  // rebind ⋮ buttons created by render
+  // Rebind ⋮ buttons created by render
   document.querySelectorAll('.btn-actions').forEach(btn => {
     const clone = btn.cloneNode(true);
     btn.replaceWith(clone);
   });
+
   document.querySelectorAll('.btn-actions').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const wrap = btn.closest('.menu-wrap');
-      const isOpen = wrap && wrap.classList.contains('menu-open');
-      closeAllMenus();
-      if (wrap) {
-        if (!isOpen) {
-          wrap.classList.add('menu-open');
-          btn.setAttribute('aria-expanded', 'true');
-        } else {
-          wrap.classList.remove('menu-open');
-          btn.setAttribute('aria-expanded', 'false');
-        }
-      }
-    });
-    btn.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click(); }
-    });
+    cloneButtonBehavior(btn);
   });
 
-  // prevent menu clicks from closing before firing
+  // Keep menu clicks from closing before firing
   document.querySelectorAll('.card-menu').forEach(menu => {
     const clone = menu.cloneNode(true);
     clone.innerHTML = menu.innerHTML;
@@ -1908,11 +1877,12 @@ function bindPlayerRowHandlers() {
     menu.addEventListener('click', (e) => e.stopPropagation());
   });
 
+  // One-time global closers & delegated actions
   if (!bindPlayerRowHandlers._globalsBound) {
     document.addEventListener('click', () => closeAllMenus());
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllMenus(); });
 
-    // delegated Edit/Delete
+    // Delegated Edit/Delete actions
     document.addEventListener('click', async (e) => {
       const editBtn = e.target.closest('[data-role="menu-edit"]');
       const delBtn  = e.target.closest('[data-role="menu-delete"]');
@@ -1956,6 +1926,46 @@ function bindPlayerRowHandlers() {
 
     bindPlayerRowHandlers._globalsBound = true;
   }
+
+  function cloneButtonBehavior(btn) {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wrap = btn.closest('.menu-wrap');
+      const isOpen = wrap && wrap.classList.contains('menu-open');
+      closeAllMenus();
+      if (wrap) {
+        if (!isOpen) {
+          wrap.classList.add('menu-open');
+          btn.setAttribute('aria-expanded', 'true');
+        } else {
+          wrap.classList.remove('menu-open');
+          btn.setAttribute('aria-expanded', 'false');
+        }
+      }
+    });
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); btn.click(); }
+    });
+  }
+}
+
+function bindSelectionHandlers() {
+  // checkbox toggle for selected state (bulk bar)
+  document.querySelectorAll('.player-select').forEach(cb => {
+    const clone = cb.cloneNode(true);
+    cb.replaceWith(clone);
+  });
+  document.querySelectorAll('.player-select').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const id = String(e.currentTarget.getAttribute('data-id'));
+      const set = selectedSet();
+      if (e.currentTarget.checked) set.add(id); else set.delete(id);
+      state.selectedIds = Array.from(set);
+      const card = e.currentTarget.closest('.player-card');
+      if (card) card.classList.toggle('is-selected', e.currentTarget.checked);
+      updateBulkBarVisibility();
+    });
+  });
 }
 
 function bindSelectionHandlers() {
