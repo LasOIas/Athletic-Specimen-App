@@ -262,29 +262,14 @@ function queueSaveToSupabase() {
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {
     try {
-      // Prepare rows (id may be undefined for new local players)
-      const rows = state.players.map(p => ({
-        id: p.id || undefined,
-        name: p.name,
-        skill: p.skill,
-        group: p.group || ''
-      }));
+      const rows = state.players.map(p => {
+        const base = { id: p.id || undefined, name: p.name, skill: p.skill };
+        const grp = String(p.group || '').trim();
+        if (PREFER_TAG_COLUMN) return { ...base, tag: grp };
+        return { ...base, group: grp };
+      });
 
-      // First try with group
-      try {
-        await supabaseClient
-          .from('players')
-          .upsert(rows, { onConflict: 'id' });
-      } catch (e1) {
-        // Fallback to tag if schema uses 'tag' instead of 'group'
-        const withTag = rows.map(r => {
-          const { group, ...rest } = r;
-          return { ...rest, tag: group || '' };
-        });
-        await supabaseClient
-          .from('players')
-          .upsert(withTag, { onConflict: 'id' });
-      }
+      await supabaseClient.from('players').upsert(rows, { onConflict: 'id' });
     } catch (err) {
       console.error('Auto-save error:', err);
     }
@@ -554,27 +539,43 @@ async function syncFromSupabase() {
   }
 }
 
+// Detect whether the 'players' table uses 'group' or 'tag'
+let PREFER_TAG_COLUMN = false; // when true, use 'tag' instead of 'group'
+
+async function detectPlayersSchema() {
+  if (!supabaseClient) return;
+  try {
+    // If this succeeds, 'group' exists
+    const { error } = await supabaseClient.from('players').select('group').limit(1);
+    if (error) throw error;
+    PREFER_TAG_COLUMN = false;
+  } catch {
+    // Fall back to 'tag' column if 'group' is missing
+    PREFER_TAG_COLUMN = true;
+  }
+}
+
 async function updatePlayerFieldsSupabase(id, fields) {
   if (!supabaseClient || !id) return false;
+
+  // Split out group so we can map to tag when needed
+  const { group, ...rest } = fields || {};
+  const payload = { ...rest };
+
+  if (typeof group !== 'undefined') {
+    if (PREFER_TAG_COLUMN) {
+      payload.tag = group || '';
+    } else {
+      payload.group = group || '';
+    }
+  }
+
   try {
-    const { error } = await supabaseClient.from('players').update(fields).eq('id', id);
+    const { error } = await supabaseClient.from('players').update(payload).eq('id', id);
     if (error) throw error;
     return true;
   } catch (e) {
-    if (fields.group) {
-      try {
-        const alt = { ...fields };
-        delete alt.group;
-        alt.tag = fields.group;
-        const { error } = await supabaseClient.from('players').update(alt).eq('id', id);
-        if (error) throw error;
-        return true;
-      } catch (e2) {
-        console.error('Supabase update fallback failed', e2);
-      }
-    } else {
-      console.error('Supabase update error', e);
-    }
+    console.error('Supabase update error', e);
     return false;
   }
 }
@@ -1235,6 +1236,24 @@ function bindPlayerRowHandlers() {
 
 }
 
+function bindSelectionHandlers() {
+  // checkbox toggle for selected state (bulk bar)
+  document.querySelectorAll('.player-select').forEach(cb => {
+    const clone = cb.cloneNode(true);
+    cb.replaceWith(clone);
+  });
+  document.querySelectorAll('.player-select').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const id = String(e.currentTarget.getAttribute('data-id'));
+      const set = selectedSet();
+      if (e.currentTarget.checked) set.add(id); else set.delete(id);
+      state.selectedIds = Array.from(set);
+      const card = e.currentTarget.closest('.player-card');
+      if (card) card.classList.toggle('is-selected', e.currentTarget.checked);
+      updateBulkBarVisibility();
+    });
+  });
+}
 // Render the entire application into the root element. Each call replaces
 // existing content to reflect the current state. Event handlers are
 // attached inline within this function. To minimize reflows, we build
@@ -2151,25 +2170,6 @@ function attachHandlers() {
     });
   }
 
-function bindSelectionHandlers() {
-  // checkbox toggle for selected state (bulk bar)
-  document.querySelectorAll('.player-select').forEach(cb => {
-    const clone = cb.cloneNode(true);
-    cb.replaceWith(clone);
-  });
-  document.querySelectorAll('.player-select').forEach(cb => {
-    cb.addEventListener('change', (e) => {
-      const id = String(e.currentTarget.getAttribute('data-id'));
-      const set = selectedSet();
-      if (e.currentTarget.checked) set.add(id); else set.delete(id);
-      state.selectedIds = Array.from(set);
-      const card = e.currentTarget.closest('.player-card');
-      if (card) card.classList.toggle('is-selected', e.currentTarget.checked);
-      updateBulkBarVisibility();
-    });
-  });
-}
-
 // --- Select all visible ---
 const selectAllBtn = document.getElementById('btn-select-all-visible');
 if (selectAllBtn) {
@@ -2271,16 +2271,18 @@ function init() {
   // Load from localStorage
   loadLocal();
   // Sync from supabase if available
-  syncFromSupabase().then(() => {
-    // Register service worker for PWA offline support
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js').catch((err) => {
-        console.warn('Service worker registration failed', err);
-      });
-    }
-    // Render UI
-    render();
-  });  
+  // Sync from supabase if available
+(async () => {
+  await detectPlayersSchema();
+  await syncFromSupabase();
+  // Register service worker for PWA offline support
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch((err) => {
+      console.warn('Service worker registration failed', err);
+    });
+  }
+  render();
+})();
 }
 
 if (document.readyState === 'loading') {
