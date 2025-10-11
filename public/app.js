@@ -1803,34 +1803,6 @@ function attachHandlers() {
       });
     });
 
-    // Save edited player (inline)
-    document.querySelectorAll('.btn-save-edit').forEach((btn) => {
-      btn.addEventListener('click', async (ev) => {
-        const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
-        const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
-        const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
-        const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
-        const name = nameInput.value.trim();
-        const skill = parseFloat(skillInput.value);
-        const group = groupInput ? groupInput.value.trim() : '';
-        if (!name || isNaN(skill) || skill <= 0) return;
-
-        const updated = [...state.players];
-        const player = updated[idx];
-        updated[idx] = { ...player, name, skill, group };
-        state.players = updated;
-
-        if (player && player.id) {
-          await updatePlayerFieldsSupabase(player.id, { name, skill, group });
-          await syncFromSupabase();
-        }
-
-        saveLocal();
-        queueSaveToSupabase();
-        render();
-      });
-    });
-
     document.querySelectorAll('.btn-checkin').forEach((btn) => {
       btn.addEventListener('click', async (ev) => {
         const id = ev.currentTarget.getAttribute('data-id');
@@ -2162,21 +2134,22 @@ function attachPlayerEditHandlers() {
 
   if (!name || Number.isNaN(skill) || skill <= 0) return;
 
-  // optimistic local update
-  const copy = [...state.players];
+  // 1) Optimistic local update
+  const copy   = [...state.players];
   const player = copy[idx];
-  copy[idx] = { ...player, name, skill, group };
+  copy[idx]    = { ...player, name, skill, group };
   state.players = copy;
 
-  // attempt remote update (optional)
-  let ok = true;
+  // 2) Try remote update (optional)
   if (player && player.id) {
-    ok = await updatePlayerFieldsSupabase(player.id, { name, skill, group });
+    const ok = await updatePlayerFieldsSupabase(player.id, { name, skill, group });
+    // (optional) if (!ok) console.warn('Saved locally; will retry via queueSaveToSupabase');
   }
 
+  // 3) Persist + re-render (do NOT call syncFromSupabase here)
   saveLocal();
-  queueSaveToSupabase(); // debounce/try later if needed
-  render();              // do NOT call syncFromSupabase() here
+  queueSaveToSupabase();
+  render();
 });
   });
 }
