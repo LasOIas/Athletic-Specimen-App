@@ -225,19 +225,33 @@ function queueSaveToSupabase() {
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {
     try {
-      // Deduplicate players by name before saving
-const uniquePlayers = state.players.reduce((acc, p) => {
-  if (!acc.some(x => normalize(x.name) === normalize(p.name))) {
-    acc.push({ ...p, group: p.group || '' });
-  }
-  return acc;
-}, []);
+      // Prepare rows (id may be undefined for new local players)
+      const rows = state.players.map(p => ({
+        id: p.id || undefined,
+        name: p.name,
+        skill: p.skill,
+        group: p.group || ''
+      }));
 
-await supabaseClient.from('players').upsert(uniquePlayers, { onConflict:'name' });      
+      // First try with group
+      try {
+        await supabaseClient
+          .from('players')
+          .upsert(rows, { onConflict: 'id' });
+      } catch (e1) {
+        // Fallback to tag if schema uses 'tag' instead of 'group'
+        const withTag = rows.map(r => {
+          const { group, ...rest } = r;
+          return { ...rest, tag: group || '' };
+        });
+        await supabaseClient
+          .from('players')
+          .upsert(withTag, { onConflict: 'id' });
+      }
     } catch (err) {
       console.error('Auto-save error:', err);
     }
-  }, 1000);
+  }, 800);
 }
 
 // Balanced group generation algorithm. Given a list of all players, the set
@@ -1552,11 +1566,46 @@ if (!menuStyle) {
   document.head.appendChild(menuStyle);
 }
 menuStyle.textContent = cssText;
+let editStyle = document.getElementById('edit-css');
+const editCss = `
+.player-card .edit-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:10px;
+  padding:10px;
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:8px;
+  box-shadow:0 2px 6px rgba(0,0,0,.04);
+}
 
-  // After DOM has been updated, attach event listeners to interactive
-  // elements. Because content is rebuilt on every render call, we must
-  // reattach handlers each time. Listeners reference functions defined
-  // below.
+/* shorter inputs (desktop), but expand on small screens */
+.player-card .edit-row input{
+  flex:0 0 240px;
+  max-width:240px;
+}
+.player-card .edit-row .btn-save-edit{
+  flex:0 0 auto;
+  padding:8px 14px;
+}
+
+/* mobile: let them go full width */
+@media (max-width: 640px){
+  .player-card .edit-row input{
+    flex:1 1 100%;
+    max-width:100%;
+  }
+}
+`;
+if (!editStyle) {
+  editStyle = document.createElement('style');
+  editStyle.id = 'edit-css';
+  editStyle.type = 'text/css';
+  document.head.appendChild(editStyle);
+}
+editStyle.textContent = editCss;
+
 // at the end of render()
 attachHandlers();
 bindTournamentTab();
@@ -2174,36 +2223,74 @@ if (removeBtn) {
   });
 }
 }
+
 function attachPlayerEditHandlers() {
   document.querySelectorAll('.btn-save-edit').forEach((btn) => {
     btn.addEventListener('click', async (ev) => {
-  const idx = parseInt(ev.currentTarget.getAttribute('data-index'), 10);
-  const nameInput  = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
-  const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
-  const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
-  const name  = nameInput.value.trim();
-  const skill = parseFloat(skillInput.value);
-  const group = groupInput ? groupInput.value.trim() : '';
+      const idx = parseInt(ev.currentTarget.getAttribute('data-index'), 10);
+      const nameInput  = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
+      const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
+      const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
+      const name  = nameInput.value.trim();
+      const skill = parseFloat(skillInput.value);
+      const group = groupInput ? groupInput.value.trim() : '';
+      if (!name || Number.isNaN(skill) || skill <= 0) return;
 
-  if (!name || Number.isNaN(skill) || skill <= 0) return;
+      // Optimistic local update
+      const copy   = [...state.players];
+      const player = copy[idx];
+      copy[idx]    = { ...player, name, skill, group };
+      state.players = copy;
 
-  // 1) Optimistic local update
-  const copy   = [...state.players];
-  const player = copy[idx];
-  copy[idx]    = { ...player, name, skill, group };
-  state.players = copy;
+      let remoteOK = false;
 
-  // 2) Try remote update (optional)
-  if (player && player.id) {
-    const ok = await updatePlayerFieldsSupabase(player.id, { name, skill, group });
-    // (optional) if (!ok) console.warn('Saved locally; will retry via queueSaveToSupabase');
-  }
+      if (supabaseClient) {
+        try {
+          if (player && player.id) {
+            // update by id (with group->tag fallback inside the helper)
+            remoteOK = await updatePlayerFieldsSupabase(player.id, { name, skill, group });
+          } else {
+            // no id yet -> insert first (try group then tag)
+            try {
+              const { data, error } = await supabaseClient
+                .from('players')
+                .insert([{ name, skill, group }])
+                .select();
+              if (error) throw error;
+              remoteOK = true;
+            } catch {
+              const { data, error } = await supabaseClient
+                .from('players')
+                .insert([{ name, skill, tag: group }])
+                .select();
+              if (error) throw error;
+              remoteOK = true;
+            }
+          }
+        } catch (e) {
+          console.error('Supabase save error', e);
+        }
+      }
 
-  // 3) Persist + re-render (do NOT call syncFromSupabase here)
-  saveLocal();
-  queueSaveToSupabase();
-  render();
-});
+      saveLocal();
+      queueSaveToSupabase(); // still useful for bulk changes
+
+      // If remote worked, refresh to capture ids and server truth
+      if (remoteOK) await syncFromSupabase();
+
+      // close editor row + tiny toast
+      const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+      if (row) row.style.display = 'none';
+      try {
+        const toast = document.createElement('div');
+        toast.textContent = remoteOK ? 'Saved to Supabase ✅' : 'Saved locally ✅';
+        toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 1200);
+      } catch {}
+
+      render();
+    });
   });
 }
 
