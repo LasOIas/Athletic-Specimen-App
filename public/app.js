@@ -226,14 +226,17 @@ ${
     </div>
 
     ${state.isAdmin ? `
-      <div class="edit-row" style="display:none; gap:6px; margin-top:8px;" data-index="${idx}">
-        <input type="text" class="edit-name" value="${player.name}" />
-        <input type="number" class="edit-skill" value="${player.skill}" step="0.1" />
-        <input type="text" class="edit-group" placeholder="Group" value="${player.group ? player.group : ''}" />
-        <button class="btn-save-edit success" data-index="${idx}">Save</button>
-      </div>` : ''
-    }
+  <div class="menu-wrap">
+    <button type="button" class="btn-actions icon" aria-haspopup="true" aria-expanded="false"
+            data-id="${player.id}" title="More actions">⋮</button>
+    <div class="card-menu" role="menu">
+      <button type="button" class="menu-item" data-role="menu-edit" data-index="${idx}">Edit</button>
+      <button type="button" class="menu-item" data-role="menu-delete" data-id="${player.id}">Delete</button>
   </div>
+  `
+  : ''
+  }
+</div>
 `;
   }).join('');
 }
@@ -1266,6 +1269,59 @@ function render() {
 const sanitized = html.replace(/\n?\]\s*$/, '');
 root.innerHTML = sanitized;
 
+// immediately after: root.innerHTML = sanitized;
+
+// inject or refresh menu CSS so dropdowns are visible, clickable, and top-right
+let menuStyle = document.getElementById('menu-css');
+const cssText = `
+.players { position: relative; overflow: visible; }
+.player-card { position: relative; overflow: visible; }
+.player-card .card-actions { position: relative; overflow: visible; }
+.player-card .menu-wrap {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10000;
+}
+.btn-actions {
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+.card-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 28px; /* below the button */
+  min-width: 140px;
+  background: #fff;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 10px 24px rgba(0,0,0,0.16);
+  z-index: 10001;
+}
+.menu-open > .card-menu { display: block; }
+.menu-item {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.menu-item:hover { background: rgba(0,0,0,0.05); }
+.menu-item[data-role="menu-delete"] { color: #b91c1c; }
+`;
+if (!menuStyle) {
+  menuStyle = document.createElement('style');
+  menuStyle.id = 'menu-css';
+  menuStyle.type = 'text/css';
+  document.head.appendChild(menuStyle);
+}
+menuStyle.textContent = cssText;
+
   // After DOM has been updated, attach event listeners to interactive
   // elements. Because content is rebuilt on every render call, we must
   // reattach handlers each time. Listeners reference functions defined
@@ -1839,17 +1895,16 @@ function closeAllMenus() {
 }
 
 function closeAllMenus() {
-  document.querySelectorAll('.menu-wrap').forEach(w => {
-    w.classList.remove('menu-open');
-  });
+  document.querySelectorAll('.menu-wrap').forEach(w => w.classList.remove('menu-open'));
   document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
 }
 
 function bindPlayerRowHandlers() {
-  // open or close the per-card dropdown menu
+  // Rebind ⋮ buttons created by render
   document.querySelectorAll('.btn-actions').forEach(btn => {
-    // remove old listeners to avoid stacking on re-render
-    btn.replaceWith(btn.cloneNode(true));
+    // ensure no duplicate listeners from prior renders
+    const clone = btn.cloneNode(true);
+    btn.replaceWith(clone);
   });
   document.querySelectorAll('.btn-actions').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -1875,37 +1930,35 @@ function bindPlayerRowHandlers() {
     });
   });
 
-  // keep clicks inside the menu from bubbling to the outside-closer
+  // prevent clicks inside menu from closing it before items fire
   document.querySelectorAll('.card-menu').forEach(menu => {
-    // rebuild listener to avoid duplicates
-    menu.replaceWith(menu.cloneNode(true));
+    const clone = menu.cloneNode(true);
+    // copy child nodes to keep buttons
+    clone.innerHTML = menu.innerHTML;
+    menu.replaceWith(clone);
   });
   document.querySelectorAll('.card-menu').forEach(menu => {
-    menu.addEventListener('click', (e) => {
-      e.stopPropagation();
-    });
+    menu.addEventListener('click', (e) => e.stopPropagation());
   });
 
-  // one global outside click closer, attach once
-  if (!bindPlayerRowHandlers._outsideBound) {
+  // attach global closers and action handlers once
+  if (!bindPlayerRowHandlers._globalsBound) {
+    // close menus on outside click or Esc
     document.addEventListener('click', () => closeAllMenus());
-    bindPlayerRowHandlers._outsideBound = true;
-  }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeAllMenus();
+    });
 
-  // one global delegated handler for Edit and Delete that survives re-renders
-  if (!bindPlayerRowHandlers._delegatedBound) {
+    // delegated actions: Edit / Delete
     document.addEventListener('click', async (e) => {
-      const editBtn = e.target.closest('[data-role="menu-edit"], .btn-edit');
-      const delBtn  = e.target.closest('[data-role="menu-delete"], .btn-delete');
+      const editBtn = e.target.closest('[data-role="menu-edit"]');
+      const delBtn  = e.target.closest('[data-role="menu-delete"]');
 
       if (editBtn) {
         e.stopPropagation();
         const idx = parseInt(editBtn.getAttribute('data-index'));
-        // open the inline edit row for this player
         const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-        if (row) {
-          row.style.display = row.style.display === 'none' ? 'flex' : 'none';
-        }
+        if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
         closeAllMenus();
         return;
       }
@@ -1916,10 +1969,7 @@ function bindPlayerRowHandlers() {
         if (!id) return;
 
         const idx = state.players.findIndex((p) => String(p.id) === id);
-        if (idx === -1) {
-          closeAllMenus();
-          return;
-        }
+        if (idx === -1) { closeAllMenus(); return; }
 
         const removed = state.players[idx];
 
@@ -1934,7 +1984,6 @@ function bindPlayerRowHandlers() {
 
         state.players = state.players.filter((p) => String(p.id) !== id);
         state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
-
         saveLocal();
         queueSaveToSupabase();
         closeAllMenus();
@@ -1942,7 +1991,8 @@ function bindPlayerRowHandlers() {
         return;
       }
     });
-    bindPlayerRowHandlers._delegatedBound = true;
+
+    bindPlayerRowHandlers._globalsBound = true;
   }
 }
 
