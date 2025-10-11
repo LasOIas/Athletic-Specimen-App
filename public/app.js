@@ -209,19 +209,21 @@ function renderFilteredPlayers() {
           : `<button class="btn-checkin primary" data-id="${player.id}">Check In</button>`
       }
       <span class="spacer"></span>
-      ${
+      // inside renderFilteredPlayers() where the per-card actions are built
+${
   state.isAdmin
     ? `
       <div class="menu-wrap" style="position:relative; display:inline-block;">
         <button class="btn-actions icon" aria-haspopup="true" aria-expanded="false" data-id="${player.id}" title="More actions">⋮</button>
-        <div class="card-menu" role="menu" style="display:none; position:absolute; right:0; top:110%; min-width:120px; background:#fff; border:1px solid rgba(0,0,0,0.1); border-radius:6px; padding:4px; box-shadow:0 6px 20px rgba(0,0,0,0.12); z-index:20;">
-          <button class="menu-item btn-edit" role="menuitem" data-index="${idx}" style="width:100%; text-align:left; padding:6px 10px; border:none; background:transparent; cursor:pointer;">Edit</button>
-          <button class="menu-item btn-delete danger" role="menuitem" data-id="${player.id}" style="width:100%; text-align:left; padding:6px 10px; border:none; background:transparent; cursor:pointer; color:#b91c1c;">Delete</button>
+        <div class="card-menu" role="menu" style="display:none; position:absolute; right:0; top:110%; min-width:140px; background:#fff; border:1px solid rgba(0,0,0,0.1); border-radius:6px; padding:4px; box-shadow:0 6px 20px rgba(0,0,0,0.12); z-index:9999;">
+          <button class="menu-item" data-role="menu-edit" data-index="${idx}" style="width:100%; text-align:left; padding:6px 10px; border:none; background:transparent; cursor:pointer;">Edit</button>
+          <button class="menu-item" data-role="menu-delete" data-id="${player.id}" style="width:100%; text-align:left; padding:6px 10px; border:none; background:transparent; cursor:pointer; color:#b91c1c;">Delete</button>
         </div>
       </div>
       `
     : ''
 }
+
     </div>
 
     ${state.isAdmin ? `
@@ -1268,9 +1270,12 @@ root.innerHTML = sanitized;
   // elements. Because content is rebuilt on every render call, we must
   // reattach handlers each time. Listeners reference functions defined
   // below.
-  attachHandlers();
+// at the end of render()
+attachHandlers();
 bindTournamentTab();
 bindFiltersCollapsible();
+bindPlayerRowHandlers();
+bindSelectionHandlers();
 updateBulkBarVisibility();
 }
 
@@ -1816,6 +1821,7 @@ function closeAllMenus() {
 
 function bindPlayerRowHandlers() {
   // open or close the per-card dropdown menu
+// at the top of bindPlayerRowHandlers()
 document.querySelectorAll('.btn-actions').forEach(btn => {
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -1829,6 +1835,85 @@ document.querySelectorAll('.btn-actions').forEach(btn => {
     }
   });
 });
+
+// prevent outside-click from closing the menu before item handlers run
+document.querySelectorAll('.card-menu').forEach(menu => {
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation(); // allow item handlers below to run first
+  });
+});
+
+// attach a single, once-only outside click closer
+if (!bindPlayerRowHandlers._menuGlobalOutside) {
+  document.addEventListener('click', () => closeAllMenus());
+  bindPlayerRowHandlers._menuGlobalOutside = true;
+}
+
+// keyboard support for ⋮
+document.querySelectorAll('.btn-actions').forEach(btn => {
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      btn.click();
+    }
+  });
+});
+
+// global delegated handler for menu actions and legacy buttons
+if (!bindPlayerRowHandlers._delegatedActions) {
+  document.addEventListener('click', async (e) => {
+    const editBtn = e.target.closest('[data-role="menu-edit"], .btn-edit');
+    const delBtn  = e.target.closest('[data-role="menu-delete"], .btn-delete');
+
+    if (editBtn) {
+      e.stopPropagation();
+      // open inline editor row for this index
+      const idx = parseInt(editBtn.getAttribute('data-index'));
+      const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+      if (row) {
+        row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+        closeAllMenus();
+      }
+      return;
+    }
+
+    if (delBtn) {
+      e.stopPropagation();
+      const id = String(delBtn.getAttribute('data-id') || '');
+      if (!id) return;
+
+      // delete exactly like your existing .btn-delete logic
+      const idx = state.players.findIndex((p) => String(p.id) === id);
+      if (idx === -1) { closeAllMenus(); return; }
+
+      const removed = state.players[idx];
+
+      try {
+        if (supabaseClient && removed.id) {
+          await supabaseClient.from('players').delete().eq('id', removed.id);
+          await syncFromSupabase();
+        }
+      } catch (err) {
+        console.error('Supabase delete error', err);
+      }
+
+      state.players = state.players.filter((p) => String(p.id) !== id);
+      state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
+      saveLocal();
+      queueSaveToSupabase();
+      closeAllMenus();
+      render();
+      return;
+    }
+  });
+
+  bindPlayerRowHandlers._delegatedActions = true;
+}
+
+function closeAllMenus() {
+  document.querySelectorAll('.card-menu').forEach(m => m.style.display = 'none');
+  document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
 
 // one global outside-click closer, attached only once
 if (!bindPlayerRowHandlers._menuGlobal) {
