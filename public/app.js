@@ -1016,13 +1016,13 @@ function closeAllMenus() {
 }
 
 function bindPlayerRowHandlers() {
-  // Rebind ⋮ buttons created by render (remove stale listeners)
+  // Rebind fresh ⋮ buttons on each render
   document.querySelectorAll('.btn-actions').forEach(btn => {
     const clone = btn.cloneNode(true);
     btn.replaceWith(clone);
   });
 
-  // Toggle this card's menu on button click
+  // Toggle the dropdown for this card
   document.querySelectorAll('.btn-actions').forEach(btn => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -1034,48 +1034,44 @@ function bindPlayerRowHandlers() {
         btn.setAttribute('aria-expanded', String(!isOpen));
       }
     });
-    btn.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        btn.click();
-      }
-    });
   });
 
-  // Keep menu clicks from bubbling/closing
-  document.querySelectorAll('.card-menu').forEach(menu => {
-    const clone = menu.cloneNode(true);
-    clone.innerHTML = menu.innerHTML;
-    menu.replaceWith(clone);
-  });
+  // Keep clicks inside the dropdown from closing it immediately
   document.querySelectorAll('.card-menu').forEach(menu => {
     menu.addEventListener('click', (e) => e.stopPropagation());
   });
 
-  // One-time global closers & delegated actions
+  // One-time global close and delegated actions
   if (!bindPlayerRowHandlers._globalsBound) {
     document.addEventListener('click', () => closeAllMenus());
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllMenus(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeAllMenus();
+    });
 
+    // Delegated Edit and Delete
     document.addEventListener('click', async (e) => {
       const editBtn = e.target.closest('[data-role="menu-edit"]');
       const delBtn  = e.target.closest('[data-role="menu-delete"]');
 
+      // Edit opens the inline editor row for this card
       if (editBtn) {
         e.stopPropagation();
-        const idx = parseInt(editBtn.getAttribute('data-index'));
+        const idx = parseInt(editBtn.getAttribute('data-index'), 10);
         const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-        if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+        if (row) {
+          row.style.display = row.style.display === 'none' || row.style.display === '' ? 'flex' : 'none';
+        }
         closeAllMenus();
         return;
       }
 
+      // Delete removes player locally and in Supabase, then re-renders
       if (delBtn) {
         e.stopPropagation();
         const id = String(delBtn.getAttribute('data-id') || '');
-        if (!id) return;
+        if (!id) { closeAllMenus(); return; }
 
-        const idx = state.players.findIndex((p) => String(p.id) === id);
+        const idx = state.players.findIndex(p => String(p.id) === id);
         if (idx === -1) { closeAllMenus(); return; }
 
         const removed = state.players[idx];
@@ -1089,8 +1085,9 @@ function bindPlayerRowHandlers() {
           console.error('Supabase delete error', err);
         }
 
-        state.players = state.players.filter((p) => String(p.id) !== id);
-        state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
+        state.players = state.players.filter(p => String(p.id) !== id);
+        state.checkedIn = state.checkedIn.filter(n => n !== removed.name);
+
         saveLocal();
         queueSaveToSupabase();
         closeAllMenus();
@@ -1466,6 +1463,7 @@ bindTournamentTab();
 bindFiltersCollapsible();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
+attachPlayerEditHandlers();
 updateBulkBarVisibility();
 }
 
@@ -2104,45 +2102,34 @@ if (removeBtn) {
   });
 }
 }
-
 function attachPlayerEditHandlers() {
-  // Edit button toggles
-  document.querySelectorAll('.btn-edit').forEach((btn) => {
-    btn.addEventListener('click', (ev) => {
-      const idx = ev.currentTarget.getAttribute('data-index');
-      const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-      if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+  document.querySelectorAll('.btn-save-edit').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      const idx = parseInt(ev.currentTarget.getAttribute('data-index'), 10);
+      const nameInput  = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
+      const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
+      const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
+      const name  = nameInput.value.trim();
+      const skill = parseFloat(skillInput.value);
+      const group = groupInput ? groupInput.value.trim() : '';
+
+      if (!name || Number.isNaN(skill) || skill <= 0) return;
+
+      const updated = [...state.players];
+      const player  = updated[idx];
+      updated[idx]  = { ...player, name, skill, group };
+      state.players = updated;
+
+      if (player && player.id) {
+        await updatePlayerFieldsSupabase(player.id, { name, skill, group });
+        await syncFromSupabase();
+      }
+
+      saveLocal();
+      queueSaveToSupabase();
+      render();
     });
   });
-
-  // Save edited player
-  document.querySelectorAll('.btn-save-edit').forEach((btn) => {
-  btn.addEventListener('click', async (ev) => {
-    const idx = parseInt(ev.currentTarget.getAttribute('data-index'));
-    const nameInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-name`);
-    const skillInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-skill`);
-    const groupInput = document.querySelector(`.edit-row[data-index="${idx}"] .edit-group`);
-    const name = nameInput.value.trim();
-    const skill = parseFloat(skillInput.value);
-    const group = groupInput ? groupInput.value.trim() : '';
-
-    if (!name || isNaN(skill) || skill <= 0) return;
-
-    const updated = [...state.players];
-    const player = updated[idx];
-    updated[idx] = { ...player, name, skill, group };
-    state.players = updated;
-
-    if (player && player.id) {
-      await updatePlayerFieldsSupabase(player.id, { name, skill, group });
-      await syncFromSupabase();
-    }
-
-    saveLocal();
-    queueSaveToSupabase();
-    render();
-  });
-});
 }
 
 // Initialise the app. Called once on page load. It loads stored data,
