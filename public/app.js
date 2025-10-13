@@ -1909,9 +1909,10 @@ if (groupSelect) {
   }
 
   // --- Admin login/logout ---
+// Admin login
 const loginBtn = document.getElementById('btn-admin-login');
 if (loginBtn) {
-  loginBtn.addEventListener('click', () => {
+  loginBtn.addEventListener('click', async () => {
     const codeInput = document.getElementById('admin-code');
     const code = codeInput ? codeInput.value.trim() : '';
     if (!code) return;
@@ -1919,26 +1920,29 @@ if (loginBtn) {
     // Master admin: full access
     if (code === MASTER_ADMIN_CODE) {
       state.isAdmin = true;
-      state.limitedGroup = null;
+      state.limitedGroup = null;                 // clear tenant lock
+      state.activeGroup = 'All';                 // show everyone
       sessionStorage.setItem(LS_ADMIN_KEY, 'true');
       sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
+      try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
+      await syncFromSupabase();                  // re-fetch full dataset
       render();
       return;
     }
 
-    // Tenant admin: map code to one group
+    // Tenant admin: lock to one group
     const group = ADMIN_CODE_MAP[code];
     if (group) {
       state.isAdmin = true;
       state.limitedGroup = group;
-
       if (!state.groups.includes(group)) {
         state.groups = Array.from(new Set([...state.groups, group]));
       }
-      state.activeGroup = group;
-
+      state.activeGroup = group;                 // force filter to tenant group
       sessionStorage.setItem(LS_ADMIN_KEY, 'true');
       sessionStorage.setItem(LS_LIMITED_GROUP_KEY, group);
+      try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, group); } catch {}
+      await syncFromSupabase();                  // re-fetch only that group
       render();
       return;
     }
@@ -1947,13 +1951,17 @@ if (loginBtn) {
   });
 }
 
+// Admin logout
 const logoutBtn = document.getElementById('btn-logout');
 if (logoutBtn) {
-  logoutBtn.addEventListener('click', () => {
+  logoutBtn.addEventListener('click', async () => {
     state.isAdmin = false;
-    state.limitedGroup = null;
+    state.limitedGroup = null;                   // clear tenant lock
+    state.activeGroup = 'All';                   // reset view
     sessionStorage.removeItem(LS_ADMIN_KEY);
     sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
+    try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
+    await syncFromSupabase();                    // load public view dataset
     render();
   });
 }
