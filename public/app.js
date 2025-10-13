@@ -1450,32 +1450,6 @@ function render() {
   </div>
   ${teamsHTML}
 </div>
-${state.isAdmin && !state.limitedGroup ? `
-  <div class="card">
-    <h3>Attendance Summary</h3>
-    <p class="small" style="margin-top:-0.25rem;">
-      Viewing: <strong>${state.activeGroup || 'All'}</strong> • Total checked in: <strong>${state.checkedIn.length}</strong>
-    </p>
-    <div style="overflow:auto;">
-      <table class="table">
-        <thead>
-          <tr><th>Group</th><th>Checked In</th><th>Total Players</th></tr>
-        </thead>
-        <tbody>
-          ${
-            computeCheckedInByGroup().map(row => `
-              <tr>
-                <td>${row.group}</td>
-                <td>${row.in}</td>
-                <td>${row.total}</td>
-              </tr>
-            `).join('')
-          }
-        </tbody>
-      </table>
-    </div>
-  </div>
-` : ''}
 <div class="row" style="justify-content:space-between; align-items:center; margin-top:8px;">
   <h3>Players</h3>
   <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
@@ -1588,11 +1562,35 @@ ${state.isAdmin && !state.limitedGroup ? `
   // Build final page markup. Hide full players list on public side. The list is only shown in admin panel.
   const html = `
     <div class="container">
-      <h1 class="title">${state.limitedGroup ? state.limitedGroup : 'Athletic Specimen'}</h1>
-<p class="small" style="text-align:center;">
+<h1 class="title">${state.limitedGroup ? state.limitedGroup : 'Athletic Specimen'}</h1>
+
+<p class="small" style="text-align:center; margin-bottom:0.25rem;">
   Checked In: <strong>${state.checkedIn.length}</strong>
   ${state.isAdmin && !state.limitedGroup ? ` • Group: <strong>${state.activeGroup || 'All'}</strong>` : ''}
 </p>
+
+${state.isAdmin && !state.limitedGroup ? `
+  <div style="text-align:center; font-size:0.9rem; margin-top:0.25rem;">
+    <table style="margin:0 auto; border-collapse:collapse; font-size:inherit;">
+      <thead>
+        <tr>
+          <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Group</th>
+          <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Checked In</th>
+          <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Total Players</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${computeCheckedInByGroup().map(row => `
+          <tr>
+            <td style="padding:2px 8px;">${row.group}</td>
+            <td style="padding:2px 8px;">${row.in}</td>
+            <td style="padding:2px 8px;">${row.total}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+` : ''}
       ${adminLoginHTML}
       <div class="grid-2">
        <div class="card">
