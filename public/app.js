@@ -1619,22 +1619,25 @@ ${state.isAdmin && !state.limitedGroup ? `
 ` : ''}
       ${adminLoginHTML}
       <div class="grid-2">
-       <div class="card">
-  <h2>Check In</h2>
-  <input type="text" id="check-name" placeholder="First and Last Name" />
-  <div class="row">
-    <button id="btn-check-in">Check In</button>
-    <button id="btn-check-out">Check Out</button>
+  <div class="card">
+    <h2>Check In</h2>
+    <input type="text" id="check-name" placeholder="First and Last Name" />
+    <div class="row">
+      <button id="btn-check-in">Check In</button>
+      <button id="btn-check-out">Check Out</button>
+    </div>
+    ${checkMsg}
   </div>
-  ${checkMsg}
+
+  ${!state.isAdmin ? `
+  <div class="card">
+    <h2>Register Player</h2>
+    <input type="text" id="register-name" placeholder="First and Last Name" />
+    <button id="btn-register">Register</button>
+    ${regMsg}
+  </div>
+  ` : ``}
 </div>
-<div class="card">
-  <h2>Register Player</h2>
-  <input type="text" id="register-name" placeholder="First and Last Name" />
-  <button id="btn-register">Register</button>
-  ${regMsg}
-</div>
-      </div>
       ${adminHTML}
     </div>
   `;
@@ -2094,59 +2097,6 @@ if (logoutBtn) {
       render();
     });
   }
-
-  const registerBtn = document.getElementById('btn-register');
-
-  // --- Public: Register player ---
-if (registerBtn) {
-  registerBtn.addEventListener('click', async () => {
-    const input = document.getElementById('register-name');
-    const name = (input && input.value || '').trim();
-    if (!name) return;
-
-    const already = state.players.some((p) => normalize(p.name) === normalize(name));
-    if (already) {
-      messages.registration = 'Player already registered.';
-      setTimeout(() => { messages.registration = ''; render(); }, 3000);
-      if (input) input.value = '';
-      return;
-    }
-
-    // default skill and group for this registration
-    const group = state.limitedGroup
-      ? state.limitedGroup
-      : (state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '');
-
-    const newPlayerLocal = { name, skill: 0, group };
-
-    if (supabaseClient) {
-      try {
-        // choose correct column name for group
-        let insertRow = { name, skill: 0 };
-        if (group) {
-          if (HAS_GROUP) insertRow.group = group;
-          else if (HAS_TAG) insertRow.tag = group;
-        }
-        const { error } = await supabaseClient.from('players').insert([insertRow]).select();
-        if (error) console.error('Supabase insert error', error);
-        await syncFromSupabase();
-      } catch (err) {
-        console.error('Supabase insert error', err);
-        // fall back to local insert on error
-        state.players = [...state.players, newPlayerLocal];
-      }
-    } else {
-      state.players = [...state.players, newPlayerLocal];
-    }
-
-    messages.registration = 'Player registered. Waiting for admin to assign skill.';
-    setTimeout(() => { messages.registration = ''; render(); }, 3000);
-    if (input) input.value = '';
-    saveLocal();
-    queueSaveToSupabase();
-    render();
-  });
-}
 
   // --- Public: Check in/out ---
   const checkInBtn = document.getElementById('btn-check-in');
