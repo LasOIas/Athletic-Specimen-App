@@ -43,23 +43,10 @@ const DEFAULT_ADMIN_CODE_MAP = {
 // Session key for tenant scope
 const LS_LIMITED_GROUP_KEY = 'athletic_specimen_limited_group';
 
-function computeCheckedInByGroup() {
-  const byGroup = {};
-  const norm = (s) => String(s || '').trim();
-  const isIn = new Set((state.checkedIn || []).map(norm));
+// --- Admin code storage (TENANT CODES) ---
+const LS_CODEMAP_KEY = 'athletic_specimen_admin_codes';
+let ADMIN_CODE_MAP = {}; // populated by loadAdminCodes()
 
-  for (const p of state.players || []) {
-    const g = norm(p.group || 'Ungrouped');
-    if (!byGroup[g]) byGroup[g] = { total: 0, in: 0 };
-    byGroup[g].total += 1;
-    if (isIn.has(norm(p.name))) byGroup[g].in += 1;
-  }
-
-  // return sorted entries by name
-  return Object.entries(byGroup)
-    .map(([group, v]) => ({ group, total: v.total, in: v.in }))
-    .sort((a, b) => a.group.localeCompare(b.group));
-}
 function computeCheckedInByGroup() {
   const byGroup = {};
   const norm = (s) => String(s || '').trim();
@@ -2080,6 +2067,8 @@ if (logoutBtn) {
       render();
     });
   }
+
+  const registerBtn = document.getElementById('btn-register');
 
   // --- Public: Register player ---
 if (registerBtn) {
