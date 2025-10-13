@@ -1561,8 +1561,6 @@ function render() {
   <option value="">— choose —</option>
   ${state.groups.filter(g => g && g !== 'All').map(g => `<option value="${g}">${g}</option>`).join('')}
 </select>
-<input id="bulk-new-group" type="text" placeholder="or type new group" ${state.limitedGroup ? 'disabled' : ''} />
-
       <button id="btn-assign-to-group" class="primary">Add</button>
       <button id="btn-remove-from-group" class="danger">Remove</button>
       <button id="btn-clear-selection" class="secondary">Clear</button>
