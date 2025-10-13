@@ -43,6 +43,41 @@ const DEFAULT_ADMIN_CODE_MAP = {
 // Session key for tenant scope
 const LS_LIMITED_GROUP_KEY = 'athletic_specimen_limited_group';
 
+function computeCheckedInByGroup() {
+  const byGroup = {};
+  const norm = (s) => String(s || '').trim();
+  const isIn = new Set((state.checkedIn || []).map(norm));
+
+  for (const p of state.players || []) {
+    const g = norm(p.group || 'Ungrouped');
+    if (!byGroup[g]) byGroup[g] = { total: 0, in: 0 };
+    byGroup[g].total += 1;
+    if (isIn.has(norm(p.name))) byGroup[g].in += 1;
+  }
+
+  // return sorted entries by name
+  return Object.entries(byGroup)
+    .map(([group, v]) => ({ group, total: v.total, in: v.in }))
+    .sort((a, b) => a.group.localeCompare(b.group));
+}
+function computeCheckedInByGroup() {
+  const byGroup = {};
+  const norm = (s) => String(s || '').trim();
+  const isIn = new Set((state.checkedIn || []).map(norm));
+
+  for (const p of state.players || []) {
+    const g = norm(p.group || 'Ungrouped');
+    if (!byGroup[g]) byGroup[g] = { total: 0, in: 0 };
+    byGroup[g].total += 1;
+    if (isIn.has(norm(p.name))) byGroup[g].in += 1;
+  }
+
+  // return sorted entries by name
+  return Object.entries(byGroup)
+    .map(([group, v]) => ({ group, total: v.total, in: v.in }))
+    .sort((a, b) => a.group.localeCompare(b.group));
+}
+
 function loadAdminCodes() {
   try {
     const raw = localStorage.getItem(LS_CODEMAP_KEY);
@@ -498,24 +533,6 @@ function renderFilteredPlayers() {
       </div>
     `;
   }).join('');
-}
-
-// Bracket helper: create a default 8‑team single elimination bracket. Each
-// match object tracks its two competitors and the winner. Rounds are
-// arranged such that indices 0–3 represent round 1, 4–5 represent round 2
-// (semi finals) and index 6 represents the final. When a winner is set in
-// round n, the winner automatically populates the appropriate slot in the
-// next round.
-function createEmptyBracket() {
-  return [
-    { team1: '', team2: '', winner: null },
-    { team1: '', team2: '', winner: null },
-    { team1: '', team2: '', winner: null },
-    { team1: '', team2: '', winner: null },
-    { team1: '', team2: '', winner: null },
-    { team1: '', team2: '', winner: null },
-    { team1: '', team2: '', winner: null },
-  ];
 }
 
 // Global state. We use a simple object to hold application state. When
@@ -1487,6 +1504,32 @@ function render() {
   </div>
   ${teamsHTML}
 </div>
+${state.isAdmin && !state.limitedGroup ? `
+  <div class="card">
+    <h3>Attendance Summary</h3>
+    <p class="small" style="margin-top:-0.25rem;">
+      Viewing: <strong>${state.activeGroup || 'All'}</strong> • Total checked in: <strong>${state.checkedIn.length}</strong>
+    </p>
+    <div style="overflow:auto;">
+      <table class="table">
+        <thead>
+          <tr><th>Group</th><th>Checked In</th><th>Total Players</th></tr>
+        </thead>
+        <tbody>
+          ${
+            computeCheckedInByGroup().map(row => `
+              <tr>
+                <td>${row.group}</td>
+                <td>${row.in}</td>
+                <td>${row.total}</td>
+              </tr>
+            `).join('')
+          }
+        </tbody>
+      </table>
+    </div>
+  </div>
+` : ''}
 <div class="row" style="justify-content:space-between; align-items:center; margin-top:8px;">
   <h3>Players</h3>
   <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
@@ -1600,7 +1643,10 @@ function render() {
   const html = `
     <div class="container">
       <h1 class="title">${state.limitedGroup ? state.limitedGroup : 'Athletic Specimen'}</h1>
-<p class="small" style="text-align:center;">Checked In: <strong>${state.checkedIn.length}</strong></p>
+<p class="small" style="text-align:center;">
+  Checked In: <strong>${state.checkedIn.length}</strong>
+  ${state.isAdmin && !state.limitedGroup ? ` • Group: <strong>${state.activeGroup || 'All'}</strong>` : ''}
+</p>
       ${adminLoginHTML}
       <div class="grid-2">
        <div class="card">
