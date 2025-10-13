@@ -37,7 +37,7 @@ const MASTER_ADMIN_CODE = 'nlvb2025';
 // Default tenant admin codes (locked to single groups)
 const DEFAULT_ADMIN_CODE_MAP = {
   'kcvb2025': 'KC Volleyball',
-  'nlvb2025': 'Athletic Specimen' // optional mirror, so CO still maps if used as tenant
+  'asvb2025': 'Athletic Specimen' // optional mirror, so CO still maps if used as tenant
 };
 
 // Session key for tenant scope
