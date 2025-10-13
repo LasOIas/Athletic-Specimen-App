@@ -211,6 +211,58 @@ const selectedSet = () => new Set(state.selectedIds || []);
   }, true);
 })();
 
+// -- One delegated handler for Check In and Check Out buttons (capture phase) --
+(function ensureCheckDelegationBound() {
+  if (window.__checkDelegated) return;
+  window.__checkDelegated = true;
+
+  document.addEventListener('click', async function onCheckDelegated(e) {
+    const inBtn = e.target.closest('.btn-checkin');
+    const outBtn = e.target.closest('.btn-checkout');
+    if (!inBtn && !outBtn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const btn = inBtn || outBtn;
+    const id = btn.getAttribute('data-id');
+    if (!id) return;
+
+    const player = state.players.find(p => String(p.id) === String(id));
+    if (!player) return;
+
+    try {
+      if (inBtn) {
+        if (!state.checkedIn.includes(player.name)) {
+          state.checkedIn = [...state.checkedIn, player.name];
+          if (supabaseClient && player.id) {
+            try {
+              await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+              await syncFromSupabase();
+            } catch (err) {
+              console.error('Supabase update error', err);
+            }
+          }
+        }
+      } else if (outBtn) {
+        state.checkedIn = state.checkedIn.filter(n => normalize(n) !== normalize(player.name));
+        if (supabaseClient && player.id) {
+          try {
+            await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+            await syncFromSupabase();
+          } catch (err) {
+            console.error('Supabase check-out error', err);
+          }
+        }
+      }
+    } finally {
+      saveLocal();
+      queueSaveToSupabase();
+      render();
+    }
+  }, true);
+})();
+
 function updateBulkBarVisibility() {
   const bar = document.getElementById('bulkBar');
   const countEl = document.getElementById('bulkCount');
@@ -1382,22 +1434,10 @@ function render() {
   </div>
   ${teamsHTML}
 </div>
-
-      <div class="card">
-        <h3>Tournament Bracket</h3>
-        <p class="small">Enter up to 8 teams below. Click team names to advance them.</p>
-        ${bracketHTML}
-      </div>
-     <div class="card">
-  <div class="row" style="justify-content:space-between;">
+<div class="row" style="justify-content:space-between; align-items:center; margin-top:8px;">
   <h3>Players</h3>
+  <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
 </div>
-    <button id="btn-select-all-visible" class="secondary" title="Select all players currently shown by your filters/search">
-      Select All Shown
-    </button>
-  </div>
-</div>
-
   <!-- Collapsible body: put ALL your filter controls INSIDE this div -->
   <div id="filtersBody">
     <h4 style="margin-bottom: 0.5rem;">Filters</h4>
@@ -1481,7 +1521,6 @@ function render() {
     ${renderFilteredPlayers()}
   </div>
 </div>
-    </div>
   ` : '';
 
   // Build the final page markup
@@ -1694,14 +1733,6 @@ const editCss = `
 /* Don't let any nested .row inside the edit area expand vertically */
 .player-card .edit-row .row{ min-height:0 !important; }
 `;
-if (!editStyle) {
-  editStyle = document.createElement('style');
-  editStyle.id = 'edit-css';
-  editStyle.type = 'text/css';
-  document.head.appendChild(editStyle);
-}
-editStyle.textContent = editCss;
-
 if (!editStyle) {
   editStyle = document.createElement('style');
   editStyle.id = 'edit-css';
@@ -2012,29 +2043,6 @@ function attachHandlers() {
         const idx = ev.currentTarget.getAttribute('data-index');
         const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
         if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
-      });
-    });
-
-    document.querySelectorAll('.btn-checkin').forEach((btn) => {
-      btn.addEventListener('click', async (ev) => {
-        const id = ev.currentTarget.getAttribute('data-id');
-        const player = state.players.find((p) => String(p.id) === String(id));
-        if (!player) return;
-
-        if (!state.checkedIn.includes(player.name)) {
-          state.checkedIn = [...state.checkedIn, player.name];
-          if (supabaseClient && player.id) {
-            try {
-              await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
-              await syncFromSupabase();
-            } catch (err) {
-              console.error('Supabase update error', err);
-            }
-          }
-        }
-        saveLocal();
-        queueSaveToSupabase();
-        render();
       });
     });
 
