@@ -1479,17 +1479,58 @@ function render() {
     </div>
   `
   : `
-    <div class="row" style="margin-top: 0.5rem;">
-      <label for="group-filter-select">Group:</label>
-      <select id="group-filter-select">
-        ${state.groups.map(g => `<option value="${g}" ${state.activeGroup === g ? 'selected' : ''}>${g}</option>`).join('')}
-      </select>
-      <input type="text" id="new-group-name" placeholder="New group name" />
-      <button id="btn-add-group">Add Group</button>
-      <button id="btn-rename-group" class="secondary">Rename Selected</button>
-      <button id="btn-delete-group" class="danger">Delete Selected</button>
+  <div class="row" style="margin-top: 0.5rem; align-items:center;">
+    <label for="group-filter-select">Group:</label>
+    <select id="group-filter-select">
+      ${state.groups.map(g => `<option value="${g}" ${state.activeGroup === g ? 'selected' : ''}>${g}</option>`).join('')}
+    </select>
+
+    <button id="btn-open-group-manager" class="secondary">Manage Groups…</button>
+  </div>
+
+  <!-- lightweight modal -->
+  <div id="groupManager" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:10000;">
+    <div style="max-width:720px; margin:6vh auto; background:#fff; border-radius:12px; box-shadow:0 12px 32px rgba(0,0,0,.18); overflow:hidden;">
+      <div style="display:flex; align-items:center; padding:12px 16px; background:#f8fafc;">
+        <h3 style="margin:0; font-size:18px;">Manage Groups</h3>
+        <span style="flex:1"></span>
+        <button id="btn-close-group-manager" class="secondary">Close</button>
+      </div>
+
+      <div style="padding:16px;">
+        <!-- add -->
+        <div class="card" style="padding:12px; margin-bottom:12px;">
+          <div class="row">
+            <input type="text" id="gm-new-name" placeholder="New group name" />
+            <button id="gm-add" class="primary">Add Group</button>
+          </div>
+        </div>
+
+        <!-- merge -->
+        <div class="card" style="padding:12px; margin-bottom:12px;">
+          <div class="row">
+            <label style="min-width:56px;">Merge</label>
+            <select id="gm-merge-from"></select>
+            <span>into</span>
+            <select id="gm-merge-into"></select>
+            <button id="gm-merge" class="secondary">Merge</button>
+          </div>
+          <p class="small" style="margin:.5rem 0 0 0;">Moves all players from source into destination and removes the empty source.</p>
+        </div>
+
+        <!-- list -->
+        <div class="card" style="padding:12px;">
+          <table class="table" style="width:100%;">
+            <thead>
+              <tr><th style="text-align:left;">Group</th><th>Checked In</th><th>Total</th><th style="width:160px;">Actions</th></tr>
+            </thead>
+            <tbody id="gm-rows"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
-  `
+  </div>
+`
 }
     <!-- Skill range sub-filter (only when Filter = Skill) -->
     ${state.playerTab === 'skill' ? `
@@ -1821,82 +1862,150 @@ if (groupSelect) {
   });
 }
 
-  const addGroupBtn = document.getElementById('btn-add-group');
-  if (addGroupBtn) {
-    addGroupBtn.addEventListener('click', () => {
-      const input = document.getElementById('new-group-name');
-      const name = (input && input.value || '').trim();
-      if (!name) return;
-      if (!state.groups.includes(name)) {
-        state.groups = Array.from(new Set([...state.groups, name])).filter(Boolean);
-      }
-      state.activeGroup = name;
-      input.value = '';
-      saveLocal();
-      render();
-    });
+// ----- Group Manager (master admin) -----
+const gmOpen  = document.getElementById('btn-open-group-manager');
+const gmRoot  = document.getElementById('groupManager');
+
+function gmPopulate() {
+  if (!gmRoot) return;
+
+  // Build a canonical group list (exclude "All")
+  const known = new Set(state.groups.filter(g => g && g !== 'All'));
+  // Include any groups that might exist on players but not in state.groups
+  state.players.forEach(p => {
+    const g = String(p.group || '').trim();
+    if (g) known.add(g);
+  });
+  const list = Array.from(known).sort((a,b)=>a.localeCompare(b));
+
+  // Fill merge selects
+  const fromSel = gmRoot.querySelector('#gm-merge-from');
+  const intoSel = gmRoot.querySelector('#gm-merge-into');
+  const opts = list.map(g => `<option value="${g}">${g}</option>`).join('');
+  if (fromSel) fromSel.innerHTML = `<option value="">— choose —</option>${opts}`;
+  if (intoSel) intoSel.innerHTML = `<option value="">— choose —</option>${opts}`;
+
+  // Fill rows with counts + actions
+  const byGroup = computeCheckedInByGroup();
+  const totals = Object.fromEntries(byGroup.map(r => [r.group, r.total]));
+  const ins    = Object.fromEntries(byGroup.map(r => [r.group, r.in]));
+
+  const rowsEl = gmRoot.querySelector('#gm-rows');
+  if (rowsEl) {
+    rowsEl.innerHTML = list.map(g => `
+      <tr data-group="${g}">
+        <td><strong>${g}</strong></td>
+        <td style="text-align:center;">${ins[g] || 0}</td>
+        <td style="text-align:center;">${totals[g] || 0}</td>
+        <td>
+          <div class="row" style="gap:6px; justify-content:flex-end;">
+            <button class="gm-rename secondary" data-group="${g}">Rename</button>
+            <button class="gm-delete danger" data-group="${g}">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
   }
+}
 
-  const renameGroupBtn = document.getElementById('btn-rename-group');
-  if (renameGroupBtn) {
-    renameGroupBtn.addEventListener('click', async () => {
-      const oldName = state.activeGroup;
-      if (!oldName || oldName === 'All') return;
-      const input = document.getElementById('new-group-name');
-      const newName = (input && input.value || '').trim();
-      if (!newName) return;
-      if (state.groups.includes(newName)) return;
+if (gmOpen && gmRoot) {
+  gmOpen.addEventListener('click', () => {
+    gmPopulate();
+    gmRoot.style.display = 'block';
+  });
+  const gmClose = gmRoot.querySelector('#btn-close-group-manager');
+  if (gmClose) gmClose.addEventListener('click', () => gmRoot.style.display = 'none');
 
-      state.groups = state.groups.map(g => g === oldName ? newName : g);
+  // Add
+  const gmAdd = gmRoot.querySelector('#gm-add');
+  if (gmAdd) gmAdd.addEventListener('click', () => {
+    const input = gmRoot.querySelector('#gm-new-name');
+    const name  = (input && input.value || '').trim();
+    if (!name) return;
+    if (!state.groups.includes(name)) {
+      state.groups = Array.from(new Set([...state.groups, name]));
+    }
+    state.activeGroup = name;
+    saveLocal();
+    render();
+    gmPopulate();
+    if (input) input.value = '';
+  });
+
+  // Merge
+  const gmMergeBtn = gmRoot.querySelector('#gm-merge');
+  if (gmMergeBtn) gmMergeBtn.addEventListener('click', async () => {
+    const from = gmRoot.querySelector('#gm-merge-from')?.value || '';
+    const into = gmRoot.querySelector('#gm-merge-into')?.value || '';
+    if (!from || !into || from === into) return;
+
+    // Local change
+    state.players = state.players.map(p => (String(p.group || '') === from ? { ...p, group: into } : p));
+    state.groups  = Array.from(new Set(state.groups.map(g => g === from ? into : g).filter(Boolean)));
+    if (state.activeGroup === from) state.activeGroup = into;
+
+    // Remote change
+    try {
+      const ids = state.players.filter(p => p.group === into || p.group === from).map(p => p.id).filter(Boolean);
+      for (const id of ids) { await updatePlayerFieldsSupabase(id, { group: into }); }
+      await syncFromSupabase();
+    } catch (e) { console.error('Supabase merge error', e); }
+
+    saveLocal();
+    render();
+    gmPopulate();
+  });
+
+  // Row actions (rename/delete)
+  gmRoot.addEventListener('click', async (e) => {
+    const renameBtn = e.target.closest('.gm-rename');
+    const deleteBtn = e.target.closest('.gm-delete');
+
+    // Rename
+    if (renameBtn) {
+      const oldName = renameBtn.getAttribute('data-group');
+      if (!oldName) return;
+      const newName = prompt(`Rename "${oldName}" to:`, oldName);
+      if (!newName || newName === oldName) return;
+
+      state.groups  = state.groups.map(g => g === oldName ? newName : g);
       state.players = state.players.map(p => (String(p.group || '') === oldName ? { ...p, group: newName } : p));
+      if (state.activeGroup === oldName) state.activeGroup = newName;
 
       try {
-        if (supabaseClient) {
-          const ids = state.players
-            .filter(p => p.group === newName || p.group === oldName)
-            .map(p => p.id)
-            .filter(Boolean);
-          for (const id of ids) {
-            await updatePlayerFieldsSupabase(id, { group: newName });
-          }
-          await syncFromSupabase();
-        }
-      } catch (e) {
-        console.error('Supabase bulk rename error', e);
-      }
+        const ids = state.players.filter(p => p.group === newName).map(p => p.id).filter(Boolean);
+        for (const id of ids) { await updatePlayerFieldsSupabase(id, { group: newName }); }
+        await syncFromSupabase();
+      } catch (e) { console.error('Supabase rename error', e); }
 
-      state.activeGroup = newName;
       saveLocal();
       render();
-    });
-  }
+      gmPopulate();
+      return;
+    }
 
-  const deleteGroupBtn = document.getElementById('btn-delete-group');
-  if (deleteGroupBtn) {
-    deleteGroupBtn.addEventListener('click', async () => {
-      const name = state.activeGroup;
-      if (!name || name === 'All') return;
+    // Delete
+    if (deleteBtn) {
+      const name = deleteBtn.getAttribute('data-group');
+      if (!name) return;
+      if (!confirm(`Delete "${name}" and remove the group from all players?`)) return;
 
-      state.groups = state.groups.filter(g => g !== name);
+      state.groups  = state.groups.filter(g => g !== name);
       state.players = state.players.map(p => (String(p.group || '') === name ? { ...p, group: '' } : p));
-      state.activeGroup = 'All';
+      if (state.activeGroup === name) state.activeGroup = 'All';
 
       try {
-        if (supabaseClient) {
-          const ids = state.players.filter(p => !p.group || p.group === '').map(p => p.id).filter(Boolean);
-          for (const id of ids) {
-            await updatePlayerFieldsSupabase(id, { group: '' });
-          }
-          await syncFromSupabase();
-        }
-      } catch (e) {
-        console.error('Supabase bulk clear group error', e);
-      }
+        const ids = state.players.filter(p => !p.group).map(p => p.id).filter(Boolean);
+        for (const id of ids) { await updatePlayerFieldsSupabase(id, { group: '' }); }
+        await syncFromSupabase();
+      } catch (e) { console.error('Supabase delete group error', e); }
 
       saveLocal();
       render();
-    });
-  }
+      gmPopulate();
+    }
+  });
+}
 
   // --- Admin login/logout ---
 // Admin login
