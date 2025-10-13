@@ -529,7 +529,6 @@ const state = {
   players: [],        // list of players { name, skill, id? }
   checkedIn: [],      // list of player names currently checked in
   isAdmin: false,     // whether admin panel is unlocked
-  bracket: createEmptyBracket(),
   generatedTeams: [], // result of the last team generation
   groupCount: 2,      // number of teams requested when generating groups
   playerTab: 'all',   // current active tab: 'all', 'in', 'out', 'skill'
