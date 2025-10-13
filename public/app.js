@@ -1485,7 +1485,7 @@ function render() {
       ${state.groups.map(g => `<option value="${g}" ${state.activeGroup === g ? 'selected' : ''}>${g}</option>`).join('')}
     </select>
 
-    <button id="btn-open-group-manager" class="secondary">Manage Groups…</button>
+    <button id="btn-open-group-manager" class="secondary">Manage Groups</button>
   </div>
 
   <!-- lightweight modal -->
@@ -1505,19 +1505,6 @@ function render() {
             <button id="gm-add" class="primary">Add Group</button>
           </div>
         </div>
-
-        <!-- merge -->
-        <div class="card" style="padding:12px; margin-bottom:12px;">
-          <div class="row">
-            <label style="min-width:56px;">Merge</label>
-            <select id="gm-merge-from"></select>
-            <span>into</span>
-            <select id="gm-merge-into"></select>
-            <button id="gm-merge" class="secondary">Merge</button>
-          </div>
-          <p class="small" style="margin:.5rem 0 0 0;">Moves all players from source into destination and removes the empty source.</p>
-        </div>
-
         <!-- list -->
         <div class="card" style="padding:12px;">
           <table class="table" style="width:100%;">
@@ -1930,30 +1917,6 @@ if (gmOpen && gmRoot) {
     render();
     gmPopulate();
     if (input) input.value = '';
-  });
-
-  // Merge
-  const gmMergeBtn = gmRoot.querySelector('#gm-merge');
-  if (gmMergeBtn) gmMergeBtn.addEventListener('click', async () => {
-    const from = gmRoot.querySelector('#gm-merge-from')?.value || '';
-    const into = gmRoot.querySelector('#gm-merge-into')?.value || '';
-    if (!from || !into || from === into) return;
-
-    // Local change
-    state.players = state.players.map(p => (String(p.group || '') === from ? { ...p, group: into } : p));
-    state.groups  = Array.from(new Set(state.groups.map(g => g === from ? into : g).filter(Boolean)));
-    if (state.activeGroup === from) state.activeGroup = into;
-
-    // Remote change
-    try {
-      const ids = state.players.filter(p => p.group === into || p.group === from).map(p => p.id).filter(Boolean);
-      for (const id of ids) { await updatePlayerFieldsSupabase(id, { group: into }); }
-      await syncFromSupabase();
-    } catch (e) { console.error('Supabase merge error', e); }
-
-    saveLocal();
-    render();
-    gmPopulate();
   });
 
   // Row actions (rename/delete)
@@ -2452,16 +2415,20 @@ if (registerBtn) {
   }
 
 // --- Select all visible ---
+// --- Select all visible ---
 const selectAllBtn = document.getElementById('btn-select-all-visible');
 if (selectAllBtn) {
   selectAllBtn.addEventListener('click', () => {
     const visibleCards = document.querySelectorAll('.players .player-card');
     const ids = Array.from(visibleCards).map(el => String(el.getAttribute('data-id')));
+
     state.selectedIds = ids;
+
     visibleCards.forEach(el => el.classList.add('is-selected'));
-    document.querySelectorAll('.player-select').forEach(cb => {
-      cb.checked = true;
-    });
+    document.querySelectorAll('.player-select').forEach(cb => { cb.checked = true; });
+
+    updateBulkBarVisibility(); // ✅ show bulk bar with actions
+    document.getElementById('bulkBar')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); // ✅ bring it into view
   });
 }
 
@@ -2472,6 +2439,7 @@ if (clearSelBtn) {
     state.selectedIds = [];
     document.querySelectorAll('.player-select').forEach(cb => cb.checked = false);
     document.querySelectorAll('.player-card').forEach(el => el.classList.remove('is-selected'));
+    updateBulkBarVisibility(); // ✅ hide bar when nothing is selected
   });
 }
 
