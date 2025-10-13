@@ -1417,46 +1417,6 @@ function render() {
     }).join('') + '</div>';
   }
 
-  // Build bracket HTML. Input fields for round 1 and buttons for advancing winners.
-  const bracketMatches = state.bracket;
-  function matchHTML(match, idx) {
-    const inputHTML = idx < 4 ? `
-      <input type="text" data-match="${idx}" data-field="team1" placeholder="Team 1" value="${escapeHTML(match.team1)}" />
-      <input type="text" data-match="${idx}" data-field="team2" placeholder="Team 2" value="${escapeHTML(match.team2)}" />
-    ` : '';
-    // Buttons to pick winners
-    let buttonsHTML = '';
-    const t1 = match.team1;
-    const t2 = match.team2;
-    if (t1) {
-      buttonsHTML += `<button class="btn-advance" data-match="${idx}" data-team="${escapeHTML(t1)}" ${match.winner === t1 ? 'style="background-color:#16a34a;color:#ffffff"' : ''}>${escapeHTML(t1)}</button>`;
-    }
-    if (t2) {
-      buttonsHTML += `<button class="btn-advance" data-match="${idx}" data-team="${escapeHTML(t2)}" ${match.winner === t2 ? 'style="background-color:#16a34a;color:#ffffff"' : ''}>${escapeHTML(t2)}</button>`;
-    }
-    // Always show current winner if no buttons (semi/final)
-    let winnerDisplay = '';
-    if (!t1 && !t2 && match.winner) {
-      winnerDisplay = `<span class="winner-display">${escapeHTML(match.winner)}</span>`;
-    }
-    return `
-      <div class="match" data-match="${idx}">
-        ${inputHTML}
-        <div class="row">${buttonsHTML}${winnerDisplay}</div>
-      </div>
-    `;
-  }
-  const round1 = bracketMatches.slice(0, 4).map((m, idx) => matchHTML(m, idx)).join('');
-  const round2 = bracketMatches.slice(4, 6).map((m, idx) => matchHTML(m, 4 + idx)).join('');
-  const finalMatch = matchHTML(bracketMatches[6], 6);
-  const bracketHTML = `
-    <div class="bracket">
-      <div class="round round1">${round1}</div>
-      <div class="round round2">${round2}</div>
-      <div class="round final">${finalMatch}</div>
-    </div>
-  `;
-
   // Admin panel HTML, only visible when state.isAdmin is true.
   // Layout: logout at top, admin controls, then player list at the bottom.
   const adminHTML = state.isAdmin ? `
