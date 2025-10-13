@@ -615,30 +615,38 @@ function saveLocal() {
 // function is a no‑op. When remote data is retrieved it merges into
 // state.players and updates state.checkedIn with any players marked
 // checked_in.
-
 async function syncFromSupabase() {
   if (!supabaseClient) return;
+
   try {
-    const { data, error } = await supabaseClient.from('players').select('*');
+    // when tenant-limited, only fetch that group to reduce data exposure and payload size
+    let query = supabaseClient.from('players').select('*');
+
+    if (state.limitedGroup) {
+      if (HAS_GROUP) {
+        query = query.eq('group', state.limitedGroup);
+      } else if (HAS_TAG) {
+        query = query.eq('tag', state.limitedGroup);
+      }
+    }
+
+    const { data, error } = await query;
     if (error) {
       console.error('Supabase fetch error', error);
       return;
     }
     if (!Array.isArray(data)) return;
 
-    // Replace state.players cleanly
     state.players = data.map((p) => ({
-  name: p.name,
-  skill: Number(p.skill) || 0,
-  id: p.id,
-  checked_in: !!p.checked_in,
-  group: String(p.group || p.tag || '').trim()
-}));
+      name: p.name,
+      skill: Number(p.skill) || 0,
+      id: p.id,
+      checked_in: !!p.checked_in,
+      group: String(p.group || p.tag || '').trim()
+    }));
 
-    // Only set checkedIn once — no need to merge or deduplicate
     state.checkedIn = data.filter((p) => p.checked_in).map((p) => p.name);
     state.loaded = true;
-
   } catch (err) {
     console.error('Error syncing from Supabase', err);
   }
@@ -2020,38 +2028,55 @@ if (logoutBtn) {
   }
 
   // --- Public: Register player ---
-  const registerBtn = document.getElementById('btn-register');
-  if (registerBtn) {
-    registerBtn.addEventListener('click', async () => {
-      const input = document.getElementById('register-name');
-      const name = (input && input.value || '').trim();
-      if (!name) return;
+if (registerBtn) {
+  registerBtn.addEventListener('click', async () => {
+    const input = document.getElementById('register-name');
+    const name = (input && input.value || '').trim();
+    if (!name) return;
 
-      if (state.players.some((p) => normalize(p.name) === normalize(name))) {
-        messages.registration = 'Player already registered.';
-      } else {
-        const newPlayer = { name, skill: 0 };
-        if (supabaseClient) {
-          try {
-            const { data, error } = await supabaseClient.from('players').insert([newPlayer]).select();
-            await syncFromSupabase();
-            if (error) console.error('Supabase insert error', error);
-          } catch (err) {
-            console.error('Supabase insert error', err);
-          }
-        } else {
-          state.players = [...state.players, newPlayer];
-        }
-        messages.registration = 'Player registered. Waiting for admin to assign skill.';
-      }
-
+    const already = state.players.some((p) => normalize(p.name) === normalize(name));
+    if (already) {
+      messages.registration = 'Player already registered.';
       setTimeout(() => { messages.registration = ''; render(); }, 3000);
       if (input) input.value = '';
-      saveLocal();
-      queueSaveToSupabase();
-      render();
-    });
-  }
+      return;
+    }
+
+    // default skill and group for this registration
+    const group = state.limitedGroup
+      ? state.limitedGroup
+      : (state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '');
+
+    const newPlayerLocal = { name, skill: 0, group };
+
+    if (supabaseClient) {
+      try {
+        // choose correct column name for group
+        let insertRow = { name, skill: 0 };
+        if (group) {
+          if (HAS_GROUP) insertRow.group = group;
+          else if (HAS_TAG) insertRow.tag = group;
+        }
+        const { error } = await supabaseClient.from('players').insert([insertRow]).select();
+        if (error) console.error('Supabase insert error', error);
+        await syncFromSupabase();
+      } catch (err) {
+        console.error('Supabase insert error', err);
+        // fall back to local insert on error
+        state.players = [...state.players, newPlayerLocal];
+      }
+    } else {
+      state.players = [...state.players, newPlayerLocal];
+    }
+
+    messages.registration = 'Player registered. Waiting for admin to assign skill.';
+    setTimeout(() => { messages.registration = ''; render(); }, 3000);
+    if (input) input.value = '';
+    saveLocal();
+    queueSaveToSupabase();
+    render();
+  });
+}
 
   // --- Public: Check in/out ---
   const checkInBtn = document.getElementById('btn-check-in');
