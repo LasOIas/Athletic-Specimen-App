@@ -36,7 +36,7 @@ const MASTER_ADMIN_CODE = 'nlvb2025';
 
 // Default tenant admin codes (locked to single groups)
 const DEFAULT_ADMIN_CODE_MAP = {
-  'kcvb2025': 'Kansas Volleyball',
+  'kcvb2025': 'KC Volleyball',
   'nlvb2025': 'Athletic Specimen' // optional mirror, so CO still maps if used as tenant
 };
 
@@ -473,7 +473,8 @@ function renderFilteredPlayers() {
             <div class="meta">
               Skill: ${player.skill === 0 ? 'Unset' : player.skill}
               • <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
-              ${player.group ? ` • <span class="badge">${player.group}</span>` : ''}
+              ${!state.limitedGroup && player.group ? ` • <span class="badge">${player.group}</span>` : ''}
+
             </div>
           </div>
         </div>
@@ -1499,22 +1500,26 @@ function render() {
     </div>
 
     <!-- Group filter + group management -->
+   ${state.limitedGroup
+  ? `
     <div class="row" style="margin-top: 0.5rem;">
-  <label for="group-filter-select">Group:</label>
-  <select id="group-filter-select" ${state.limitedGroup ? 'disabled' : ''}>
-    ${
-      state.limitedGroup
-        ? `<option value="${state.limitedGroup}" selected>${state.limitedGroup}</option>`
-        : state.groups.map(g => `<option value="${g}" ${state.activeGroup === g ? 'selected' : ''}>${g}</option>`).join('')
-    }
-  </select>
-
-  <input type="text" id="new-group-name" placeholder="New group name" ${state.limitedGroup ? 'disabled' : ''} />
-  <button id="btn-add-group" ${state.limitedGroup ? 'disabled' : ''}>Add Group</button>
-  <button id="btn-rename-group" class="secondary" ${state.limitedGroup ? 'disabled' : ''}>Rename Selected</button>
-  <button id="btn-delete-group" class="danger" ${state.limitedGroup ? 'disabled' : ''}>Delete Selected</button>
-</div>
-
+      <label>Group:</label>
+      <span class="badge" id="tenant-group-pill" style="font-weight:600;">${state.limitedGroup}</span>
+    </div>
+  `
+  : `
+    <div class="row" style="margin-top: 0.5rem;">
+      <label for="group-filter-select">Group:</label>
+      <select id="group-filter-select">
+        ${state.groups.map(g => `<option value="${g}" ${state.activeGroup === g ? 'selected' : ''}>${g}</option>`).join('')}
+      </select>
+      <input type="text" id="new-group-name" placeholder="New group name" />
+      <button id="btn-add-group">Add Group</button>
+      <button id="btn-rename-group" class="secondary">Rename Selected</button>
+      <button id="btn-delete-group" class="danger">Delete Selected</button>
+    </div>
+  `
+}
     <!-- Skill range sub-filter (only when Filter = Skill) -->
     ${state.playerTab === 'skill' ? `
       <div class="row" style="margin-top: 0.5rem;">
@@ -1586,7 +1591,7 @@ function render() {
   // Build final page markup. Hide full players list on public side. The list is only shown in admin panel.
   const html = `
     <div class="container">
-      <h1 class="title">Athletic Specimen</h1>
+      <h1 class="title">${state.limitedGroup ? state.limitedGroup : 'Athletic Specimen'}</h1>
 <p class="small" style="text-align:center;">Checked In: <strong>${state.checkedIn.length}</strong></p>
       ${adminLoginHTML}
       <div class="grid-2">
