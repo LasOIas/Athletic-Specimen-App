@@ -31,6 +31,17 @@ const addNameInput = document.getElementById('newPlayerName');
 const addBtn = document.getElementById('addPlayerBtn');
 const selectedSet = () => new Set(state.selectedIds || []);
 
+// Multi-tenant admin codes
+const MASTER_ADMIN_CODE = 'nlvb2025'; // full admin for all groups
+// Map any tenant admin code to a single visible group.
+// Add or change entries to match your sites.
+const ADMIN_CODE_MAP = {
+  'as-co': 'Athletic Specimen',
+  'ks-wichita': 'Wichita Kansas'
+};
+// Session key for tenant scope
+const LS_LIMITED_GROUP_KEY = 'athletic_specimen_limited_group';
+
 // -- Robust global click handler for player card menus (capture phase) --
 (function ensureMenuActionsBound() {
   if (window.__menusBound) return;
@@ -495,12 +506,12 @@ const state = {
   playerTab: 'all',   // current active tab: 'all', 'in', 'out', 'skill'
   skillSubTab: null,  // current skill range selected, like '1.0', '2.0', etc.
   loaded: false,      // becomes true after Supabase loads
-  // safe defaults for older helpers that reference these:
   playersById: new Map(),
   searchTerm: '',
   groups: ['All', 'Athletic Specimen'],
   activeGroup: 'All',
   selectedIds: [], // player.id[] currently selected (admin bulk)
+  limitedGroup: null // when set, admin is locked to this group
 };
 
 function showTournamentView(show) {
@@ -549,6 +560,12 @@ function loadLocal() {
   } catch {}
   const ag = localStorage.getItem(LS_ACTIVE_GROUP_KEY);
   if (ag) state.activeGroup = ag;
+  const lim = sessionStorage.getItem(LS_LIMITED_GROUP_KEY);
+if (lim) {
+  state.limitedGroup = lim;
+  // force the active group to the tenant’s group
+  state.activeGroup = lim;
+}
 }
 
 
@@ -1456,15 +1473,20 @@ function render() {
 
     <!-- Group filter + group management -->
     <div class="row" style="margin-top: 0.5rem;">
-      <label for="group-filter-select">Group:</label>
-      <select id="group-filter-select">
-        ${state.groups.map(g => `<option value="${g}" ${state.activeGroup === g ? 'selected' : ''}>${g}</option>`).join('')}
-      </select>
-      <input type="text" id="new-group-name" placeholder="New group name" />
-      <button id="btn-add-group">Add Group</button>
-      <button id="btn-rename-group" class="secondary">Rename Selected</button>
-      <button id="btn-delete-group" class="danger">Delete Selected</button>
-    </div>
+  <label for="group-filter-select">Group:</label>
+  <select id="group-filter-select" ${state.limitedGroup ? 'disabled' : ''}>
+    ${
+      state.limitedGroup
+        ? `<option value="${state.limitedGroup}" selected>${state.limitedGroup}</option>`
+        : state.groups.map(g => `<option value="${g}" ${state.activeGroup === g ? 'selected' : ''}>${g}</option>`).join('')
+    }
+  </select>
+
+  <input type="text" id="new-group-name" placeholder="New group name" ${state.limitedGroup ? 'disabled' : ''} />
+  <button id="btn-add-group" ${state.limitedGroup ? 'disabled' : ''}>Add Group</button>
+  <button id="btn-rename-group" class="secondary" ${state.limitedGroup ? 'disabled' : ''}>Rename Selected</button>
+  <button id="btn-delete-group" class="danger" ${state.limitedGroup ? 'disabled' : ''}>Delete Selected</button>
+</div>
 
     <!-- Skill range sub-filter (only when Filter = Skill) -->
     ${state.playerTab === 'skill' ? `
@@ -1504,11 +1526,11 @@ function render() {
       <span style="flex:1"></span>
 
       <label for="bulk-dest-group">Move to group:</label>
-      <select id="bulk-dest-group">
-        <option value="">— choose —</option>
-        ${state.groups.filter(g => g && g !== 'All').map(g => `<option value="${g}">${g}</option>`).join('')}
-      </select>
-      <input id="bulk-new-group" type="text" placeholder="or type new group" />
+      <select id="bulk-dest-group" ${state.limitedGroup ? 'disabled' : ''}>
+  <option value="">— choose —</option>
+  ${state.groups.filter(g => g && g !== 'All').map(g => `<option value="${g}">${g}</option>`).join('')}
+</select>
+<input id="bulk-new-group" type="text" placeholder="or type new group" ${state.limitedGroup ? 'disabled' : ''} />
 
       <button id="btn-assign-to-group" class="primary">Add</button>
       <button id="btn-remove-from-group" class="danger">Remove</button>
@@ -1754,14 +1776,20 @@ updateBulkBarVisibility();
 // called after each call to render().
 function attachHandlers() {
   // --- Group controls (Admin Players) ---
-  const groupSelect = document.getElementById('group-filter-select');
-  if (groupSelect) {
-    groupSelect.addEventListener('change', () => {
-      state.activeGroup = groupSelect.value || 'All';
-      saveLocal();
-      render();
-    });
-  }
+const groupSelect = document.getElementById('group-filter-select');
+if (groupSelect) {
+  groupSelect.addEventListener('change', () => {
+    if (state.limitedGroup) {
+      // enforce lock
+      state.activeGroup = state.limitedGroup;
+      groupSelect.value = state.limitedGroup;
+      return;
+    }
+    state.activeGroup = groupSelect.value || 'All';
+    saveLocal();
+    render();
+  });
+}
 
   const addGroupBtn = document.getElementById('btn-add-group');
   if (addGroupBtn) {
@@ -1842,27 +1870,53 @@ function attachHandlers() {
 
   // --- Admin login/logout ---
   const loginBtn = document.getElementById('btn-admin-login');
-  if (loginBtn) {
-    loginBtn.addEventListener('click', () => {
-      const codeInput = document.getElementById('admin-code');
-      if (codeInput && codeInput.value.trim() === 'nlvb2025') {
-        state.isAdmin = true;
-        sessionStorage.setItem(LS_ADMIN_KEY, 'true');
-        render();
-      } else {
-        alert('Incorrect admin code');
-      }
-    });
-  }
+if (loginBtn) {
+  loginBtn.addEventListener('click', () => {
+    const codeInput = document.getElementById('admin-code');
+    const code = codeInput ? codeInput.value.trim() : '';
 
-  const logoutBtn = document.getElementById('btn-logout');
-  if (logoutBtn) {
-    logoutBtn.addEventListener('click', () => {
-      state.isAdmin = false;
-      sessionStorage.removeItem(LS_ADMIN_KEY);
+    if (!code) return;
+
+    // Master admin: full access
+    if (code === MASTER_ADMIN_CODE) {
+      state.isAdmin = true;
+      state.limitedGroup = null;
+      sessionStorage.setItem(LS_ADMIN_KEY, 'true');
+      sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
       render();
-    });
-  }
+      return;
+    }
+
+    // Tenant admin: map code to one group
+    const group = ADMIN_CODE_MAP[code];
+    if (group) {
+      state.isAdmin = true;
+      state.limitedGroup = group;
+      // ensure the group exists in the dropdown list
+      if (!state.groups.includes(group)) {
+        state.groups = Array.from(new Set([...state.groups, group]));
+      }
+      state.activeGroup = group;
+      sessionStorage.setItem(LS_ADMIN_KEY, 'true');
+      sessionStorage.setItem(LS_LIMITED_GROUP_KEY, group);
+      render();
+      return;
+    }
+
+    alert('Incorrect admin code');
+  });
+}
+
+const logoutBtn = document.getElementById('btn-logout');
+if (logoutBtn) {
+  logoutBtn.addEventListener('click', () => {
+    state.isAdmin = false;
+    state.limitedGroup = null;
+    sessionStorage.removeItem(LS_ADMIN_KEY);
+    sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
+    render();
+  });
+}
 
   // --- Admin: Save player (add/update) ---
   const savePlayerBtn = document.getElementById('btn-save-player');
@@ -1892,7 +1946,9 @@ function attachHandlers() {
         }
       } else {
         // insert new
-        const group = state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '';
+        const group = state.limitedGroup
+        ? state.limitedGroup
+        : (state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '');
         const newPlayer = { name, skill, group };
         let inserted = { ...newPlayer };
 
@@ -2263,8 +2319,9 @@ if (assignBtn) {
     const selEl = document.getElementById('bulk-dest-group');
     const newEl = document.getElementById('bulk-new-group');
     const typed = (newEl && newEl.value || '').trim();
-    const chosen = selEl ? selEl.value : '';
-    const dest = typed || chosen;
+const chosen = selEl ? selEl.value : '';
+let dest = typed || chosen;
+if (state.limitedGroup) dest = state.limitedGroup;
 
     if (!dest || dest === 'All') return;
 
