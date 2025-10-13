@@ -31,16 +31,40 @@ const addNameInput = document.getElementById('newPlayerName');
 const addBtn = document.getElementById('addPlayerBtn');
 const selectedSet = () => new Set(state.selectedIds || []);
 
-// Multi-tenant admin codes
-const MASTER_ADMIN_CODE = 'nlvb2025'; // full admin for all groups
-// Map any tenant admin code to a single visible group.
-// Add or change entries to match your sites.
-const ADMIN_CODE_MAP = {
-  'as-co': 'Athletic Specimen',
-  'ks-wichita': 'Wichita Kansas'
+// Master admin (full access across all groups)
+const MASTER_ADMIN_CODE = 'nlvb2025';
+
+// Default tenant admin codes (locked to single groups)
+const DEFAULT_ADMIN_CODE_MAP = {
+  'kcvb2025': 'Kansas Volleyball',
+  'nlvb2025': 'Athletic Specimen' // optional mirror, so CO still maps if used as tenant
 };
+
 // Session key for tenant scope
 const LS_LIMITED_GROUP_KEY = 'athletic_specimen_limited_group';
+
+function loadAdminCodes() {
+  try {
+    const raw = localStorage.getItem(LS_CODEMAP_KEY);
+    if (raw) {
+      ADMIN_CODE_MAP = JSON.parse(raw) || {};
+    } else {
+      // first run seed
+      ADMIN_CODE_MAP = { ...DEFAULT_ADMIN_CODE_MAP };
+      localStorage.setItem(LS_CODEMAP_KEY, JSON.stringify(ADMIN_CODE_MAP));
+    }
+  } catch {
+    ADMIN_CODE_MAP = { ...DEFAULT_ADMIN_CODE_MAP };
+  }
+  state.adminCodeMap = { ...ADMIN_CODE_MAP };
+}
+
+function saveAdminCodes() {
+  try {
+    localStorage.setItem(LS_CODEMAP_KEY, JSON.stringify(ADMIN_CODE_MAP));
+  } catch {}
+  state.adminCodeMap = { ...ADMIN_CODE_MAP };
+}
 
 // -- Robust global click handler for player card menus (capture phase) --
 (function ensureMenuActionsBound() {
@@ -511,7 +535,8 @@ const state = {
   groups: ['All', 'Athletic Specimen'],
   activeGroup: 'All',
   selectedIds: [], // player.id[] currently selected (admin bulk)
-  limitedGroup: null // when set, admin is locked to this group
+  limitedGroup: null, // when set, admin is locked to this group
+  adminCodeMap: {}   // live copy used by the UI
 };
 
 function showTournamentView(show) {
@@ -548,6 +573,7 @@ function loadLocal() {
   } catch (err) {
     console.error('Error loading from localStorage', err);
   }
+
   const storedTab = sessionStorage.getItem(LS_TAB_KEY);
   if (storedTab) state.playerTab = storedTab;
 
@@ -560,14 +586,15 @@ function loadLocal() {
   } catch {}
   const ag = localStorage.getItem(LS_ACTIVE_GROUP_KEY);
   if (ag) state.activeGroup = ag;
-  const lim = sessionStorage.getItem(LS_LIMITED_GROUP_KEY);
-if (lim) {
-  state.limitedGroup = lim;
-  // force the active group to the tenant’s group
-  state.activeGroup = lim;
-}
-}
 
+  // load codes and tenant scope
+  loadAdminCodes(); // << add this
+  const lim = sessionStorage.getItem(LS_LIMITED_GROUP_KEY); // << add this
+  if (lim) {
+    state.limitedGroup = lim;
+    state.activeGroup = lim;
+  }
+}
 
 // Save current state players and checked in names to localStorage. Called
 // whenever state.players or state.checkedIn changes.
@@ -1869,12 +1896,11 @@ if (groupSelect) {
   }
 
   // --- Admin login/logout ---
-  const loginBtn = document.getElementById('btn-admin-login');
+const loginBtn = document.getElementById('btn-admin-login');
 if (loginBtn) {
   loginBtn.addEventListener('click', () => {
     const codeInput = document.getElementById('admin-code');
     const code = codeInput ? codeInput.value.trim() : '';
-
     if (!code) return;
 
     // Master admin: full access
@@ -1892,11 +1918,12 @@ if (loginBtn) {
     if (group) {
       state.isAdmin = true;
       state.limitedGroup = group;
-      // ensure the group exists in the dropdown list
+
       if (!state.groups.includes(group)) {
         state.groups = Array.from(new Set([...state.groups, group]));
       }
       state.activeGroup = group;
+
       sessionStorage.setItem(LS_ADMIN_KEY, 'true');
       sessionStorage.setItem(LS_LIMITED_GROUP_KEY, group);
       render();
