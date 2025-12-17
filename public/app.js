@@ -135,6 +135,13 @@ function saveAdminCodes() {
         if (hidden) hidden.value = val;
         const btn = select.querySelector('.group-btn');
         if (btn) btn.textContent = val || 'Group';
+        // add chosen group to state.groups if it's new
+        try {
+          if (val && !(state.groups || []).includes(val)) {
+            state.groups = [...(state.groups || []), val];
+            saveLocal();
+          }
+        } catch (e) {}
         select.classList.remove('open');
       }
       return;
@@ -547,7 +554,7 @@ function renderFilteredPlayers() {
           <input type="hidden" class="edit-group" value="${player.group || ''}" />
           <button type="button" class="group-btn">${player.group || 'Group'}</button>
           <div class="group-list" role="menu" aria-hidden="true">
-            ${state.groups.map(g => `<button type="button" class="group-item" data-value="${g}">${g}</button>`).join('')}
+            ${getAvailableGroups().map(g => `<button type="button" class="group-item" data-value="${g}">${g}</button>`).join('')}
           </div>
         </div>
         <button type="button" class="btn-save-edit success" data-index="${idx}" data-id="${player.id}">Save</button>
@@ -578,6 +585,14 @@ const state = {
   limitedGroup: null, // when set, admin is locked to this group
   adminCodeMap: {}   // live copy used by the UI
 };
+
+function getAvailableGroups() {
+  const fromPlayers = Array.from(new Set((state.players || []).map(p => String(p.group || '').trim()).filter(Boolean)));
+  const merged = Array.from(new Set([...(state.groups || []), ...fromPlayers]));
+  // ensure 'All' is present and first
+  const withoutAll = merged.filter(g => g !== 'All');
+  return ['All', ...withoutAll];
+}
 
 function showTournamentView(show) {
   const v = document.getElementById('view-tournament');
