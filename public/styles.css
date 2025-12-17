@@ -285,6 +285,17 @@ button.winner {
 
 .group-list .group-item:hover { background: #f8fafc; }
 
+/* Ensure group item text is readable (override global button color) */
+.group-list .group-item {
+  color: #0f172a;
+  font-size: 15px;
+}
+
+/* Make the group button text dark as well */
+.group-select .group-btn {
+  color: #0f172a;
+}
+
 .player-tabs button,
 .skill-subtabs button {
   padding: 6px 12px;
