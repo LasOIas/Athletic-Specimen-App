@@ -123,7 +123,7 @@ function saveAdminCodes() {
       const idx = parseInt(editBtn.getAttribute('data-index'), 10);
       const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
       if (row) {
-        row.style.display = row.style.display === 'none' || row.style.display === '' ? 'flex' : 'none';
+        row.classList.toggle('show');
       }
       // close menu
       const wrap = editBtn.closest('.menu-wrap');
@@ -255,7 +255,7 @@ function saveAdminCodes() {
     }
 
     // Close row and show small toast
-    if (row) row.style.display = 'none';
+    if (row) row.classList.remove('show');
     try {
       const toast = document.createElement('div');
       toast.textContent = remoteOK ? 'Saved to Supabase' : 'Saved locally';
@@ -510,12 +510,12 @@ function renderFilteredPlayers() {
         </div>
 
         ${state.isAdmin ? `
-          <div class="edit-row" style="display:none; align-items:center; gap:8px; margin-top:8px;" data-index="${idx}">
-  <input type="text" class="edit-name" placeholder="Name" value="${player.name}" style="width:150px; height:32px; padding:4px 8px; border-radius:6px; border:1px solid #ccc;" />
-  <input type="number" class="edit-skill" placeholder="Skill" step="0.1" value="${player.skill}" style="width:70px; height:32px; padding:4px 8px; border-radius:6px; border:1px solid #ccc; text-align:center;" />
-  <input type="text" class="edit-group" placeholder="Group" value="${player.group || ''}" style="width:120px; height:32px; padding:4px 8px; border-radius:6px; border:1px solid #ccc;" />
-  <button type="button" class="btn-save-edit success" data-index="${idx}" data-id="${player.id}" style="height:32px; padding:0 10px; border-radius:6px;">Save</button>
-</div>
+          <div class="edit-row" data-index="${idx}">
+        <input type="text" class="edit-name" placeholder="Name" value="${player.name}" />
+        <input type="number" class="edit-skill" placeholder="Skill" step="0.1" value="${player.skill}" />
+        <input type="text" class="edit-group" placeholder="Group" value="${player.group || ''}" />
+        <button type="button" class="btn-save-edit success" data-index="${idx}" data-id="${player.id}">Save</button>
+      </div>
         ` : ''}
       </div>
     `;
@@ -2175,7 +2175,7 @@ if (logoutBtn) {
       btn.addEventListener('click', (ev) => {
         const idx = ev.currentTarget.getAttribute('data-index');
         const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-        if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+        if (row) row.classList.toggle('show');
       });
     });
 
