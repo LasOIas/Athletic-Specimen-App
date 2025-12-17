@@ -187,7 +187,8 @@ button.winner {
   color: #64748b;
 }
 .edit-row{
-  display:none;
+.player-card .edit-row{
+  display:none !important;
   grid-template-columns: 1fr 80px 140px auto;
   gap:10px;
   align-items:center;
@@ -196,6 +197,9 @@ button.winner {
   border-radius:8px;
   background:#ffffff;
   border:1px solid #e6eef6;
+}
+
+.player-card .edit-row.show{ display:grid !important; }
 }
 
 .player-card .edit-row.show{ display:grid; }
@@ -224,7 +228,7 @@ button.winner {
 .btn-save-edit:hover{ opacity:0.95; transform:translateY(-1px); }
 
 @media (max-width:640px){
-  .edit-row{ display:block; }
+  .player-card .edit-row{ display:block !important; }
   .edit-row input{ margin-bottom:8px; }
   .btn-save-edit{ display:block; width:100%; }
 }
