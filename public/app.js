@@ -588,10 +588,10 @@ const state = {
 
 function getAvailableGroups() {
   const fromPlayers = Array.from(new Set((state.players || []).map(p => String(p.group || '').trim()).filter(Boolean)));
-  const merged = Array.from(new Set([...(state.groups || []), ...fromPlayers]));
-  // ensure 'All' is present and first
-  const withoutAll = merged.filter(g => g !== 'All');
-  return ['All', ...withoutAll];
+  const fromConfig = Array.from(new Set(Object.values(state.adminCodeMap || ADMIN_CODE_MAP || {}).map(v => String(v || '').trim()).filter(Boolean)));
+  const merged = Array.from(new Set([...(state.groups || []).filter(g => g && g !== 'All'), ...fromPlayers, ...fromConfig]));
+  // Return available groups for selection (exclude the 'All' sentinel)
+  return merged.filter(Boolean);
 }
 
 function showTournamentView(show) {
