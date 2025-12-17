@@ -186,51 +186,51 @@ button.winner {
   font-size: 0.875rem;
   color: #64748b;
 }
-.edit-row{
-.player-card .edit-row{
-  display:none !important;
+
+/* Edit row: hidden by default, shown when .show is applied */
+.player-card .edit-row {
+  display: none !important;
   grid-template-columns: 1fr 80px 140px auto;
-  gap:10px;
-  align-items:center;
-  margin-top:8px;
-  padding:10px;
-  border-radius:8px;
-  background:#ffffff;
-  border:1px solid #e6eef6;
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e6eef6;
 }
 
-.player-card .edit-row.show{ display:grid !important; }
+.player-card .edit-row.show {
+  display: grid !important;
 }
 
-.player-card .edit-row.show{ display:grid; }
-
-.edit-row input{
-  box-sizing:border-box;
-  height:38px;
-  padding:6px 10px;
-  border-radius:6px;
-  border:1px solid #d1d5db;
-  background:#fff;
-  width:100%;
+.edit-row input {
+  box-sizing: border-box;
+  height: 38px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  width: 100%;
 }
 
-.btn-save-edit{
-  height:38px;
-  padding:0 12px;
-  border-radius:6px;
-  background:#10b981;
-  color:#fff;
-  border:none;
-  cursor:pointer;
-  font-weight:600;
+.btn-save-edit {
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 6px;
+  background: #10b981;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
 }
 
-.btn-save-edit:hover{ opacity:0.95; transform:translateY(-1px); }
+.btn-save-edit:hover { opacity: 0.95; transform: translateY(-1px); }
 
-@media (max-width:640px){
-  .player-card .edit-row{ display:block !important; }
-  .edit-row input{ margin-bottom:8px; }
-  .btn-save-edit{ display:block; width:100%; }
+@media (max-width:640px) {
+  .player-card .edit-row { display: block !important; }
+  .edit-row input { margin-bottom: 8px; }
+  .btn-save-edit { display: block; width: 100%; }
 }
 
 .player-tabs,

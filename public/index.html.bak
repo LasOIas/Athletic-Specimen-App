@@ -4,11 +4,10 @@
   <meta charset="UTF-8" />
   <meta
     name="viewport"
-    content="width=device-width, initial-scale=1.0"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
   />
   <meta name="theme-color" content="#0f172a" />
   <link rel="manifest" href="manifest.json" />
-  <link rel="apple-touch-icon" href="icon-192x192.png" />
   <link rel="stylesheet" href="styles.css" />
   <title>Athletic Specimen</title>
 
@@ -42,6 +41,26 @@
     .tournament-header h2{ margin:0; font-size:20px; }
     .tournament-actions{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
     .full-width{ width:100%; }
+  </style>
+
+    <style>
+    /* Force full contrast inside the Tournament overlay */
+    #view-tournament .card,
+    #view-tournament,
+    #view-tournament * {
+      opacity: 1 !important;
+      color: #eaeef4;
+    }
+    #view-tournament .card {
+      background: #16181c;
+      border: 1px solid #2a2f38;
+    }
+    #view-tournament label { color: #cfd6e4; font-weight: 600; }
+    #view-tournament input,
+    #view-tournament select,
+    #view-tournament textarea {
+      background:#0d0f12; color:#eaeef4; border:1px solid #2a2f38; border-radius:8px; padding:8px;
+    }
   </style>
 </head>
 <body>
@@ -83,20 +102,20 @@
       </div>
 
       <!-- Report score -->
-      <div class="card" style="margin-bottom:12px;">
+            <div class="card" style="margin-bottom:12px;">
         <h3 style="margin-top:0;">Report Score</h3>
-        <div class="tournament-actions" style="margin-bottom:8px;">
-          <label for="reportMatchSelect">Match</label>
-          <select id="reportMatchSelect" style="min-width:280px;"></select>
+        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px;">
+          <label for="reportNetSelect">Net</label>
+          <select id="reportNetSelect" style="min-width:180px;"></select>
 
-          <label for="teamA_score">Team A</label>
-          <input id="teamA_score" type="number" min="0" step="1" style="width:90px;" />
+          <label>Teams</label>
+          <span id="reportTeamsPreview" class="badge">—</span>
 
-          <label for="teamB_score">Team B</label>
-          <input id="teamB_score" type="number" min="0" step="1" style="width:90px;" />
+          <label for="team_score_1">Score (Your team)</label>
+          <input id="team_score_1" type="number" min="0" step="1" style="width:90px;" />
 
-          <label for="reporterTeam">Your team name</label>
-          <input id="reporterTeam" type="text" placeholder="Type your team name" style="min-width:180px;" />
+          <label for="team_score_2">Score (Opponent)</label>
+          <input id="team_score_2" type="number" min="0" step="1" style="width:90px;" />
 
           <button id="submitScoreBtn">Submit score</button>
         </div>

@@ -1,0 +1,2112 @@
+/*
+ * Athletic Specimen web application
+ */
+// Menu and inline editor styles were moved to `public/styles.css`.
+// This keeps styling in a single place and prevents duplicate rules
+// and large template strings inside the JS file.
+
+// -- One delegated Save handler for inline edit rows (capture phase) --
+(function ensureSaveDelegationBound() {
+  if (window.__saveDelegated) return;
+  window.__saveDelegated = true;
+
+  document.addEventListener('click', async function onSaveDelegated(e) {
+    const btn = e.target.closest('.btn-save-edit');
+    if (!btn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const idxAttr = parseInt(btn.getAttribute('data-index'), 10);
+    const idAttr  = btn.getAttribute('data-id');
+    const idxFromData = Number.isNaN(idxAttr) ? -1 : idxAttr;
+
+    // Locate the edit row using the index we render onto it
+    const row = document.querySelector(`.edit-row[data-index="${idxFromData}"]`) || btn.closest('.edit-row');
+    if (!row) return;
+
+    const nameInput  = row.querySelector('.edit-name');
+    const skillInput = row.querySelector('.edit-skill');
+    const groupInput = row.querySelector('.edit-group');
+
+    const name  = (nameInput?.value || '').trim();
+    let   skill = parseFloat(skillInput?.value);
+    const group = (groupInput?.value || '').trim();
+
+    if (!name || Number.isNaN(skill)) return;
+    // Clamp and keep one decimal place
+    skill = Math.max(0, Math.min(10, Math.round(skill * 10) / 10));
+
+    // Prefer updating by id; fall back to idx
+    let idx = -1;
+    if (idAttr) idx = state.players.findIndex(p => String(p.id) === String(idAttr));
+    if (idx === -1) idx = idxFromData;
+    if (idx < 0 || !state.players[idx]) return;
+
+    const prev = state.players[idx];
+    const next = { ...prev, name, skill, group };
+
+    // Optimistic local update
+    const copy = state.players.slice();
+    copy[idx] = next;
+    state.players = copy;
+
+    // Persist local
+    try { localStorage.setItem('athletic_specimen_players', JSON.stringify(state.players)); } catch {}
+
+    // Remote sync (with group->tag fallback handled inside helper)
+    let remoteOK = false;
+    try {
+      if (supabaseClient) {
+        if (!next.id) {
+  try {
+    try {
+      const { error } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+      if (error) throw error;
+    } catch {
+      try {
+        const { error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+        if (error) throw error;
+      } catch {
+        // 3rd fallback: table has neither 'group' nor 'tag'
+        const { error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+        if (error) throw error;
+      }
+    }
+    remoteOK = true;
+  } catch (e) {
+    console.error('Supabase save error', e);
+  }
+}
+      }
+    } catch (err) {
+      console.error('Supabase save error', err);
+    }
+
+    // Best-effort background upsert batch too
+    try { queueSaveToSupabase(); } catch {}
+
+    if (remoteOK) {
+      try { await syncFromSupabase(); } catch {}
+    }
+
+    // Close row and show small toast
+    if (row) row.style.display = 'none';
+    try {
+      const toast = document.createElement('div');
+      toast.textContent = remoteOK ? 'Saved to Supabase' : 'Saved locally';
+      toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 1100);
+    } catch {}
+
+    render();
+  }, true);
+})();
+
+// -- One delegated handler for Check In and Check Out buttons (capture phase) --
+(function ensureCheckDelegationBound() {
+  if (window.__checkDelegated) return;
+  window.__checkDelegated = true;
+
+  document.addEventListener('click', async function onCheckDelegated(e) {
+    const inBtn = e.target.closest('.btn-checkin');
+    const outBtn = e.target.closest('.btn-checkout');
+    if (!inBtn && !outBtn) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const btn = inBtn || outBtn;
+    const id = btn.getAttribute('data-id');
+    if (!id) return;
+
+    const player = state.players.find(p => String(p.id) === String(id));
+    if (!player) return;
+
+    try {
+      if (inBtn) {
+        if (!state.checkedIn.includes(player.name)) {
+          state.checkedIn = [...state.checkedIn, player.name];
+          if (supabaseClient && player.id) {
+            try {
+              await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+              await syncFromSupabase();
+            } catch (err) {
+              console.error('Supabase update error', err);
+            }
+          }
+        }
+      } else if (outBtn) {
+        state.checkedIn = state.checkedIn.filter(n => normalize(n) !== normalize(player.name));
+        if (supabaseClient && player.id) {
+          try {
+            await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+            await syncFromSupabase();
+          } catch (err) {
+            console.error('Supabase check-out error', err);
+          }
+        }
+      }
+    } finally {
+      saveLocal();
+      queueSaveToSupabase();
+      render();
+    }
+  }, true);
+})();
+
+function updateBulkBarVisibility() {
+  const bar = document.getElementById('bulkBar');
+  const countEl = document.getElementById('bulkCount');
+  const n = (state.selectedIds || []).length;
+  if (!bar || !countEl) return;
+  if (n > 0) {
+    bar.style.display = 'block';
+    countEl.textContent = `${n} selected`;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function bindFiltersCollapsible() {
+  const btn = document.getElementById('filtersToggle');
+  const body = document.getElementById('filtersBody');
+  if (!btn || !body) return;
+  btn.addEventListener('click', () => {
+    const collapsed = body.getAttribute('data-collapsed') === 'true';
+    body.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
+  });
+}
+
+function upsertPlayer(row) {
+  if (!row || !row.id) return;
+  state.playersById.set(row.id, row);
+  render();
+}
+
+function removePlayer(id) {
+  state.playersById.delete(id);
+  render();
+}
+
+function visiblePlayers() {
+  const term = state.searchTerm.trim().toLowerCase();
+  const all = Array.from(state.playersById.values());
+  if (!term) return all;
+  return all.filter(p => (p.name || '').toLowerCase().includes(term));
+}
+
+// Create Supabase client if credentials are provided. The global `supabase`
+// object is exported by vendor/supabase.js. When both values are falsy
+// (empty strings), supabaseClient will be null and no network calls will be
+// made. We wrap creation in a try/catch to avoid errors if supabase.js
+// fails to load.
+
+// Utility to normalise player names for case insensitive comparison
+function normalize(str) {
+  return String(str || '').trim().toLowerCase();
+}
+
+let saveTimeout;
+function queueSaveToSupabase() {
+  if (!supabaseClient) return;
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(async () => {
+    try {
+      const rows = state.players.map(p => {
+        const base = { id: p.id || undefined, name: p.name, skill: p.skill };
+        const grp = String(p.group || '').trim();
+        if (HAS_GROUP)      return { ...base, group: grp };
+        if (HAS_TAG)        return { ...base, tag: grp };
+        return base; // no group-like column in table
+      });
+
+      await supabaseClient.from('players').upsert(rows, { onConflict: 'id' });
+    } catch (err) {
+      console.error('Auto-save error:', err);
+    }
+  }, 800);
+}
+
+// Balanced group generation algorithm. Given a list of all players, the set
+// of names that are currently checked in and a desired number of groups,
+// assign players to groups so that total skill in each group is as even as
+// possible. The algorithm sorts players by skill descending then greedily
+// assigns each player to the group with the lowest total skill so far.
+function generateBalancedGroups(players, checkedInNames, groupCount) {
+  const eligible = players.filter(p =>
+    checkedInNames.some(n => normalize(n) === normalize(p.name))
+  );
+
+  // 1) Sort by descending skill, but randomize equal-skill ties
+  const sorted = eligible.slice().sort((a, b) => {
+    const skillDiff = b.skill - a.skill;
+    return skillDiff !== 0 ? skillDiff : Math.random() - 0.5;
+  });
+
+  const teams = Array.from({ length: groupCount }, () => []);
+  const teamSkills = new Array(groupCount).fill(0);
+
+  for (const player of sorted) {
+    // 2) Find the current minimum total skill
+    const minSkill = Math.min(...teamSkills);
+    // 3) Gather all teams at that minimum
+    const candidates = teamSkills
+      .map((s, idx) => (s === minSkill ? idx : -1))
+      .filter(idx => idx !== -1);
+    // 4) Randomly choose among them
+    const target =
+      candidates[Math.floor(Math.random() * candidates.length)];
+
+    teams[target].push(player);
+    teamSkills[target] += player.skill;
+  }
+
+  return teams;
+}
+
+function renderFilteredPlayers() {
+  // start from all players
+  let filtered = state.players.slice();
+
+  // group filter
+  if (state.activeGroup && state.activeGroup !== 'All') {
+    filtered = filtered.filter(p => String(p.group || '').trim() === state.activeGroup);
+  }
+
+  // tab filters
+  if (state.playerTab === 'in') {
+    filtered = filtered.filter(p => state.checkedIn.includes(p.name));
+  } else if (state.playerTab === 'out') {
+    filtered = filtered.filter(p => !state.checkedIn.includes(p.name));
+  } else if (state.playerTab === 'skill' && state.skillSubTab) {
+    const min = parseFloat(state.skillSubTab);
+    const max = min === 9.0 ? 10 : min + 0.9;
+    filtered = filtered
+  .filter(p => p.skill >= min && p.skill <= max)
+  .sort((a, b) => (b.skill - a.skill) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  } else if (state.playerTab === 'unrated') {
+    filtered = filtered.filter(p => !p.skill || p.skill === 0);
+  }
+
+  // search
+  const q = (state.searchTerm || '').toLowerCase().trim();
+  if (q) {
+    filtered = filtered.filter(p => {
+      const nm = (p.name || '').toLowerCase();
+      const tg = (p.tag  || '').toLowerCase();
+      const gp = (p.group|| '').toLowerCase();
+      return nm.includes(q) || tg.includes(q) || gp.includes(q);
+    });
+  }
+
+  // sort by skill desc
+  filtered.sort((a, b) => (b.skill - a.skill) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+  if (!filtered.length) return '<p>No players found.</p>';
+
+  return filtered.map((player) => {
+    const idx = state.players.findIndex(p => p.id === player.id);
+    const checked = state.checkedIn.includes(player.name);
+    const isSelected = selectedSet().has(String(player.id));
+
+    return `
+      <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
+        ${state.isAdmin ? `
+  <div class="menu-wrap">
+    <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
+            data-id="${player.id}" title="More actions">⋮</button>
+    <div class="card-menu" role="menu">
+      <button type="button" class="menu-item" data-role="menu-edit" data-index="${idx}">Edit</button>
+      <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
+    </div>
+  </div>
+` : ''}
+
+        <div class="row" style="align-items:center; gap:8px;">
+          <input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />
+          <div>
+            <strong>${player.name}</strong>
+            <div class="meta">
+              Skill: ${player.skill === 0 ? 'Unset' : player.skill}
+              • <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
+              ${!state.limitedGroup && player.group ? ` • <span class="badge">${player.group}</span>` : ''}
+
+            </div>
+          </div>
+        </div>
+
+        <div class="card-actions">
+          ${checked
+            ? `<button class="btn-checkout primary" data-id="${player.id}">Check Out</button>`
+            : `<button class="btn-checkin primary" data-id="${player.id}">Check In</button>`
+          }
+          <span class="spacer"></span>
+        </div>
+
+        ${state.isAdmin ? `
+          <div class="edit-row" data-index="${idx}">
+        <input type="text" class="edit-name" placeholder="Name" value="${player.name}" />
+        <input type="number" class="edit-skill" placeholder="Skill" step="0.1" value="${player.skill}" />
+        <input type="text" class="edit-group" placeholder="Group" value="${player.group || ''}" />
+        <button type="button" class="btn-save-edit success" data-index="${idx}" data-id="${player.id}">Save</button>
+      </div>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+// Global state. We use a simple object to hold application state. When
+// properties change the UI is rebuilt. Keeping all state in one place
+// simplifies debugging and persistence.
+const state = {
+  players: [],        // list of players { name, skill, id? }
+  checkedIn: [],      // list of player names currently checked in
+  isAdmin: false,     // whether admin panel is unlocked
+  generatedTeams: [], // result of the last team generation
+  groupCount: 2,      // number of teams requested when generating groups
+  playerTab: 'all',   // current active tab: 'all', 'in', 'out', 'skill'
+  skillSubTab: null,  // current skill range selected, like '1.0', '2.0', etc.
+  loaded: false,      // becomes true after Supabase loads
+  playersById: new Map(),
+  searchTerm: '',
+  groups: ['All', 'Athletic Specimen'],
+  activeGroup: 'All',
+  selectedIds: [], // player.id[] currently selected (admin bulk)
+  limitedGroup: null, // when set, admin is locked to this group
+  adminCodeMap: {}   // live copy used by the UI
+};
+
+function showTournamentView(show) {
+  const v = document.getElementById('view-tournament');
+  if (!v) return;
+  v.style.display = show ? 'block' : 'none';
+  v.setAttribute('aria-hidden', show ? 'false' : 'true');
+}
+
+// Message state used for transient user feedback; messages auto clear
+const messages = {
+  registration: '',
+  checkIn: '',
+};
+
+// -----------------------------------------------------------------------------
+// Persistence helpers
+//
+// Local storage keys. We use separate keys to avoid collisions.
+const LS_PLAYERS_KEY = 'athletic_specimen_players';
+const LS_CHECKIN_KEY = 'athletic_specimen_checked_in';
+const LS_ADMIN_KEY = 'athletic_specimen_is_admin';
+
+// Load players and checked in names from localStorage into state. Called
+// during initialization.
+function loadLocal() {
+  try {
+    const storedPlayers = JSON.parse(localStorage.getItem(LS_PLAYERS_KEY) || '[]');
+    if (Array.isArray(storedPlayers)) state.players = storedPlayers;
+    const storedChecked = JSON.parse(localStorage.getItem(LS_CHECKIN_KEY) || '[]');
+    if (Array.isArray(storedChecked)) state.checkedIn = storedChecked;
+    const adminFlag = sessionStorage.getItem(LS_ADMIN_KEY);
+    state.isAdmin = adminFlag === 'true';
+  } catch (err) {
+    console.error('Error loading from localStorage', err);
+  }
+
+  const storedTab = sessionStorage.getItem(LS_TAB_KEY);
+  if (storedTab) state.playerTab = storedTab;
+
+  const storedSubtab = sessionStorage.getItem(LS_SUBTAB_KEY);
+  if (storedSubtab) state.skillSubTab = storedSubtab;
+
+  try {
+    const groups = JSON.parse(localStorage.getItem(LS_GROUPS_KEY) || '[]');
+    if (Array.isArray(groups) && groups.length) state.groups = Array.from(new Set(['All', ...groups.filter(Boolean)]));
+  } catch {}
+  const ag = localStorage.getItem(LS_ACTIVE_GROUP_KEY);
+  if (ag) state.activeGroup = ag;
+
+  // load codes and tenant scope
+  loadAdminCodes(); // << add this
+  const lim = sessionStorage.getItem(LS_LIMITED_GROUP_KEY); // << add this
+  if (lim) {
+    state.limitedGroup = lim;
+    state.activeGroup = lim;
+  }
+}
+
+// Save current state players and checked in names to localStorage. Called
+// whenever state.players or state.checkedIn changes.
+function saveLocal() {
+  try {
+    localStorage.setItem(LS_PLAYERS_KEY, JSON.stringify(state.players));
+    localStorage.setItem(LS_CHECKIN_KEY, JSON.stringify(state.checkedIn));
+    localStorage.setItem(LS_GROUPS_KEY, JSON.stringify(state.groups.filter(g => g && g !== 'All')));
+    localStorage.setItem(LS_ACTIVE_GROUP_KEY, state.activeGroup || 'All');
+  } catch (err) {
+    console.error('Error saving to localStorage', err);
+  }
+}
+
+// Sync local state with Supabase. Pulls players list and checked_in flags
+// from the Supabase table `players`. If Supabase is not configured this
+// function is a no‑op. When remote data is retrieved it merges into
+// state.players and updates state.checkedIn with any players marked
+// checked_in.
+async function syncFromSupabase() {
+  if (!supabaseClient) return;
+
+  try {
+    // when tenant-limited, only fetch that group to reduce data exposure and payload size
+    let query = supabaseClient.from('players').select('*');
+
+    if (state.limitedGroup) {
+      if (HAS_GROUP) {
+        query = query.eq('group', state.limitedGroup);
+      } else if (HAS_TAG) {
+        query = query.eq('tag', state.limitedGroup);
+      }
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error('Supabase fetch error', error);
+      return;
+    }
+    if (!Array.isArray(data)) return;
+
+    state.players = data.map((p) => ({
+      name: p.name,
+      skill: Number(p.skill) || 0,
+      id: p.id,
+      checked_in: !!p.checked_in,
+      group: String(p.group || p.tag || '').trim()
+    }));
+
+    state.checkedIn = data.filter((p) => p.checked_in).map((p) => p.name);
+    state.loaded = true;
+  } catch (err) {
+    console.error('Error syncing from Supabase', err);
+  }
+}
+
+// Detect whether the 'players' table uses 'group' or 'tag'
+
+let HAS_GROUP = false;
+let HAS_TAG = false;
+let PREFER_TAG_COLUMN = false;
+
+async function detectPlayersSchema() {
+  if (!supabaseClient) return;
+  HAS_GROUP = false;
+  HAS_TAG = false;
+
+  try {
+    const { error } = await supabaseClient.from('players').select('group').limit(1);
+    HAS_GROUP = !error; // if no error, column exists
+  } catch {}
+
+  try {
+    const { error } = await supabaseClient.from('players').select('tag').limit(1);
+    HAS_TAG = !error;
+  } catch {}
+
+  // prefer tag only if tag exists and group does not
+  PREFER_TAG_COLUMN = HAS_TAG && !HAS_GROUP;
+
+  if (!HAS_GROUP && !HAS_TAG) {
+    console.warn('[players] No group-like column found (neither "group" nor "tag"). Group changes will be local-only.');
+  }
+}
+
+async function updatePlayerFieldsSupabase(id, fields) {
+  if (!supabaseClient || !id) return false;
+
+  const { group, ...rest } = fields || {};
+  const payload = { ...rest };
+
+  if (typeof group !== 'undefined') {
+    if (HAS_GROUP)      payload.group = group || '';
+    else if (HAS_TAG)   payload.tag   = group || '';
+    // else: table has neither -> don’t send a group-like column
+  }
+
+  try {
+    const { error } = await supabaseClient.from('players').update(payload).eq('id', id);
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    console.error('Supabase update error', e);
+    return false;
+  }
+}
+
+// map teamId -> { poolId, number } after pools are saved
+function computePoolNumbers(t) {
+  const map = {};
+  (t.pools || []).forEach(pool => {
+    pool.teamIds.forEach((tid, i) => {
+      map[tid] = { poolId: pool.id, number: i + 1 };
+    });
+  });
+  return map;
+}
+
+function poolNameById(t, poolId) {
+  return (t.pools || []).find(p => p.id === poolId)?.name || '';
+}
+
+function teamNumberLabel(t, teamId) {
+  if (!t.poolNumbers) return '';
+  const rec = t.poolNumbers[teamId];
+  if (!rec) return '';
+  const pName = poolNameById(t, rec.poolId);
+  // Example label: "A-3" (Pool A, team #3)
+  const poolLetter = (pName.match(/Pool\s+([A-Z])/i)?.[1] || pName.replace(/[^A-Za-z]/g,'').slice(-1) || '?').toUpperCase();
+  return `${poolLetter}-${rec.number}`;
+}
+
+// ------- TournamentManager (clean IIFE) --------------------------------------
+const TournamentManager = (() => {
+  const LS_KEY = 'nvlb_tournaments_v1';
+
+  // --------- storage helpers ----------
+  function load() {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      return raw ? JSON.parse(raw) : { tournaments: [], scoreSubmissions: {} };
+    } catch {
+      return { tournaments: [], scoreSubmissions: {} };
+    }
+  }
+  function save(state) { localStorage.setItem(LS_KEY, JSON.stringify(state)); }
+  function upsertTournament(t) {
+    const s = load();
+    const i = s.tournaments.findIndex(x => x.id === t.id);
+    if (i >= 0) s.tournaments[i] = t; else s.tournaments.push(t);
+    save(s);
+  }
+
+  // ---------- tiny utils ----------
+  const uid = () => Math.random().toString(36).slice(2, 10);
+
+  // Compute pool “numbers” for quick team number labels like A-3, B-1, etc.
+  function computePoolNumbers(t) {
+    const map = {};
+    (t.pools || []).forEach(pool => {
+      pool.teamIds.forEach((tid, i) => { map[tid] = { poolId: pool.id, number: i + 1 }; });
+    });
+    return map;
+  }
+
+  // Round-robin generator for a list of team IDs (adds a bye if odd)
+  function roundRobinPairs(teamIds) {
+    const ids = [...teamIds];
+    if (ids.length % 2 === 1) ids.push(null);
+    const n = ids.length;
+    const rounds = [];
+    for (let r = 0; r < n - 1; r++) {
+      const pairs = [];
+      for (let i = 0; i < n / 2; i++) {
+        const a = ids[i], b = ids[n - 1 - i];
+        if (a && b) pairs.push([a, b]);
+      }
+      rounds.push(pairs);
+      const fixed = ids[0];
+      const rest = ids.slice(1);
+      rest.unshift(rest.pop());
+      ids.splice(0, ids.length, fixed, ...rest);
+    }
+    return rounds;
+  }
+
+  // ---------- public-ish helpers used by UI ----------
+  function getAll() { return load().tournaments; }
+  function getById(id) { return getAll().find(t => t.id === id) || null; }
+
+  function createTournament(name, netsCount) {
+    const t = {
+      id: uid(),
+      name,
+      nets: Array.from({ length: Number(netsCount || 1) }, (_, i) => i + 1),
+      teams: [],          // [{id, name}]
+      pools: [],          // [{id, name, teamIds: []}]
+      poolNumbers: {},    // { teamId: { poolId, number } }
+      poolMatches: [],    // [{ id, label, poolId, round, net, teamAId, teamBId, status, scoreA, scoreB }]
+      createdAt: Date.now()
+    };
+    upsertTournament(t);
+    return t;
+  }
+
+  function addTeams(tournamentId, teamNames) {
+    const t = getById(tournamentId);
+    if (!t) return;
+    const existing = new Set(t.teams.map(x => x.name.toLowerCase()));
+    teamNames.forEach(n => {
+      const name = String(n || '').trim();
+      if (!name || existing.has(name.toLowerCase())) return;
+      t.teams.push({ id: uid(), name });
+    });
+    upsertTournament(t);
+  }
+
+  // poolsSpec = [{ name: "Pool A", teams: ["Team 1","Team 2",...] }, ...]
+  function setPools(tournamentId, poolsSpec) {
+    const t = getById(tournamentId);
+    if (!t) return;
+    const nameToId = Object.fromEntries(t.teams.map(tm => [tm.name, tm.id]));
+    t.pools = (poolsSpec || []).map(p => ({
+      id: uid(),
+      name: p.name,
+      teamIds: (p.teams || []).map(n => nameToId[n]).filter(Boolean)
+    }));
+    // cache lookup table for team numbers (A-1, B-3, etc.)
+    t.poolNumbers = computePoolNumbers(t);
+    upsertTournament(t);
+  }
+
+  function generatePoolSchedule(tournamentId) {
+    const t = getById(tournamentId);
+    if (!t) return;
+    const nets = t.nets.length ? t.nets : [1];
+    const matches = [];
+    let seq = 1;
+
+    (t.pools || []).forEach(pool => {
+      const rr = roundRobinPairs(pool.teamIds);
+      rr.forEach((pairs, roundIndex) => {
+        pairs.forEach((pair, pairIndex) => {
+          matches.push({
+            id: uid(),
+            label: `M${seq++}`,
+            poolId: pool.id,
+            round: roundIndex + 1,
+            net: nets[pairIndex % nets.length], // rotate across available nets
+            teamAId: pair[0],
+            teamBId: pair[1],
+            status: 'scheduled',
+            scoreA: null,
+            scoreB: null
+          });
+        });
+      });
+    });
+
+    t.poolMatches = matches;
+    upsertTournament(t);
+  }
+
+  // ------------- standings / rankings -------------
+  function teamRecord(tournamentId, teamId) {
+    const t = getById(tournamentId);
+    if (!t) return { wins: 0, losses: 0, pf: 0, pa: 0, pd: 0 };
+    let wins = 0, losses = 0, pf = 0, pa = 0;
+    (t.poolMatches || []).forEach(m => {
+      if (m.status !== 'final') return;
+      if (m.teamAId === teamId) {
+        pf += m.scoreA; pa += m.scoreB;
+        if (m.scoreA > m.scoreB) wins++; else if (m.scoreA < m.scoreB) losses++;
+      } else if (m.teamBId === teamId) {
+        pf += m.scoreB; pa += m.scoreA;
+        if (m.scoreB > m.scoreA) wins++; else if (m.scoreB < m.scoreA) losses++;
+      }
+    });
+    return { wins, losses, pf, pa, pd: pf - pa };
+  }
+
+  function poolStandings(tournamentId) {
+    const t = getById(tournamentId);
+    if (!t) return [];
+    return (t.pools || []).map(pool => {
+      const rows = pool.teamIds.map(teamId => {
+        const rec = teamRecord(t.id, teamId);
+        const name = t.teams.find(x => x.id === teamId)?.name || 'Unknown';
+        return { teamId, teamName: name, ...rec };
+      }).sort((a, b) => {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        if (b.pd !== a.pd) return b.pd - a.pd;
+        if (b.pf !== a.pf) return b.pf - a.pf;
+        return a.teamName.localeCompare(b.teamName);
+      });
+      return { poolId: pool.id, poolName: pool.name, rows };
+    });
+  }
+
+  function allTeamsRanked(tournamentId) {
+    const t = getById(tournamentId);
+    if (!t) return [];
+    return t.teams.map(tm => ({ teamId: tm.id, teamName: tm.name, ...teamRecord(t.id, tm.id) }))
+      .sort((a, b) => {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        if (b.pd !== a.pd) return b.pd - a.pd;
+        if (b.pf !== a.pf) return b.pf - a.pf;
+        return a.teamName.localeCompare(b.teamName);
+      });
+  }
+
+  // ------------- lookups used by UI -------------
+  function nextMatchForTeam(tournamentId, teamId) {
+    const t = getById(tournamentId);
+    if (!t) return null;
+    const upcoming = (t.poolMatches || [])
+      .filter(m => m.status === 'scheduled' && (m.teamAId === teamId || m.teamBId === teamId))
+      .sort((a, b) => (a.round - b.round) || String(a.label).localeCompare(String(b.label)));
+    return upcoming[0] || null;
+  }
+
+  // Find the next scheduled match on a specific net (for “Report Score by Net” UI)
+  function findNextScheduledMatchByNet(tournamentId, netNumber) {
+    const t = getById(tournamentId);
+    if (!t) return null;
+    const upcoming = (t.poolMatches || [])
+      .filter(m => m.status === 'scheduled' && Number(m.net) === Number(netNumber))
+      .sort((a, b) => (a.round - b.round) || String(a.label).localeCompare(String(b.label)));
+    return upcoming[0] || null;
+  }
+
+  // ------------- dual-entry score reporting -------------
+  function submitScoreDualEntry(tournamentId, matchId, reporterTeamName, scoreA, scoreB) {
+    const state = load();
+    const key = `${tournamentId}:${matchId}`;
+    if (!state.scoreSubmissions[key]) state.scoreSubmissions[key] = [];
+    state.scoreSubmissions[key].push({
+      by: String(reporterTeamName || '').trim(),
+      scoreA: Number(scoreA),
+      scoreB: Number(scoreB),
+      ts: Date.now()
+    });
+    save(state);
+
+    const subs = state.scoreSubmissions[key];
+    if (subs.length >= 2) {
+      for (let i = 0; i < subs.length; i++) {
+        for (let j = i + 1; j < subs.length; j++) {
+          if (subs[i].scoreA === subs[j].scoreA && subs[i].scoreB === subs[j].scoreB) {
+            finalizeMatchScore(tournamentId, matchId, subs[i].scoreA, subs[i].scoreB);
+            state.scoreSubmissions[key] = [{
+              finalized: true, scoreA: subs[i].scoreA, scoreB: subs[i].scoreB, ts: Date.now()
+            }];
+            save(state);
+            return { status: 'finalized', message: 'Scores matched from two teams and have been recorded.' };
+          }
+        }
+      }
+      return { status: 'pending', message: 'Second submission received but does not match another. Admin review required.' };
+    }
+    return { status: 'pending', message: 'First submission recorded. Waiting for the second team to submit the same score.' };
+  }
+
+  function finalizeMatchScore(tournamentId, matchId, scoreA, scoreB) {
+    const t = getById(tournamentId);
+    if (!t) return;
+    const m = (t.poolMatches || []).find(x => x.id === matchId);
+    if (!m) return;
+    m.status = 'final';
+    m.scoreA = Number(scoreA);
+    m.scoreB = Number(scoreB);
+    upsertTournament(t);
+  }
+
+  // Expose only what the app needs
+  return {
+    // lists / lookup
+    getAll,
+    getById,
+    // setup
+    createTournament,
+    addTeams,
+    setPools,
+    generatePoolSchedule,
+    // standings / rankings
+    poolStandings,
+    allTeamsRanked,
+    // queries for UI
+    nextMatchForTeam,
+    findNextScheduledMatchByNet,
+    // scoring
+    submitScoreDualEntry
+  };
+})();
+
+// Ensure tournament modal cards aren't faded (used later)
+// Ensure tournament modal content is not dimmed or disabled anywhere
+// Ensure tournament modal content is never dimmed
+function fixTournamentFading() {
+  const root = document.getElementById('view-tournament');
+  if (!root) return;
+
+  // Remove disabled flags/classes
+  root.querySelectorAll('[aria-disabled],[data-disabled]').forEach(el => {
+    el.removeAttribute('aria-disabled');
+    el.removeAttribute('data-disabled');
+  });
+  root.querySelectorAll('.muted,.is-disabled,.disabled').forEach(el => {
+    el.classList.remove('muted','is-disabled','disabled');
+  });
+
+  // Re-enable controls
+  root.querySelectorAll('fieldset, input, select, textarea, button').forEach(el => {
+    if (el.disabled) el.disabled = false;
+    el.style.pointerEvents = 'auto';
+    el.style.opacity = '1';
+    el.style.filter = 'none';
+  });
+
+  // Let CSS control colors (do NOT force white again)
+  root.querySelectorAll('h2, h3, h4, label, .field-label, .section-title').forEach(el => {
+    el.style.opacity = '1';
+    el.style.filter = 'none';
+    el.style.color = ''; // reset any inline color that was set before
+  });
+}
+
+// Make sure section titles and inline labels exist and are visible
+function ensureTournamentUI() {
+  const root = document.getElementById('view-tournament');
+  if (!root) return;
+
+  const styleLabel = (lbl) => {
+    lbl.style.opacity = '1';
+    lbl.style.filter = 'none';
+    lbl.style.color = '#111';
+    lbl.style.fontWeight = '600';
+    lbl.style.display = 'inline-block';
+    lbl.style.minWidth = '72px';
+    lbl.style.marginRight = '8px';
+  };
+
+  const specs = [
+    { id: 'reportMatchSelect', text: 'Match' },
+    { id: 'teamA_score',       text: 'Team A',  ph: 'Team A' },
+    { id: 'teamB_score',       text: 'Team B',  ph: 'Team B' },
+    { id: 'reporterTeam',      text: 'Your team name', ph: 'Type your team name' },
+  ];
+
+  specs.forEach(({ id, text, ph }) => {
+    const input = document.getElementById(id);
+    if (!input) return;
+
+    if (ph && 'placeholder' in input) input.placeholder = ph;
+
+    let lbl = root.querySelector(`label[for="${id}"]`);
+    if (!lbl && input.previousElementSibling && input.previousElementSibling.tagName.toLowerCase() === 'label') {
+      lbl = input.previousElementSibling;
+    }
+    if (!lbl) {
+      lbl = document.createElement('label');
+      lbl.setAttribute('for', id);
+      input.insertAdjacentElement('beforebegin', lbl);
+    }
+    lbl.textContent = text;
+    styleLabel(lbl);
+  });
+}
+
+function ensureTournamentTabClickable() {
+  const btn = document.getElementById('tab-tournament');
+  if (!btn) return;
+  btn.style.pointerEvents = 'auto';
+  btn.style.opacity = '';
+  btn.style.filter = 'none';
+  btn.classList.remove('disabled', 'is-disabled', 'muted');
+  btn.setAttribute('aria-disabled', 'false');
+  btn.setAttribute('tabindex', '0');
+  btn.setAttribute('role', 'button');
+  // help if something is overlaying it
+  btn.style.position = btn.style.position || 'relative';
+  btn.style.zIndex = '10';
+}
+
+function openTournamentView() {
+  showTournamentView(true);
+  try { fixTournamentFading(); } catch {}
+  try { ensureTournamentUI(); } catch {}
+  try { dedupeSectionTitles(); } catch {}
+}
+
+function bindTournamentTab() {
+  const byId = document.getElementById('tab-tournament');
+  if (byId) {
+    byId.style.pointerEvents = 'auto';
+    byId.onclick = (e) => {
+      if (e) e.preventDefault();
+      showTournamentView(true);
+      initTournamentView();
+    };
+  }
+
+  if (!bindTournamentTab._delegated) {
+    document.addEventListener('click', (e) => {
+      const el = e.target.closest('#tab-tournament, [data-tab="tournament"], a[href="#tournament"]');
+      if (!el) return;
+      e.preventDefault();
+      showTournamentView(true);
+      initTournamentView();
+    });
+    bindTournamentTab._delegated = true;
+  }
+}
+
+function initTournamentView() {
+  const adminBox = document.getElementById('adminTournament');
+  if (adminBox) adminBox.style.display = state.isAdmin ? 'block' : 'none';
+
+  const tSelect = document.getElementById('tournamentSelect');
+  const publicNext = document.getElementById('publicNextMatches');
+  const poolStand = document.getElementById('poolStandings');
+  const reportStatus = document.getElementById('reportStatus');
+  const reportMatchSelect = document.getElementById('reportMatchSelect');
+  const reporterTeamInput = document.getElementById('reporterTeam');
+  const teamAInput = document.getElementById('teamA_score');
+  const teamBInput = document.getElementById('teamB_score');
+  const closeBtn = document.getElementById('closeTournamentBtn');
+
+  function matchLabel(t, m) {
+    const a = teamNumberLabel(t, m.teamAId) || 'TBD';
+    const b = teamNumberLabel(t, m.teamBId) || 'TBD';
+    return `${m.label} • ${a} vs ${b} • Net ${m.net} • R${m.round}`;
+  }
+
+  function refreshTournamentSelect() {
+    if (!tSelect) return;
+    const all = TournamentManager.getAll();
+    const prev = tSelect.value;
+    tSelect.innerHTML = all.length
+      ? all.map(t => `<option value="${t.id}">${t.name}</option>`).join('')
+      : `<option value="">No tournaments</option>`;
+    if (prev && Array.from(tSelect.options).some(o => o.value === prev)) {
+      tSelect.value = prev;
+    }
+  }
+
+  function renderAdminRankings() {
+    const box = document.getElementById('adminRankings');
+    if (!box) return;
+    const id = tSelect ? tSelect.value : '';
+    const rows = id ? TournamentManager.allTeamsRanked(id) : [];
+    box.innerHTML = rows.length ? `
+      <table class="table">
+        <thead><tr><th>#</th><th>Team</th><th>Record</th><th>PF</th><th>PA</th><th>PD</th></tr></thead>
+        <tbody>
+          ${rows.map((r,i)=>`<tr><td>${i+1}</td><td>${r.teamName}</td><td>${r.wins}-${r.losses}</td><td>${r.pf}</td><td>${r.pa}</td><td>${r.pd}</td></tr>`).join('')}
+        </tbody>
+      </table>` : '';
+  }
+
+  function renderPublicNextAndStandings() {
+    const id = tSelect ? tSelect.value : '';
+    const t = TournamentManager.getById(id);
+
+    if (publicNext) {
+      if (!t) {
+        publicNext.innerHTML = '<ul class="list"><li>No tournament selected</li></ul>';
+      } else {
+        const nets = t.nets && t.nets.length ? t.nets : [1];
+        const rows = nets.map(n => {
+          const m = TournamentManager.findNextScheduledMatchByNet(t.id, n);
+          if (!m) return `<li>Net ${n}: no scheduled match</li>`;
+          return `<li><span class="badge">Net ${n}</span> ${matchLabel(t, m)}</li>`;
+        }).join('');
+        publicNext.innerHTML = `<ul class="list">${rows}</ul>`;
+      }
+    }
+
+    if (poolStand) {
+      if (!t) {
+        poolStand.innerHTML = '';
+      } else {
+        const standings = TournamentManager.poolStandings(t.id);
+        poolStand.innerHTML = standings.length
+          ? standings.map(s => `
+              <div class="card">
+                <h4 style="margin:6px 0;">${s.poolName}</h4>
+                <table class="table">
+                  <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>PF</th><th>PA</th><th>PD</th></tr></thead>
+                  <tbody>
+                    ${s.rows.map((r,i)=>`
+                      <tr>
+                        <td>${i+1}</td>
+                        <td>${r.teamName}</td>
+                        <td>${r.wins}</td>
+                        <td>${r.losses}</td>
+                        <td>${r.pf}</td>
+                        <td>${r.pa}</td>
+                        <td>${r.pd}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `).join('')
+          : `<p class="small" style="margin:0;">No pools yet.</p>`;
+      }
+    }
+  }
+
+  function populateReportMatchSelect() {
+    const el = reportMatchSelect;
+    if (!el) return;
+    const id = tSelect ? tSelect.value : '';
+    el.innerHTML = '';
+    if (!id) {
+      el.innerHTML = `<option value="">Select a tournament first</option>`;
+      return;
+    }
+    const t = TournamentManager.getById(id);
+    if (!t || !Array.isArray(t.poolMatches) || t.poolMatches.length === 0) {
+      el.innerHTML = `<option value="">No matches scheduled</option>`;
+      return;
+    }
+    const scheduled = t.poolMatches.filter(m => m.status === 'scheduled');
+    if (scheduled.length === 0) {
+      el.innerHTML = `<option value="">No upcoming matches</option>`;
+      return;
+    }
+    el.innerHTML = scheduled
+      .sort((a,b) => (a.round - b.round) || String(a.label).localeCompare(String(b.label)))
+      .map(m => `<option value="${m.id}">${matchLabel(t, m)}</option>`)
+      .join('');
+  }
+
+  const createBtn = document.getElementById('createTournamentBtn');
+  if (createBtn) createBtn.onclick = () => {
+    const name = (document.getElementById('newTournamentName').value || '').trim();
+    const nets = document.getElementById('newTournamentNets').value;
+    if (!name) return;
+    TournamentManager.createTournament(name, nets || 1);
+    refreshTournamentSelect();
+    renderAdminRankings();
+    renderPublicNextAndStandings();
+    populateReportMatchSelect();
+  };
+
+  const addTeamsBtn = document.getElementById('addTeamsBtn');
+  if (addTeamsBtn) addTeamsBtn.onclick = () => {
+    const id = tSelect ? tSelect.value : '';
+    if (!id) return;
+    const text = document.getElementById('bulkTeams').value || '';
+    const names = text.split('\n').map(s => s.trim()).filter(Boolean);
+    if (!names.length) return;
+    TournamentManager.addTeams(id, names);
+    renderAdminRankings();
+    renderPublicNextAndStandings();
+    populateReportMatchSelect();
+  };
+
+  const savePoolsBtn = document.getElementById('savePoolsBtn');
+  if (savePoolsBtn) savePoolsBtn.onclick = () => {
+    const id = tSelect ? tSelect.value : '';
+    if (!id) return;
+    try {
+      const spec = JSON.parse(document.getElementById('poolsJson').value || '[]');
+      TournamentManager.setPools(id, spec);
+      renderAdminRankings();
+      renderPublicNextAndStandings();
+      populateReportMatchSelect();
+    } catch {
+      alert('Pools JSON invalid');
+    }
+  };
+
+  const genBtn = document.getElementById('generatePoolScheduleBtn');
+  if (genBtn) genBtn.onclick = () => {
+    const id = tSelect ? tSelect.value : '';
+    if (!id) return;
+    TournamentManager.generatePoolSchedule(id);
+    renderAdminRankings();
+    renderPublicNextAndStandings();
+    populateReportMatchSelect();
+  };
+
+  const submitScoreBtn = document.getElementById('submitScoreBtn');
+  if (submitScoreBtn) submitScoreBtn.onclick = () => {
+    const id = tSelect ? tSelect.value : '';
+    const matchId = reportMatchSelect ? reportMatchSelect.value : '';
+    const a = Number(teamAInput && teamAInput.value ? teamAInput.value : '');
+    const b = Number(teamBInput && teamBInput.value ? teamBInput.value : '');
+    const who = reporterTeamInput && reporterTeamInput.value ? reporterTeamInput.value.trim() : '';
+
+    if (!id || !matchId || Number.isNaN(a) || Number.isNaN(b) || a < 0 || b < 0) {
+      if (reportStatus) reportStatus.textContent = 'Complete all fields to submit a score.';
+      return;
+    }
+
+    const res = TournamentManager.submitScoreDualEntry(id, matchId, who, a, b);
+    if (reportStatus) reportStatus.textContent = res.message;
+
+    renderAdminRankings();
+    renderPublicNextAndStandings();
+    populateReportMatchSelect();
+
+    if (teamAInput) teamAInput.value = '';
+    if (teamBInput) teamBInput.value = '';
+    if (reporterTeamInput) reporterTeamInput.value = '';
+  };
+
+  if (tSelect) tSelect.onchange = () => {
+    renderAdminRankings();
+    renderPublicNextAndStandings();
+    populateReportMatchSelect();
+  };
+
+  if (closeBtn) closeBtn.onclick = () => {
+    showTournamentView(false);
+  };
+
+  refreshTournamentSelect();
+  renderAdminRankings();
+  renderPublicNextAndStandings();
+  populateReportMatchSelect();
+}
+
+
+// -----------------------------------------------------------------------------
+// UI Helpers
+// Keep exactly ONE copy of this
+function closeAllMenus() {
+  document.querySelectorAll('.menu-wrap').forEach(w => w.classList.remove('menu-open'));
+  document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
+
+function bindPlayerRowHandlers() {
+  // Rebind fresh ⋮ buttons on each render
+  document.querySelectorAll('.btn-actions').forEach(btn => {
+    const clone = btn.cloneNode(true);
+    btn.replaceWith(clone);
+  });
+
+  // Toggle the dropdown for this card (local; global handler will also catch)
+  document.querySelectorAll('.btn-actions').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wrap = btn.closest('.menu-wrap');
+      const isOpen = wrap && wrap.classList.contains('menu-open');
+      closeAllMenus();
+      if (wrap) {
+        wrap.classList.toggle('menu-open', !isOpen);
+        btn.setAttribute('aria-expanded', String(!isOpen));
+      }
+    });
+  });
+
+  // Keep clicks inside the dropdown from closing it immediately
+  document.querySelectorAll('.card-menu').forEach(menu => {
+    menu.addEventListener('click', (e) => e.stopPropagation());
+  });
+
+}
+
+function bindSelectionHandlers() {
+  // checkbox toggle for selected state (bulk bar)
+  document.querySelectorAll('.player-select').forEach(cb => {
+    const clone = cb.cloneNode(true);
+    cb.replaceWith(clone);
+  });
+  document.querySelectorAll('.player-select').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const id = String(e.currentTarget.getAttribute('data-id'));
+      const set = selectedSet();
+      if (e.currentTarget.checked) set.add(id); else set.delete(id);
+      state.selectedIds = Array.from(set);
+      const card = e.currentTarget.closest('.player-card');
+      if (card) card.classList.toggle('is-selected', e.currentTarget.checked);
+      updateBulkBarVisibility();
+    });
+  });
+}
+// Render the entire application into the root element. Each call replaces
+// existing content to reflect the current state. Event handlers are
+// attached inline within this function. To minimize reflows, we build
+// strings for larger sections and assign innerHTML.
+function render() {
+  let editStyle = document.getElementById('edit-css');
+  if (!editStyle) {
+    editStyle = document.createElement('style');
+    editStyle.id = 'edit-css';
+    editStyle.type = 'text/css';
+    document.head.appendChild(editStyle);
+  }
+  editStyle.textContent = editCss;
+  const html = `
+    <label>
+      Teams:
+      <input type="number" id="group-count" min="2" value="${escapeHTML(String(state.groupCount))}" />
+    </label>
+    <button id="btn-generate-teams">Generate</button>
+    <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
+  </div>
+  ${teamsHTML}
+</div>
+<div class="row" style="justify-content:space-between; align-items:center; margin-top:8px;">
+  <h3>Players</h3>
+  <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
+</div>
+  <!-- Collapsible body: put ALL your filter controls INSIDE this div -->
+  <div id="filtersBody">
+    <h4 style="margin-bottom: 0.5rem;">Filters</h4>
+
+    <!-- Filter select (All / In / Out / Skill / Unset) -->
+    <div class="row">
+      <label for="player-tab-select">Filter:</label>
+      <select id="player-tab-select">
+        <option value="all" ${state.playerTab === 'all' ? 'selected' : ''}>All Players</option>
+        <option value="in" ${state.playerTab === 'in' ? 'selected' : ''}>Checked In</option>
+        <option value="out" ${state.playerTab === 'out' ? 'selected' : ''}>Checked Out</option>
+        <option value="skill" ${state.playerTab === 'skill' ? 'selected' : ''}>Skill Number</option>
+        <option value="unrated" ${state.playerTab === 'unrated' ? 'selected' : ''}>Unset Skill</option>
+      </select>
+    </div>
+
+    <!-- Group filter + group management -->
+   ${state.limitedGroup
+  ? `
+    <div class="row" style="margin-top: 0.5rem;">
+      <label>Group:</label>
+      <span class="badge" id="tenant-group-pill" style="font-weight:600;">${state.limitedGroup}</span>
+    </div>
+  `
+  : `
+  <div class="row" style="margin-top: 0.5rem; align-items:center;">
+    <label for="group-filter-select">Group:</label>
+    <select id="group-filter-select">
+      ${state.groups.map(g => `<option value="${g}" ${state.activeGroup === g ? 'selected' : ''}>${g}</option>`).join('')}
+    </select>
+
+    <button id="btn-open-group-manager" class="secondary">Manage Groups</button>
+  </div>
+
+  <!-- lightweight modal -->
+  <div id="groupManager" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:10000;">
+    <div style="max-width:720px; margin:6vh auto; background:#fff; border-radius:12px; box-shadow:0 12px 32px rgba(0,0,0,.18); overflow:hidden;">
+      <div style="display:flex; align-items:center; padding:12px 16px; background:#f8fafc;">
+        <h3 style="margin:0; font-size:18px;">Manage Groups</h3>
+        <span style="flex:1"></span>
+        <button id="btn-close-group-manager" class="secondary">Close</button>
+      </div>
+
+      <div style="padding:16px;">
+        <!-- add -->
+        <div class="card" style="padding:12px; margin-bottom:12px;">
+          <div class="row">
+            <input type="text" id="gm-new-name" placeholder="New group name" />
+            <button id="gm-add" class="primary">Add Group</button>
+          </div>
+        </div>
+        <!-- list -->
+        <div class="card" style="padding:12px;">
+          <table class="table" style="width:100%;">
+            <thead>
+              <tr><th style="text-align:left;">Group</th><th>Checked In</th><th>Total</th><th style="width:160px;">Actions</th></tr>
+            </thead>
+            <tbody id="gm-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+`
+}
+    <!-- Skill range sub-filter (only when Filter = Skill) -->
+    ${state.playerTab === 'skill' ? `
+      <div class="row" style="margin-top: 0.5rem;">
+        <label for="skill-subtab-select">Skill Range:</label>
+        <select id="skill-subtab-select">
+          ${Array.from({ length: 9 }, (_, i) => {
+            const base = `${i + 1}.0`;
+            const selected = state.skillSubTab === base ? 'selected' : '';
+            const label = base === '9.0' ? '9.0–10' : `${base}–${i + 1}.9`;
+            return `<option value="${base}" ${selected}>${label}</option>`;
+          }).join('')}
+        </select>
+      </div>
+    ` : ''}
+
+    <!-- Search -->
+    <div id="player-search-container" style="position:relative; display:inline-block; width:100%; max-width:400px; margin:0.5rem 0;">
+      <input
+        type="text"
+        id="player-search"
+        placeholder="Search name or tag"
+        value="${escapeHTML(state.searchTerm || '')}"
+        style="padding: 0.5rem 2rem 0.5rem 0.5rem; width: 100%;"
+      />
+      <span
+        id="player-search-clear"
+        style="position:absolute; right:8px; top:50%; transform:translateY(-50%); cursor:pointer; user-select:none; ${state.searchTerm ? '' : 'display:none;'}"
+      >✕</span>
+    </div>
+  </div> <!-- /#filtersBody -->
+
+  <!-- Sticky Bulk Bar (shows only when you select players) -->
+  <div id="bulkBar" class="card" style="display:none; position:sticky; bottom:0; z-index:5;">
+    <div class="row">
+      <strong id="bulkCount">0 selected</strong>
+      <span style="flex:1"></span>
+
+      <label for="bulk-dest-group">Move to group:</label>
+      <select id="bulk-dest-group" ${state.limitedGroup ? 'disabled' : ''}>
+  <option value="">— choose —</option>
+  ${state.groups.filter(g => g && g !== 'All').map(g => `<option value="${g}">${g}</option>`).join('')}
+</select>
+      <button id="btn-assign-to-group" class="primary">Add</button>
+      <button id="btn-remove-from-group" class="danger">Remove</button>
+      <button id="btn-clear-selection" class="secondary">Clear</button>
+    </div>
+  </div>
+
+  <!-- Filtered Player Cards -->
+  <div class="players">
+    ${renderFilteredPlayers()}
+  </div>
+</div>
+  ` : '';
+
+  // Build the final page markup
+  const adminLoginHTML = !state.isAdmin ? `
+    <div class="card">
+      <h2>Admin Login</h2>
+      <div class="row">
+        <input type="password" id="admin-code" placeholder="Enter admin code" />
+        <button id="btn-admin-login">Login</button>
+      </div>
+    </div>
+  ` : '';
+
+  // Build final page markup. Hide full players list on public side. The list is only shown in admin panel.
+    <div class="container">
+<h1 class="title">${state.limitedGroup ? state.limitedGroup : 'Athletic Specimen'}</h1>
+
+<p class="small" style="text-align:center; margin-bottom:0.25rem;">
+  Checked In: <strong>${state.checkedIn.length}</strong>
+  ${state.isAdmin && !state.limitedGroup ? ` • Group: <strong>${state.activeGroup || 'All'}</strong>` : ''}
+</p>
+
+${state.isAdmin && !state.limitedGroup ? `
+  <div style="text-align:center; font-size:0.9rem; margin-top:0.25rem;">
+    <table style="margin:0 auto; border-collapse:collapse; font-size:inherit;">
+      <thead>
+        <tr>
+          <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Group</th>
+          <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Checked In</th>
+          <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Total Players</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${computeCheckedInByGroup().map(row => `
+          <tr>
+            <td style="padding:2px 8px;">${row.group}</td>
+            <td style="padding:2px 8px;">${row.in}</td>
+            <td style="padding:2px 8px;">${row.total}</td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
+` : ''}
+      ${adminLoginHTML}
+      <div class="grid-2">
+  <div class="card">
+    <h2>Check In</h2>
+    <input type="text" id="check-name" placeholder="First and Last Name" />
+    <div class="row">
+      <button id="btn-check-in">Check In</button>
+      <button id="btn-check-out">Check Out</button>
+    </div>
+    ${checkMsg}
+  </div>
+
+  ${!state.isAdmin ? `
+  <div class="card">
+    <h2>Register Player</h2>
+    <input type="text" id="register-name" placeholder="First and Last Name" />
+    <button id="btn-register">Register</button>
+    ${regMsg}
+  </div>
+  ` : ``}
+</div>
+      ${adminHTML}
+    </div>
+  `;
+
+  // Strip any trailing stray ']' that might have slipped into the template
+const sanitized = html.replace(/\n?\]\s*$/, '');
+root.innerHTML = sanitized;
+
+// Menu and inline editor styles have been moved to `public/styles.css`.
+// Keeping CSS in stylesheets avoids large template strings inside JS
+// and resolves editor/Problems related to embedded CSS.
+
+// at the end of render()
+attachHandlers();
+bindTournamentTab();
+bindFiltersCollapsible();
+bindPlayerRowHandlers();
+bindSelectionHandlers();
+updateBulkBarVisibility();
+}
+
+// Attach event listeners to the current DOM. This function should be
+// called after each call to render().
+function attachHandlers() {
+  // --- Group controls (Admin Players) ---
+const groupSelect = document.getElementById('group-filter-select');
+if (groupSelect) {
+  groupSelect.addEventListener('change', () => {
+    if (state.limitedGroup) {
+      // enforce lock
+      state.activeGroup = state.limitedGroup;
+      groupSelect.value = state.limitedGroup;
+      return;
+    }
+    state.activeGroup = groupSelect.value || 'All';
+    saveLocal();
+    render();
+  });
+}
+
+// ----- Group Manager (master admin) -----
+const gmOpen  = document.getElementById('btn-open-group-manager');
+const gmRoot  = document.getElementById('groupManager');
+
+function gmPopulate() {
+  if (!gmRoot) return;
+
+  // Build a canonical group list (exclude "All")
+  const known = new Set(state.groups.filter(g => g && g !== 'All'));
+  // Include any groups that might exist on players but not in state.groups
+  state.players.forEach(p => {
+    const g = String(p.group || '').trim();
+    if (g) known.add(g);
+  });
+  const list = Array.from(known).sort((a,b)=>a.localeCompare(b));
+
+  // Fill merge selects
+  const fromSel = gmRoot.querySelector('#gm-merge-from');
+  const intoSel = gmRoot.querySelector('#gm-merge-into');
+  const opts = list.map(g => `<option value="${g}">${g}</option>`).join('');
+  if (fromSel) fromSel.innerHTML = `<option value="">— choose —</option>${opts}`;
+  if (intoSel) intoSel.innerHTML = `<option value="">— choose —</option>${opts}`;
+
+  // Fill rows with counts + actions
+  const byGroup = computeCheckedInByGroup();
+  const totals = Object.fromEntries(byGroup.map(r => [r.group, r.total]));
+  const ins    = Object.fromEntries(byGroup.map(r => [r.group, r.in]));
+
+  const rowsEl = gmRoot.querySelector('#gm-rows');
+  if (rowsEl) {
+    rowsEl.innerHTML = list.map(g => `
+      <tr data-group="${g}">
+        <td><strong>${g}</strong></td>
+        <td style="text-align:center;">${ins[g] || 0}</td>
+        <td style="text-align:center;">${totals[g] || 0}</td>
+        <td>
+          <div class="row" style="gap:6px; justify-content:flex-end;">
+            <button class="gm-rename secondary" data-group="${g}">Rename</button>
+            <button class="gm-delete danger" data-group="${g}">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  }
+}
+
+if (gmOpen && gmRoot) {
+  gmOpen.addEventListener('click', () => {
+    gmPopulate();
+    gmRoot.style.display = 'block';
+  });
+  const gmClose = gmRoot.querySelector('#btn-close-group-manager');
+  if (gmClose) gmClose.addEventListener('click', () => gmRoot.style.display = 'none');
+
+  // Add
+  const gmAdd = gmRoot.querySelector('#gm-add');
+  if (gmAdd) gmAdd.addEventListener('click', () => {
+    const input = gmRoot.querySelector('#gm-new-name');
+    const name  = (input && input.value || '').trim();
+    if (!name) return;
+    if (!state.groups.includes(name)) {
+      state.groups = Array.from(new Set([...state.groups, name]));
+    }
+    state.activeGroup = name;
+    saveLocal();
+    render();
+    gmPopulate();
+    if (input) input.value = '';
+  });
+
+  // Row actions (rename/delete)
+  gmRoot.addEventListener('click', async (e) => {
+    const renameBtn = e.target.closest('.gm-rename');
+    const deleteBtn = e.target.closest('.gm-delete');
+
+    // Rename
+    if (renameBtn) {
+      const oldName = renameBtn.getAttribute('data-group');
+      if (!oldName) return;
+      const newName = prompt(`Rename "${oldName}" to:`, oldName);
+      if (!newName || newName === oldName) return;
+
+      state.groups  = state.groups.map(g => g === oldName ? newName : g);
+      state.players = state.players.map(p => (String(p.group || '') === oldName ? { ...p, group: newName } : p));
+      if (state.activeGroup === oldName) state.activeGroup = newName;
+
+      try {
+        const ids = state.players.filter(p => p.group === newName).map(p => p.id).filter(Boolean);
+        for (const id of ids) { await updatePlayerFieldsSupabase(id, { group: newName }); }
+        await syncFromSupabase();
+      } catch (e) { console.error('Supabase rename error', e); }
+
+      saveLocal();
+      render();
+      gmPopulate();
+      return;
+    }
+
+    // Delete
+    if (deleteBtn) {
+      const name = deleteBtn.getAttribute('data-group');
+      if (!name) return;
+      if (!confirm(`Delete "${name}" and remove the group from all players?`)) return;
+
+      state.groups  = state.groups.filter(g => g !== name);
+      state.players = state.players.map(p => (String(p.group || '') === name ? { ...p, group: '' } : p));
+      if (state.activeGroup === name) state.activeGroup = 'All';
+
+      try {
+        const ids = state.players.filter(p => !p.group).map(p => p.id).filter(Boolean);
+        for (const id of ids) { await updatePlayerFieldsSupabase(id, { group: '' }); }
+        await syncFromSupabase();
+      } catch (e) { console.error('Supabase delete group error', e); }
+
+      saveLocal();
+      render();
+      gmPopulate();
+    }
+  });
+}
+
+  // --- Admin login/logout ---
+// Admin login
+const loginBtn = document.getElementById('btn-admin-login');
+if (loginBtn) {
+  loginBtn.addEventListener('click', async () => {
+    const codeInput = document.getElementById('admin-code');
+    const code = codeInput ? codeInput.value.trim() : '';
+    if (!code) return;
+
+    // Master admin: full access
+    if (code === MASTER_ADMIN_CODE) {
+      state.isAdmin = true;
+      state.limitedGroup = null;                 // clear tenant lock
+      state.activeGroup = 'All';                 // show everyone
+      sessionStorage.setItem(LS_ADMIN_KEY, 'true');
+      sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
+      try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
+      await syncFromSupabase();                  // re-fetch full dataset
+      render();
+      return;
+    }
+
+    // Tenant admin: lock to one group
+    const group = ADMIN_CODE_MAP[code];
+    if (group) {
+      state.isAdmin = true;
+      state.limitedGroup = group;
+      if (!state.groups.includes(group)) {
+        state.groups = Array.from(new Set([...state.groups, group]));
+      }
+      state.activeGroup = group;                 // force filter to tenant group
+      sessionStorage.setItem(LS_ADMIN_KEY, 'true');
+      sessionStorage.setItem(LS_LIMITED_GROUP_KEY, group);
+      try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, group); } catch {}
+      await syncFromSupabase();                  // re-fetch only that group
+      render();
+      return;
+    }
+
+    alert('Incorrect admin code');
+  });
+}
+
+// Admin logout
+const logoutBtn = document.getElementById('btn-logout');
+if (logoutBtn) {
+  logoutBtn.addEventListener('click', async () => {
+    state.isAdmin = false;
+    state.limitedGroup = null;                   // clear tenant lock
+    state.activeGroup = 'All';                   // reset view
+    sessionStorage.removeItem(LS_ADMIN_KEY);
+    sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
+    try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
+    await syncFromSupabase();                    // load public view dataset
+    render();
+  });
+}
+
+  // --- Admin: Save player (add/update) ---
+  const savePlayerBtn = document.getElementById('btn-save-player');
+  if (savePlayerBtn) {
+    savePlayerBtn.addEventListener('click', async () => {
+      const nameInput = document.getElementById('admin-player-name');
+      const skillInput = document.getElementById('admin-player-skill');
+      const name = (nameInput && nameInput.value || '').trim();
+      const skill = parseFloat(skillInput && skillInput.value || '');
+      if (!name || isNaN(skill) || skill <= 0) return;
+
+      const idx = state.players.findIndex((p) => normalize(p.name) === normalize(name));
+
+      if (idx !== -1) {
+        // update existing
+        const updated = state.players.slice();
+        updated[idx] = { ...updated[idx], name, skill };
+        state.players = updated;
+
+        if (supabaseClient && updated[idx].id) {
+          try {
+            await supabaseClient.from('players').update({ name, skill }).eq('id', updated[idx].id);
+            await syncFromSupabase();
+          } catch (err) {
+            console.error('Supabase update error', err);
+          }
+        }
+      } else {
+        // insert new
+        const group = state.limitedGroup
+        ? state.limitedGroup
+        : (state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '');
+        const newPlayer = { name, skill, group };
+        let inserted = { ...newPlayer };
+
+        if (supabaseClient) {
+          try {
+  try {
+    const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+    await syncFromSupabase();
+    if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+  } catch {
+    try {
+      const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+      await syncFromSupabase();
+      if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+    } catch {
+      // 3rd fallback: table has neither 'group' nor 'tag'
+      const { data } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+      await syncFromSupabase();
+      if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+    }
+  }
+} catch (err) {
+  console.error('Supabase insert error', err);
+  state.players = [...state.players, inserted];
+}
+        } else {
+          state.players = [...state.players, inserted];
+        }
+      }
+
+      if (nameInput) nameInput.value = '';
+      if (skillInput) skillInput.value = '';
+      saveLocal();
+      queueSaveToSupabase();
+      render();
+    });
+  }
+
+  // --- Public: Check in/out ---
+  const checkInBtn = document.getElementById('btn-check-in');
+  if (checkInBtn) {
+    checkInBtn.addEventListener('click', async () => {
+      const input = document.getElementById('check-name');
+      const name = (input && input.value || '').trim();
+      if (!name) return;
+
+      const player = state.players.find((p) => normalize(p.name) === normalize(name));
+      if (player) {
+        if (!state.checkedIn.includes(player.name)) {
+          state.checkedIn = [...state.checkedIn, player.name];
+          if (supabaseClient && player.id) {
+            try {
+              await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+              await syncFromSupabase();
+            } catch (err) {
+              console.error('Supabase update error', err);
+            }
+          }
+          messages.checkIn = 'You are checked in';
+        } else {
+          messages.checkIn = 'You are already checked in.';
+        }
+      } else {
+        messages.checkIn = 'Player not found in history';
+      }
+
+      setTimeout(() => { messages.checkIn = ''; render(); }, 3000);
+      if (input) input.value = '';
+      saveLocal();
+      queueSaveToSupabase();
+      render();
+    });
+  }
+
+  const checkOutBtn = document.getElementById('btn-check-out');
+  if (checkOutBtn) {
+    checkOutBtn.addEventListener('click', async () => {
+      const input = document.getElementById('check-name');
+      const name = (input && input.value || '').trim();
+      if (!name) return;
+
+      const player = state.players.find((p) => normalize(p.name) === normalize(name));
+      if (player) {
+        if (state.checkedIn.some((n) => normalize(n) === normalize(name))) {
+          state.checkedIn = state.checkedIn.filter((n) => normalize(n) !== normalize(name));
+          if (supabaseClient && player.id) {
+            try {
+              await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+              await syncFromSupabase();
+            } catch (err) {
+              console.error('Supabase check-out error', err);
+            }
+          }
+          messages.checkIn = 'You are now checked out.';
+        } else {
+          messages.checkIn = 'You were not checked in.';
+        }
+      } else {
+        messages.checkIn = 'Player not found.';
+      }
+
+      setTimeout(() => { messages.checkIn = ''; render(); }, 3000);
+      if (input) input.value = '';
+      saveLocal();
+      queueSaveToSupabase();
+      render();
+    });
+  }
+
+  // --- Player cards: inline actions ---
+  function attachPlayerRowHandlers() {
+    document.querySelectorAll('.btn-edit').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        const idx = ev.currentTarget.getAttribute('data-index');
+        const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+        if (row) row.style.display = row.style.display === 'none' ? 'grid' : 'none';
+      });
+    });
+
+    document.querySelectorAll('.btn-checkout').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        const id = ev.currentTarget.getAttribute('data-id');
+        const player = state.players.find((p) => String(p.id) === String(id));
+        if (!player) return;
+
+        state.checkedIn = state.checkedIn.filter((n) => n !== player.name);
+        if (supabaseClient && player.id) {
+          try {
+            await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+            await syncFromSupabase();
+          } catch (err) {
+            console.error('Supabase update error', err);
+          }
+        }
+        saveLocal();
+        queueSaveToSupabase();
+        render();
+      });
+    });
+
+    document.querySelectorAll('.btn-delete').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        const id = ev.currentTarget.getAttribute('data-id');
+        const idx = state.players.findIndex((p) => String(p.id) === String(id));
+        if (idx === -1) return;
+
+        const removed = state.players[idx];
+
+        if (supabaseClient && removed.id) {
+          try {
+            await supabaseClient.from('players').delete().eq('id', removed.id);
+            await syncFromSupabase();
+          } catch (err) {
+            console.error('Supabase delete error', err);
+          }
+        }
+
+        state.players = state.players.filter((p) => String(p.id) !== String(id));
+        state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
+
+        saveLocal();
+        queueSaveToSupabase();
+        render();
+      });
+    });
+  }
+  attachPlayerRowHandlers();
+
+  // --- Reset all checkins ---
+  const resetBtn = document.getElementById('btn-reset-checkins');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', async () => {
+      state.checkedIn = [];
+      if (supabaseClient) {
+        try {
+          await supabaseClient.from('players').update({ checked_in: false }).eq('checked_in', true);
+          await syncFromSupabase();
+        } catch (err) {
+          console.error('Supabase reset error', err);
+        }
+      }
+      saveLocal();
+      queueSaveToSupabase();
+      render();
+    });
+  }
+
+  // --- Team generator controls ---
+  const groupCountInput = document.getElementById('group-count');
+  if (groupCountInput) {
+    groupCountInput.addEventListener('change', () => {
+      const val = parseInt(groupCountInput.value);
+      state.groupCount = isNaN(val) ? 2 : Math.max(2, val);
+    });
+  }
+
+  const generateBtn = document.getElementById('btn-generate-teams');
+  if (generateBtn) {
+    generateBtn.addEventListener('click', () => {
+      state.generatedTeams = generateBalancedGroups(state.players, state.checkedIn, state.groupCount);
+      render();
+    });
+  }
+
+  // --- Bracket inline editing ---
+  document.querySelectorAll('.match input').forEach((input) => {
+    input.addEventListener('input', (ev) => {
+      const matchIndex = parseInt(ev.target.getAttribute('data-match'));
+      const field = ev.target.getAttribute('data-field');
+      const value = ev.target.value;
+      if (isNaN(matchIndex) || !field) return;
+      const updated = state.bracket.slice();
+      updated[matchIndex] = { ...updated[matchIndex], [field]: value, winner: updated[matchIndex].winner === value ? value : null };
+      if (matchIndex < 4) {
+        const dest = 4 + Math.floor(matchIndex / 2);
+        const destField = matchIndex % 2 === 0 ? 'team1' : 'team2';
+        updated[dest] = { ...updated[dest], [destField]: '', winner: null };
+        updated[6] = { ...updated[6], team1: '', team2: '', winner: null };
+      }
+      const scrollY = window.scrollY;
+      state.bracket = updated;
+      render();
+      setTimeout(() => window.scrollTo(0, scrollY), 0);
+    });
+  });
+
+  document.querySelectorAll('.btn-advance').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      const matchIndex = parseInt(ev.currentTarget.getAttribute('data-match'));
+      const team = ev.currentTarget.getAttribute('data-team');
+      if (isNaN(matchIndex) || !team) return;
+      const updated = state.bracket.slice();
+      updated[matchIndex] = { ...updated[matchIndex], winner: team };
+      if (matchIndex < 4) {
+        const dest = 4 + Math.floor(matchIndex / 2);
+        const destField = matchIndex % 2 === 0 ? 'team1' : 'team2';
+        updated[dest] = { ...updated[dest], [destField]: team, winner: updated[dest].winner === team ? team : null };
+        updated[6] = { ...updated[6], team1: '', team2: '', winner: null };
+      } else if (matchIndex < 6) {
+        const destField = matchIndex === 4 ? 'team1' : 'team2';
+        updated[6] = { ...updated[6], [destField]: team, winner: updated[6].winner === team ? team : null };
+      }
+      const scrollY = window.scrollY;
+      state.bracket = updated;
+      render();
+      setTimeout(() => window.scrollTo(0, scrollY), 0);
+    });
+  });
+
+  // --- Filters & search ---
+  const tabSelect = document.getElementById('player-tab-select');
+  if (tabSelect) {
+    tabSelect.addEventListener('change', (ev) => {
+      state.playerTab = ev.target.value;
+      sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
+      state.skillSubTab = null;
+      render();
+    });
+  }
+
+  const searchInput = document.getElementById('player-search');
+  const clearBtn = document.getElementById('player-search-clear');
+  if (searchInput) {
+    const toggleClear = () => {
+      if (clearBtn) clearBtn.style.display = searchInput.value.trim() ? 'inline' : 'none';
+    };
+    searchInput.addEventListener('input', () => {
+      state.searchTerm = searchInput.value;
+      const container = document.querySelector('.players');
+      if (container) {
+        container.innerHTML = renderFilteredPlayers();
+        bindPlayerRowHandlers();
+        bindSelectionHandlers();
+      }
+      toggleClear();
+    });
+    toggleClear();
+  }
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      state.searchTerm = '';
+      const si = document.getElementById('player-search');
+      if (si) { si.value = ''; si.focus(); }
+      const container = document.querySelector('.players');
+      if (container) {
+        container.innerHTML = renderFilteredPlayers();
+        bindPlayerRowHandlers();
+        bindSelectionHandlers();
+      }
+      clearBtn.style.display = 'none';
+    });
+  }
+
+  const subtabSelect = document.getElementById('skill-subtab-select');
+  if (subtabSelect) {
+    subtabSelect.addEventListener('change', (ev) => {
+      state.skillSubTab = ev.target.value;
+      sessionStorage.setItem(LS_SUBTAB_KEY, state.skillSubTab);
+      render();
+    });
+  }
+
+// --- Select all visible ---
+// --- Select all visible ---
+const selectAllBtn = document.getElementById('btn-select-all-visible');
+if (selectAllBtn) {
+  selectAllBtn.addEventListener('click', () => {
+    const visibleCards = document.querySelectorAll('.players .player-card');
+    const ids = Array.from(visibleCards).map(el => String(el.getAttribute('data-id')));
+
+    state.selectedIds = ids;
+
+    visibleCards.forEach(el => el.classList.add('is-selected'));
+    document.querySelectorAll('.player-select').forEach(cb => { cb.checked = true; });
+
+    updateBulkBarVisibility(); // ✅ show bulk bar with actions
+    document.getElementById('bulkBar')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); // ✅ bring it into view
+  });
+}
+
+// --- Clear selection ---
+const clearSelBtn = document.getElementById('btn-clear-selection');
+if (clearSelBtn) {
+  clearSelBtn.addEventListener('click', () => {
+    state.selectedIds = [];
+    document.querySelectorAll('.player-select').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.player-card').forEach(el => el.classList.remove('is-selected'));
+    updateBulkBarVisibility(); // ✅ hide bar when nothing is selected
+  });
+}
+
+// --- Assign/move to group ---
+const assignBtn = document.getElementById('btn-assign-to-group');
+if (assignBtn) {
+  assignBtn.addEventListener('click', async () => {
+    const sel = selectedSet();
+    if (!sel.size) return;
+
+    const selEl = document.getElementById('bulk-dest-group');
+    const newEl = document.getElementById('bulk-new-group');
+    const typed = (newEl && newEl.value || '').trim();
+const chosen = selEl ? selEl.value : '';
+let dest = typed || chosen;
+if (state.limitedGroup) dest = state.limitedGroup;
+
+    if (!dest || dest === 'All') return;
+
+    // Ensure group exists in dropdown
+    if (!state.groups.includes(dest)) {
+      state.groups = Array.from(new Set([...state.groups, dest]));
+    }
+
+    // Local update
+    const ids = Array.from(sel);
+    state.players = state.players.map(p =>
+      ids.includes(String(p.id)) ? { ...p, group: dest } : p
+    );
+
+    // Supabase updates
+    try {
+      for (const id of ids) {
+        await updatePlayerFieldsSupabase(id, { group: dest });
+      }
+      await syncFromSupabase();
+    } catch (e) {
+      console.error('Supabase bulk assign error', e);
+    }
+
+    saveLocal();
+    render();
+  });
+}
+
+// --- Remove from group ---
+const removeBtn = document.getElementById('btn-remove-from-group');
+if (removeBtn) {
+  removeBtn.addEventListener('click', async () => {
+    const sel = selectedSet();
+    if (!sel.size) return;
+
+    const ids = Array.from(sel);
+    // Local update
+    state.players = state.players.map(p =>
+      ids.includes(String(p.id)) ? { ...p, group: '' } : p
+    );
+
+    // Supabase updates
+    try {
+      for (const id of ids) {
+        await updatePlayerFieldsSupabase(id, { group: '' });
+      }
+      await syncFromSupabase();
+    } catch (e) {
+      console.error('Supabase bulk remove group error', e);
+    }
+
+    saveLocal();
+    render();
+  });
+}
+}
+
+// Initialise the app. Called once on page load. It loads stored data,
+// optionally syncs with Supabase, registers the service worker and
+// renders the UI for the first time.
+function init() {
+  // Load from localStorage
+  loadLocal();
+  // Sync from supabase if available
+  // Sync from supabase if available
+(async () => {
+  await detectPlayersSchema();
+  await syncFromSupabase();
+  // Register service worker for PWA offline support
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch((err) => {
+      console.warn('Service worker registration failed', err);
+    });
+  }
+  render();
+})();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    init();
+    initTournamentView();
+    bindTournamentTab();
+  });
+} else {
+  init();
+  initTournamentView();
+  bindTournamentTab();
+}
