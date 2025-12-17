@@ -110,6 +110,36 @@ function saveAdminCodes() {
       return;
     }
 
+    // Group select toggle / selection (inside edit-row)
+    const groupBtn = e.target.closest('.group-btn');
+    if (groupBtn) {
+      e.stopPropagation();
+      e.preventDefault();
+      // close other open group-selects
+      document.querySelectorAll('.group-select.open').forEach(el => {
+        if (el !== groupBtn.closest('.group-select')) el.classList.remove('open');
+      });
+      const wrap = groupBtn.closest('.group-select');
+      if (wrap) wrap.classList.toggle('open');
+      return;
+    }
+
+    const groupItem = e.target.closest('.group-item');
+    if (groupItem) {
+      e.stopPropagation();
+      e.preventDefault();
+      const val = groupItem.getAttribute('data-value') || '';
+      const select = groupItem.closest('.group-select');
+      if (select) {
+        const hidden = select.querySelector('.edit-group');
+        if (hidden) hidden.value = val;
+        const btn = select.querySelector('.group-btn');
+        if (btn) btn.textContent = val || 'Group';
+        select.classList.remove('open');
+      }
+      return;
+    }
+
     // 2) Keep clicks inside an open dropdown from closing it via bubbling
     if (e.target.closest('.card-menu')) {
       e.stopPropagation();
@@ -513,7 +543,13 @@ function renderFilteredPlayers() {
           <div class="edit-row" data-index="${idx}">
         <input type="text" class="edit-name" placeholder="Name" value="${player.name}" />
         <input type="number" class="edit-skill" placeholder="Skill" step="0.1" value="${player.skill}" />
-        <input type="text" class="edit-group" placeholder="Group" value="${player.group || ''}" />
+        <div class="group-select" data-index="${idx}">
+          <input type="hidden" class="edit-group" value="${player.group || ''}" />
+          <button type="button" class="group-btn">${player.group || 'Group'}</button>
+          <div class="group-list" role="menu" aria-hidden="true">
+            ${state.groups.map(g => `<button type="button" class="group-item" data-value="${g}">${g}</button>`).join('')}
+          </div>
+        </div>
         <button type="button" class="btn-save-edit success" data-index="${idx}" data-id="${player.id}">Save</button>
       </div>
         ` : ''}

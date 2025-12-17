@@ -241,6 +241,50 @@ button.winner {
   margin-bottom: 0.5rem;
 }
 
+/* Group select dropdown inside edit-row */
+.group-select {
+  position: relative;
+  display: inline-block;
+}
+
+.group-select .group-btn {
+  height: 38px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  cursor: pointer;
+}
+
+.group-select .group-list {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  background: #fff;
+  border: 1px solid #e6eef6;
+  box-shadow: 0 6px 18px rgba(2,6,23,0.08);
+  border-radius: 6px;
+  display: none;
+  min-width: 160px;
+  padding: 6px;
+}
+
+.group-select.open .group-list { display: block; }
+
+.group-list .group-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.group-list .group-item:hover { background: #f8fafc; }
+
 .player-tabs button,
 .skill-subtabs button {
   padding: 6px 12px;
