@@ -368,9 +368,26 @@ html,
 body {
   touch-action: manipulation;
   font-size: 16px !important;
-  text-size-adjust: 100%;
-  -webkit-text-size-adjust: 100%;
   overscroll-behavior: none;
 }
 
 .player-card.is-selected { outline: 2px solid #3b82f6; border-radius: 6px; }
+
+/* Utility classes to replace inline styles from index.html */
+.loading-message {
+  padding: 2rem;
+  text-align: center;
+  font-family: sans-serif;
+  color: #fff;
+}
+.mb-12 { margin-bottom: 12px; }
+.mt-0 { margin-top: 0; }
+.mb-8 { margin-bottom: 8px; }
+.min-w-220 { min-width: 220px; }
+.min-w-280 { min-width: 280px; }
+.w-90 { width: 90px; }
+.min-w-180 { min-width: 180px; }
+.m-0 { margin: 0; }
+.my-8 { margin: 8px 0; }
+.mb-6 { margin-bottom: 6px; }
+.w-100 { width: 100px; }

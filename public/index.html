@@ -6,7 +6,7 @@
     name="viewport"
     content="width=device-width, initial-scale=1.0"
   />
-  <meta name="theme-color" content="#0f172a" />
+  
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="icon-192x192.png" />
   <link rel="stylesheet" href="styles.css" />
@@ -46,7 +46,7 @@
 </head>
 <body>
   <div id="root">
-    <div style="padding:2rem;text-align:center;font-family:sans-serif;color:#fff;">
+    <div class="loading-message">
       Loading app, please wait...
     </div>
   </div>
@@ -63,74 +63,74 @@
       </div>
 
       <!-- Select tournament -->
-      <div class="card" style="margin-bottom:12px;">
+      <div class="card mb-12">
         <div class="tournament-actions">
           <label for="tournamentSelect">Tournament</label>
-          <select id="tournamentSelect" style="min-width:220px;"></select>
+              <select id="tournamentSelect" class="min-w-220"></select>
         </div>
       </div>
 
       <!-- Public next matches -->
-      <div class="card" style="margin-bottom:12px;">
-        <h3 style="margin-top:0;">Public Schedule and Next Match</h3>
+      <div class="card mb-12">
+        <h3 class="mt-0">Public Schedule and Next Match</h3>
         <div id="publicNextMatches"></div>
       </div>
 
       <!-- Pool standings -->
-      <div class="card" style="margin-bottom:12px;">
-        <h3 style="margin-top:0;">Pool Standings</h3>
+      <div class="card mb-12">
+        <h3 class="mt-0">Pool Standings</h3>
         <div id="poolStandings"></div>
       </div>
 
       <!-- Report score -->
-      <div class="card" style="margin-bottom:12px;">
-        <h3 style="margin-top:0;">Report Score</h3>
-        <div class="tournament-actions" style="margin-bottom:8px;">
+      <div class="card mb-12">
+        <h3 class="mt-0">Report Score</h3>
+        <div class="tournament-actions mb-8">
           <label for="reportMatchSelect">Match</label>
-          <select id="reportMatchSelect" style="min-width:280px;"></select>
+          <select id="reportMatchSelect" class="min-w-280"></select>
 
           <label for="teamA_score">Team A</label>
-          <input id="teamA_score" type="number" min="0" step="1" style="width:90px;" />
+          <input id="teamA_score" type="number" min="0" step="1" class="w-90" />
 
           <label for="teamB_score">Team B</label>
-          <input id="teamB_score" type="number" min="0" step="1" style="width:90px;" />
+          <input id="teamB_score" type="number" min="0" step="1" class="w-90" />
 
           <label for="reporterTeam">Your team name</label>
-          <input id="reporterTeam" type="text" placeholder="Type your team name" style="min-width:180px;" />
+          <input id="reporterTeam" type="text" placeholder="Type your team name" class="min-w-180" />
 
           <button id="submitScoreBtn">Submit score</button>
         </div>
-        <p id="reportStatus" class="small" style="margin:0;"></p>
+        <p id="reportStatus" class="small m-0"></p>
       </div>
 
       <!-- Admin area (auto-hidden if not admin) -->
-      <div id="adminTournament" class="card" style="margin-bottom:12px;">
-        <h3 style="margin-top:0;">Admin Setup</h3>
+      <div id="adminTournament" class="card mb-12">
+        <h3 class="mt-0">Admin Setup</h3>
 
-        <div class="tournament-actions" style="margin-bottom:8px;">
+        <div class="tournament-actions mb-8">
           <input id="newTournamentName" type="text" placeholder="Tournament name" />
-          <input id="newTournamentNets" type="number" min="1" value="3" style="width:100px;" />
+          <input id="newTournamentNets" type="number" min="1" value="3" class="w-100" />
           <button id="createTournamentBtn">Create</button>
         </div>
 
-        <h4 style="margin:8px 0;">Add teams (one per line)</h4>
+        <h4 class="my-8">Add teams (one per line)</h4>
         <textarea id="bulkTeams" rows="6" class="full-width"></textarea>
-        <div style="margin:8px 0;">
+        <div class="my-8">
           <button id="addTeamsBtn">Add teams</button>
         </div>
 
-        <h4 style="margin:8px 0;">Pools JSON</h4>
-        <p class="small" style="margin:0 0 6px 0;">
+        <h4 class="my-8">Pools JSON</h4>
+        <p class="small m-0 mb-6">
           Example:
           <code>[{"name":"Pool A","teams":["Team 1","Team 2","Team 3","Team 4"]},{"name":"Pool B","teams":["Team 5","Team 6","Team 7","Team 8"]}]</code>
         </p>
         <textarea id="poolsJson" rows="6" class="full-width">[]</textarea>
-        <div class="tournament-actions" style="margin:8px 0;">
+        <div class="tournament-actions my-8">
           <button id="savePoolsBtn">Save pools</button>
           <button id="generatePoolScheduleBtn">Generate pool schedule</button>
         </div>
 
-        <h4 style="margin:8px 0;">Admin Rankings</h4>
+        <h4 class="my-8">Admin Rankings</h4>
         <div id="adminRankings"></div>
       </div>
     </div>
