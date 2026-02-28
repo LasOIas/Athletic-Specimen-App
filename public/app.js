@@ -2087,8 +2087,9 @@ if (logoutBtn) {
       const nameInput = document.getElementById('admin-player-name');
       const skillInput = document.getElementById('admin-player-skill');
       const name = (nameInput && nameInput.value || '').trim();
-      const skill = parseFloat(skillInput && skillInput.value || '');
-      if (!name || isNaN(skill) || skill <= 0) return;
+      let skill = parseFloat(skillInput && skillInput.value || '');
+      if (Number.isNaN(skill)) skill = 0; // treat empty input as 0
+      if (!name || skill < 0) return;
 
       const idx = state.players.findIndex((p) => normalize(p.name) === normalize(name));
 
