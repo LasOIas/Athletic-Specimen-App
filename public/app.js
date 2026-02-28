@@ -2244,7 +2244,7 @@ if (logoutBtn) {
         const group = state.limitedGroup
           ? state.limitedGroup
           : (state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '');
-        const skill = 5.0;
+        const skill = 0.0;
         const newPlayer = { name, skill, group };
         let inserted = { ...newPlayer };
 
