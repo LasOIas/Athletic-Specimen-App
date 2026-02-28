@@ -2220,6 +2220,68 @@ if (logoutBtn) {
     });
   }
 
+    // --- Public: Register new player (simple, default skill) ---
+    const registerBtn = document.getElementById('btn-register');
+    if (registerBtn) {
+      registerBtn.addEventListener('click', async () => {
+        const input = document.getElementById('register-name');
+        const name = (input && input.value || '').trim();
+        if (!name) {
+          messages.registration = 'Please enter a name';
+          setTimeout(() => { messages.registration = ''; render(); }, 2500);
+          return render();
+        }
+
+        // prevent duplicates by normalized name
+        const exists = state.players.find((p) => normalize(p.name) === normalize(name));
+        if (exists) {
+          messages.registration = 'Player already registered';
+          setTimeout(() => { messages.registration = ''; render(); }, 2500);
+          if (input) input.value = '';
+          return render();
+        }
+
+        const group = state.limitedGroup
+          ? state.limitedGroup
+          : (state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '');
+        const skill = 5.0;
+        const newPlayer = { name, skill, group };
+        let inserted = { ...newPlayer };
+
+        if (supabaseClient) {
+          try {
+            try {
+              const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+              await syncFromSupabase();
+              if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+            } catch {
+              try {
+                const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+                await syncFromSupabase();
+                if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+              } catch {
+                const { data } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                await syncFromSupabase();
+                if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+              }
+            }
+          } catch (err) {
+            console.error('Supabase insert error', err);
+            state.players = [...state.players, inserted];
+          }
+        } else {
+          state.players = [...state.players, inserted];
+        }
+
+        messages.registration = 'Registered';
+        setTimeout(() => { messages.registration = ''; render(); }, 2500);
+        if (input) input.value = '';
+        saveLocal();
+        queueSaveToSupabase();
+        render();
+      });
+    }
+
   // --- Player cards: inline actions ---
   function attachPlayerRowHandlers() {
     document.querySelectorAll('.btn-edit').forEach((btn) => {
