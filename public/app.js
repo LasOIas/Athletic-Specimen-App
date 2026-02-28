@@ -2092,6 +2092,7 @@ if (logoutBtn) {
       if (!name || skill < 0) return;
 
       const idx = state.players.findIndex((p) => normalize(p.name) === normalize(name));
+      const isNew = idx === -1;
 
       if (idx !== -1) {
         // update existing
@@ -2146,6 +2147,15 @@ if (logoutBtn) {
       if (skillInput) skillInput.value = '';
       saveLocal();
       queueSaveToSupabase();
+      // Small floating toast like public registration
+      try {
+        const toast = document.createElement('div');
+        toast.textContent = isNew ? 'Player added' : 'Player updated';
+        toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 1200);
+      } catch {}
+
       render();
     });
   }
