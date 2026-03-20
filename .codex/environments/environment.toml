@@ -6,15 +6,6 @@ name = "Athletic Specimen App"
 script = ""
 
 [[actions]]
-name = "Run"
-icon = "run"
-command = '''
-```powershell
-git commit -m "chore: push latest changes"; git push origin main
-```
-'''
-
-[[actions]]
 name = "push to git"
 icon = "run"
 command = "git add -A; git commit -m \"chore: push latest changes\"; git push origin main"

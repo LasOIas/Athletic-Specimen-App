@@ -83,6 +83,34 @@ function saveAdminCodes() {
   state.adminCodeMap = { ...ADMIN_CODE_MAP };
 }
 
+function closeInlineEditRow(row) {
+  if (!row) return;
+  row.classList.remove('show');
+  const card = row.closest('.player-card');
+  if (card) card.classList.remove('is-editing');
+  row.querySelectorAll('.group-select.open').forEach((el) => el.classList.remove('open'));
+}
+
+function closeAllInlineEditRows(exceptRow = null) {
+  document.querySelectorAll('.edit-row.show').forEach((row) => {
+    if (exceptRow && row === exceptRow) return;
+    closeInlineEditRow(row);
+  });
+}
+
+function openInlineEditRow(row) {
+  if (!row) return;
+  closeAllInlineEditRows(row);
+  row.classList.add('show');
+  const card = row.closest('.player-card');
+  if (card) card.classList.add('is-editing');
+  const nameInput = row.querySelector('.edit-name');
+  if (nameInput) {
+    nameInput.focus();
+    if (typeof nameInput.select === 'function') nameInput.select();
+  }
+}
+
 // -- Robust global click handler for player card menus (capture phase) --
 (function ensureMenuActionsBound() {
   if (window.__menusBound) return;
@@ -155,7 +183,9 @@ function saveAdminCodes() {
       const idx = parseInt(editBtn.getAttribute('data-index'), 10);
       const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
       if (row) {
-        row.classList.toggle('show');
+        const wasOpen = row.classList.contains('show');
+        closeAllInlineEditRows();
+        if (!wasOpen) openInlineEditRow(row);
       }
       // close menu
       const wrap = editBtn.closest('.menu-wrap');
@@ -207,6 +237,14 @@ function saveAdminCodes() {
   window.__saveDelegated = true;
 
   document.addEventListener('click', async function onSaveDelegated(e) {
+    const cancelBtn = e.target.closest('.btn-cancel-edit');
+    if (cancelBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      render();
+      return;
+    }
+
     const btn = e.target.closest('.btn-save-edit');
     if (!btn) return;
 
@@ -215,6 +253,7 @@ function saveAdminCodes() {
 
     const idxAttr = parseInt(btn.getAttribute('data-index'), 10);
     const idAttr  = btn.getAttribute('data-id');
+    const hasStableId = !!idAttr && idAttr !== 'undefined' && idAttr !== 'null';
     const idxFromData = Number.isNaN(idxAttr) ? -1 : idxAttr;
 
     // Locate the edit row using the index we render onto it
@@ -235,7 +274,7 @@ function saveAdminCodes() {
 
     // Prefer updating by id; fall back to idx
     let idx = -1;
-    if (idAttr) idx = state.players.findIndex(p => String(p.id) === String(idAttr));
+    if (hasStableId) idx = state.players.findIndex(p => String(p.id) === String(idAttr));
     if (idx === -1) idx = idxFromData;
     if (idx < 0 || !state.players[idx]) return;
 
@@ -248,35 +287,33 @@ function saveAdminCodes() {
     state.players = copy;
 
     // Persist local
-    try { localStorage.setItem('athletic_specimen_players', JSON.stringify(state.players)); } catch {}
+    saveLocal();
 
-    // Remote sync (with group->tag fallback handled inside helper)
+    // Remote sync: update existing remote rows immediately; insert local-only rows.
     let remoteOK = false;
-    try {
-      if (supabaseClient) {
-        if (!next.id) {
-  try {
-    try {
-      const { error } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
-      if (error) throw error;
-    } catch {
+    if (supabaseClient) {
       try {
-        const { error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-        if (error) throw error;
-      } catch {
-        // 3rd fallback: table has neither 'group' nor 'tag'
-        const { error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-        if (error) throw error;
+        if (next.id) {
+          remoteOK = await updatePlayerFieldsSupabase(next.id, { name, skill, group });
+        } else {
+          try {
+            const { error } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+            if (error) throw error;
+          } catch {
+            try {
+              const { error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+              if (error) throw error;
+            } catch {
+              // 3rd fallback: table has neither 'group' nor 'tag'
+              const { error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+              if (error) throw error;
+            }
+          }
+          remoteOK = true;
+        }
+      } catch (err) {
+        console.error('Supabase save error', err);
       }
-    }
-    remoteOK = true;
-  } catch (e) {
-    console.error('Supabase save error', e);
-  }
-}
-      }
-    } catch (err) {
-      console.error('Supabase save error', err);
     }
 
     // Best-effort background upsert batch too
@@ -287,7 +324,7 @@ function saveAdminCodes() {
     }
 
     // Close row and show small toast
-    if (row) row.classList.remove('show');
+    closeInlineEditRow(row);
     try {
       const toast = document.createElement('div');
       toast.textContent = remoteOK ? 'Saved to Supabase' : 'Saved locally';
@@ -555,7 +592,7 @@ function renderFilteredPlayers() {
   if (!filtered.length) return '<p>No players found.</p>';
 
   return filtered.map((player) => {
-    const idx = state.players.findIndex(p => p.id === player.id);
+    const idx = state.players.indexOf(player);
     const checked = isPlayerCheckedIn(player);
     const isSelected = selectedSet().has(String(player.id));
 
@@ -604,7 +641,10 @@ function renderFilteredPlayers() {
             ${getAvailableGroups().map(g => `<button type="button" class="group-item" data-value="${g}">${g}</button>`).join('')}
           </div>
         </div>
-        <button type="button" class="btn-save-edit success" data-index="${idx}" data-id="${player.id}">Save</button>
+        <div class="edit-actions">
+          <button type="button" class="btn-save-edit success" data-index="${idx}" data-id="${player.id}">Save</button>
+          <button type="button" class="btn-cancel-edit secondary" data-index="${idx}">Cancel</button>
+        </div>
       </div>
         ` : ''}
       </div>
@@ -1933,11 +1973,18 @@ const editCss = `
 /* --- Keep player cards compact, ignore any global min-height --- */
 .players .player-card { min-height: auto !important; }
 .players .player-card .row { min-height: 0 !important; }
+.player-card.is-editing{
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.22);
+  background: #f8fffc;
+}
+.player-card.is-editing .card-actions{
+  display:none;
+}
 
 /* ----- Compact inline edit row (grid) ----- */
 .player-card .edit-row{
-  display:grid;
-  grid-template-columns: minmax(220px, 1fr) 90px 160px auto; /* name | skill | group | save */
+  display:none !important;
+  grid-template-columns: minmax(220px, 1fr) 90px 160px auto; /* name | skill | group | actions */
   align-items:center;
   gap:8px;
   margin-top:8px;
@@ -1945,6 +1992,9 @@ const editCss = `
   border-radius:8px;
   background:#f8fafc;            /* subtle background so it reads as an editor */
   box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
+}
+.player-card .edit-row.show{
+  display:grid !important;
 }
 
 /* Inputs: kill any giant/global styles */
@@ -1966,16 +2016,41 @@ const editCss = `
 .player-card .edit-row .edit-skill{ width:90px; text-align:right; }
 .player-card .edit-row .edit-group{ width:160px; }
 
-/* Save button aligns with inputs and stays small */
-.player-card .edit-row .btn-save-edit{
+.player-card .edit-row .edit-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  justify-self:end;
+}
+
+/* Action buttons align with inputs and stay compact */
+.player-card .edit-row .btn-save-edit,
+.player-card .edit-row .btn-cancel-edit{
   height:36px !important;
   padding:0 12px;
   border-radius:6px;
-  justify-self:start;
+}
+.player-card .edit-row .btn-cancel-edit{
+  border:1px solid #d1d5db;
+  background:#fff;
+  color:#111827;
 }
 
 /* Don't let any nested .row inside the edit area expand vertically */
 .player-card .edit-row .row{ min-height:0 !important; }
+@media (max-width:640px){
+  .player-card .edit-row.show{
+    grid-template-columns:1fr;
+  }
+  .player-card .edit-row .edit-actions{
+    justify-self:stretch;
+    width:100%;
+  }
+  .player-card .edit-row .btn-save-edit,
+  .player-card .edit-row .btn-cancel-edit{
+    width:100%;
+  }
+}
 `;
 if (!editStyle) {
   editStyle = document.createElement('style');
