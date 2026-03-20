@@ -135,6 +135,78 @@ button.danger:hover {
   margin-bottom: 0.25rem;
 }
 
+.generated-team {
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.generated-team.is-drop-enabled {
+  border-color: #93c5fd;
+  border-style: dashed;
+}
+
+.generated-team.is-drop-target {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.22);
+}
+
+.team-player-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.team-player-card {
+  background: #fff;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: grab;
+  user-select: none;
+}
+
+.team-player-card:active {
+  cursor: grabbing;
+}
+
+.team-player-card .name {
+  font-weight: 600;
+}
+
+.team-player-card.is-dragging {
+  opacity: 0.45;
+  border-style: dashed;
+}
+
+.team-player-card.is-swap-target {
+  border-color: #16a34a;
+  background: #ecfdf5;
+  box-shadow: inset 0 0 0 1px rgba(22, 163, 74, 0.2);
+}
+
+.team-drop-empty {
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: center;
+  background: #fff;
+}
+
+.generated-team-dragging .team-player-card:not(.is-dragging) {
+  opacity: 0.95;
+}
+
 ul {
   margin: 0;
   padding-left: 1rem;

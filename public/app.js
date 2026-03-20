@@ -337,6 +337,121 @@ function openInlineEditRow(row) {
   }, true);
 })();
 
+let generatedTeamDragState = null;
+
+function clearGeneratedTeamDragVisuals() {
+  document.querySelectorAll('.generated-team.is-drop-enabled').forEach((el) => el.classList.remove('is-drop-enabled'));
+  document.querySelectorAll('.generated-team.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+  document.querySelectorAll('.team-player-card.is-swap-target').forEach((el) => el.classList.remove('is-swap-target'));
+  document.querySelectorAll('.team-player-card.is-dragging').forEach((el) => el.classList.remove('is-dragging'));
+  document.body.classList.remove('generated-team-dragging');
+}
+
+function resetGeneratedTeamDragState() {
+  clearGeneratedTeamDragVisuals();
+  generatedTeamDragState = null;
+}
+
+(function ensureGeneratedTeamDnDBound() {
+  if (window.__generatedTeamDnDBound) return;
+  window.__generatedTeamDnDBound = true;
+
+  document.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.team-player-card');
+    if (!card) return;
+
+    const fromTeamIndex = Number(card.getAttribute('data-team-index'));
+    const playerKey = String(card.getAttribute('data-player-key') || '');
+    if (!Number.isInteger(fromTeamIndex) || !playerKey) return;
+
+    generatedTeamDragState = { fromTeamIndex, playerKey };
+    card.classList.add('is-dragging');
+    document.body.classList.add('generated-team-dragging');
+    document.querySelectorAll('.generated-team[data-team-index]').forEach((teamEl) => {
+      const idx = Number(teamEl.getAttribute('data-team-index'));
+      if (Number.isInteger(idx) && idx !== fromTeamIndex) {
+        teamEl.classList.add('is-drop-enabled');
+      }
+    });
+
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', playerKey); } catch {}
+    }
+  });
+
+  document.addEventListener('dragover', (e) => {
+    if (!generatedTeamDragState) return;
+    const teamEl = e.target.closest('.generated-team[data-team-index]');
+    if (!teamEl) return;
+
+    const toTeamIndex = Number(teamEl.getAttribute('data-team-index'));
+    if (!Number.isInteger(toTeamIndex) || toTeamIndex === generatedTeamDragState.fromTeamIndex) return;
+
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+
+    document.querySelectorAll('.generated-team.is-drop-target').forEach((el) => {
+      if (el !== teamEl) el.classList.remove('is-drop-target');
+    });
+    document.querySelectorAll('.team-player-card.is-swap-target').forEach((el) => el.classList.remove('is-swap-target'));
+    teamEl.classList.add('is-drop-target');
+
+    const targetCard = e.target.closest('.team-player-card');
+    if (targetCard && Number(targetCard.getAttribute('data-team-index')) === toTeamIndex) {
+      const targetKey = String(targetCard.getAttribute('data-player-key') || '');
+      if (targetKey && targetKey !== generatedTeamDragState.playerKey) {
+        targetCard.classList.add('is-swap-target');
+      }
+    }
+  });
+
+  document.addEventListener('drop', (e) => {
+    if (!generatedTeamDragState) return;
+    const teamEl = e.target.closest('.generated-team[data-team-index]');
+    if (!teamEl) {
+      resetGeneratedTeamDragState();
+      return;
+    }
+
+    const toTeamIndex = Number(teamEl.getAttribute('data-team-index'));
+    if (!Number.isInteger(toTeamIndex)) {
+      resetGeneratedTeamDragState();
+      return;
+    }
+
+    e.preventDefault();
+
+    const fromTeamIndex = generatedTeamDragState.fromTeamIndex;
+    const draggedKey = generatedTeamDragState.playerKey;
+    let swapWithKey = '';
+
+    const targetCard = e.target.closest('.team-player-card');
+    if (targetCard && Number(targetCard.getAttribute('data-team-index')) === toTeamIndex) {
+      const candidate = String(targetCard.getAttribute('data-player-key') || '');
+      if (candidate && candidate !== draggedKey) swapWithKey = candidate;
+    }
+
+    const result = moveGeneratedPlayerBetweenTeams(fromTeamIndex, toTeamIndex, draggedKey, swapWithKey);
+    resetGeneratedTeamDragState();
+
+    if (!result.changed) {
+      if (result.reason === 'swap-required') {
+        showTeamMoveToast('Drop on a player to swap when team sizes are even.');
+      }
+      return;
+    }
+
+    render();
+  });
+
+  document.addEventListener('dragend', (e) => {
+    if (e.target.closest('.team-player-card')) {
+      resetGeneratedTeamDragState();
+    }
+  });
+})();
+
 // -- One delegated handler for Check In and Check Out buttons (capture phase) --
 (function ensureCheckDelegationBound() {
   if (window.__checkDelegated) return;
@@ -518,37 +633,202 @@ function queueSaveToSupabase() {
 // Balanced group generation algorithm. Given a list of all players, the set
 // of identity keys that are currently checked in and a desired number of groups,
 // assign players to groups so that total skill in each group is as even as
-// possible. The algorithm sorts players by skill descending then greedily
-// assigns each player to the group with the lowest total skill so far.
-function generateBalancedGroups(players, checkedInKeys, groupCount) {
-  const inSet = new Set(checkedInKeys || []);
-  const eligible = players.filter((p) => inSet.has(playerIdentityKey(p)));
+// possible. It builds multiple randomized balanced candidates, scores them for
+// fairness, then chooses one from the near-best results to improve variation
+// between runs while keeping totals tight.
+function summarizeTeamFairness(teams) {
+  const totals = teams.map((team) =>
+    team.reduce((sum, p) => sum + (Number(p.skill) || 0), 0)
+  );
+  const counts = teams.map((team) => team.length);
+  const maxSkill = totals.length ? Math.max(...totals) : 0;
+  const minSkill = totals.length ? Math.min(...totals) : 0;
+  const meanSkill = totals.length
+    ? totals.reduce((sum, v) => sum + v, 0) / totals.length
+    : 0;
+  const variance = totals.length
+    ? totals.reduce((sum, v) => sum + Math.pow(v - meanSkill, 2), 0) / totals.length
+    : 0;
 
-  // 1) Sort by descending skill, but randomize equal-skill ties
-  const sorted = eligible.slice().sort((a, b) => {
-    const skillDiff = b.skill - a.skill;
-    return skillDiff !== 0 ? skillDiff : Math.random() - 0.5;
-  });
+  const skillSpread = maxSkill - minSkill;
+  const countSpread = (counts.length ? Math.max(...counts) : 0) - (counts.length ? Math.min(...counts) : 0);
+  const skillStdev = Math.sqrt(variance);
+  const score = skillSpread + countSpread * 0.75 + skillStdev * 0.25;
 
+  return { skillSpread, countSpread, skillStdev, score };
+}
+
+function generateOneBalancedCandidate(eligiblePlayers, groupCount) {
   const teams = Array.from({ length: groupCount }, () => []);
   const teamSkills = new Array(groupCount).fill(0);
 
-  for (const player of sorted) {
-    // 2) Find the current minimum total skill
-    const minSkill = Math.min(...teamSkills);
-    // 3) Gather all teams at that minimum
-    const candidates = teamSkills
-      .map((s, idx) => (s === minSkill ? idx : -1))
-      .filter(idx => idx !== -1);
-    // 4) Randomly choose among them
-    const target =
-      candidates[Math.floor(Math.random() * candidates.length)];
+  const ordered = eligiblePlayers.slice().sort((a, b) => {
+    const diff = (Number(b.skill) || 0) - (Number(a.skill) || 0);
+    if (Math.abs(diff) >= 0.6) return diff;
+    return Math.random() - 0.5;
+  });
+
+  // Small near-skill shuffles increase variety without wrecking fairness.
+  for (let i = 0; i < ordered.length - 1; i += 1) {
+    const a = Number(ordered[i].skill) || 0;
+    const b = Number(ordered[i + 1].skill) || 0;
+    if (Math.abs(a - b) <= 0.6 && Math.random() < 0.35) {
+      const temp = ordered[i];
+      ordered[i] = ordered[i + 1];
+      ordered[i + 1] = temp;
+    }
+  }
+
+  const baseSize = Math.floor(ordered.length / groupCount);
+  const extras = ordered.length % groupCount;
+  const shuffledTeamIndexes = Array.from({ length: groupCount }, (_, idx) => idx).sort(
+    () => Math.random() - 0.5
+  );
+  const sizeCaps = new Array(groupCount).fill(baseSize);
+  for (let i = 0; i < extras; i += 1) {
+    sizeCaps[shuffledTeamIndexes[i]] += 1;
+  }
+
+  for (const player of ordered) {
+    let candidates = [];
+    for (let i = 0; i < groupCount; i += 1) {
+      if (teams[i].length < sizeCaps[i]) candidates.push(i);
+    }
+    if (!candidates.length) {
+      candidates = Array.from({ length: groupCount }, (_, idx) => idx);
+    }
+
+    let minProjected = Infinity;
+    for (const idx of candidates) {
+      const projected = teamSkills[idx] + (Number(player.skill) || 0);
+      if (projected < minProjected) minProjected = projected;
+    }
+
+    const nearBest = candidates.filter(
+      (idx) => teamSkills[idx] + (Number(player.skill) || 0) <= minProjected + 0.35
+    );
+    const pool = nearBest.length ? nearBest : candidates;
+    const target = pool[Math.floor(Math.random() * pool.length)];
 
     teams[target].push(player);
-    teamSkills[target] += player.skill;
+    teamSkills[target] += Number(player.skill) || 0;
   }
 
   return teams;
+}
+
+function generateBalancedGroups(players, checkedInKeys, groupCount) {
+  const inSet = new Set(checkedInKeys || []);
+  const eligible = players.filter((p) => inSet.has(playerIdentityKey(p)));
+  const safeGroupCount = Math.max(2, Number(groupCount) || 2);
+
+  if (!eligible.length) {
+    return {
+      teams: Array.from({ length: safeGroupCount }, () => []),
+      summary: { skillSpread: 0, countSpread: 0, attempts: 0, fairnessScore: 0 }
+    };
+  }
+
+  const attempts = Math.max(24, Math.min(120, eligible.length * 6));
+  let best = null;
+  const nearBest = [];
+
+  for (let i = 0; i < attempts; i += 1) {
+    const teams = generateOneBalancedCandidate(eligible, safeGroupCount);
+    const fairness = summarizeTeamFairness(teams);
+    const candidate = { teams, fairness };
+
+    if (!best || fairness.score < best.fairness.score - 1e-9) {
+      best = candidate;
+      nearBest.length = 0;
+      nearBest.push(candidate);
+      continue;
+    }
+
+    if (
+      fairness.score <= best.fairness.score + 0.35 &&
+      fairness.skillSpread <= best.fairness.skillSpread + 0.25
+    ) {
+      nearBest.push(candidate);
+    }
+  }
+
+  const pool = nearBest.length ? nearBest : [best];
+  const chosen = pool[Math.floor(Math.random() * pool.length)] || best;
+  const chosenFairness = chosen ? chosen.fairness : { skillSpread: 0, countSpread: 0, score: 0 };
+
+  return {
+    teams: chosen ? chosen.teams : Array.from({ length: safeGroupCount }, () => []),
+    summary: {
+      skillSpread: Number(chosenFairness.skillSpread.toFixed(2)),
+      countSpread: chosenFairness.countSpread,
+      attempts,
+      fairnessScore: Number(chosenFairness.score.toFixed(2))
+    }
+  };
+}
+
+function updateGeneratedTeamsSummaryFromCurrent(teams) {
+  const fairness = summarizeTeamFairness(teams);
+  const prevAttempts = Number(state.generatedTeamsSummary && state.generatedTeamsSummary.attempts);
+  state.generatedTeamsSummary = {
+    skillSpread: Number(fairness.skillSpread.toFixed(2)),
+    countSpread: fairness.countSpread,
+    attempts: Number.isFinite(prevAttempts) ? prevAttempts : 0,
+    fairnessScore: Number(fairness.score.toFixed(2))
+  };
+}
+
+function moveGeneratedPlayerBetweenTeams(fromTeamIndex, toTeamIndex, playerKey, swapWithKey) {
+  const teamCount = Array.isArray(state.generatedTeams) ? state.generatedTeams.length : 0;
+  if (!teamCount) return { changed: false, reason: 'no-teams' };
+  if (!Number.isInteger(fromTeamIndex) || !Number.isInteger(toTeamIndex)) {
+    return { changed: false, reason: 'invalid-target' };
+  }
+  if (fromTeamIndex < 0 || toTeamIndex < 0 || fromTeamIndex >= teamCount || toTeamIndex >= teamCount) {
+    return { changed: false, reason: 'invalid-target' };
+  }
+  if (fromTeamIndex === toTeamIndex) return { changed: false, reason: 'same-team' };
+  if (!playerKey) return { changed: false, reason: 'missing-player' };
+
+  const teams = state.generatedTeams.map((team) => team.slice());
+  const fromTeam = teams[fromTeamIndex];
+  const toTeam = teams[toTeamIndex];
+  const fromIdx = fromTeam.findIndex((p) => playerIdentityKey(p) === playerKey);
+  if (fromIdx < 0) return { changed: false, reason: 'missing-player' };
+
+  if (swapWithKey) {
+    const toIdx = toTeam.findIndex((p) => playerIdentityKey(p) === swapWithKey);
+    if (toIdx >= 0) {
+      const dragged = fromTeam[fromIdx];
+      fromTeam[fromIdx] = toTeam[toIdx];
+      toTeam[toIdx] = dragged;
+      state.generatedTeams = teams;
+      updateGeneratedTeamsSummaryFromCurrent(teams);
+      return { changed: true, mode: 'swap' };
+    }
+  }
+
+  // Simple move is allowed only when it won't make size imbalance worse.
+  if (fromTeam.length > toTeam.length) {
+    const [dragged] = fromTeam.splice(fromIdx, 1);
+    toTeam.push(dragged);
+    state.generatedTeams = teams;
+    updateGeneratedTeamsSummaryFromCurrent(teams);
+    return { changed: true, mode: 'move' };
+  }
+
+  return { changed: false, reason: 'swap-required' };
+}
+
+function showTeamMoveToast(message) {
+  try {
+    const toast = document.createElement('div');
+    toast.textContent = message;
+    toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 1300);
+  } catch {}
 }
 
 function renderFilteredPlayers() {
@@ -660,6 +940,7 @@ const state = {
   checkedIn: [],      // list of attendance keys currently checked in
   isAdmin: false,     // whether admin panel is unlocked
   generatedTeams: [], // result of the last team generation
+  generatedTeamsSummary: null, // fairness details from the latest generation
   groupCount: 2,      // number of teams requested when generating groups
   playerTab: 'all',   // current active tab: 'all', 'in', 'out', 'skill'
   skillSubTab: null,  // current skill range selected, like '1.0', '2.0', etc.
@@ -1607,14 +1888,38 @@ function render() {
 
   // Build generated teams HTML
   let teamsHTML = '';
+  let teamsFairnessHTML = '';
   if (state.generatedTeams.length > 0) {
+    if (state.generatedTeamsSummary) {
+      teamsFairnessHTML = `
+        <p class="small" style="margin:0.25rem 0 0.5rem;">
+          Fairness spread: <strong>${state.generatedTeamsSummary.skillSpread.toFixed(1)}</strong>
+          | Team size spread: <strong>${state.generatedTeamsSummary.countSpread}</strong>
+          | Candidate runs: <strong>${state.generatedTeamsSummary.attempts}</strong>
+        </p>
+      `;
+    }
     teamsHTML = '<div class="teams">' + state.generatedTeams.map((team, i) => {
-      const members = team.map((p) => `<li>${escapeHTML(p.name)} (${escapeHTML(String(p.skill))})</li>`).join('');
-      const totalSkill = team.reduce((sum, p) => sum + p.skill, 0).toFixed(1);
+      const members = team.map((p, memberIndex) => {
+        const playerKey = playerIdentityKey(p) || `temp:${i}:${memberIndex}`;
+        return `
+          <li
+            class="team-player-card"
+            draggable="true"
+            data-team-index="${i}"
+            data-player-key="${escapeHTML(playerKey)}"
+            title="Drag to move to another team"
+          >
+            <span class="name">${escapeHTML(p.name)}</span>
+            <span class="small">${escapeHTML(String(Number(p.skill) || 0))}</span>
+          </li>
+        `;
+      }).join('');
+      const totalSkill = team.reduce((sum, p) => sum + (Number(p.skill) || 0), 0).toFixed(1);
       return `
-  <div class="team">
+  <div class="team generated-team" data-team-index="${i}">
     <h4>Team ${i + 1} <span class="small" style="font-weight:normal;">(Total: ${totalSkill})</span></h4>
-    <ul>${members}</ul>
+    <ul class="team-player-list">${members || '<li class="team-drop-empty small">Drop here</li>'}</ul>
   </div>
 `;
     }).join('') + '</div>';
@@ -1651,6 +1956,7 @@ function render() {
     <button id="btn-generate-teams">Generate</button>
     <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
   </div>
+  ${teamsFairnessHTML}
   ${teamsHTML}
 </div>
 <div class="row" style="justify-content:space-between; align-items:center; margin-top:8px;">
@@ -2561,7 +2867,9 @@ if (logoutBtn) {
   const generateBtn = document.getElementById('btn-generate-teams');
   if (generateBtn) {
     generateBtn.addEventListener('click', () => {
-      state.generatedTeams = generateBalancedGroups(state.players, state.checkedIn, state.groupCount);
+      const generated = generateBalancedGroups(state.players, state.checkedIn, state.groupCount);
+      state.generatedTeams = generated.teams;
+      state.generatedTeamsSummary = generated.summary;
       render();
     });
   }
