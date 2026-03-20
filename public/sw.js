@@ -1,4 +1,4 @@
-const CACHE_NAME = 'athletic-specimen-cache-v1';
+const CACHE_NAME = 'athletic-specimen-cache-v2';
 const ASSETS = [
   '/',
   '/index.html',
@@ -6,6 +6,7 @@ const ASSETS = [
   '/manifest.json',
   '/app.js'
 ];
+const NETWORK_FIRST_PATHS = new Set(ASSETS);
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -28,11 +29,28 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  const isSameOrigin = url.origin === self.location.origin;
+  const isShellAsset = isSameOrigin && NETWORK_FIRST_PATHS.has(url.pathname);
 
-  // For page navigations, prefer network so new Vercel deploys show immediately.
-  if (event.request.mode === 'navigate') {
+  // Prefer network for app shell assets so deploy updates are not hidden by stale cache.
+  if (event.request.mode === 'navigate' || isShellAsset) {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match('/index.html'))
+      fetch(event.request)
+        .then((response) => {
+          if (isSameOrigin && response && response.ok) {
+            const cloned = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned)).catch(() => {});
+          }
+          return response;
+        })
+        .catch(() => {
+          return caches.match(event.request).then((cached) => {
+            if (cached) return cached;
+            if (event.request.mode === 'navigate') return caches.match('/index.html');
+            return undefined;
+          });
+        })
     );
     return;
   }
