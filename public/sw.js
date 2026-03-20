@@ -1,13 +1,10 @@
 const CACHE_NAME = 'athletic-specimen-cache-v1';
 const ASSETS = [
-  './index.html',
-  './styles.css',
-  './manifest.json',
-  './app.js',
-  './vendor/react.production.min.js',
-  './vendor/react-dom.production.min.js',
-  './vendor/supabase.js',
-  './vendor/babel.min.js'
+  '/',
+  '/index.html',
+  '/styles.css',
+  '/manifest.json',
+  '/app.js'
 ];
 
 self.addEventListener('install', (event) => {

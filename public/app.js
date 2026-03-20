@@ -24,11 +24,6 @@ const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
 const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
 
-// expected DOM targets
-const listEl = document.getElementById('playerList');
-const searchInput = document.getElementById('searchInput');
-const addNameInput = document.getElementById('newPlayerName');
-const addBtn = document.getElementById('addPlayerBtn');
 const selectedSet = () => new Set(state.selectedIds || []);
 
 // Master admin (full access across all groups)
@@ -50,13 +45,13 @@ let ADMIN_CODE_MAP = {}; // populated by loadAdminCodes()
 function computeCheckedInByGroup() {
   const byGroup = {};
   const norm = (s) => String(s || '').trim();
-  const isIn = new Set((state.checkedIn || []).map(norm));
+  const isIn = new Set(state.checkedIn || []);
 
   for (const p of state.players || []) {
     const g = norm(p.group || 'Ungrouped');
     if (!byGroup[g]) byGroup[g] = { total: 0, in: 0 };
     byGroup[g].total += 1;
-    if (isIn.has(norm(p.name))) byGroup[g].in += 1;
+    if (isIn.has(playerIdentityKey(p))) byGroup[g].in += 1;
   }
 
   // return sorted entries by name
@@ -191,7 +186,7 @@ function saveAdminCodes() {
       }
 
       state.players = state.players.filter(p => String(p.id) !== id);
-      state.checkedIn = state.checkedIn.filter(n => n !== removed.name);
+      checkOutPlayer(removed);
       saveLocal();
 
       // close any open menu and re-render
@@ -327,8 +322,7 @@ function saveAdminCodes() {
 
     try {
       if (inBtn) {
-        if (!state.checkedIn.includes(player.name)) {
-          state.checkedIn = [...state.checkedIn, player.name];
+        if (checkInPlayer(player)) {
           if (supabaseClient && player.id) {
             try {
               await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
@@ -339,7 +333,7 @@ function saveAdminCodes() {
           }
         }
       } else if (outBtn) {
-        state.checkedIn = state.checkedIn.filter(n => normalize(n) !== normalize(player.name));
+        checkOutPlayer(player);
         if (supabaseClient && player.id) {
           try {
             await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
@@ -370,34 +364,6 @@ function updateBulkBarVisibility() {
   }
 }
 
-function bindFiltersCollapsible() {
-  const btn = document.getElementById('filtersToggle');
-  const body = document.getElementById('filtersBody');
-  if (!btn || !body) return;
-  btn.addEventListener('click', () => {
-    const collapsed = body.getAttribute('data-collapsed') === 'true';
-    body.setAttribute('data-collapsed', collapsed ? 'false' : 'true');
-  });
-}
-
-function upsertPlayer(row) {
-  if (!row || !row.id) return;
-  state.playersById.set(row.id, row);
-  render();
-}
-
-function removePlayer(id) {
-  state.playersById.delete(id);
-  render();
-}
-
-function visiblePlayers() {
-  const term = state.searchTerm.trim().toLowerCase();
-  const all = Array.from(state.playersById.values());
-  if (!term) return all;
-  return all.filter(p => (p.name || '').toLowerCase().includes(term));
-}
-
 // Create Supabase client if credentials are provided. The global `supabase`
 // object is exported by vendor/supabase.js. When both values are falsy
 // (empty strings), supabaseClient will be null and no network calls will be
@@ -407,6 +373,88 @@ function visiblePlayers() {
 // Utility to normalise player names for case insensitive comparison
 function normalize(str) {
   return String(str || '').trim().toLowerCase();
+}
+
+function createLocalPlayerKey() {
+  return `lp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function ensurePlayerIdentityKeys() {
+  let changed = false;
+  (state.players || []).forEach((player) => {
+    if (!player || typeof player !== 'object') return;
+    if (player.id) return;
+    const current = String(player.localKey || '').trim();
+    if (current) return;
+    player.localKey = createLocalPlayerKey();
+    changed = true;
+  });
+  return changed;
+}
+
+function playerIdentityKey(player) {
+  if (!player || typeof player !== 'object') return '';
+  if (player.id) return `id:${String(player.id)}`;
+  const current = String(player.localKey || '').trim();
+  if (current) return `local:${current}`;
+  player.localKey = createLocalPlayerKey();
+  return `local:${player.localKey}`;
+}
+
+function normalizeCheckedInEntries(entries) {
+  ensurePlayerIdentityKeys();
+  const list = Array.isArray(entries) ? entries : [];
+  const byName = new Map();
+  (state.players || []).forEach((p) => {
+    const nm = normalize(p.name);
+    if (nm && !byName.has(nm)) byName.set(nm, p);
+  });
+
+  const knownKeys = new Set((state.players || []).map((p) => playerIdentityKey(p)).filter(Boolean));
+  const seen = new Set();
+  const out = [];
+
+  list.forEach((entry) => {
+    if (typeof entry !== 'string') return;
+    const raw = entry.trim();
+    if (!raw) return;
+
+    let key = '';
+    if (raw.startsWith('id:') || raw.startsWith('local:')) {
+      key = raw;
+    } else {
+      const player = byName.get(normalize(raw));
+      if (player) key = playerIdentityKey(player);
+    }
+
+    if (!key || !knownKeys.has(key) || seen.has(key)) return;
+    seen.add(key);
+    out.push(key);
+  });
+
+  return out;
+}
+
+function isPlayerCheckedIn(player) {
+  const key = playerIdentityKey(player);
+  return !!key && (state.checkedIn || []).includes(key);
+}
+
+function checkInPlayer(player) {
+  const key = playerIdentityKey(player);
+  if (!key) return false;
+  if ((state.checkedIn || []).includes(key)) return false;
+  state.checkedIn = [...(state.checkedIn || []), key];
+  return true;
+}
+
+function checkOutPlayer(player) {
+  const key = playerIdentityKey(player);
+  if (!key) return false;
+  const next = (state.checkedIn || []).filter((k) => k !== key);
+  const changed = next.length !== (state.checkedIn || []).length;
+  state.checkedIn = next;
+  return changed;
 }
 
 let saveTimeout;
@@ -431,14 +479,13 @@ function queueSaveToSupabase() {
 }
 
 // Balanced group generation algorithm. Given a list of all players, the set
-// of names that are currently checked in and a desired number of groups,
+// of identity keys that are currently checked in and a desired number of groups,
 // assign players to groups so that total skill in each group is as even as
 // possible. The algorithm sorts players by skill descending then greedily
 // assigns each player to the group with the lowest total skill so far.
-function generateBalancedGroups(players, checkedInNames, groupCount) {
-  const eligible = players.filter(p =>
-    checkedInNames.some(n => normalize(n) === normalize(p.name))
-  );
+function generateBalancedGroups(players, checkedInKeys, groupCount) {
+  const inSet = new Set(checkedInKeys || []);
+  const eligible = players.filter((p) => inSet.has(playerIdentityKey(p)));
 
   // 1) Sort by descending skill, but randomize equal-skill ties
   const sorted = eligible.slice().sort((a, b) => {
@@ -478,9 +525,9 @@ function renderFilteredPlayers() {
 
   // tab filters
   if (state.playerTab === 'in') {
-    filtered = filtered.filter(p => state.checkedIn.includes(p.name));
+    filtered = filtered.filter((p) => isPlayerCheckedIn(p));
   } else if (state.playerTab === 'out') {
-    filtered = filtered.filter(p => !state.checkedIn.includes(p.name));
+    filtered = filtered.filter((p) => !isPlayerCheckedIn(p));
   } else if (state.playerTab === 'skill' && state.skillSubTab) {
     const min = parseFloat(state.skillSubTab);
     const max = min === 9.0 ? 10 : min + 0.9;
@@ -509,7 +556,7 @@ function renderFilteredPlayers() {
 
   return filtered.map((player) => {
     const idx = state.players.findIndex(p => p.id === player.id);
-    const checked = state.checkedIn.includes(player.name);
+    const checked = isPlayerCheckedIn(player);
     const isSelected = selectedSet().has(String(player.id));
 
     return `
@@ -570,14 +617,13 @@ function renderFilteredPlayers() {
 // simplifies debugging and persistence.
 const state = {
   players: [],        // list of players { name, skill, id? }
-  checkedIn: [],      // list of player names currently checked in
+  checkedIn: [],      // list of attendance keys currently checked in
   isAdmin: false,     // whether admin panel is unlocked
   generatedTeams: [], // result of the last team generation
   groupCount: 2,      // number of teams requested when generating groups
   playerTab: 'all',   // current active tab: 'all', 'in', 'out', 'skill'
   skillSubTab: null,  // current skill range selected, like '1.0', '2.0', etc.
   loaded: false,      // becomes true after Supabase loads
-  playersById: new Map(),
   searchTerm: '',
   groups: ['All', 'Athletic Specimen'],
   activeGroup: 'All',
@@ -615,14 +661,24 @@ const LS_PLAYERS_KEY = 'athletic_specimen_players';
 const LS_CHECKIN_KEY = 'athletic_specimen_checked_in';
 const LS_ADMIN_KEY = 'athletic_specimen_is_admin';
 
-// Load players and checked in names from localStorage into state. Called
+// Load players and checked-in attendance keys from localStorage into state. Called
 // during initialization.
 function loadLocal() {
+  let shouldPersistMigration = false;
   try {
     const storedPlayers = JSON.parse(localStorage.getItem(LS_PLAYERS_KEY) || '[]');
     if (Array.isArray(storedPlayers)) state.players = storedPlayers;
+    if (ensurePlayerIdentityKeys()) shouldPersistMigration = true;
+
     const storedChecked = JSON.parse(localStorage.getItem(LS_CHECKIN_KEY) || '[]');
-    if (Array.isArray(storedChecked)) state.checkedIn = storedChecked;
+    if (Array.isArray(storedChecked)) {
+      const normalizedChecked = normalizeCheckedInEntries(storedChecked);
+      state.checkedIn = normalizedChecked;
+      if (JSON.stringify(normalizedChecked) !== JSON.stringify(storedChecked)) {
+        shouldPersistMigration = true;
+      }
+    }
+
     const adminFlag = sessionStorage.getItem(LS_ADMIN_KEY);
     state.isAdmin = adminFlag === 'true';
   } catch (err) {
@@ -649,12 +705,16 @@ function loadLocal() {
     state.limitedGroup = lim;
     state.activeGroup = lim;
   }
+
+  if (shouldPersistMigration) saveLocal();
 }
 
-// Save current state players and checked in names to localStorage. Called
+// Save current state players and checked-in attendance keys to localStorage. Called
 // whenever state.players or state.checkedIn changes.
 function saveLocal() {
   try {
+    ensurePlayerIdentityKeys();
+    state.checkedIn = normalizeCheckedInEntries(state.checkedIn);
     localStorage.setItem(LS_PLAYERS_KEY, JSON.stringify(state.players));
     localStorage.setItem(LS_CHECKIN_KEY, JSON.stringify(state.checkedIn));
     localStorage.setItem(LS_GROUPS_KEY, JSON.stringify(state.groups.filter(g => g && g !== 'All')));
@@ -664,11 +724,62 @@ function saveLocal() {
   }
 }
 
+function mergePlayersAfterSync(remotePlayers) {
+  const prevPlayers = Array.isArray(state.players) ? state.players : [];
+  const prevChecked = new Set(state.checkedIn || []);
+  ensurePlayerIdentityKeys();
+
+  const remoteByName = new Map();
+  remotePlayers.forEach((p) => {
+    const key = normalize(p.name);
+    if (key && !remoteByName.has(key)) remoteByName.set(key, p);
+  });
+
+  const preservedLocalOnly = [];
+  const carriedChecked = new Set();
+
+  prevPlayers.forEach((p) => {
+    if (!p || typeof p !== 'object') return;
+    if (p.id) return; // remote rows with ids are authoritative
+
+    // Keep tenant scoping behavior when a limited group is active.
+    if (state.limitedGroup && String(p.group || '').trim() !== state.limitedGroup) return;
+
+    const localKey = playerIdentityKey(p);
+    const localWasChecked = !!localKey && prevChecked.has(localKey);
+    const matchedRemote = remoteByName.get(normalize(p.name));
+
+    if (matchedRemote) {
+      // If a local-only player now exists remotely, carry check-in state forward.
+      if (localWasChecked) {
+        const remoteKey = playerIdentityKey(matchedRemote);
+        if (remoteKey) carriedChecked.add(remoteKey);
+      }
+      return;
+    }
+
+    preservedLocalOnly.push(p);
+    if (localWasChecked) carriedChecked.add(localKey);
+  });
+
+  const remoteChecked = new Set(
+    remotePlayers
+      .filter((p) => p.checked_in)
+      .map((p) => playerIdentityKey(p))
+      .filter(Boolean)
+  );
+
+  return {
+    players: [...remotePlayers, ...preservedLocalOnly],
+    checkedIn: [...remoteChecked, ...carriedChecked]
+  };
+}
+
 // Sync local state with Supabase. Pulls players list and checked_in flags
 // from the Supabase table `players`. If Supabase is not configured this
 // function is a no‑op. When remote data is retrieved it merges into
-// state.players and updates state.checkedIn with any players marked
-// checked_in.
+// state.players and updates state.checkedIn with identity keys for players
+// marked checked_in.
 async function syncFromSupabase() {
   if (!supabaseClient) return;
 
@@ -691,7 +802,7 @@ async function syncFromSupabase() {
     }
     if (!Array.isArray(data)) return;
 
-    state.players = data.map((p) => ({
+    const remotePlayers = data.map((p) => ({
       name: p.name,
       skill: Number(p.skill) || 0,
       id: p.id,
@@ -699,7 +810,9 @@ async function syncFromSupabase() {
       group: String(p.group || p.tag || '').trim()
     }));
 
-    state.checkedIn = data.filter((p) => p.checked_in).map((p) => p.name);
+    const merged = mergePlayersAfterSync(remotePlayers);
+    state.players = merged.players;
+    state.checkedIn = normalizeCheckedInEntries(merged.checkedIn);
     state.loaded = true;
   } catch (err) {
     console.error('Error syncing from Supabase', err);
@@ -1138,7 +1251,6 @@ function openTournamentView() {
   showTournamentView(true);
   try { fixTournamentFading(); } catch {}
   try { ensureTournamentUI(); } catch {}
-  try { dedupeSectionTitles(); } catch {}
 }
 
 function bindTournamentTab() {
@@ -1876,7 +1988,6 @@ editStyle.textContent = editCss;
 // at the end of render()
 attachHandlers();
 bindTournamentTab();
-bindFiltersCollapsible();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
@@ -1916,13 +2027,6 @@ function gmPopulate() {
     if (g) known.add(g);
   });
   const list = Array.from(known).sort((a,b)=>a.localeCompare(b));
-
-  // Fill merge selects
-  const fromSel = gmRoot.querySelector('#gm-merge-from');
-  const intoSel = gmRoot.querySelector('#gm-merge-into');
-  const opts = list.map(g => `<option value="${g}">${g}</option>`).join('');
-  if (fromSel) fromSel.innerHTML = `<option value="">— choose —</option>${opts}`;
-  if (intoSel) intoSel.innerHTML = `<option value="">— choose —</option>${opts}`;
 
   // Fill rows with counts + actions
   const byGroup = computeCheckedInByGroup();
@@ -2170,8 +2274,7 @@ if (logoutBtn) {
 
       const player = state.players.find((p) => normalize(p.name) === normalize(name));
       if (player) {
-        if (!state.checkedIn.includes(player.name)) {
-          state.checkedIn = [...state.checkedIn, player.name];
+        if (checkInPlayer(player)) {
           if (supabaseClient && player.id) {
             try {
               await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
@@ -2205,8 +2308,8 @@ if (logoutBtn) {
 
       const player = state.players.find((p) => normalize(p.name) === normalize(name));
       if (player) {
-        if (state.checkedIn.some((n) => normalize(n) === normalize(name))) {
-          state.checkedIn = state.checkedIn.filter((n) => normalize(n) !== normalize(name));
+        if (isPlayerCheckedIn(player)) {
+          checkOutPlayer(player);
           if (supabaseClient && player.id) {
             try {
               await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
@@ -2309,7 +2412,7 @@ if (logoutBtn) {
         const player = state.players.find((p) => String(p.id) === String(id));
         if (!player) return;
 
-        state.checkedIn = state.checkedIn.filter((n) => n !== player.name);
+        checkOutPlayer(player);
         if (supabaseClient && player.id) {
           try {
             await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
@@ -2342,7 +2445,7 @@ if (logoutBtn) {
         }
 
         state.players = state.players.filter((p) => String(p.id) !== String(id));
-        state.checkedIn = state.checkedIn.filter((n) => n !== removed.name);
+        checkOutPlayer(removed);
 
         saveLocal();
         queueSaveToSupabase();
@@ -2387,51 +2490,6 @@ if (logoutBtn) {
       render();
     });
   }
-
-  // --- Bracket inline editing ---
-  document.querySelectorAll('.match input').forEach((input) => {
-    input.addEventListener('input', (ev) => {
-      const matchIndex = parseInt(ev.target.getAttribute('data-match'));
-      const field = ev.target.getAttribute('data-field');
-      const value = ev.target.value;
-      if (isNaN(matchIndex) || !field) return;
-      const updated = state.bracket.slice();
-      updated[matchIndex] = { ...updated[matchIndex], [field]: value, winner: updated[matchIndex].winner === value ? value : null };
-      if (matchIndex < 4) {
-        const dest = 4 + Math.floor(matchIndex / 2);
-        const destField = matchIndex % 2 === 0 ? 'team1' : 'team2';
-        updated[dest] = { ...updated[dest], [destField]: '', winner: null };
-        updated[6] = { ...updated[6], team1: '', team2: '', winner: null };
-      }
-      const scrollY = window.scrollY;
-      state.bracket = updated;
-      render();
-      setTimeout(() => window.scrollTo(0, scrollY), 0);
-    });
-  });
-
-  document.querySelectorAll('.btn-advance').forEach((btn) => {
-    btn.addEventListener('click', (ev) => {
-      const matchIndex = parseInt(ev.currentTarget.getAttribute('data-match'));
-      const team = ev.currentTarget.getAttribute('data-team');
-      if (isNaN(matchIndex) || !team) return;
-      const updated = state.bracket.slice();
-      updated[matchIndex] = { ...updated[matchIndex], winner: team };
-      if (matchIndex < 4) {
-        const dest = 4 + Math.floor(matchIndex / 2);
-        const destField = matchIndex % 2 === 0 ? 'team1' : 'team2';
-        updated[dest] = { ...updated[dest], [destField]: team, winner: updated[dest].winner === team ? team : null };
-        updated[6] = { ...updated[6], team1: '', team2: '', winner: null };
-      } else if (matchIndex < 6) {
-        const destField = matchIndex === 4 ? 'team1' : 'team2';
-        updated[6] = { ...updated[6], [destField]: team, winner: updated[6].winner === team ? team : null };
-      }
-      const scrollY = window.scrollY;
-      state.bracket = updated;
-      render();
-      setTimeout(() => window.scrollTo(0, scrollY), 0);
-    });
-  });
 
   // --- Filters & search ---
   const tabSelect = document.getElementById('player-tab-select');
@@ -2523,11 +2581,9 @@ if (assignBtn) {
     if (!sel.size) return;
 
     const selEl = document.getElementById('bulk-dest-group');
-    const newEl = document.getElementById('bulk-new-group');
-    const typed = (newEl && newEl.value || '').trim();
-const chosen = selEl ? selEl.value : '';
-let dest = typed || chosen;
-if (state.limitedGroup) dest = state.limitedGroup;
+    const chosen = selEl ? selEl.value : '';
+    let dest = chosen;
+    if (state.limitedGroup) dest = state.limitedGroup;
 
     if (!dest || dest === 'All') return;
 
