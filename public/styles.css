@@ -34,6 +34,12 @@ body {
   align-items: center;
 }
 
+.admin-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .row {
   display: flex;
   gap: 0.5rem;
@@ -245,6 +251,13 @@ body {
 
 .card-generate-teams .live-net-team strong {
   font-size: 1rem;
+}
+
+.card-generate-teams .live-net-team-size {
+  margin-top: 0.1rem;
+  color: #64748b;
+  font-size: 0.76rem;
+  line-height: 1.15;
 }
 
 .card-generate-teams .live-net-divider {

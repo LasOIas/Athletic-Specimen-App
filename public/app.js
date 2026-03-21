@@ -986,6 +986,43 @@ function deriveLiveTeamMatchups(teams) {
   return { matchups, waitingTeams };
 }
 
+function defaultLiveCourtOrder(teamCount) {
+  const count = Math.max(0, Number(teamCount) || 0);
+  return Array.from({ length: count }, (_, idx) => idx + 1);
+}
+
+function normalizeLiveCourtOrder(courtOrder, teamCount) {
+  const count = Math.max(0, Number(teamCount) || 0);
+  if (!count) return [];
+  const list = Array.isArray(courtOrder) ? courtOrder : [];
+  const cleaned = list
+    .map((value) => Number(value))
+    .filter((teamNo) => Number.isInteger(teamNo) && teamNo > 0 && teamNo <= count);
+
+  if (cleaned.length !== count) return defaultLiveCourtOrder(count);
+  if (new Set(cleaned).size !== count) return defaultLiveCourtOrder(count);
+  return cleaned;
+}
+
+function deriveLiveTeamMatchupsFromOrder(courtOrder) {
+  const order = Array.isArray(courtOrder) ? courtOrder : [];
+  const matchups = [];
+  const waitingTeams = [];
+
+  for (let i = 0; i < order.length; i += 2) {
+    const teamA = Number(order[i]);
+    const teamB = Number(order[i + 1]);
+    if (!Number.isInteger(teamA)) continue;
+    if (Number.isInteger(teamB)) {
+      matchups.push({ teamA, teamB });
+    } else {
+      waitingTeams.push(teamA);
+    }
+  }
+
+  return { matchups, waitingTeams };
+}
+
 function liveMatchupKey(teamA, teamB) {
   return `${teamA}-${teamB}`;
 }
@@ -1018,10 +1055,10 @@ function areAllLiveMatchResultsRecorded(matchups, resultsByMatch) {
   });
 }
 
-function deriveNextLiveCourtOrder(teams, liveMatchups, resultsByMatch) {
-  const teamList = Array.isArray(teams) ? teams : [];
+function deriveNextLiveCourtOrder(courtOrder, liveMatchups, resultsByMatch) {
+  const currentOrder = Array.isArray(courtOrder) ? courtOrder : [];
   const pairs = Array.isArray(liveMatchups && liveMatchups.matchups) ? liveMatchups.matchups : [];
-  if (!teamList.length || !pairs.length) return null;
+  if (!currentOrder.length || !pairs.length) return null;
 
   const winners = [];
   const losers = [];
@@ -1037,22 +1074,21 @@ function deriveNextLiveCourtOrder(teams, liveMatchups, resultsByMatch) {
   if (winners.length !== pairs.length || losers.length !== pairs.length) return null;
 
   const waiting = (Array.isArray(liveMatchups && liveMatchups.waitingTeams) ? liveMatchups.waitingTeams : [])
-    .filter((teamNo) => Number.isInteger(teamNo) && teamNo > 0 && teamNo <= teamList.length);
+    .filter((teamNo) => Number.isInteger(teamNo) && currentOrder.includes(teamNo));
 
   // First version rule: winners stay/shift left, waiting teams slot between winners and losers,
   // losers shift away from the left winners court.
   const orderedTeamNumbers = [...winners, ...waiting, ...losers];
-  if (orderedTeamNumbers.length !== teamList.length) return null;
-  if (new Set(orderedTeamNumbers).size !== teamList.length) return null;
-
-  return orderedTeamNumbers.map((teamNo) => {
-    const team = teamList[teamNo - 1];
-    return Array.isArray(team) ? team.slice() : [];
-  });
+  if (orderedTeamNumbers.length !== currentOrder.length) return null;
+  if (new Set(orderedTeamNumbers).size !== currentOrder.length) return null;
+  return orderedTeamNumbers;
 }
 
 function maybeAdvanceLiveCourtsFromResults() {
-  const liveMatchups = deriveLiveTeamMatchups(state.generatedTeams);
+  const teamCount = Array.isArray(state.generatedTeams) ? state.generatedTeams.length : 0;
+  const currentOrder = normalizeLiveCourtOrder(state.liveCourtOrder, teamCount);
+  state.liveCourtOrder = currentOrder;
+  const liveMatchups = deriveLiveTeamMatchupsFromOrder(currentOrder);
   if (!liveMatchups.matchups.length) return false;
 
   const normalizedResults = normalizeLiveMatchResults(state.liveMatchResults, liveMatchups.matchups);
@@ -1064,11 +1100,10 @@ function maybeAdvanceLiveCourtsFromResults() {
 
   if (!areAllLiveMatchResultsRecorded(liveMatchups.matchups, normalizedResults)) return false;
 
-  const nextTeams = deriveNextLiveCourtOrder(state.generatedTeams, liveMatchups, normalizedResults);
-  if (!nextTeams) return false;
+  const nextOrder = deriveNextLiveCourtOrder(currentOrder, liveMatchups, normalizedResults);
+  if (!nextOrder) return false;
 
-  state.generatedTeams = nextTeams;
-  updateGeneratedTeamsSummaryFromCurrent(nextTeams);
+  state.liveCourtOrder = nextOrder;
   state.liveMatchResults = {};
   state.liveMatchSkillSnapshots = {};
   return true;
@@ -1508,6 +1543,7 @@ const state = {
   isAdmin: false,     // whether admin panel is unlocked
   generatedTeams: [], // result of the last team generation
   generatedTeamsSummary: null, // fairness details from the latest generation
+  liveCourtOrder: [], // current live court order as stable team numbers (left -> right)
   liveMatchResults: {}, // map of matchup key ("1-2") -> winner team number
   liveMatchSkillSnapshots: {}, // map of matchup key -> playerKey skill snapshot before result apply
   groupCount: 2,      // number of teams requested when generating groups
@@ -1556,12 +1592,14 @@ const LS_CHECKIN_KEY = 'athletic_specimen_checked_in';
 const LS_ADMIN_KEY = 'athletic_specimen_is_admin';
 const LS_GENERATED_TEAMS_KEY = 'athletic_specimen_generated_team_keys';
 const LS_GENERATED_SUMMARY_KEY = 'athletic_specimen_generated_teams_summary';
+const LS_LIVE_COURT_ORDER_KEY = 'athletic_specimen_live_court_order';
 const LS_LIVE_MATCH_RESULTS_KEY = 'athletic_specimen_live_match_results';
 const LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY = 'athletic_specimen_live_match_skill_snapshots';
 
 function clearStoredGeneratedTeams() {
   localStorage.removeItem(LS_GENERATED_TEAMS_KEY);
   localStorage.removeItem(LS_GENERATED_SUMMARY_KEY);
+  localStorage.removeItem(LS_LIVE_COURT_ORDER_KEY);
   localStorage.removeItem(LS_LIVE_MATCH_RESULTS_KEY);
   localStorage.removeItem(LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY);
 }
@@ -1656,11 +1694,13 @@ function loadGeneratedTeamsFromLocal() {
     if (!restoredTeams) {
       state.generatedTeams = [];
       state.generatedTeamsSummary = null;
+      state.liveCourtOrder = [];
       state.liveMatchResults = {};
       state.liveMatchSkillSnapshots = {};
       if (
         localStorage.getItem(LS_GENERATED_TEAMS_KEY) ||
         localStorage.getItem(LS_GENERATED_SUMMARY_KEY) ||
+        localStorage.getItem(LS_LIVE_COURT_ORDER_KEY) ||
         localStorage.getItem(LS_LIVE_MATCH_RESULTS_KEY) ||
         localStorage.getItem(LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY)
       ) {
@@ -1670,6 +1710,12 @@ function loadGeneratedTeamsFromLocal() {
     }
 
     state.generatedTeams = restoredTeams;
+    const storedCourtOrder = JSON.parse(localStorage.getItem(LS_LIVE_COURT_ORDER_KEY) || 'null');
+    const normalizedCourtOrder = normalizeLiveCourtOrder(storedCourtOrder, restoredTeams.length);
+    state.liveCourtOrder = normalizedCourtOrder;
+    if (JSON.stringify(normalizedCourtOrder) !== JSON.stringify(Array.isArray(storedCourtOrder) ? storedCourtOrder : [])) {
+      shouldPersistMigration = true;
+    }
 
     const storedSummary = JSON.parse(localStorage.getItem(LS_GENERATED_SUMMARY_KEY) || 'null');
     const normalizedSummary = sanitizeGeneratedTeamsSummary(storedSummary);
@@ -1680,7 +1726,7 @@ function loadGeneratedTeamsFromLocal() {
     }
 
     const storedResults = JSON.parse(localStorage.getItem(LS_LIVE_MATCH_RESULTS_KEY) || '{}');
-    const matchups = deriveLiveTeamMatchups(restoredTeams);
+    const matchups = deriveLiveTeamMatchupsFromOrder(normalizedCourtOrder);
     const normalizedResults = normalizeLiveMatchResults(storedResults, matchups.matchups);
     state.liveMatchResults = normalizedResults;
     if (JSON.stringify(normalizedResults) !== JSON.stringify(storedResults || {})) {
@@ -1696,6 +1742,7 @@ function loadGeneratedTeamsFromLocal() {
   } catch (err) {
     state.generatedTeams = [];
     state.generatedTeamsSummary = null;
+    state.liveCourtOrder = [];
     state.liveMatchResults = {};
     state.liveMatchSkillSnapshots = {};
     shouldPersistMigration = true;
@@ -1707,6 +1754,9 @@ function loadGeneratedTeamsFromLocal() {
 function saveGeneratedTeamsToLocal() {
   const teamKeys = serializeGeneratedTeamsForStorage(state.generatedTeams);
   if (!teamKeys) {
+    if (!Array.isArray(state.generatedTeams) || state.generatedTeams.length === 0) {
+      state.liveCourtOrder = [];
+    }
     clearStoredGeneratedTeams();
     return;
   }
@@ -1720,7 +1770,11 @@ function saveGeneratedTeamsToLocal() {
     localStorage.removeItem(LS_GENERATED_SUMMARY_KEY);
   }
 
-  const matchups = deriveLiveTeamMatchups(teamKeys);
+  const normalizedCourtOrder = normalizeLiveCourtOrder(state.liveCourtOrder, teamKeys.length);
+  state.liveCourtOrder = normalizedCourtOrder;
+  localStorage.setItem(LS_LIVE_COURT_ORDER_KEY, JSON.stringify(normalizedCourtOrder));
+
+  const matchups = deriveLiveTeamMatchupsFromOrder(normalizedCourtOrder);
   const normalizedResults = normalizeLiveMatchResults(state.liveMatchResults, matchups.matchups);
   state.liveMatchResults = normalizedResults;
   if (Object.keys(normalizedResults).length) {
@@ -2732,7 +2786,9 @@ function render() {
       `;
     }
 
-    const liveMatchups = deriveLiveTeamMatchups(state.generatedTeams);
+    const normalizedCourtOrder = normalizeLiveCourtOrder(state.liveCourtOrder, state.generatedTeams.length);
+    state.liveCourtOrder = normalizedCourtOrder;
+    const liveMatchups = deriveLiveTeamMatchupsFromOrder(normalizedCourtOrder);
     const resultsByMatch = normalizeLiveMatchResults(state.liveMatchResults, liveMatchups.matchups);
     state.liveMatchResults = resultsByMatch;
     const snapshotsByMatch = normalizeLiveMatchSkillSnapshots(state.liveMatchSkillSnapshots, resultsByMatch);
@@ -2741,6 +2797,8 @@ function render() {
       const matchKey = liveMatchupKey(match.teamA, match.teamB);
       const winner = Number(resultsByMatch[matchKey]) || 0;
       const loser = winner === match.teamA ? match.teamB : (winner === match.teamB ? match.teamA : 0);
+      const teamASize = Array.isArray(state.generatedTeams[match.teamA - 1]) ? state.generatedTeams[match.teamA - 1].length : 0;
+      const teamBSize = Array.isArray(state.generatedTeams[match.teamB - 1]) ? state.generatedTeams[match.teamB - 1].length : 0;
       return `
       <article class="live-net-card">
         <div class="live-net-header">
@@ -2750,10 +2808,12 @@ function render() {
         <div class="live-net-court" role="group" aria-label="Net ${idx + 1} teams">
           <div class="live-net-team">
             <strong>Team ${match.teamA}</strong>
+            <span class="small live-net-team-size">Team of ${teamASize}</span>
           </div>
           <div class="live-net-divider" aria-hidden="true">NET</div>
           <div class="live-net-team">
             <strong>Team ${match.teamB}</strong>
+            <span class="small live-net-team-size">Team of ${teamBSize}</span>
           </div>
         </div>
         <div class="live-matchup-actions">
@@ -2826,7 +2886,10 @@ function render() {
     <div>
       <div class="card admin-header">
         <h2>Admin Dashboard</h2>
-        <button id="btn-logout">Logout</button>
+        <div class="admin-header-actions">
+          <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
+          <button id="btn-logout">Logout</button>
+        </div>
       </div>
       <div class="card card-add-player">
         <h3>Add/Update Player</h3>
@@ -2867,7 +2930,6 @@ function render() {
       <input type="number" id="group-count" min="2" value="${escapeHTML(String(state.groupCount))}" />
     </label>
     <button id="btn-generate-teams">Generate</button>
-    <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
   </div>
   ${teamsFairnessHTML}
   ${liveMatchupsHTML}
@@ -3902,6 +3964,7 @@ if (logoutBtn) {
       const generated = generateBalancedGroups(state.players, state.checkedIn, state.groupCount);
       state.generatedTeams = generated.teams;
       state.generatedTeamsSummary = generated.summary;
+      state.liveCourtOrder = defaultLiveCourtOrder(generated.teams.length);
       state.liveMatchResults = {};
       state.liveMatchSkillSnapshots = {};
       saveLocal();
