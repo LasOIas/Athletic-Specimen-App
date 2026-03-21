@@ -24,6 +24,7 @@ const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
 const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
 const UNGROUPED_FILTER_VALUE = '__ungrouped__';
+const UNGROUPED_FILTER_LABEL = 'Ungrouped (No Groups)';
 
 const selectedSet = () => new Set(state.selectedIds || []);
 
@@ -43,26 +44,45 @@ const LS_LIMITED_GROUP_KEY = 'athletic_specimen_limited_group';
 const LS_CODEMAP_KEY = 'athletic_specimen_admin_codes';
 let ADMIN_CODE_MAP = {}; // populated by loadAdminCodes()
 
-function isUngroupedValue(value) {
-  return String(value || '').trim() === '';
-}
-
 function computeCheckedInByGroup() {
-  const byGroup = {};
-  const norm = (s) => String(s || '').trim();
+  const byGroup = new Map();
   const isIn = new Set(state.checkedIn || []);
 
   for (const p of state.players || []) {
-    const g = isUngroupedValue(p.group) ? 'Ungrouped' : norm(p.group);
-    if (!byGroup[g]) byGroup[g] = { total: 0, in: 0 };
-    byGroup[g].total += 1;
-    if (isIn.has(playerIdentityKey(p))) byGroup[g].in += 1;
+    const primary = getPlayerPrimaryGroup(p);
+    const groupKey = primary || UNGROUPED_FILTER_VALUE;
+    const groupLabel = primary || UNGROUPED_FILTER_LABEL;
+
+    if (!byGroup.has(groupKey)) {
+      byGroup.set(groupKey, {
+        groupKey,
+        groupLabel,
+        isUngrouped: !primary,
+        total: 0,
+        in: 0
+      });
+    }
+
+    const row = byGroup.get(groupKey);
+    row.total += 1;
+    if (isIn.has(playerIdentityKey(p))) row.in += 1;
   }
 
   // return sorted entries by name
-  return Object.entries(byGroup)
-    .map(([group, v]) => ({ group, total: v.total, in: v.in }))
-    .sort((a, b) => a.group.localeCompare(b.group));
+  return Array.from(byGroup.values())
+    .sort((a, b) => a.groupLabel.localeCompare(b.groupLabel));
+}
+
+function normalizeActiveGroupSelection(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return 'All';
+  if (raw === 'All' || raw === UNGROUPED_FILTER_VALUE) return raw;
+  if (raw === UNGROUPED_FILTER_LABEL) return UNGROUPED_FILTER_VALUE;
+  if (raw === 'Ungrouped') {
+    const hasNamedUngroupedGroup = getAvailableGroups().includes('Ungrouped');
+    if (!hasNamedUngroupedGroup) return UNGROUPED_FILTER_VALUE;
+  }
+  return raw;
 }
 
 function loadAdminCodes() {
@@ -152,26 +172,57 @@ function openInlineEditRow(row) {
       return;
     }
 
+    const setPrimaryBtn = e.target.closest('[data-role="set-primary-group"]');
+    if (setPrimaryBtn) {
+      e.stopPropagation();
+      e.preventDefault();
+      const row = setPrimaryBtn.closest('.edit-row');
+      if (!row) return;
+      const groups = getEditGroupsFromRow(row);
+      const index = parseInt(setPrimaryBtn.getAttribute('data-group-index'), 10);
+      if (!Number.isInteger(index) || index < 0 || index >= groups.length) return;
+      const selected = groups[index];
+      const next = [selected, ...groups.filter((_, idx) => idx !== index)];
+      updateEditRowGroupUI(row, next);
+      return;
+    }
+
+    const removeGroupBtn = e.target.closest('[data-role="remove-group"]');
+    if (removeGroupBtn) {
+      e.stopPropagation();
+      e.preventDefault();
+      const row = removeGroupBtn.closest('.edit-row');
+      if (!row) return;
+      const groups = getEditGroupsFromRow(row);
+      const index = parseInt(removeGroupBtn.getAttribute('data-group-index'), 10);
+      if (!Number.isInteger(index) || index < 0 || index >= groups.length) return;
+      const next = groups.filter((_, idx) => idx !== index);
+      updateEditRowGroupUI(row, next);
+      return;
+    }
+
     const groupItem = e.target.closest('.group-item');
     if (groupItem) {
       e.stopPropagation();
       e.preventDefault();
-      const val = groupItem.getAttribute('data-value') || '';
+      const val = normalizeGroupName(groupItem.getAttribute('data-value') || '');
       const select = groupItem.closest('.group-select');
-      if (select) {
-        const hidden = select.querySelector('.edit-group');
-        if (hidden) hidden.value = val;
-        const btn = select.querySelector('.group-btn');
-        if (btn) btn.textContent = val || 'Group';
-        // add chosen group to state.groups if it's new
-        try {
-          if (val && !(state.groups || []).includes(val)) {
-            state.groups = [...(state.groups || []), val];
-            saveLocal();
-          }
-        } catch (e) {}
-        select.classList.remove('open');
-      }
+      const row = select ? select.closest('.edit-row') : null;
+      if (!select || !row || !val) return;
+
+      const groups = getEditGroupsFromRow(row);
+      const next = [val, ...groups.filter((group) => group !== val)];
+      updateEditRowGroupUI(row, next);
+
+      // add chosen group to state.groups if it's new
+      try {
+        if (!(state.groups || []).includes(val)) {
+          state.groups = [...(state.groups || []), val];
+          saveLocal();
+        }
+      } catch (err) {}
+
+      select.classList.remove('open');
       return;
     }
 
@@ -233,6 +284,7 @@ function openInlineEditRow(row) {
 
     // 4) Clicked anywhere else: close any open menus
     document.querySelectorAll('.menu-wrap.menu-open').forEach(w => w.classList.remove('menu-open'));
+    document.querySelectorAll('.group-select.open').forEach(el => el.classList.remove('open'));
   }, true); // capture phase so we always see the click
 })();
 
@@ -268,10 +320,16 @@ function openInlineEditRow(row) {
     const nameInput  = row.querySelector('.edit-name');
     const skillInput = row.querySelector('.edit-skill');
     const groupInput = row.querySelector('.edit-group');
+    const groupsInput = row.querySelector('.edit-groups');
 
     const name  = (nameInput?.value || '').trim();
     let   skill = parseFloat(skillInput?.value);
-    const group = (groupInput?.value || '').trim();
+    const parsedGroups = parseEditGroupsValue(groupsInput?.value || '');
+    const fallbackGroup = normalizeGroupName(groupInput?.value || '');
+    const groups = parsedGroups.length
+      ? parsedGroups
+      : (fallbackGroup ? [fallbackGroup] : []);
+    const group = groups[0] || '';
 
     if (!name || Number.isNaN(skill)) return;
     // Clamp and keep one decimal place
@@ -284,7 +342,7 @@ function openInlineEditRow(row) {
     if (idx < 0 || !state.players[idx]) return;
 
     const prev = state.players[idx];
-    const next = { ...prev, name, skill, group };
+    const next = { ...prev, name, skill, group, groups };
 
     // Optimistic local update
     const copy = state.players.slice();
@@ -532,6 +590,162 @@ function normalize(str) {
   return String(str || '').trim().toLowerCase();
 }
 
+function escapeHTMLText(value) {
+  return String(value || '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
+}
+
+function normalizeGroupName(value) {
+  return String(value || '').trim();
+}
+
+function normalizeGroupList(values) {
+  if (!Array.isArray(values)) return [];
+  const seen = new Set();
+  const out = [];
+  values.forEach((value) => {
+    const group = normalizeGroupName(value);
+    if (!group || seen.has(group)) return;
+    seen.add(group);
+    out.push(group);
+  });
+  return out;
+}
+
+function getPlayerGroups(player) {
+  if (!player || typeof player !== 'object') return [];
+  const primary = normalizeGroupName(player.group || player.tag || '');
+  const fromArray = normalizeGroupList(player.groups);
+  if (!primary) return fromArray;
+  if (!fromArray.length) return [primary];
+  if (fromArray[0] === primary) return fromArray;
+  return [primary, ...fromArray.filter((g) => g !== primary)];
+}
+
+function getPlayerPrimaryGroup(player) {
+  const groups = getPlayerGroups(player);
+  return groups.length ? groups[0] : '';
+}
+
+function playerBelongsToGroup(player, groupName) {
+  const target = normalizeGroupName(groupName);
+  if (!target) return false;
+  return getPlayerGroups(player).includes(target);
+}
+
+function isPlayerUngrouped(player) {
+  return getPlayerGroups(player).length === 0;
+}
+
+function normalizePlayerGroupShape(player) {
+  if (!player || typeof player !== 'object') return false;
+  const normalizedGroups = getPlayerGroups(player);
+  const normalizedPrimary = normalizedGroups[0] || '';
+
+  let changed = false;
+  if (player.group !== normalizedPrimary) {
+    player.group = normalizedPrimary;
+    changed = true;
+  }
+
+  if (!Array.isArray(player.groups) || player.groups.length !== normalizedGroups.length ||
+      player.groups.some((group, idx) => group !== normalizedGroups[idx])) {
+    player.groups = normalizedGroups;
+    changed = true;
+  }
+
+  return changed;
+}
+
+function normalizePlayerGroupsInState() {
+  let changed = false;
+  (state.players || []).forEach((player) => {
+    if (normalizePlayerGroupShape(player)) changed = true;
+  });
+  return changed;
+}
+
+function parseEditGroupsValue(rawValue) {
+  if (!rawValue) return [];
+  try {
+    const parsed = JSON.parse(rawValue);
+    return normalizeGroupList(parsed);
+  } catch {
+    const fallback = normalizeGroupName(rawValue);
+    return fallback ? [fallback] : [];
+  }
+}
+
+function getEditGroupsFromRow(row) {
+  if (!row) return [];
+  const groupsInput = row.querySelector('.edit-groups');
+  const primaryInput = row.querySelector('.edit-group');
+  const fromGroupsInput = parseEditGroupsValue(groupsInput?.value || '');
+  if (fromGroupsInput.length) return fromGroupsInput;
+  const primary = normalizeGroupName(primaryInput?.value || '');
+  return primary ? [primary] : [];
+}
+
+function renderEditGroupChipsMarkup(groups) {
+  const normalized = normalizeGroupList(groups);
+  if (!normalized.length) {
+    return '<span class="group-chip-empty small">No groups</span>';
+  }
+  return normalized.map((group, idx) => `
+    <span class="group-chip ${idx === 0 ? 'is-primary' : ''}">
+      <button
+        type="button"
+        class="group-chip-label"
+        data-role="set-primary-group"
+        data-group-index="${idx}"
+      >${escapeHTMLText(group)}${idx === 0 ? ' (Primary)' : ''}</button>
+      <button
+        type="button"
+        class="group-chip-remove"
+        data-role="remove-group"
+        data-group-index="${idx}"
+        aria-label="Remove ${escapeHTMLText(group)}"
+      >&times;</button>
+    </span>
+  `).join('');
+}
+
+function updateEditRowGroupUI(row, nextGroups) {
+  if (!row) return;
+  const normalized = normalizeGroupList(nextGroups);
+  const primary = normalized[0] || '';
+
+  const groupsInput = row.querySelector('.edit-groups');
+  if (groupsInput) groupsInput.value = JSON.stringify(normalized);
+
+  const primaryInput = row.querySelector('.edit-group');
+  if (primaryInput) primaryInput.value = primary;
+
+  const button = row.querySelector('.group-btn');
+  if (button) button.textContent = primary || 'Group';
+
+  const chips = row.querySelector('.group-chips');
+  if (chips) chips.innerHTML = renderEditGroupChipsMarkup(normalized);
+
+  const select = row.querySelector('.group-select');
+  if (select) {
+    select.querySelectorAll('.group-item').forEach((item) => {
+      const val = normalizeGroupName(item.getAttribute('data-value') || '');
+      const idx = normalized.indexOf(val);
+      const isMember = idx !== -1;
+      const isPrimary = idx === 0;
+      item.classList.toggle('is-member', isMember);
+      item.classList.toggle('is-primary', isPrimary);
+      item.textContent = `${val}${isPrimary ? ' (Primary)' : (isMember ? ' (Member)' : '')}`;
+    });
+  }
+}
+
 function createLocalPlayerKey() {
   return `lp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -622,7 +836,7 @@ function queueSaveToSupabase() {
     try {
       const rows = state.players.map(p => {
         const base = { id: p.id || undefined, name: p.name, skill: p.skill };
-        const grp = String(p.group || '').trim();
+        const grp = getPlayerPrimaryGroup(p);
         if (HAS_GROUP)      return { ...base, group: grp };
         if (HAS_TAG)        return { ...base, tag: grp };
         return base; // no group-like column in table
@@ -839,13 +1053,14 @@ function showTeamMoveToast(message) {
 function renderFilteredPlayers() {
   // start from all players
   let filtered = state.players.slice();
+  const activeGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
 
   // group filter
-  if (state.activeGroup && state.activeGroup !== 'All') {
-    if (state.activeGroup === UNGROUPED_FILTER_VALUE) {
-      filtered = filtered.filter(p => isUngroupedValue(p.group));
+  if (activeGroup && activeGroup !== 'All') {
+    if (activeGroup === UNGROUPED_FILTER_VALUE) {
+      filtered = filtered.filter((p) => isPlayerUngrouped(p));
     } else {
-      filtered = filtered.filter(p => String(p.group || '').trim() === state.activeGroup);
+      filtered = filtered.filter((p) => playerBelongsToGroup(p, activeGroup));
     }
   }
 
@@ -870,7 +1085,7 @@ function renderFilteredPlayers() {
     filtered = filtered.filter(p => {
       const nm = (p.name || '').toLowerCase();
       const tg = (p.tag  || '').toLowerCase();
-      const gp = (p.group|| '').toLowerCase();
+      const gp = getPlayerGroups(p).join(' ').toLowerCase();
       return nm.includes(q) || tg.includes(q) || gp.includes(q);
     });
   }
@@ -884,6 +1099,9 @@ function renderFilteredPlayers() {
     const idx = state.players.indexOf(player);
     const checked = isPlayerCheckedIn(player);
     const isSelected = selectedSet().has(String(player.id));
+    const playerGroup = getPlayerPrimaryGroup(player);
+    const playerGroups = getPlayerGroups(player);
+    const playerGroupsValue = escapeHTMLText(JSON.stringify(playerGroups));
 
     return `
       <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
@@ -905,7 +1123,7 @@ function renderFilteredPlayers() {
             <div class="meta">
               Skill: ${player.skill === 0 ? 'Unset' : player.skill}
               • <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
-              ${!state.limitedGroup && player.group ? ` • <span class="badge">${player.group}</span>` : ''}
+              ${!state.limitedGroup && playerGroup ? ` • <span class="badge">${playerGroup}</span>` : ''}
 
             </div>
           </div>
@@ -924,11 +1142,20 @@ function renderFilteredPlayers() {
         <input type="text" class="edit-name" placeholder="Name" value="${player.name}" />
         <input type="number" class="edit-skill" placeholder="Skill" step="0.1" value="${player.skill}" />
         <div class="group-select" data-index="${idx}">
-          <input type="hidden" class="edit-group" value="${player.group || ''}" />
-          <button type="button" class="group-btn">${player.group || 'Group'}</button>
+          <input type="hidden" class="edit-group" value="${playerGroup || ''}" />
+          <input type="hidden" class="edit-groups" value="${playerGroupsValue}" />
+          <button type="button" class="group-btn">${playerGroup || 'Group'}</button>
           <div class="group-list" role="menu" aria-hidden="true">
-            ${getAvailableGroups().map(g => `<button type="button" class="group-item" data-value="${g}">${g}</button>`).join('')}
+            ${getAvailableGroups().map((g) => {
+              const groupName = normalizeGroupName(g);
+              const memberIndex = playerGroups.indexOf(groupName);
+              const isMember = memberIndex !== -1;
+              const isPrimary = memberIndex === 0;
+              const label = `${groupName}${isPrimary ? ' (Primary)' : (isMember ? ' (Member)' : '')}`;
+              return `<button type="button" class="group-item ${isMember ? 'is-member' : ''} ${isPrimary ? 'is-primary' : ''}" data-value="${escapeHTMLText(groupName)}">${escapeHTMLText(label)}</button>`;
+            }).join('')}
           </div>
+          <div class="group-chips">${renderEditGroupChipsMarkup(playerGroups)}</div>
         </div>
         <div class="edit-actions">
           <button type="button" class="btn-save-edit success" data-index="${idx}" data-id="${player.id}">Save</button>
@@ -963,7 +1190,11 @@ const state = {
 };
 
 function getAvailableGroups() {
-  const fromPlayers = Array.from(new Set((state.players || []).map(p => String(p.group || '').trim()).filter(Boolean)));
+  const fromPlayersSet = new Set();
+  (state.players || []).forEach((player) => {
+    getPlayerGroups(player).forEach((group) => fromPlayersSet.add(group));
+  });
+  const fromPlayers = Array.from(fromPlayersSet);
   const fromConfig = Array.from(new Set(Object.values(state.adminCodeMap || ADMIN_CODE_MAP || {}).map(v => String(v || '').trim()).filter(Boolean)));
   const merged = Array.from(new Set([...(state.groups || []).filter(g => g && g !== 'All'), ...fromPlayers, ...fromConfig]));
   // Return available groups for selection (exclude the 'All' sentinel)
@@ -998,6 +1229,7 @@ function loadLocal() {
   try {
     const storedPlayers = JSON.parse(localStorage.getItem(LS_PLAYERS_KEY) || '[]');
     if (Array.isArray(storedPlayers)) state.players = storedPlayers;
+    if (normalizePlayerGroupsInState()) shouldPersistMigration = true;
     if (ensurePlayerIdentityKeys()) shouldPersistMigration = true;
 
     const storedChecked = JSON.parse(localStorage.getItem(LS_CHECKIN_KEY) || '[]');
@@ -1026,7 +1258,11 @@ function loadLocal() {
     if (Array.isArray(groups) && groups.length) state.groups = Array.from(new Set(['All', ...groups.filter(Boolean)]));
   } catch {}
   const ag = localStorage.getItem(LS_ACTIVE_GROUP_KEY);
-  if (ag) state.activeGroup = ag;
+  if (ag) {
+    const normalizedActiveGroup = normalizeActiveGroupSelection(ag);
+    state.activeGroup = normalizedActiveGroup;
+    if (normalizedActiveGroup !== ag) shouldPersistMigration = true;
+  }
 
   // load codes and tenant scope
   loadAdminCodes(); // << add this
@@ -1043,6 +1279,7 @@ function loadLocal() {
 // whenever state.players or state.checkedIn changes.
 function saveLocal() {
   try {
+    normalizePlayerGroupsInState();
     ensurePlayerIdentityKeys();
     state.checkedIn = normalizeCheckedInEntries(state.checkedIn);
     localStorage.setItem(LS_PLAYERS_KEY, JSON.stringify(state.players));
@@ -1059,8 +1296,29 @@ function mergePlayersAfterSync(remotePlayers) {
   const prevChecked = new Set(state.checkedIn || []);
   ensurePlayerIdentityKeys();
 
+  const prevById = new Map();
+  prevPlayers.forEach((player) => {
+    if (!player || typeof player !== 'object' || !player.id) return;
+    prevById.set(String(player.id), player);
+  });
+
+  const mergedRemotePlayers = (Array.isArray(remotePlayers) ? remotePlayers : []).map((remotePlayer) => {
+    if (!remotePlayer || typeof remotePlayer !== 'object' || !remotePlayer.id) return remotePlayer;
+    const prev = prevById.get(String(remotePlayer.id));
+    if (!prev) return remotePlayer;
+
+    const remotePrimary = getPlayerPrimaryGroup(remotePlayer);
+    const prevGroups = getPlayerGroups(prev);
+    const groups = normalizeGroupList([
+      ...(remotePrimary ? [remotePrimary] : []),
+      ...prevGroups.filter((group) => group !== remotePrimary)
+    ]);
+
+    return { ...remotePlayer, group: groups[0] || '', groups };
+  });
+
   const remoteByName = new Map();
-  remotePlayers.forEach((p) => {
+  mergedRemotePlayers.forEach((p) => {
     const key = normalize(p.name);
     if (key && !remoteByName.has(key)) remoteByName.set(key, p);
   });
@@ -1073,7 +1331,7 @@ function mergePlayersAfterSync(remotePlayers) {
     if (p.id) return; // remote rows with ids are authoritative
 
     // Keep tenant scoping behavior when a limited group is active.
-    if (state.limitedGroup && String(p.group || '').trim() !== state.limitedGroup) return;
+    if (state.limitedGroup && getPlayerPrimaryGroup(p) !== state.limitedGroup) return;
 
     const localKey = playerIdentityKey(p);
     const localWasChecked = !!localKey && prevChecked.has(localKey);
@@ -1093,14 +1351,14 @@ function mergePlayersAfterSync(remotePlayers) {
   });
 
   const remoteChecked = new Set(
-    remotePlayers
+    mergedRemotePlayers
       .filter((p) => p.checked_in)
       .map((p) => playerIdentityKey(p))
       .filter(Boolean)
   );
 
   return {
-    players: [...remotePlayers, ...preservedLocalOnly],
+    players: [...mergedRemotePlayers, ...preservedLocalOnly],
     checkedIn: [...remoteChecked, ...carriedChecked]
   };
 }
@@ -1132,16 +1390,21 @@ async function syncFromSupabase() {
     }
     if (!Array.isArray(data)) return;
 
-    const remotePlayers = data.map((p) => ({
-      name: p.name,
-      skill: Number(p.skill) || 0,
-      id: p.id,
-      checked_in: !!p.checked_in,
-      group: String(p.group || p.tag || '').trim()
-    }));
+    const remotePlayers = data.map((p) => {
+      const group = normalizeGroupName(p.group || p.tag || '');
+      return {
+        name: p.name,
+        skill: Number(p.skill) || 0,
+        id: p.id,
+        checked_in: !!p.checked_in,
+        group,
+        groups: group ? [group] : []
+      };
+    });
 
     const merged = mergePlayersAfterSync(remotePlayers);
     state.players = merged.players;
+    normalizePlayerGroupsInState();
     state.checkedIn = normalizeCheckedInEntries(merged.checkedIn);
     state.loaded = true;
   } catch (err) {
@@ -1883,6 +2146,34 @@ function render() {
 
   // Helper to escape text for safe insertion into HTML
   const escapeHTML = (str) => str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
+  const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE ? UNGROUPED_FILTER_LABEL : (normalizedActiveGroup || 'All');
+  const isActiveGroupValue = (value) => normalizeActiveGroupSelection(value || 'All') === normalizedActiveGroup;
+  const rosterNavButtonStyle = (value) => (
+    isActiveGroupValue(value)
+      ? 'background:#111827;color:#fff;border-color:#111827;'
+      : ''
+  );
+  const rosterGroupNavHTML = state.isAdmin && !state.limitedGroup ? `
+    <div class="row" style="gap:6px; align-items:center; margin:0.25rem 0 0.5rem;">
+      <span class="small" style="font-weight:600;">Roster View:</span>
+      <button type="button" class="secondary" data-group-view="All" style="${rosterNavButtonStyle('All')}">All</button>
+      ${getAvailableGroups().map((groupName) => `
+        <button
+          type="button"
+          class="secondary"
+          data-group-view="${escapeHTML(groupName)}"
+          style="${rosterNavButtonStyle(groupName)}"
+        >${escapeHTML(groupName)}</button>
+      `).join('')}
+      <button
+        type="button"
+        class="secondary"
+        data-group-view="${UNGROUPED_FILTER_VALUE}"
+        style="${rosterNavButtonStyle(UNGROUPED_FILTER_VALUE)}"
+      >${UNGROUPED_FILTER_LABEL}</button>
+    </div>
+  ` : '';
 
   // Build registration and check‑in messages
   const regMsg = messages.registration ? `<p class="msg">${escapeHTML(messages.registration)}</p>` : '';
@@ -1969,9 +2260,13 @@ function render() {
   ${teamsHTML}
 </div>
 <div class="row" style="justify-content:space-between; align-items:center; margin-top:8px;">
-  <h3>Players</h3>
-  <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
+  <h3>Players${normalizedActiveGroup !== 'All' ? ` <span class="small" style="font-weight:500;">(${escapeHTML(activeGroupLabel)} Roster)</span>` : ''}</h3>
+  <div class="row" style="gap:6px; align-items:center;">
+    ${!state.limitedGroup && normalizedActiveGroup !== 'All' ? `<button type="button" class="secondary" data-group-view="All">Show All Players</button>` : ''}
+    <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
+  </div>
 </div>
+${rosterGroupNavHTML}
   <!-- Collapsible body: put ALL your filter controls INSIDE this div -->
   <div id="filtersBody">
     <h4 style="margin-bottom: 0.5rem;">Filters</h4>
@@ -2000,8 +2295,9 @@ function render() {
   <div class="row" style="margin-top: 0.5rem; align-items:center;">
     <label for="group-filter-select">Group:</label>
     <select id="group-filter-select">
-      ${state.groups.map(g => `<option value="${g}" ${state.activeGroup === g ? 'selected' : ''}>${g}</option>`).join('')}
-      <option value="${UNGROUPED_FILTER_VALUE}" ${state.activeGroup === UNGROUPED_FILTER_VALUE ? 'selected' : ''}>Ungrouped</option>
+      <option value="All" ${isActiveGroupValue('All') ? 'selected' : ''}>All</option>
+      ${getAvailableGroups().map((groupName) => `<option value="${escapeHTML(groupName)}" ${isActiveGroupValue(groupName) ? 'selected' : ''}>${escapeHTML(groupName)}</option>`).join('')}
+      <option value="${UNGROUPED_FILTER_VALUE}" ${isActiveGroupValue(UNGROUPED_FILTER_VALUE) ? 'selected' : ''}>${UNGROUPED_FILTER_LABEL}</option>
     </select>
 
     <button id="btn-open-group-manager" class="secondary">Manage Groups</button>
@@ -2111,7 +2407,7 @@ function render() {
 
 <p class="small" style="text-align:center; margin-bottom:0.25rem;">
   Checked In: <strong>${state.checkedIn.length}</strong>
-  ${state.isAdmin && !state.limitedGroup ? ` • Group: <strong>${state.activeGroup === UNGROUPED_FILTER_VALUE ? 'Ungrouped' : (state.activeGroup || 'All')}</strong>` : ''}
+  ${state.isAdmin && !state.limitedGroup ? ` • Group: <strong>${activeGroupLabel}</strong>` : ''}
 </p>
 
 ${state.isAdmin && !state.limitedGroup ? `
@@ -2125,13 +2421,23 @@ ${state.isAdmin && !state.limitedGroup ? `
         </tr>
       </thead>
       <tbody>
-        ${computeCheckedInByGroup().map(row => `
+        ${computeCheckedInByGroup().map((row) => {
+          const groupViewValue = row.groupKey;
+          return `
           <tr>
-            <td style="padding:2px 8px;">${row.group}</td>
+            <td style="padding:2px 8px;">
+              <button
+                type="button"
+                class="secondary"
+                data-group-view="${escapeHTML(groupViewValue)}"
+                style="padding:2px 8px; font-size:12px; ${isActiveGroupValue(groupViewValue) ? 'background:#111827;color:#fff;border-color:#111827;' : ''}"
+              >${escapeHTML(row.groupLabel)}</button>
+            </td>
             <td style="padding:2px 8px;">${row.in}</td>
             <td style="padding:2px 8px;">${row.total}</td>
           </tr>
-        `).join('')}
+        `;
+        }).join('')}
       </tbody>
     </table>
   </div>
@@ -2300,8 +2606,8 @@ const editCss = `
 /* ----- Compact inline edit row (grid) ----- */
 .player-card .edit-row{
   display:none !important;
-  grid-template-columns: minmax(220px, 1fr) 90px 160px auto; /* name | skill | group | actions */
-  align-items:center;
+  grid-template-columns: minmax(220px, 1fr) 90px minmax(220px, 1fr) auto; /* name | skill | groups | actions */
+  align-items:start;
   gap:8px;
   margin-top:8px;
   padding:8px;
@@ -2330,7 +2636,67 @@ const editCss = `
 /* Per-field sizing still feels right */
 .player-card .edit-row .edit-name{ min-width:220px; }
 .player-card .edit-row .edit-skill{ width:90px; text-align:right; }
-.player-card .edit-row .edit-group{ width:160px; }
+.player-card .edit-row .group-select{ width:100%; }
+.player-card .edit-row .group-btn{
+  width:100%;
+  height:36px !important;
+  border:1px solid #d1d5db;
+  border-radius:6px;
+  background:#fff;
+  text-align:left;
+  padding:0 10px;
+  color:#111827;
+}
+.player-card .edit-row .group-list{
+  max-height:220px;
+  overflow:auto;
+}
+.player-card .edit-row .group-list .group-item.is-member{
+  font-weight:600;
+}
+.player-card .edit-row .group-list .group-item.is-primary{
+  color:#065f46;
+}
+.player-card .edit-row .group-chips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin-top:6px;
+}
+.player-card .edit-row .group-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  border:1px solid #d1d5db;
+  background:#fff;
+  border-radius:999px;
+  padding:2px 6px;
+}
+.player-card .edit-row .group-chip.is-primary{
+  border-color:#86efac;
+  background:#f0fdf4;
+}
+.player-card .edit-row .group-chip-label{
+  border:none;
+  background:transparent;
+  color:#111827;
+  cursor:pointer;
+  font-size:12px;
+  line-height:1.2;
+  padding:0;
+}
+.player-card .edit-row .group-chip-remove{
+  border:none;
+  background:transparent;
+  color:#b91c1c;
+  cursor:pointer;
+  font-size:14px;
+  line-height:1;
+  padding:0 2px;
+}
+.player-card .edit-row .group-chip-empty{
+  color:#64748b;
+}
 
 .player-card .edit-row .edit-actions{
   display:flex;
@@ -2397,11 +2763,27 @@ if (groupSelect) {
       groupSelect.value = state.limitedGroup;
       return;
     }
-    state.activeGroup = groupSelect.value || 'All';
+    state.activeGroup = normalizeActiveGroupSelection(groupSelect.value || 'All');
     saveLocal();
     render();
   });
 }
+
+const setRosterGroupView = (nextGroupValue) => {
+  if (state.limitedGroup) return;
+  const nextGroup = normalizeActiveGroupSelection(nextGroupValue);
+  state.activeGroup = nextGroup;
+  if (groupSelect) groupSelect.value = nextGroup;
+  saveLocal();
+  render();
+};
+
+document.querySelectorAll('[data-group-view]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const nextGroup = button.getAttribute('data-group-view') || 'All';
+    setRosterGroupView(nextGroup);
+  });
+});
 
 // ----- Group Manager (master admin) -----
 const gmOpen  = document.getElementById('btn-open-group-manager');
@@ -2414,15 +2796,14 @@ function gmPopulate() {
   const known = new Set(state.groups.filter(g => g && g !== 'All'));
   // Include any groups that might exist on players but not in state.groups
   state.players.forEach(p => {
-    const g = String(p.group || '').trim();
-    if (g) known.add(g);
+    getPlayerGroups(p).forEach((g) => known.add(g));
   });
   const list = Array.from(known).sort((a,b)=>a.localeCompare(b));
 
   // Fill rows with counts + actions
   const byGroup = computeCheckedInByGroup();
-  const totals = Object.fromEntries(byGroup.map(r => [r.group, r.total]));
-  const ins    = Object.fromEntries(byGroup.map(r => [r.group, r.in]));
+  const totals = Object.fromEntries(byGroup.map(r => [r.groupKey, r.total]));
+  const ins    = Object.fromEntries(byGroup.map(r => [r.groupKey, r.in]));
 
   const rowsEl = gmRoot.querySelector('#gm-rows');
   if (rowsEl) {
@@ -2479,7 +2860,12 @@ if (gmOpen && gmRoot) {
       if (!newName || newName === oldName) return;
 
       state.groups  = state.groups.map(g => g === oldName ? newName : g);
-      state.players = state.players.map(p => (String(p.group || '') === oldName ? { ...p, group: newName } : p));
+      state.players = state.players.map((player) => {
+        const memberships = getPlayerGroups(player);
+        if (!memberships.includes(oldName)) return player;
+        const nextGroups = normalizeGroupList(memberships.map((group) => (group === oldName ? newName : group)));
+        return { ...player, group: nextGroups[0] || '', groups: nextGroups };
+      });
       if (state.activeGroup === oldName) state.activeGroup = newName;
 
       try {
@@ -2501,7 +2887,12 @@ if (gmOpen && gmRoot) {
       if (!confirm(`Delete "${name}" and remove the group from all players?`)) return;
 
       state.groups  = state.groups.filter(g => g !== name);
-      state.players = state.players.map(p => (String(p.group || '') === name ? { ...p, group: '' } : p));
+      state.players = state.players.map((player) => {
+        const memberships = getPlayerGroups(player);
+        if (!memberships.includes(name)) return player;
+        const nextGroups = memberships.filter((group) => group !== name);
+        return { ...player, group: nextGroups[0] || '', groups: nextGroups };
+      });
       if (state.activeGroup === name) state.activeGroup = 'All';
 
       try {
@@ -2605,9 +2996,10 @@ if (logoutBtn) {
         }
       } else {
         // insert new
+        const activeGroupForInsert = normalizeActiveGroupSelection(state.activeGroup || 'All');
         const group = state.limitedGroup
         ? state.limitedGroup
-        : (state.activeGroup && state.activeGroup !== 'All' && state.activeGroup !== UNGROUPED_FILTER_VALUE ? state.activeGroup : '');
+        : (activeGroupForInsert && activeGroupForInsert !== 'All' && activeGroupForInsert !== UNGROUPED_FILTER_VALUE ? activeGroupForInsert : '');
         const newPlayer = { name, skill, group };
         let inserted = { ...newPlayer };
 
@@ -2746,9 +3138,10 @@ if (logoutBtn) {
           return render();
         }
 
+        const activeGroupForRegister = normalizeActiveGroupSelection(state.activeGroup || 'All');
         const group = state.limitedGroup
           ? state.limitedGroup
-          : (state.activeGroup && state.activeGroup !== 'All' && state.activeGroup !== UNGROUPED_FILTER_VALUE ? state.activeGroup : '');
+          : (activeGroupForRegister && activeGroupForRegister !== 'All' && activeGroupForRegister !== UNGROUPED_FILTER_VALUE ? activeGroupForRegister : '');
         const skill = 0.0;
         const newPlayer = { name, skill, group };
         let inserted = { ...newPlayer };
