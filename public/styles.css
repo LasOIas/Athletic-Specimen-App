@@ -173,7 +173,7 @@ body {
 
 .card-generate-teams .live-nets-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 220px));
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
   gap: 0.55rem;
   justify-content: start;
   align-items: start;
@@ -327,9 +327,15 @@ body {
   color: #475569;
 }
 
+@media (max-width: 1120px) {
+  .card-generate-teams .live-nets-grid {
+    grid-template-columns: repeat(3, minmax(170px, 1fr));
+  }
+}
+
 @media (max-width: 760px) {
   .card-generate-teams .live-nets-grid {
-    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    grid-template-columns: repeat(2, minmax(170px, 1fr));
   }
 
   .card-generate-teams .live-net-card {

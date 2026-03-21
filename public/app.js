@@ -1008,6 +1008,72 @@ function normalizeLiveMatchResults(resultsByMatch, matchups) {
   return normalized;
 }
 
+function areAllLiveMatchResultsRecorded(matchups, resultsByMatch) {
+  const pairs = Array.isArray(matchups) ? matchups : [];
+  if (!pairs.length) return false;
+  return pairs.every((match) => {
+    const matchKey = liveMatchupKey(match.teamA, match.teamB);
+    const winner = Number((resultsByMatch || {})[matchKey]);
+    return winner === match.teamA || winner === match.teamB;
+  });
+}
+
+function deriveNextLiveCourtOrder(teams, liveMatchups, resultsByMatch) {
+  const teamList = Array.isArray(teams) ? teams : [];
+  const pairs = Array.isArray(liveMatchups && liveMatchups.matchups) ? liveMatchups.matchups : [];
+  if (!teamList.length || !pairs.length) return null;
+
+  const winners = [];
+  const losers = [];
+
+  pairs.forEach((match) => {
+    const matchKey = liveMatchupKey(match.teamA, match.teamB);
+    const winner = Number((resultsByMatch || {})[matchKey]);
+    if (winner !== match.teamA && winner !== match.teamB) return;
+    winners.push(winner);
+    losers.push(winner === match.teamA ? match.teamB : match.teamA);
+  });
+
+  if (winners.length !== pairs.length || losers.length !== pairs.length) return null;
+
+  const waiting = (Array.isArray(liveMatchups && liveMatchups.waitingTeams) ? liveMatchups.waitingTeams : [])
+    .filter((teamNo) => Number.isInteger(teamNo) && teamNo > 0 && teamNo <= teamList.length);
+
+  // First version rule: winners stay/shift left, waiting teams slot between winners and losers,
+  // losers shift away from the left winners court.
+  const orderedTeamNumbers = [...winners, ...waiting, ...losers];
+  if (orderedTeamNumbers.length !== teamList.length) return null;
+  if (new Set(orderedTeamNumbers).size !== teamList.length) return null;
+
+  return orderedTeamNumbers.map((teamNo) => {
+    const team = teamList[teamNo - 1];
+    return Array.isArray(team) ? team.slice() : [];
+  });
+}
+
+function maybeAdvanceLiveCourtsFromResults() {
+  const liveMatchups = deriveLiveTeamMatchups(state.generatedTeams);
+  if (!liveMatchups.matchups.length) return false;
+
+  const normalizedResults = normalizeLiveMatchResults(state.liveMatchResults, liveMatchups.matchups);
+  state.liveMatchResults = normalizedResults;
+  state.liveMatchSkillSnapshots = normalizeLiveMatchSkillSnapshots(
+    state.liveMatchSkillSnapshots,
+    normalizedResults
+  );
+
+  if (!areAllLiveMatchResultsRecorded(liveMatchups.matchups, normalizedResults)) return false;
+
+  const nextTeams = deriveNextLiveCourtOrder(state.generatedTeams, liveMatchups, normalizedResults);
+  if (!nextTeams) return false;
+
+  state.generatedTeams = nextTeams;
+  updateGeneratedTeamsSummaryFromCurrent(nextTeams);
+  state.liveMatchResults = {};
+  state.liveMatchSkillSnapshots = {};
+  return true;
+}
+
 function normalizeLiveMatchSkillSnapshots(snapshotsByMatch, resultsByMatch) {
   const source = snapshotsByMatch && typeof snapshotsByMatch === 'object' ? snapshotsByMatch : {};
   const resultKeys = Object.keys(resultsByMatch && typeof resultsByMatch === 'object' ? resultsByMatch : {});
@@ -3881,9 +3947,13 @@ if (logoutBtn) {
         ...existingSnapshots,
         [matchKey]: baselineSnapshot
       };
+      const courtsAdvanced = maybeAdvanceLiveCourtsFromResults();
       saveLocal();
       queueSaveToSupabase();
       render();
+      if (courtsAdvanced) {
+        showTeamMoveToast('Courts advanced. Winners moved left.');
+      }
     });
   });
 
