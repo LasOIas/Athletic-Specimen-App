@@ -675,6 +675,16 @@ function parseAdminGroupsInput(rawValue) {
   return normalizeGroupList(String(rawValue).split(/[,;\n]/g));
 }
 
+function renderAdminGroupsPreviewMarkup(rawValue) {
+  const groups = parseAdminGroupsInput(rawValue);
+  if (!groups.length) {
+    return '<span class="admin-groups-empty small">No groups set</span>';
+  }
+  return groups.map((group, idx) =>
+    `<span class="admin-groups-chip ${idx === 0 ? 'is-primary' : ''}">${escapeHTMLText(group)}${idx === 0 ? ' (Primary)' : ''}</span>`
+  ).join('');
+}
+
 function parseEditGroupsValue(rawValue) {
   if (!rawValue) return [];
   try {
@@ -2215,10 +2225,29 @@ function render() {
       </div>
       <div class="card">
         <h3>Add/Update Player</h3>
-        <div class="row">
+        <div class="row admin-player-form-row">
           <input type="text" id="admin-player-name" placeholder="Name" />
           <input type="number" id="admin-player-skill" placeholder="Skill" step="0.1" />
-          <input type="text" id="admin-player-groups" placeholder="Groups (comma-separated, first is primary)" />
+          <div class="admin-player-groups-field">
+            <input
+              type="text"
+              id="admin-player-groups"
+              list="admin-player-groups-options"
+              placeholder="Groups (comma separated)"
+              autocomplete="off"
+              spellcheck="false"
+              aria-describedby="admin-player-groups-help"
+            />
+            <datalist id="admin-player-groups-options">
+              ${getAvailableGroups().map((groupName) => `<option value="${escapeHTML(groupName)}"></option>`).join('')}
+            </datalist>
+            <div id="admin-player-groups-help" class="small admin-player-groups-help">
+              ${state.limitedGroup
+                ? `Group lock active: ${escapeHTML(state.limitedGroup)} is always primary.`
+                : 'Use commas to add groups. First group is primary.'}
+            </div>
+            <div id="admin-player-groups-preview" class="admin-player-groups-preview">${renderAdminGroupsPreviewMarkup('')}</div>
+          </div>
           <button id="btn-save-player">Save</button>
         </div>
       </div>
@@ -2736,6 +2765,21 @@ if (groupSelect) {
     saveLocal();
     render();
   });
+}
+
+const adminGroupsInput = document.getElementById('admin-player-groups');
+const adminGroupsPreview = document.getElementById('admin-player-groups-preview');
+if (adminGroupsInput && adminGroupsPreview) {
+  const syncAdminGroupsPreview = () => {
+    adminGroupsPreview.innerHTML = renderAdminGroupsPreviewMarkup(adminGroupsInput.value || '');
+  };
+  adminGroupsInput.addEventListener('input', syncAdminGroupsPreview);
+  adminGroupsInput.addEventListener('blur', () => {
+    const normalized = parseAdminGroupsInput(adminGroupsInput.value || '');
+    adminGroupsInput.value = normalized.join(', ');
+    syncAdminGroupsPreview();
+  });
+  syncAdminGroupsPreview();
 }
 
 // ----- Group Manager (master admin) -----
