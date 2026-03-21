@@ -23,6 +23,7 @@ const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
 const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
+const UNGROUPED_FILTER_VALUE = '__ungrouped__';
 
 const selectedSet = () => new Set(state.selectedIds || []);
 
@@ -42,13 +43,17 @@ const LS_LIMITED_GROUP_KEY = 'athletic_specimen_limited_group';
 const LS_CODEMAP_KEY = 'athletic_specimen_admin_codes';
 let ADMIN_CODE_MAP = {}; // populated by loadAdminCodes()
 
+function isUngroupedValue(value) {
+  return String(value || '').trim() === '';
+}
+
 function computeCheckedInByGroup() {
   const byGroup = {};
   const norm = (s) => String(s || '').trim();
   const isIn = new Set(state.checkedIn || []);
 
   for (const p of state.players || []) {
-    const g = norm(p.group || 'Ungrouped');
+    const g = isUngroupedValue(p.group) ? 'Ungrouped' : norm(p.group);
     if (!byGroup[g]) byGroup[g] = { total: 0, in: 0 };
     byGroup[g].total += 1;
     if (isIn.has(playerIdentityKey(p))) byGroup[g].in += 1;
@@ -837,7 +842,11 @@ function renderFilteredPlayers() {
 
   // group filter
   if (state.activeGroup && state.activeGroup !== 'All') {
-    filtered = filtered.filter(p => String(p.group || '').trim() === state.activeGroup);
+    if (state.activeGroup === UNGROUPED_FILTER_VALUE) {
+      filtered = filtered.filter(p => isUngroupedValue(p.group));
+    } else {
+      filtered = filtered.filter(p => String(p.group || '').trim() === state.activeGroup);
+    }
   }
 
   // tab filters
@@ -1992,6 +2001,7 @@ function render() {
     <label for="group-filter-select">Group:</label>
     <select id="group-filter-select">
       ${state.groups.map(g => `<option value="${g}" ${state.activeGroup === g ? 'selected' : ''}>${g}</option>`).join('')}
+      <option value="${UNGROUPED_FILTER_VALUE}" ${state.activeGroup === UNGROUPED_FILTER_VALUE ? 'selected' : ''}>Ungrouped</option>
     </select>
 
     <button id="btn-open-group-manager" class="secondary">Manage Groups</button>
@@ -2101,7 +2111,7 @@ function render() {
 
 <p class="small" style="text-align:center; margin-bottom:0.25rem;">
   Checked In: <strong>${state.checkedIn.length}</strong>
-  ${state.isAdmin && !state.limitedGroup ? ` • Group: <strong>${state.activeGroup || 'All'}</strong>` : ''}
+  ${state.isAdmin && !state.limitedGroup ? ` • Group: <strong>${state.activeGroup === UNGROUPED_FILTER_VALUE ? 'Ungrouped' : (state.activeGroup || 'All')}</strong>` : ''}
 </p>
 
 ${state.isAdmin && !state.limitedGroup ? `
@@ -2597,7 +2607,7 @@ if (logoutBtn) {
         // insert new
         const group = state.limitedGroup
         ? state.limitedGroup
-        : (state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '');
+        : (state.activeGroup && state.activeGroup !== 'All' && state.activeGroup !== UNGROUPED_FILTER_VALUE ? state.activeGroup : '');
         const newPlayer = { name, skill, group };
         let inserted = { ...newPlayer };
 
@@ -2738,7 +2748,7 @@ if (logoutBtn) {
 
         const group = state.limitedGroup
           ? state.limitedGroup
-          : (state.activeGroup && state.activeGroup !== 'All' ? state.activeGroup : '');
+          : (state.activeGroup && state.activeGroup !== 'All' && state.activeGroup !== UNGROUPED_FILTER_VALUE ? state.activeGroup : '');
         const skill = 0.0;
         const newPlayer = { name, skill, group };
         let inserted = { ...newPlayer };
@@ -3031,19 +3041,22 @@ if (removeBtn) {
 function init() {
   // Load from localStorage
   loadLocal();
-  // Sync from supabase if available
-  // Sync from supabase if available
-(async () => {
-  await detectPlayersSchema();
-  await syncFromSupabase();
+  // Render immediately from local state; remote schema detect/sync runs in background.
+  render();
+
   // Register service worker for PWA offline support
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch((err) => {
       console.warn('Service worker registration failed', err);
     });
   }
-  render();
-})();
+
+  // Sync from supabase if available
+  (async () => {
+    await detectPlayersSchema();
+    await syncFromSupabase();
+    render();
+  })();
 }
 
 if (document.readyState === 'loading') {
