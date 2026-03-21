@@ -670,6 +670,11 @@ function normalizePlayerGroupsInState() {
   return changed;
 }
 
+function parseAdminGroupsInput(rawValue) {
+  if (!rawValue) return [];
+  return normalizeGroupList(String(rawValue).split(/[,;\n]/g));
+}
+
 function parseEditGroupsValue(rawValue) {
   if (!rawValue) return [];
   try {
@@ -2149,31 +2154,6 @@ function render() {
   const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
   const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE ? UNGROUPED_FILTER_LABEL : (normalizedActiveGroup || 'All');
   const isActiveGroupValue = (value) => normalizeActiveGroupSelection(value || 'All') === normalizedActiveGroup;
-  const rosterNavButtonStyle = (value) => (
-    isActiveGroupValue(value)
-      ? 'background:#111827;color:#fff;border-color:#111827;'
-      : ''
-  );
-  const rosterGroupNavHTML = state.isAdmin && !state.limitedGroup ? `
-    <div class="row" style="gap:6px; align-items:center; margin:0.25rem 0 0.5rem;">
-      <span class="small" style="font-weight:600;">Roster View:</span>
-      <button type="button" class="secondary" data-group-view="All" style="${rosterNavButtonStyle('All')}">All</button>
-      ${getAvailableGroups().map((groupName) => `
-        <button
-          type="button"
-          class="secondary"
-          data-group-view="${escapeHTML(groupName)}"
-          style="${rosterNavButtonStyle(groupName)}"
-        >${escapeHTML(groupName)}</button>
-      `).join('')}
-      <button
-        type="button"
-        class="secondary"
-        data-group-view="${UNGROUPED_FILTER_VALUE}"
-        style="${rosterNavButtonStyle(UNGROUPED_FILTER_VALUE)}"
-      >${UNGROUPED_FILTER_LABEL}</button>
-    </div>
-  ` : '';
 
   // Build registration and check‑in messages
   const regMsg = messages.registration ? `<p class="msg">${escapeHTML(messages.registration)}</p>` : '';
@@ -2238,6 +2218,7 @@ function render() {
         <div class="row">
           <input type="text" id="admin-player-name" placeholder="Name" />
           <input type="number" id="admin-player-skill" placeholder="Skill" step="0.1" />
+          <input type="text" id="admin-player-groups" placeholder="Groups (comma-separated, first is primary)" />
           <button id="btn-save-player">Save</button>
         </div>
       </div>
@@ -2261,12 +2242,8 @@ function render() {
 </div>
 <div class="row" style="justify-content:space-between; align-items:center; margin-top:8px;">
   <h3>Players${normalizedActiveGroup !== 'All' ? ` <span class="small" style="font-weight:500;">(${escapeHTML(activeGroupLabel)} Roster)</span>` : ''}</h3>
-  <div class="row" style="gap:6px; align-items:center;">
-    ${!state.limitedGroup && normalizedActiveGroup !== 'All' ? `<button type="button" class="secondary" data-group-view="All">Show All Players</button>` : ''}
-    <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
-  </div>
+  <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
 </div>
-${rosterGroupNavHTML}
   <!-- Collapsible body: put ALL your filter controls INSIDE this div -->
   <div id="filtersBody">
     <h4 style="margin-bottom: 0.5rem;">Filters</h4>
@@ -2371,10 +2348,10 @@ ${rosterGroupNavHTML}
       <strong id="bulkCount">0 selected</strong>
       <span style="flex:1"></span>
 
-      <label for="bulk-dest-group">Move to group:</label>
+      <label for="bulk-dest-group">Group:</label>
       <select id="bulk-dest-group" ${state.limitedGroup ? 'disabled' : ''}>
   <option value="">— choose —</option>
-  ${state.groups.filter(g => g && g !== 'All').map(g => `<option value="${g}">${g}</option>`).join('')}
+  ${getAvailableGroups().map(g => `<option value="${g}">${g}</option>`).join('')}
 </select>
       <button id="btn-assign-to-group" class="primary">Add</button>
       <button id="btn-remove-from-group" class="danger">Remove</button>
@@ -2422,17 +2399,9 @@ ${state.isAdmin && !state.limitedGroup ? `
       </thead>
       <tbody>
         ${computeCheckedInByGroup().map((row) => {
-          const groupViewValue = row.groupKey;
           return `
           <tr>
-            <td style="padding:2px 8px;">
-              <button
-                type="button"
-                class="secondary"
-                data-group-view="${escapeHTML(groupViewValue)}"
-                style="padding:2px 8px; font-size:12px; ${isActiveGroupValue(groupViewValue) ? 'background:#111827;color:#fff;border-color:#111827;' : ''}"
-              >${escapeHTML(row.groupLabel)}</button>
-            </td>
+            <td style="padding:2px 8px;">${escapeHTML(row.groupLabel)}</td>
             <td style="padding:2px 8px;">${row.in}</td>
             <td style="padding:2px 8px;">${row.total}</td>
           </tr>
@@ -2769,22 +2738,6 @@ if (groupSelect) {
   });
 }
 
-const setRosterGroupView = (nextGroupValue) => {
-  if (state.limitedGroup) return;
-  const nextGroup = normalizeActiveGroupSelection(nextGroupValue);
-  state.activeGroup = nextGroup;
-  if (groupSelect) groupSelect.value = nextGroup;
-  saveLocal();
-  render();
-};
-
-document.querySelectorAll('[data-group-view]').forEach((button) => {
-  button.addEventListener('click', () => {
-    const nextGroup = button.getAttribute('data-group-view') || 'All';
-    setRosterGroupView(nextGroup);
-  });
-});
-
 // ----- Group Manager (master admin) -----
 const gmOpen  = document.getElementById('btn-open-group-manager');
 const gmRoot  = document.getElementById('groupManager');
@@ -2972,8 +2925,20 @@ if (logoutBtn) {
     savePlayerBtn.addEventListener('click', async () => {
       const nameInput = document.getElementById('admin-player-name');
       const skillInput = document.getElementById('admin-player-skill');
+      const groupsInput = document.getElementById('admin-player-groups');
       const name = (nameInput && nameInput.value || '').trim();
       let skill = parseFloat(skillInput && skillInput.value || '');
+      const requestedGroups = parseAdminGroupsInput(groupsInput && groupsInput.value || '');
+      const applyTopFormGroupRules = (groups, fallbackPrimary = '') => {
+        const fallback = normalizeGroupName(fallbackPrimary);
+        let next = normalizeGroupList(groups);
+        if (!next.length && fallback) next = [fallback];
+        if (state.limitedGroup) {
+          const locked = normalizeGroupName(state.limitedGroup);
+          if (locked) next = normalizeGroupList([locked, ...next.filter((groupName) => groupName !== locked)]);
+        }
+        return next;
+      };
       if (Number.isNaN(skill)) skill = 0; // treat empty input as 0
       if (!name || skill < 0) return;
 
@@ -2983,13 +2948,18 @@ if (logoutBtn) {
       if (idx !== -1) {
         // update existing
         const updated = state.players.slice();
-        updated[idx] = { ...updated[idx], name, skill };
+        const previous = updated[idx];
+        const nextGroups = applyTopFormGroupRules(
+          requestedGroups.length ? requestedGroups : getPlayerGroups(previous)
+        );
+        const nextPrimary = nextGroups[0] || '';
+        updated[idx] = { ...previous, name, skill, group: nextPrimary, groups: nextGroups };
         state.players = updated;
 
         if (supabaseClient && updated[idx].id) {
           try {
-            await supabaseClient.from('players').update({ name, skill }).eq('id', updated[idx].id);
-            await syncFromSupabase();
+            const remoteOK = await updatePlayerFieldsSupabase(updated[idx].id, { name, skill, group: nextPrimary });
+            if (remoteOK) await syncFromSupabase();
           } catch (err) {
             console.error('Supabase update error', err);
           }
@@ -2997,10 +2967,12 @@ if (logoutBtn) {
       } else {
         // insert new
         const activeGroupForInsert = normalizeActiveGroupSelection(state.activeGroup || 'All');
-        const group = state.limitedGroup
-        ? state.limitedGroup
-        : (activeGroupForInsert && activeGroupForInsert !== 'All' && activeGroupForInsert !== UNGROUPED_FILTER_VALUE ? activeGroupForInsert : '');
-        const newPlayer = { name, skill, group };
+        const defaultPrimary = state.limitedGroup
+          ? state.limitedGroup
+          : (activeGroupForInsert && activeGroupForInsert !== 'All' && activeGroupForInsert !== UNGROUPED_FILTER_VALUE ? activeGroupForInsert : '');
+        const groups = applyTopFormGroupRules(requestedGroups, defaultPrimary);
+        const group = groups[0] || '';
+        const newPlayer = { name, skill, group, groups };
         let inserted = { ...newPlayer };
 
         if (supabaseClient) {
@@ -3032,6 +3004,7 @@ if (logoutBtn) {
 
       if (nameInput) nameInput.value = '';
       if (skillInput) skillInput.value = '';
+      if (groupsInput) groupsInput.value = '';
       saveLocal();
       queueSaveToSupabase();
       // Small floating toast like public registration
@@ -3367,7 +3340,7 @@ if (assignBtn) {
     if (!sel.size) return;
 
     const selEl = document.getElementById('bulk-dest-group');
-    const chosen = selEl ? selEl.value : '';
+    const chosen = normalizeGroupName(selEl ? selEl.value : '');
     let dest = chosen;
     if (state.limitedGroup) dest = state.limitedGroup;
 
@@ -3378,18 +3351,31 @@ if (assignBtn) {
       state.groups = Array.from(new Set([...state.groups, dest]));
     }
 
-    // Local update
+    // Local update (multi-group aware): add membership and promote to primary.
     const ids = Array.from(sel);
-    state.players = state.players.map(p =>
-      ids.includes(String(p.id)) ? { ...p, group: dest } : p
-    );
+    const idSet = new Set(ids.map((id) => String(id)));
+    const remoteUpdates = [];
 
-    // Supabase updates
+    state.players = state.players.map((player) => {
+      if (!idSet.has(String(player.id))) return player;
+      const currentGroups = getPlayerGroups(player);
+      const nextGroups = normalizeGroupList([dest, ...currentGroups.filter((group) => group !== dest)]);
+      const nextPrimary = nextGroups[0] || '';
+      const hasSameGroups = currentGroups.length === nextGroups.length &&
+        currentGroups.every((group, index) => group === nextGroups[index]);
+      if (hasSameGroups && getPlayerPrimaryGroup(player) === nextPrimary) return player;
+
+      const nextPlayer = { ...player, group: nextPrimary, groups: nextGroups };
+      if (nextPlayer.id) remoteUpdates.push({ id: nextPlayer.id, group: nextPrimary });
+      return nextPlayer;
+    });
+
+    // Supabase updates (primary group only)
     try {
-      for (const id of ids) {
-        await updatePlayerFieldsSupabase(id, { group: dest });
+      for (const update of remoteUpdates) {
+        await updatePlayerFieldsSupabase(update.id, { group: update.group });
       }
-      await syncFromSupabase();
+      if (remoteUpdates.length) await syncFromSupabase();
     } catch (e) {
       console.error('Supabase bulk assign error', e);
     }
@@ -3406,18 +3392,35 @@ if (removeBtn) {
     const sel = selectedSet();
     if (!sel.size) return;
 
-    const ids = Array.from(sel);
-    // Local update
-    state.players = state.players.map(p =>
-      ids.includes(String(p.id)) ? { ...p, group: '' } : p
-    );
+    const selEl = document.getElementById('bulk-dest-group');
+    const chosen = normalizeGroupName(selEl ? selEl.value : '');
+    let targetGroup = chosen;
+    if (state.limitedGroup) targetGroup = state.limitedGroup;
+    if (!targetGroup || targetGroup === 'All' || targetGroup === UNGROUPED_FILTER_VALUE) return;
 
-    // Supabase updates
+    const ids = Array.from(sel);
+    const idSet = new Set(ids.map((id) => String(id)));
+    const remoteUpdates = [];
+
+    // Local update (multi-group aware): remove only the targeted membership.
+    state.players = state.players.map((player) => {
+      if (!idSet.has(String(player.id))) return player;
+      const currentGroups = getPlayerGroups(player);
+      if (!currentGroups.includes(targetGroup)) return player;
+
+      const nextGroups = currentGroups.filter((group) => group !== targetGroup);
+      const nextPrimary = nextGroups[0] || '';
+      const nextPlayer = { ...player, group: nextPrimary, groups: nextGroups };
+      if (nextPlayer.id) remoteUpdates.push({ id: nextPlayer.id, group: nextPrimary });
+      return nextPlayer;
+    });
+
+    // Supabase updates (primary group only)
     try {
-      for (const id of ids) {
-        await updatePlayerFieldsSupabase(id, { group: '' });
+      for (const update of remoteUpdates) {
+        await updatePlayerFieldsSupabase(update.id, { group: update.group });
       }
-      await syncFromSupabase();
+      if (remoteUpdates.length) await syncFromSupabase();
     } catch (e) {
       console.error('Supabase bulk remove group error', e);
     }
