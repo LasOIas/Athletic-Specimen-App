@@ -2361,8 +2361,22 @@ function render() {
       const winner = Number(resultsByMatch[matchKey]) || 0;
       const loser = winner === match.teamA ? match.teamB : (winner === match.teamB ? match.teamA : 0);
       return `
-      <li class="live-matchup-item">
-        <div class="live-matchup-title"><strong>Match ${idx + 1}:</strong> Team ${match.teamA} vs Team ${match.teamB}</div>
+      <article class="live-net-card">
+        <div class="live-net-header">
+          <span class="live-net-label">Net ${idx + 1}</span>
+          <span class="small live-net-match-label">Team ${match.teamA} vs Team ${match.teamB}</span>
+        </div>
+        <div class="live-net-court" role="group" aria-label="Net ${idx + 1} teams">
+          <div class="live-net-team">
+            <span class="small">Side A</span>
+            <strong>Team ${match.teamA}</strong>
+          </div>
+          <div class="live-net-divider" aria-hidden="true">NET</div>
+          <div class="live-net-team">
+            <span class="small">Side B</span>
+            <strong>Team ${match.teamB}</strong>
+          </div>
+        </div>
         <div class="live-matchup-actions">
           <button
             type="button"
@@ -2378,19 +2392,26 @@ function render() {
             data-match-key="${matchKey}"
             data-winner-team="${match.teamB}"
           >Team ${match.teamB} Won</button>
+          ${winner ? `
+          <button
+            type="button"
+            class="live-matchup-clear-btn"
+            data-role="clear-live-match-result"
+            data-match-key="${matchKey}"
+          >Clear Result</button>` : ''}
         </div>
         ${winner ? `<div class="small live-matchup-result">Recorded: Team ${winner} defeated Team ${loser}</div>` : ''}
-      </li>
+      </article>
     `;
     }).join('');
     const waitingLabel = liveMatchups.waitingTeams.map((teamNo) => `Team ${teamNo}`).join(', ');
     liveMatchupsHTML = `
       <div class="live-matchups-board">
-        <h4>Live Matchups</h4>
-        <ul class="live-matchups-list">
-          ${matchupRows || '<li class="small">No pairings available.</li>'}
-        </ul>
-        ${waitingLabel ? `<p class="small live-matchups-waiting"><strong>Waiting:</strong> ${waitingLabel}</p>` : ''}
+        <h4>Live Nets</h4>
+        <div class="live-nets-grid">
+          ${matchupRows || '<p class="small live-matchups-empty">No pairings available.</p>'}
+        </div>
+        ${waitingLabel ? `<p class="small live-matchups-waiting"><strong>Waiting Off Court:</strong> ${waitingLabel}</p>` : ''}
       </div>
     `;
 
@@ -3535,6 +3556,35 @@ if (logoutBtn) {
         ...(state.liveMatchResults || {}),
         [matchKey]: winnerTeam
       };
+      saveLocal();
+      queueSaveToSupabase();
+      render();
+    });
+  });
+
+  document.querySelectorAll('[data-role="clear-live-match-result"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const matchKey = String(btn.getAttribute('data-match-key') || '').trim();
+      if (!matchKey) return;
+
+      const existingResults = state.liveMatchResults || {};
+      if (!Object.prototype.hasOwnProperty.call(existingResults, matchKey)) return;
+
+      const parsed = parseLiveMatchKey(matchKey);
+      if (!parsed) return;
+      const { teamA, teamB } = parsed;
+
+      const previousWinner = Number(existingResults[matchKey]) || 0;
+      if (previousWinner === teamA || previousWinner === teamB) {
+        const previousLoser = previousWinner === teamA ? teamB : teamA;
+        applySkillDeltaToGeneratedTeam(previousWinner, -0.1);
+        applySkillDeltaToGeneratedTeam(previousLoser, +0.1);
+      }
+
+      const nextResults = { ...existingResults };
+      delete nextResults[matchKey];
+      state.liveMatchResults = nextResults;
+
       saveLocal();
       queueSaveToSupabase();
       render();
