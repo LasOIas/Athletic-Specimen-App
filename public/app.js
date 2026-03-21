@@ -293,7 +293,7 @@ function openInlineEditRow(row) {
   if (window.__saveDelegated) return;
   window.__saveDelegated = true;
 
-  document.addEventListener('click', async function onSaveDelegated(e) {
+  document.addEventListener('click', function onSaveDelegated(e) {
     const cancelBtn = e.target.closest('.btn-cancel-edit');
     if (cancelBtn) {
       e.preventDefault();
@@ -349,54 +349,49 @@ function openInlineEditRow(row) {
     copy[idx] = next;
     state.players = copy;
 
-    // Persist local
+    // Persist local and render immediately for responsive inline edits.
     saveLocal();
-
-    // Remote sync: update existing remote rows immediately; insert local-only rows.
-    let remoteOK = false;
-    if (supabaseClient) {
-      try {
-        if (next.id) {
-          remoteOK = await updatePlayerFieldsSupabase(next.id, { name, skill, group });
-        } else {
-          try {
-            const { error } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
-            if (error) throw error;
-          } catch {
-            try {
-              const { error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-              if (error) throw error;
-            } catch {
-              // 3rd fallback: table has neither 'group' nor 'tag'
-              const { error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-              if (error) throw error;
-            }
-          }
-          remoteOK = true;
-        }
-      } catch (err) {
-        console.error('Supabase save error', err);
-      }
-    }
-
-    // Best-effort background upsert batch too
     try { queueSaveToSupabase(); } catch {}
-
-    if (remoteOK) {
-      try { await syncFromSupabase(); } catch {}
-    }
-
-    // Close row and show small toast
     closeInlineEditRow(row);
+    render();
+
     try {
       const toast = document.createElement('div');
-      toast.textContent = remoteOK ? 'Saved to Supabase' : 'Saved locally';
+      toast.textContent = 'Saved';
       toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 1100);
     } catch {}
 
-    render();
+    // Remote sync runs in background to keep UI snappy on slower connections.
+    if (supabaseClient) {
+      (async () => {
+        try {
+          let remoteOK = false;
+          if (next.id) {
+            remoteOK = await updatePlayerFieldsSupabase(next.id, { name, skill, group });
+          } else {
+            try {
+              const { error } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+              if (error) throw error;
+            } catch {
+              try {
+                const { error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+                if (error) throw error;
+              } catch {
+                const { error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                if (error) throw error;
+              }
+            }
+            remoteOK = true;
+          }
+
+          if (remoteOK) queueSupabaseRefresh();
+        } catch (err) {
+          console.error('Supabase save error', err);
+        }
+      })();
+    }
   }, true);
 })();
 
@@ -521,7 +516,7 @@ function resetGeneratedTeamDragState() {
   if (window.__checkDelegated) return;
   window.__checkDelegated = true;
 
-  document.addEventListener('click', async function onCheckDelegated(e) {
+  document.addEventListener('click', function onCheckDelegated(e) {
     const inBtn = e.target.closest('.btn-checkin');
     const outBtn = e.target.closest('.btn-checkout');
     if (!inBtn && !outBtn) return;
@@ -536,33 +531,31 @@ function resetGeneratedTeamDragState() {
     const player = state.players.find(p => String(p.id) === String(id));
     if (!player) return;
 
-    try {
-      if (inBtn) {
-        if (checkInPlayer(player)) {
-          if (supabaseClient && player.id) {
-            try {
-              await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
-              await syncFromSupabase();
-            } catch (err) {
-              console.error('Supabase update error', err);
-            }
-          }
+    let changed = false;
+    if (inBtn) {
+      changed = checkInPlayer(player);
+    } else if (outBtn) {
+      changed = checkOutPlayer(player);
+    }
+
+    if (!changed) return;
+
+    saveLocal();
+    queueSaveToSupabase();
+    render();
+
+    if (supabaseClient && player.id) {
+      (async () => {
+        try {
+          await supabaseClient
+            .from('players')
+            .update({ checked_in: !!inBtn })
+            .eq('id', player.id);
+          queueSupabaseRefresh();
+        } catch (err) {
+          console.error(inBtn ? 'Supabase update error' : 'Supabase check-out error', err);
         }
-      } else if (outBtn) {
-        checkOutPlayer(player);
-        if (supabaseClient && player.id) {
-          try {
-            await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
-            await syncFromSupabase();
-          } catch (err) {
-            console.error('Supabase check-out error', err);
-          }
-        }
-      }
-    } finally {
-      saveLocal();
-      queueSaveToSupabase();
-      render();
+      })();
     }
   }, true);
 })();
@@ -938,6 +931,38 @@ function queueSaveToSupabase() {
       console.error('Auto-save error:', err);
     }
   }, 800);
+}
+
+let refreshTimeout;
+let refreshQueued = false;
+let refreshRunning = false;
+function queueSupabaseRefresh(delay = 160) {
+  if (!supabaseClient) return;
+  refreshQueued = true;
+  clearTimeout(refreshTimeout);
+  refreshTimeout = setTimeout(() => {
+    void runQueuedSupabaseRefresh();
+  }, Math.max(0, Number(delay) || 0));
+}
+
+async function runQueuedSupabaseRefresh() {
+  if (!supabaseClient || refreshRunning || !refreshQueued) return;
+  refreshRunning = true;
+  refreshQueued = false;
+  try {
+    await syncFromSupabase();
+    saveLocal();
+    render();
+  } catch (err) {
+    console.error('Background Supabase refresh error:', err);
+  } finally {
+    refreshRunning = false;
+    if (refreshQueued) {
+      refreshTimeout = setTimeout(() => {
+        void runQueuedSupabaseRefresh();
+      }, 0);
+    }
+  }
 }
 
 // Balanced group generation algorithm. Given a list of all players, the set
@@ -1416,6 +1441,9 @@ function renderFilteredPlayers() {
   // start from all players
   let filtered = state.players.slice();
   const activeGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
+  const checkedSet = new Set(state.checkedIn || []);
+  const selectedIds = new Set((state.selectedIds || []).map((id) => String(id)));
+  const playerIndexByRef = new Map(state.players.map((player, idx) => [player, idx]));
 
   // group filter
   if (activeGroup && activeGroup !== 'All') {
@@ -1428,9 +1456,9 @@ function renderFilteredPlayers() {
 
   // tab filters
   if (state.playerTab === 'in') {
-    filtered = filtered.filter((p) => isPlayerCheckedIn(p));
+    filtered = filtered.filter((p) => checkedSet.has(playerIdentityKey(p)));
   } else if (state.playerTab === 'out') {
-    filtered = filtered.filter((p) => !isPlayerCheckedIn(p));
+    filtered = filtered.filter((p) => !checkedSet.has(playerIdentityKey(p)));
   } else if (state.playerTab === 'skill' && state.skillSubTab) {
     const min = parseFloat(state.skillSubTab);
     const max = min === 9.0 ? 10 : min + 0.9;
@@ -1458,9 +1486,9 @@ function renderFilteredPlayers() {
   if (!filtered.length) return '<p>No players found.</p>';
 
   return filtered.map((player) => {
-    const idx = state.players.indexOf(player);
-    const checked = isPlayerCheckedIn(player);
-    const isSelected = selectedSet().has(String(player.id));
+    const idx = playerIndexByRef.has(player) ? playerIndexByRef.get(player) : -1;
+    const checked = checkedSet.has(playerIdentityKey(player));
+    const isSelected = selectedIds.has(String(player.id));
     const playerGroup = getPlayerPrimaryGroup(player);
     const playerGroups = getPlayerGroups(player);
     const playerGroupsValue = escapeHTMLText(JSON.stringify(playerGroups));
@@ -2666,52 +2694,19 @@ function closeAllMenus() {
 }
 
 function bindPlayerRowHandlers() {
-  // Rebind fresh ⋮ buttons on each render
-  document.querySelectorAll('.btn-actions').forEach(btn => {
-    const clone = btn.cloneNode(true);
-    btn.replaceWith(clone);
-  });
-
-  // Toggle the dropdown for this card (local; global handler will also catch)
-  document.querySelectorAll('.btn-actions').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const wrap = btn.closest('.menu-wrap');
-      const isOpen = wrap && wrap.classList.contains('menu-open');
-      closeAllMenus();
-      if (wrap) {
-        wrap.classList.toggle('menu-open', !isOpen);
-        btn.setAttribute('aria-expanded', String(!isOpen));
-      }
-    });
-  });
-
-  // Keep clicks inside the dropdown from closing it immediately
-  document.querySelectorAll('.card-menu').forEach(menu => {
-    menu.addEventListener('click', (e) => e.stopPropagation());
-  });
-
+  // Intentionally a no-op.
+  // Menu interactions are delegated globally and do not require per-render rebinding.
 }
 
 function bindSelectionHandlers() {
-  // checkbox toggle for selected state (bulk bar)
-  document.querySelectorAll('.player-select').forEach(cb => {
-    const clone = cb.cloneNode(true);
-    cb.replaceWith(clone);
-  });
-  document.querySelectorAll('.player-select').forEach(cb => {
-    cb.addEventListener('change', (e) => {
-      const id = String(e.currentTarget.getAttribute('data-id'));
-      const set = selectedSet();
-      if (e.currentTarget.checked) set.add(id); else set.delete(id);
-      state.selectedIds = Array.from(set);
-      const card = e.currentTarget.closest('.player-card');
-      if (card) card.classList.toggle('is-selected', e.currentTarget.checked);
-      updateBulkBarVisibility();
-    });
-  });
+  // Intentionally a no-op.
+  // Selection interactions are delegated globally and do not require per-render rebinding.
+}
 
-  // card-click toggle for selected state (bulk bar)
+(function ensureSelectionDelegationBound() {
+  if (window.__selectionDelegated) return;
+  window.__selectionDelegated = true;
+
   const nonToggleSelector = [
     'button',
     'a',
@@ -2727,23 +2722,41 @@ function bindSelectionHandlers() {
     '.group-item'
   ].join(',');
 
-  document.querySelectorAll('.players .player-card').forEach((card) => {
-    card.addEventListener('click', (e) => {
-      const target = e.target;
-      if (!(target instanceof Element)) return;
-      if (card.classList.contains('is-editing')) return;
-      if (target.closest(nonToggleSelector)) return;
+  document.addEventListener('change', (e) => {
+    const checkbox = e.target.closest('.player-select');
+    if (!checkbox) return;
 
-      const selectedText = typeof window.getSelection === 'function' ? String(window.getSelection() || '').trim() : '';
-      if (selectedText) return;
+    const id = String(checkbox.getAttribute('data-id') || '');
+    if (!id) return;
 
-      const checkbox = card.querySelector('.player-select');
-      if (!checkbox) return;
-      checkbox.checked = !checkbox.checked;
-      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    const set = selectedSet();
+    if (checkbox.checked) set.add(id); else set.delete(id);
+    state.selectedIds = Array.from(set);
+    const card = checkbox.closest('.player-card');
+    if (card) card.classList.toggle('is-selected', checkbox.checked);
+    updateBulkBarVisibility();
   });
-}
+
+  document.addEventListener('click', (e) => {
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+
+    const card = target.closest('.players .player-card');
+    if (!card) return;
+    if (card.classList.contains('is-editing')) return;
+    if (target.closest(nonToggleSelector)) return;
+
+    const selectedText = typeof window.getSelection === 'function'
+      ? String(window.getSelection() || '').trim()
+      : '';
+    if (selectedText) return;
+
+    const checkbox = card.querySelector('.player-select');
+    if (!checkbox) return;
+    checkbox.checked = !checkbox.checked;
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+})();
 // Render the entire application into the root element. Each call replaces
 // existing content to reflect the current state. Event handlers are
 // attached inline within this function. To minimize reflows, we build
@@ -3255,7 +3268,9 @@ if (!menuStyle) {
   menuStyle.type = 'text/css';
   document.head.appendChild(menuStyle);
 }
-menuStyle.textContent = cssText;
+if (menuStyle.textContent !== cssText) {
+  menuStyle.textContent = cssText;
+}
 
 let editStyle = document.getElementById('edit-css');
 const editCss = `
@@ -3407,7 +3422,9 @@ if (!editStyle) {
   editStyle.type = 'text/css';
   document.head.appendChild(editStyle);
 }
-editStyle.textContent = editCss;
+if (editStyle.textContent !== editCss) {
+  editStyle.textContent = editCss;
+}
 
 // at the end of render()
 attachHandlers();
@@ -3675,12 +3692,14 @@ if (logoutBtn) {
         state.players = updated;
 
         if (supabaseClient && updated[idx].id) {
-          try {
-            const remoteOK = await updatePlayerFieldsSupabase(updated[idx].id, { name, skill, group: nextPrimary });
-            if (remoteOK) await syncFromSupabase();
-          } catch (err) {
-            console.error('Supabase update error', err);
-          }
+          (async () => {
+            try {
+              const remoteOK = await updatePlayerFieldsSupabase(updated[idx].id, { name, skill, group: nextPrimary });
+              if (remoteOK) queueSupabaseRefresh();
+            } catch (err) {
+              console.error('Supabase update error', err);
+            }
+          })();
         }
       } else {
         // insert new
@@ -3691,32 +3710,32 @@ if (logoutBtn) {
         const groups = applyTopFormGroupRules(requestedGroups, defaultPrimary);
         const group = groups[0] || '';
         const newPlayer = { name, skill, group, groups };
-        let inserted = { ...newPlayer };
+        const inserted = { ...newPlayer };
+        state.players = [...state.players, inserted];
 
         if (supabaseClient) {
-          try {
-  try {
-    const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
-    await syncFromSupabase();
-    if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
-  } catch {
-    try {
-      const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-      await syncFromSupabase();
-      if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
-    } catch {
-      // 3rd fallback: table has neither 'group' nor 'tag'
-      const { data } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-      await syncFromSupabase();
-      if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
-    }
-  }
-} catch (err) {
-  console.error('Supabase insert error', err);
-  state.players = [...state.players, inserted];
-}
-        } else {
-          state.players = [...state.players, inserted];
+          (async () => {
+            try {
+              try {
+                const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+                queueSupabaseRefresh();
+                if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
+              } catch {
+                try {
+                  const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+                  queueSupabaseRefresh();
+                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
+                } catch {
+                  // 3rd fallback: table has neither 'group' nor 'tag'
+                  const { data } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                  queueSupabaseRefresh();
+                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
+                }
+              }
+            } catch (err) {
+              console.error('Supabase insert error', err);
+            }
+          })();
         }
       }
 
@@ -3741,21 +3760,24 @@ if (logoutBtn) {
   // --- Public: Check in/out ---
   const checkInBtn = document.getElementById('btn-check-in');
   if (checkInBtn) {
-    checkInBtn.addEventListener('click', async () => {
+    checkInBtn.addEventListener('click', () => {
       const input = document.getElementById('check-name');
       const name = (input && input.value || '').trim();
       if (!name) return;
 
       const player = state.players.find((p) => normalize(p.name) === normalize(name));
       if (player) {
-        if (checkInPlayer(player)) {
+        const changed = checkInPlayer(player);
+        if (changed) {
           if (supabaseClient && player.id) {
-            try {
-              await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
-              await syncFromSupabase();
-            } catch (err) {
-              console.error('Supabase update error', err);
-            }
+            (async () => {
+              try {
+                await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+                queueSupabaseRefresh();
+              } catch (err) {
+                console.error('Supabase update error', err);
+              }
+            })();
           }
           messages.checkIn = 'You are checked in';
         } else {
@@ -3775,22 +3797,23 @@ if (logoutBtn) {
 
   const checkOutBtn = document.getElementById('btn-check-out');
   if (checkOutBtn) {
-    checkOutBtn.addEventListener('click', async () => {
+    checkOutBtn.addEventListener('click', () => {
       const input = document.getElementById('check-name');
       const name = (input && input.value || '').trim();
       if (!name) return;
 
       const player = state.players.find((p) => normalize(p.name) === normalize(name));
       if (player) {
-        if (isPlayerCheckedIn(player)) {
-          checkOutPlayer(player);
+        if (checkOutPlayer(player)) {
           if (supabaseClient && player.id) {
-            try {
-              await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
-              await syncFromSupabase();
-            } catch (err) {
-              console.error('Supabase check-out error', err);
-            }
+            (async () => {
+              try {
+                await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+                queueSupabaseRefresh();
+              } catch (err) {
+                console.error('Supabase check-out error', err);
+              }
+            })();
           }
           messages.checkIn = 'You are now checked out.';
         } else {
@@ -3835,31 +3858,31 @@ if (logoutBtn) {
           : (activeGroupForRegister && activeGroupForRegister !== 'All' && activeGroupForRegister !== UNGROUPED_FILTER_VALUE ? activeGroupForRegister : '');
         const skill = 0.0;
         const newPlayer = { name, skill, group };
-        let inserted = { ...newPlayer };
+        const inserted = { ...newPlayer };
+        state.players = [...state.players, inserted];
 
         if (supabaseClient) {
-          try {
+          (async () => {
             try {
-              const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
-              await syncFromSupabase();
-              if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
-            } catch {
               try {
-                const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-                await syncFromSupabase();
-                if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+                const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+                queueSupabaseRefresh();
+                if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
               } catch {
-                const { data } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-                await syncFromSupabase();
-                if (Array.isArray(data) && data.length > 0) inserted = { ...newPlayer, id: data[0].id };
+                try {
+                  const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+                  queueSupabaseRefresh();
+                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
+                } catch {
+                  const { data } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                  queueSupabaseRefresh();
+                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
+                }
               }
+            } catch (err) {
+              console.error('Supabase insert error', err);
             }
-          } catch (err) {
-            console.error('Supabase insert error', err);
-            state.players = [...state.players, inserted];
-          }
-        } else {
-          state.players = [...state.players, inserted];
+          })();
         }
 
         messages.registration = 'Registered';
@@ -3873,79 +3896,30 @@ if (logoutBtn) {
 
   // --- Player cards: inline actions ---
   function attachPlayerRowHandlers() {
-    document.querySelectorAll('.btn-edit').forEach((btn) => {
-      btn.addEventListener('click', (ev) => {
-        const idx = ev.currentTarget.getAttribute('data-index');
-        const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
-        if (row) row.classList.toggle('show');
-      });
-    });
-
-    document.querySelectorAll('.btn-checkout').forEach((btn) => {
-      btn.addEventListener('click', async (ev) => {
-        const id = ev.currentTarget.getAttribute('data-id');
-        const player = state.players.find((p) => String(p.id) === String(id));
-        if (!player) return;
-
-        checkOutPlayer(player);
-        if (supabaseClient && player.id) {
-          try {
-            await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
-            await syncFromSupabase();
-          } catch (err) {
-            console.error('Supabase update error', err);
-          }
-        }
-        saveLocal();
-        queueSaveToSupabase();
-        render();
-      });
-    });
-
-    document.querySelectorAll('.btn-delete').forEach((btn) => {
-      btn.addEventListener('click', async (ev) => {
-        const id = ev.currentTarget.getAttribute('data-id');
-        const idx = state.players.findIndex((p) => String(p.id) === String(id));
-        if (idx === -1) return;
-
-        const removed = state.players[idx];
-
-        if (supabaseClient && removed.id) {
-          try {
-            await supabaseClient.from('players').delete().eq('id', removed.id);
-            await syncFromSupabase();
-          } catch (err) {
-            console.error('Supabase delete error', err);
-          }
-        }
-
-        state.players = state.players.filter((p) => String(p.id) !== String(id));
-        checkOutPlayer(removed);
-
-        saveLocal();
-        queueSaveToSupabase();
-        render();
-      });
-    });
+    // Intentionally a no-op.
+    // Player row actions are delegated globally for lower per-render overhead.
   }
   attachPlayerRowHandlers();
 
   // --- Reset all checkins ---
   const resetBtn = document.getElementById('btn-reset-checkins');
   if (resetBtn) {
-    resetBtn.addEventListener('click', async () => {
+    resetBtn.addEventListener('click', () => {
       state.checkedIn = [];
-      if (supabaseClient) {
-        try {
-          await supabaseClient.from('players').update({ checked_in: false }).eq('checked_in', true);
-          await syncFromSupabase();
-        } catch (err) {
-          console.error('Supabase reset error', err);
-        }
-      }
       saveLocal();
       queueSaveToSupabase();
       render();
+
+      if (supabaseClient) {
+        (async () => {
+          try {
+            await supabaseClient.from('players').update({ checked_in: false }).eq('checked_in', true);
+            queueSupabaseRefresh();
+          } catch (err) {
+            console.error('Supabase reset error', err);
+          }
+        })();
+      }
     });
   }
 
@@ -4141,7 +4115,7 @@ if (clearSelBtn) {
 // --- Bulk check in/out ---
 const bulkCheckInBtn = document.getElementById('btn-bulk-checkin');
 const bulkCheckOutBtn = document.getElementById('btn-bulk-checkout');
-const runBulkAttendanceAction = async (shouldCheckIn) => {
+const runBulkAttendanceAction = (shouldCheckIn) => {
   const sel = selectedSet();
   if (!sel.size) return;
 
@@ -4156,29 +4130,31 @@ const runBulkAttendanceAction = async (shouldCheckIn) => {
     if (player.id) remoteIds.add(player.id);
   });
 
-  if (supabaseClient && remoteIds.size) {
-    try {
-      for (const id of remoteIds) {
-        await supabaseClient.from('players').update({ checked_in: shouldCheckIn }).eq('id', id);
-      }
-      await syncFromSupabase();
-    } catch (err) {
-      console.error(shouldCheckIn ? 'Supabase bulk check-in error' : 'Supabase bulk check-out error', err);
-    }
-  }
-
   saveLocal();
   queueSaveToSupabase();
   render();
+
+  if (supabaseClient && remoteIds.size) {
+    (async () => {
+      try {
+        for (const id of remoteIds) {
+          await supabaseClient.from('players').update({ checked_in: shouldCheckIn }).eq('id', id);
+        }
+        queueSupabaseRefresh();
+      } catch (err) {
+        console.error(shouldCheckIn ? 'Supabase bulk check-in error' : 'Supabase bulk check-out error', err);
+      }
+    })();
+  }
 };
 if (bulkCheckInBtn) {
-  bulkCheckInBtn.addEventListener('click', async () => {
-    await runBulkAttendanceAction(true);
+  bulkCheckInBtn.addEventListener('click', () => {
+    runBulkAttendanceAction(true);
   });
 }
 if (bulkCheckOutBtn) {
-  bulkCheckOutBtn.addEventListener('click', async () => {
-    await runBulkAttendanceAction(false);
+  bulkCheckOutBtn.addEventListener('click', () => {
+    runBulkAttendanceAction(false);
   });
 }
 
