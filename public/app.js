@@ -505,6 +505,7 @@ function resetGeneratedTeamDragState() {
       return;
     }
 
+    saveLocal();
     render();
   });
 
@@ -1396,6 +1397,165 @@ const messages = {
 const LS_PLAYERS_KEY = 'athletic_specimen_players';
 const LS_CHECKIN_KEY = 'athletic_specimen_checked_in';
 const LS_ADMIN_KEY = 'athletic_specimen_is_admin';
+const LS_GENERATED_TEAMS_KEY = 'athletic_specimen_generated_team_keys';
+const LS_GENERATED_SUMMARY_KEY = 'athletic_specimen_generated_teams_summary';
+const LS_LIVE_MATCH_RESULTS_KEY = 'athletic_specimen_live_match_results';
+
+function clearStoredGeneratedTeams() {
+  localStorage.removeItem(LS_GENERATED_TEAMS_KEY);
+  localStorage.removeItem(LS_GENERATED_SUMMARY_KEY);
+  localStorage.removeItem(LS_LIVE_MATCH_RESULTS_KEY);
+}
+
+function sanitizeGeneratedTeamsSummary(summary) {
+  if (!summary || typeof summary !== 'object') return null;
+  const skillSpread = Number(summary.skillSpread);
+  const countSpread = Number(summary.countSpread);
+  if (!Number.isFinite(skillSpread) || !Number.isFinite(countSpread)) return null;
+
+  const attempts = Number(summary.attempts);
+  const fairnessScore = Number(summary.fairnessScore);
+  return {
+    skillSpread: Number(skillSpread.toFixed(2)),
+    countSpread: Math.max(0, Math.round(countSpread)),
+    attempts: Number.isFinite(attempts) ? Math.max(0, Math.round(attempts)) : 0,
+    fairnessScore: Number.isFinite(fairnessScore)
+      ? Number(fairnessScore.toFixed(2))
+      : Number((skillSpread + countSpread).toFixed(2))
+  };
+}
+
+function serializeGeneratedTeamsForStorage(teams) {
+  if (!Array.isArray(teams) || teams.length === 0) return null;
+  ensurePlayerIdentityKeys();
+
+  const knownPlayerKeys = new Set(
+    (state.players || []).map((player) => playerIdentityKey(player)).filter(Boolean)
+  );
+  const checkedSet = new Set(normalizeCheckedInEntries(state.checkedIn || []));
+  const seen = new Set();
+  const out = [];
+
+  for (const team of teams) {
+    if (!Array.isArray(team)) return null;
+    const teamKeys = [];
+    for (const member of team) {
+      if (!member || typeof member !== 'object') return null;
+      const key = playerIdentityKey(member);
+      if (!key || !knownPlayerKeys.has(key) || seen.has(key)) return null;
+      seen.add(key);
+      teamKeys.push(key);
+    }
+    out.push(teamKeys);
+  }
+
+  if (seen.size !== checkedSet.size) return null;
+  for (const key of seen) if (!checkedSet.has(key)) return null;
+  for (const key of checkedSet) if (!seen.has(key)) return null;
+
+  return out;
+}
+
+function hydrateGeneratedTeamsFromStoredKeys(storedTeamKeys) {
+  if (!Array.isArray(storedTeamKeys) || storedTeamKeys.length === 0) return null;
+  ensurePlayerIdentityKeys();
+
+  const playerByKey = new Map();
+  (state.players || []).forEach((player) => {
+    const key = playerIdentityKey(player);
+    if (key) playerByKey.set(key, player);
+  });
+
+  const checkedSet = new Set(normalizeCheckedInEntries(state.checkedIn || []));
+  const seen = new Set();
+  const restored = [];
+
+  for (const rawTeam of storedTeamKeys) {
+    if (!Array.isArray(rawTeam)) return null;
+    const team = [];
+    for (const keyRaw of rawTeam) {
+      const key = String(keyRaw || '').trim();
+      if (!key || seen.has(key) || !playerByKey.has(key)) return null;
+      seen.add(key);
+      team.push(playerByKey.get(key));
+    }
+    restored.push(team);
+  }
+
+  if (seen.size !== checkedSet.size) return null;
+  for (const key of seen) if (!checkedSet.has(key)) return null;
+  for (const key of checkedSet) if (!seen.has(key)) return null;
+
+  return restored;
+}
+
+function loadGeneratedTeamsFromLocal() {
+  let shouldPersistMigration = false;
+  try {
+    const storedTeamKeys = JSON.parse(localStorage.getItem(LS_GENERATED_TEAMS_KEY) || 'null');
+    const restoredTeams = hydrateGeneratedTeamsFromStoredKeys(storedTeamKeys);
+    if (!restoredTeams) {
+      state.generatedTeams = [];
+      state.generatedTeamsSummary = null;
+      state.liveMatchResults = {};
+      if (localStorage.getItem(LS_GENERATED_TEAMS_KEY) || localStorage.getItem(LS_GENERATED_SUMMARY_KEY) || localStorage.getItem(LS_LIVE_MATCH_RESULTS_KEY)) {
+        shouldPersistMigration = true;
+      }
+      return shouldPersistMigration;
+    }
+
+    state.generatedTeams = restoredTeams;
+
+    const storedSummary = JSON.parse(localStorage.getItem(LS_GENERATED_SUMMARY_KEY) || 'null');
+    const normalizedSummary = sanitizeGeneratedTeamsSummary(storedSummary);
+    state.generatedTeamsSummary = normalizedSummary;
+    if (storedSummary && !normalizedSummary) shouldPersistMigration = true;
+    if (normalizedSummary && JSON.stringify(normalizedSummary) !== JSON.stringify(storedSummary)) {
+      shouldPersistMigration = true;
+    }
+
+    const storedResults = JSON.parse(localStorage.getItem(LS_LIVE_MATCH_RESULTS_KEY) || '{}');
+    const matchups = deriveLiveTeamMatchups(restoredTeams);
+    const normalizedResults = normalizeLiveMatchResults(storedResults, matchups.matchups);
+    state.liveMatchResults = normalizedResults;
+    if (JSON.stringify(normalizedResults) !== JSON.stringify(storedResults || {})) {
+      shouldPersistMigration = true;
+    }
+  } catch (err) {
+    state.generatedTeams = [];
+    state.generatedTeamsSummary = null;
+    state.liveMatchResults = {};
+    shouldPersistMigration = true;
+  }
+
+  return shouldPersistMigration;
+}
+
+function saveGeneratedTeamsToLocal() {
+  const teamKeys = serializeGeneratedTeamsForStorage(state.generatedTeams);
+  if (!teamKeys) {
+    clearStoredGeneratedTeams();
+    return;
+  }
+
+  localStorage.setItem(LS_GENERATED_TEAMS_KEY, JSON.stringify(teamKeys));
+
+  const normalizedSummary = sanitizeGeneratedTeamsSummary(state.generatedTeamsSummary);
+  if (normalizedSummary) {
+    localStorage.setItem(LS_GENERATED_SUMMARY_KEY, JSON.stringify(normalizedSummary));
+  } else {
+    localStorage.removeItem(LS_GENERATED_SUMMARY_KEY);
+  }
+
+  const matchups = deriveLiveTeamMatchups(teamKeys);
+  const normalizedResults = normalizeLiveMatchResults(state.liveMatchResults, matchups.matchups);
+  state.liveMatchResults = normalizedResults;
+  if (Object.keys(normalizedResults).length) {
+    localStorage.setItem(LS_LIVE_MATCH_RESULTS_KEY, JSON.stringify(normalizedResults));
+  } else {
+    localStorage.removeItem(LS_LIVE_MATCH_RESULTS_KEY);
+  }
+}
 
 // Load players and checked-in attendance keys from localStorage into state. Called
 // during initialization.
@@ -1414,6 +1574,10 @@ function loadLocal() {
       if (JSON.stringify(normalizedChecked) !== JSON.stringify(storedChecked)) {
         shouldPersistMigration = true;
       }
+    }
+
+    if (loadGeneratedTeamsFromLocal()) {
+      shouldPersistMigration = true;
     }
 
     const adminFlag = sessionStorage.getItem(LS_ADMIN_KEY);
@@ -1461,6 +1625,7 @@ function saveLocal() {
     localStorage.setItem(LS_CHECKIN_KEY, JSON.stringify(state.checkedIn));
     localStorage.setItem(LS_GROUPS_KEY, JSON.stringify(state.groups.filter(g => g && g !== 'All')));
     localStorage.setItem(LS_ACTIVE_GROUP_KEY, state.activeGroup || 'All');
+    saveGeneratedTeamsToLocal();
   } catch (err) {
     console.error('Error saving to localStorage', err);
   }
@@ -3524,6 +3689,7 @@ if (logoutBtn) {
       state.generatedTeams = generated.teams;
       state.generatedTeamsSummary = generated.summary;
       state.liveMatchResults = {};
+      saveLocal();
       render();
     });
   }
