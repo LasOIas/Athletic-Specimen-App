@@ -41,16 +41,35 @@ body {
   flex-wrap: wrap;
 }
 
-.admin-player-form-row {
-  align-items: flex-start;
+.row.admin-player-form-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(92px, 0.55fr) minmax(260px, 1.8fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.row.admin-player-form-row > #admin-player-name {
+  min-width: 0;
+}
+
+.row.admin-player-form-row > #admin-player-skill {
+  width: 100%;
+  max-width: 120px;
+  min-width: 92px;
+}
+
+.row.admin-player-form-row > .admin-player-save-btn {
+  min-height: 38px;
+  align-self: start;
+  white-space: nowrap;
+  padding-inline: 14px;
 }
 
 .admin-player-groups-field {
-  flex: 1 1 280px;
-  min-width: 220px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.2rem;
 }
 
 .admin-player-groups-field input {
@@ -58,14 +77,19 @@ body {
 }
 
 .admin-player-groups-help {
-  line-height: 1.25;
+  font-size: 12px;
+  line-height: 1.3;
+  margin-top: 2px;
 }
 
 .admin-player-groups-preview {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
-  min-height: 1.5rem;
+  gap: 0.3rem;
+  min-height: 1.25rem;
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px dashed #e2e8f0;
 }
 
 .admin-groups-chip {
@@ -87,7 +111,185 @@ body {
   font-weight: 600;
 }
 
+.admin-groups-chip.is-context-default {
+  border-style: dashed;
+}
+
 .admin-groups-empty {
+  color: #64748b;
+}
+
+.admin-groups-context-note {
+  display: inline-flex;
+  align-self: center;
+  font-size: 12px;
+  color: #475569;
+}
+
+.card-add-player h3,
+.card-generate-teams h3,
+.card-checkin h2 {
+  margin-top: 0;
+}
+
+.card-generate-teams .generate-teams-summary {
+  margin-top: 0;
+  margin-bottom: 0.5rem;
+}
+
+.card-generate-teams .generate-teams-controls {
+  align-items: center;
+}
+
+.card-generate-teams .generate-teams-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-right: 0;
+}
+
+.card-generate-teams #group-count {
+  width: 88px;
+  min-width: 88px;
+  flex: 0 0 88px;
+}
+
+.card-generate-teams .generate-teams-controls button {
+  min-height: 38px;
+}
+
+.card-generate-teams .live-matchups-board {
+  margin: 0.35rem 0 0.6rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.card-generate-teams .live-matchups-board h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.card-generate-teams .live-matchups-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.card-generate-teams .live-matchups-list li {
+  font-size: 0.9rem;
+  color: #1f2937;
+}
+
+.card-generate-teams .live-matchup-item {
+  padding: 0.2rem 0;
+  border-bottom: 1px dashed #e2e8f0;
+}
+
+.card-generate-teams .live-matchup-item:last-child {
+  border-bottom: none;
+}
+
+.card-generate-teams .live-matchup-title {
+  line-height: 1.3;
+}
+
+.card-generate-teams .live-matchup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 0.25rem;
+}
+
+.card-generate-teams .live-matchup-result-btn {
+  padding: 0.25rem 0.5rem;
+  min-height: 30px;
+  font-size: 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #334155;
+}
+
+.card-generate-teams .live-matchup-result-btn:hover {
+  background: #f1f5f9;
+}
+
+.card-generate-teams .live-matchup-result-btn.is-selected {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+  font-weight: 600;
+}
+
+.card-generate-teams .live-matchup-result {
+  margin-top: 0.25rem;
+}
+
+.card-generate-teams .live-matchups-waiting {
+  margin: 0.4rem 0 0;
+}
+
+.card-checkin .checkin-actions {
+  align-items: stretch;
+  gap: 8px;
+}
+
+.card-checkin .checkin-actions button {
+  flex: 1 1 140px;
+  min-height: 38px;
+}
+
+@media (max-width: 980px) {
+  .row.admin-player-form-row {
+    grid-template-columns: minmax(180px, 1fr) minmax(92px, 120px) minmax(220px, 1fr);
+  }
+
+  .row.admin-player-form-row > .admin-player-save-btn {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+@media (max-width: 640px) {
+  .row.admin-player-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .row.admin-player-form-row > #admin-player-skill {
+    max-width: none;
+  }
+
+  .row.admin-player-form-row > .admin-player-save-btn {
+    width: 100%;
+  }
+}
+
+.player-groups-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.player-groups-inline .player-group-badge {
+  background: #e2e8f0;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.player-groups-inline .player-group-badge.is-primary {
+  background: #dbeafe;
+  color: #1e3a8a;
+  border-color: #93c5fd;
+  font-weight: 600;
+}
+
+.player-group-none {
   color: #64748b;
 }
 

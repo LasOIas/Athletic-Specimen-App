@@ -675,14 +675,89 @@ function parseAdminGroupsInput(rawValue) {
   return normalizeGroupList(String(rawValue).split(/[,;\n]/g));
 }
 
-function renderAdminGroupsPreviewMarkup(rawValue) {
-  const groups = parseAdminGroupsInput(rawValue);
-  if (!groups.length) {
+function getTopFormContextGroup() {
+  if (state.limitedGroup) return normalizeGroupName(state.limitedGroup);
+  const active = normalizeActiveGroupSelection(state.activeGroup || 'All');
+  if (!active || active === 'All' || active === UNGROUPED_FILTER_VALUE) return '';
+  return normalizeGroupName(active);
+}
+
+function getTopFormGroupsHelpText() {
+  if (state.limitedGroup) {
+    return `Group lock active: ${state.limitedGroup} is always primary.`;
+  }
+  const contextGroup = getTopFormContextGroup();
+  if (contextGroup) {
+    return `Roster context: ${contextGroup}. Leave Groups blank to use it for new players.`;
+  }
+  const active = normalizeActiveGroupSelection(state.activeGroup || 'All');
+  if (active === UNGROUPED_FILTER_VALUE) {
+    return 'Roster context: Ungrouped. Leave Groups blank to keep new players ungrouped.';
+  }
+  return 'Use commas to add groups. First group is primary.';
+}
+
+function renderAdminGroupsPreviewMarkup(rawValue, options = {}) {
+  const groups = Array.isArray(rawValue)
+    ? normalizeGroupList(rawValue)
+    : parseAdminGroupsInput(rawValue);
+  const contextGroup = normalizeGroupName(options.contextGroup || '');
+  const isContextDefault = !groups.length && !!contextGroup;
+  const groupsToShow = groups.length ? groups : (isContextDefault ? [contextGroup] : []);
+  const contextSuffix = options.contextSuffix || ' (Default Primary)';
+
+  if (!groupsToShow.length) {
     return '<span class="admin-groups-empty small">No groups set</span>';
   }
-  return groups.map((group, idx) =>
-    `<span class="admin-groups-chip ${idx === 0 ? 'is-primary' : ''}">${escapeHTMLText(group)}${idx === 0 ? ' (Primary)' : ''}</span>`
+  const chips = groupsToShow.map((group, idx) =>
+    `<span class="admin-groups-chip ${idx === 0 ? 'is-primary' : ''} ${isContextDefault ? 'is-context-default' : ''}">${escapeHTMLText(group)}${idx === 0 ? (isContextDefault ? contextSuffix : ' (Primary)') : ''}</span>`
   ).join('');
+  if (!isContextDefault) return chips;
+  return `${chips}<span class="small admin-groups-context-note">Applied only when adding a new player with blank Groups.</span>`;
+}
+
+function getTopFormGroupDatalistOptions() {
+  const available = getAvailableGroups();
+  const contextGroup = getTopFormContextGroup();
+  if (!contextGroup) return available;
+  return [contextGroup, ...available.filter((groupName) => groupName !== contextGroup)];
+}
+
+function getTopFormContextPreviewOptions() {
+  const contextGroup = getTopFormContextGroup();
+  if (contextGroup) return { contextGroup, contextSuffix: ' (Context Primary)' };
+  return {};
+}
+
+function findPlayerIndexByTopFormName(nameValue) {
+  const needle = normalize(nameValue);
+  if (!needle) return -1;
+  return state.players.findIndex((p) => normalize(p.name) === needle);
+}
+
+function getTopFormGroupsPreviewMarkup(nameValue, groupsRawValue) {
+  const groups = parseAdminGroupsInput(groupsRawValue);
+  if (groups.length) return renderAdminGroupsPreviewMarkup(groups);
+  const idx = findPlayerIndexByTopFormName(nameValue);
+  if (idx !== -1) {
+    return renderAdminGroupsPreviewMarkup(getPlayerGroups(state.players[idx]));
+  }
+  return renderAdminGroupsPreviewMarkup('', getTopFormContextPreviewOptions());
+}
+
+function getTopFormModeHint(nameValue) {
+  const idx = findPlayerIndexByTopFormName(nameValue);
+  if (idx !== -1) {
+    return 'Updating existing player. Leave Groups blank to keep current memberships.';
+  }
+  return getTopFormGroupsHelpText();
+}
+
+function renderTopFormGroupsHelpAndPreview(nameValue, groupsRawValue) {
+  return {
+    helpText: getTopFormModeHint(nameValue),
+    previewHTML: getTopFormGroupsPreviewMarkup(nameValue, groupsRawValue)
+  };
 }
 
 function parseEditGroupsValue(rawValue) {
@@ -890,6 +965,86 @@ function summarizeTeamFairness(teams) {
   const score = skillSpread + countSpread * 0.75 + skillStdev * 0.25;
 
   return { skillSpread, countSpread, skillStdev, score };
+}
+
+function deriveLiveTeamMatchups(teams) {
+  const safeTeams = Array.isArray(teams) ? teams : [];
+  const matchups = [];
+  const waitingTeams = [];
+
+  for (let i = 0; i < safeTeams.length; i += 2) {
+    const teamA = i + 1;
+    const teamB = i + 2;
+    if (teamB <= safeTeams.length) {
+      matchups.push({ teamA, teamB });
+    } else {
+      waitingTeams.push(teamA);
+    }
+  }
+
+  return { matchups, waitingTeams };
+}
+
+function liveMatchupKey(teamA, teamB) {
+  return `${teamA}-${teamB}`;
+}
+
+function normalizeLiveMatchResults(resultsByMatch, matchups) {
+  const source = resultsByMatch && typeof resultsByMatch === 'object' ? resultsByMatch : {};
+  const allowed = new Map(
+    (Array.isArray(matchups) ? matchups : []).map((match) => [liveMatchupKey(match.teamA, match.teamB), match])
+  );
+  const normalized = {};
+
+  Object.entries(source).forEach(([matchKey, winnerRaw]) => {
+    const match = allowed.get(matchKey);
+    if (!match) return;
+    const winner = Number(winnerRaw);
+    if (winner !== match.teamA && winner !== match.teamB) return;
+    normalized[matchKey] = winner;
+  });
+
+  return normalized;
+}
+
+function clampSkillOneDecimal(value) {
+  const numeric = Number(value) || 0;
+  const rounded = Math.round(numeric * 10) / 10;
+  return Math.max(0, Math.min(10, rounded));
+}
+
+function parseLiveMatchKey(matchKey) {
+  const raw = String(matchKey || '').trim();
+  const match = /^(\d+)-(\d+)$/.exec(raw);
+  if (!match) return null;
+  return {
+    teamA: Number(match[1]),
+    teamB: Number(match[2])
+  };
+}
+
+function applySkillDeltaToGeneratedTeam(teamNumber, delta) {
+  const teamIndex = Number(teamNumber) - 1;
+  if (!Number.isInteger(teamIndex) || teamIndex < 0) return;
+  const team = Array.isArray(state.generatedTeams) ? state.generatedTeams[teamIndex] : null;
+  if (!Array.isArray(team) || !team.length) return;
+
+  const keySet = new Set(team.map((player) => playerIdentityKey(player)).filter(Boolean));
+  if (!keySet.size) return;
+
+  state.players = (state.players || []).map((player) => {
+    const key = playerIdentityKey(player);
+    if (!keySet.has(key)) return player;
+    return { ...player, skill: clampSkillOneDecimal((Number(player.skill) || 0) + delta) };
+  });
+
+  state.generatedTeams = (state.generatedTeams || []).map((members) => (
+    (Array.isArray(members) ? members : []).map((member) => {
+      const key = playerIdentityKey(member);
+      if (!keySet.has(key)) return member;
+      return { ...member, skill: clampSkillOneDecimal((Number(member.skill) || 0) + delta) };
+    })
+  ));
 }
 
 function generateOneBalancedCandidate(eligiblePlayers, groupCount) {
@@ -1117,6 +1272,11 @@ function renderFilteredPlayers() {
     const playerGroup = getPlayerPrimaryGroup(player);
     const playerGroups = getPlayerGroups(player);
     const playerGroupsValue = escapeHTMLText(JSON.stringify(playerGroups));
+    const groupsDisplayHTML = playerGroups.length
+      ? playerGroups.map((groupName, groupIndex) =>
+        `<span class="badge player-group-badge ${groupIndex === 0 ? 'is-primary' : ''}">${escapeHTMLText(groupName)}${groupIndex === 0 ? ' (Primary)' : ''}</span>`
+      ).join('')
+      : '<span class="small player-group-none">Ungrouped</span>';
 
     return `
       <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
@@ -1138,9 +1298,8 @@ function renderFilteredPlayers() {
             <div class="meta">
               Skill: ${player.skill === 0 ? 'Unset' : player.skill}
               • <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
-              ${!state.limitedGroup && playerGroup ? ` • <span class="badge">${playerGroup}</span>` : ''}
-
             </div>
+            <div class="player-groups-inline">${groupsDisplayHTML}</div>
           </div>
         </div>
 
@@ -1192,6 +1351,7 @@ const state = {
   isAdmin: false,     // whether admin panel is unlocked
   generatedTeams: [], // result of the last team generation
   generatedTeamsSummary: null, // fairness details from the latest generation
+  liveMatchResults: {}, // map of matchup key ("1-2") -> winner team number
   groupCount: 2,      // number of teams requested when generating groups
   playerTab: 'all',   // current active tab: 'all', 'in', 'out', 'skill'
   skillSubTab: null,  // current skill range selected, like '1.0', '2.0', etc.
@@ -2164,6 +2324,8 @@ function render() {
   const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
   const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE ? UNGROUPED_FILTER_LABEL : (normalizedActiveGroup || 'All');
   const isActiveGroupValue = (value) => normalizeActiveGroupSelection(value || 'All') === normalizedActiveGroup;
+  const topFormGroupOptions = getTopFormGroupDatalistOptions();
+  const topFormContext = renderTopFormGroupsHelpAndPreview('', '');
 
   // Build registration and check‑in messages
   const regMsg = messages.registration ? `<p class="msg">${escapeHTML(messages.registration)}</p>` : '';
@@ -2179,6 +2341,7 @@ function render() {
   // Build generated teams HTML
   let teamsHTML = '';
   let teamsFairnessHTML = '';
+  let liveMatchupsHTML = '';
   if (state.generatedTeams.length > 0) {
     if (state.generatedTeamsSummary) {
       teamsFairnessHTML = `
@@ -2189,6 +2352,48 @@ function render() {
         </p>
       `;
     }
+
+    const liveMatchups = deriveLiveTeamMatchups(state.generatedTeams);
+    const resultsByMatch = normalizeLiveMatchResults(state.liveMatchResults, liveMatchups.matchups);
+    state.liveMatchResults = resultsByMatch;
+    const matchupRows = liveMatchups.matchups.map((match, idx) => {
+      const matchKey = liveMatchupKey(match.teamA, match.teamB);
+      const winner = Number(resultsByMatch[matchKey]) || 0;
+      const loser = winner === match.teamA ? match.teamB : (winner === match.teamB ? match.teamA : 0);
+      return `
+      <li class="live-matchup-item">
+        <div class="live-matchup-title"><strong>Match ${idx + 1}:</strong> Team ${match.teamA} vs Team ${match.teamB}</div>
+        <div class="live-matchup-actions">
+          <button
+            type="button"
+            class="live-matchup-result-btn ${winner === match.teamA ? 'is-selected' : ''}"
+            data-role="report-live-match-result"
+            data-match-key="${matchKey}"
+            data-winner-team="${match.teamA}"
+          >Team ${match.teamA} Won</button>
+          <button
+            type="button"
+            class="live-matchup-result-btn ${winner === match.teamB ? 'is-selected' : ''}"
+            data-role="report-live-match-result"
+            data-match-key="${matchKey}"
+            data-winner-team="${match.teamB}"
+          >Team ${match.teamB} Won</button>
+        </div>
+        ${winner ? `<div class="small live-matchup-result">Recorded: Team ${winner} defeated Team ${loser}</div>` : ''}
+      </li>
+    `;
+    }).join('');
+    const waitingLabel = liveMatchups.waitingTeams.map((teamNo) => `Team ${teamNo}`).join(', ');
+    liveMatchupsHTML = `
+      <div class="live-matchups-board">
+        <h4>Live Matchups</h4>
+        <ul class="live-matchups-list">
+          ${matchupRows || '<li class="small">No pairings available.</li>'}
+        </ul>
+        ${waitingLabel ? `<p class="small live-matchups-waiting"><strong>Waiting:</strong> ${waitingLabel}</p>` : ''}
+      </div>
+    `;
+
     teamsHTML = '<div class="teams">' + state.generatedTeams.map((team, i) => {
       const members = team.map((p, memberIndex) => {
         const playerKey = playerIdentityKey(p) || `temp:${i}:${memberIndex}`;
@@ -2223,7 +2428,7 @@ function render() {
         <h2>Admin Dashboard</h2>
         <button id="btn-logout">Logout</button>
       </div>
-      <div class="card">
+      <div class="card card-add-player">
         <h3>Add/Update Player</h3>
         <div class="row admin-player-form-row">
           <input type="text" id="admin-player-name" placeholder="Name" />
@@ -2239,27 +2444,25 @@ function render() {
               aria-describedby="admin-player-groups-help"
             />
             <datalist id="admin-player-groups-options">
-              ${getAvailableGroups().map((groupName) => `<option value="${escapeHTML(groupName)}"></option>`).join('')}
+              ${topFormGroupOptions.map((groupName) => `<option value="${escapeHTML(groupName)}"></option>`).join('')}
             </datalist>
             <div id="admin-player-groups-help" class="small admin-player-groups-help">
-              ${state.limitedGroup
-                ? `Group lock active: ${escapeHTML(state.limitedGroup)} is always primary.`
-                : 'Use commas to add groups. First group is primary.'}
+              ${escapeHTML(topFormContext.helpText)}
             </div>
-            <div id="admin-player-groups-preview" class="admin-player-groups-preview">${renderAdminGroupsPreviewMarkup('')}</div>
+            <div id="admin-player-groups-preview" class="admin-player-groups-preview">${topFormContext.previewHTML}</div>
           </div>
-          <button id="btn-save-player">Save</button>
+          <button id="btn-save-player" class="admin-player-save-btn">Save</button>
         </div>
       </div>
-     <div class="card">
+     <div class="card card-generate-teams">
   <h3>Generate Teams</h3>
-  <p class="small" style="margin-top: -0.5rem; margin-bottom: 0.5rem;">
+  <p class="small generate-teams-summary">
     Teams of 6: <strong>${Math.floor(state.checkedIn.length / 6)}</strong> |
     Teams of 4: <strong>${Math.floor(state.checkedIn.length / 4)}</strong> |
     Teams of 2: <strong>${Math.floor(state.checkedIn.length / 2)}</strong>
   </p>
-  <div class="row">
-    <label>
+  <div class="row generate-teams-controls">
+    <label class="generate-teams-count">
       Teams:
       <input type="number" id="group-count" min="2" value="${escapeHTML(String(state.groupCount))}" />
     </label>
@@ -2267,6 +2470,7 @@ function render() {
     <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
   </div>
   ${teamsFairnessHTML}
+  ${liveMatchupsHTML}
   ${teamsHTML}
 </div>
 <div class="row" style="justify-content:space-between; align-items:center; margin-top:8px;">
@@ -2377,6 +2581,9 @@ function render() {
       <strong id="bulkCount">0 selected</strong>
       <span style="flex:1"></span>
 
+      <button id="btn-bulk-checkin" class="secondary">Check In</button>
+      <button id="btn-bulk-checkout" class="secondary">Check Out</button>
+
       <label for="bulk-dest-group">Group:</label>
       <select id="bulk-dest-group" ${state.limitedGroup ? 'disabled' : ''}>
   <option value="">— choose —</option>
@@ -2442,10 +2649,10 @@ ${state.isAdmin && !state.limitedGroup ? `
 ` : ''}
       ${adminLoginHTML}
       <div class="grid-2">
-  <div class="card">
+  <div class="card card-checkin">
     <h2>Check In</h2>
     <input type="text" id="check-name" placeholder="First and Last Name" />
-    <div class="row">
+    <div class="row checkin-actions">
       <button id="btn-check-in">Check In</button>
       <button id="btn-check-out">Check Out</button>
     </div>
@@ -2767,19 +2974,24 @@ if (groupSelect) {
   });
 }
 
+const adminNameInput = document.getElementById('admin-player-name');
 const adminGroupsInput = document.getElementById('admin-player-groups');
+const adminGroupsHelp = document.getElementById('admin-player-groups-help');
 const adminGroupsPreview = document.getElementById('admin-player-groups-preview');
 if (adminGroupsInput && adminGroupsPreview) {
-  const syncAdminGroupsPreview = () => {
-    adminGroupsPreview.innerHTML = renderAdminGroupsPreviewMarkup(adminGroupsInput.value || '');
+  const syncTopFormGroupContext = () => {
+    const mode = renderTopFormGroupsHelpAndPreview(adminNameInput?.value || '', adminGroupsInput.value || '');
+    adminGroupsPreview.innerHTML = mode.previewHTML;
+    if (adminGroupsHelp) adminGroupsHelp.textContent = mode.helpText;
   };
-  adminGroupsInput.addEventListener('input', syncAdminGroupsPreview);
+  adminGroupsInput.addEventListener('input', syncTopFormGroupContext);
+  if (adminNameInput) adminNameInput.addEventListener('input', syncTopFormGroupContext);
   adminGroupsInput.addEventListener('blur', () => {
     const normalized = parseAdminGroupsInput(adminGroupsInput.value || '');
     adminGroupsInput.value = normalized.join(', ');
-    syncAdminGroupsPreview();
+    syncTopFormGroupContext();
   });
-  syncAdminGroupsPreview();
+  syncTopFormGroupContext();
 }
 
 // ----- Group Manager (master admin) -----
@@ -3290,9 +3502,44 @@ if (logoutBtn) {
       const generated = generateBalancedGroups(state.players, state.checkedIn, state.groupCount);
       state.generatedTeams = generated.teams;
       state.generatedTeamsSummary = generated.summary;
+      state.liveMatchResults = {};
       render();
     });
   }
+
+  document.querySelectorAll('[data-role="report-live-match-result"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const matchKey = String(btn.getAttribute('data-match-key') || '').trim();
+      const winnerTeam = Number(btn.getAttribute('data-winner-team'));
+      if (!matchKey || !Number.isInteger(winnerTeam)) return;
+
+      const parsed = parseLiveMatchKey(matchKey);
+      if (!parsed) return;
+      const { teamA, teamB } = parsed;
+      if (winnerTeam !== teamA && winnerTeam !== teamB) return;
+
+      const loserTeam = winnerTeam === teamA ? teamB : teamA;
+      const previousWinner = Number((state.liveMatchResults || {})[matchKey]) || 0;
+      if (previousWinner === winnerTeam) return; // prevent duplicate stacking on same result click
+
+      if (previousWinner === teamA || previousWinner === teamB) {
+        const previousLoser = previousWinner === teamA ? teamB : teamA;
+        applySkillDeltaToGeneratedTeam(previousWinner, -0.1);
+        applySkillDeltaToGeneratedTeam(previousLoser, +0.1);
+      }
+
+      applySkillDeltaToGeneratedTeam(winnerTeam, +0.1);
+      applySkillDeltaToGeneratedTeam(loserTeam, -0.1);
+
+      state.liveMatchResults = {
+        ...(state.liveMatchResults || {}),
+        [matchKey]: winnerTeam
+      };
+      saveLocal();
+      queueSaveToSupabase();
+      render();
+    });
+  });
 
   // --- Filters & search ---
   const tabSelect = document.getElementById('player-tab-select');
@@ -3373,6 +3620,50 @@ if (clearSelBtn) {
     document.querySelectorAll('.player-select').forEach(cb => cb.checked = false);
     document.querySelectorAll('.player-card').forEach(el => el.classList.remove('is-selected'));
     updateBulkBarVisibility(); // ✅ hide bar when nothing is selected
+  });
+}
+
+// --- Bulk check in/out ---
+const bulkCheckInBtn = document.getElementById('btn-bulk-checkin');
+const bulkCheckOutBtn = document.getElementById('btn-bulk-checkout');
+const runBulkAttendanceAction = async (shouldCheckIn) => {
+  const sel = selectedSet();
+  if (!sel.size) return;
+
+  const idSet = new Set(Array.from(sel).map((id) => String(id)));
+  const targets = state.players.filter((player) => idSet.has(String(player.id)));
+  if (!targets.length) return;
+
+  const remoteIds = new Set();
+  targets.forEach((player) => {
+    if (shouldCheckIn) checkInPlayer(player);
+    else checkOutPlayer(player);
+    if (player.id) remoteIds.add(player.id);
+  });
+
+  if (supabaseClient && remoteIds.size) {
+    try {
+      for (const id of remoteIds) {
+        await supabaseClient.from('players').update({ checked_in: shouldCheckIn }).eq('id', id);
+      }
+      await syncFromSupabase();
+    } catch (err) {
+      console.error(shouldCheckIn ? 'Supabase bulk check-in error' : 'Supabase bulk check-out error', err);
+    }
+  }
+
+  saveLocal();
+  queueSaveToSupabase();
+  render();
+};
+if (bulkCheckInBtn) {
+  bulkCheckInBtn.addEventListener('click', async () => {
+    await runBulkAttendanceAction(true);
+  });
+}
+if (bulkCheckOutBtn) {
+  bulkCheckOutBtn.addEventListener('click', async () => {
+    await runBulkAttendanceAction(false);
   });
 }
 
