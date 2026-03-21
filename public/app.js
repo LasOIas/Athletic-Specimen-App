@@ -2590,6 +2590,39 @@ function bindSelectionHandlers() {
       updateBulkBarVisibility();
     });
   });
+
+  // card-click toggle for selected state (bulk bar)
+  const nonToggleSelector = [
+    'button',
+    'a',
+    'input',
+    'select',
+    'textarea',
+    'label',
+    '.menu-wrap',
+    '.card-menu',
+    '.edit-row',
+    '.group-select',
+    '.group-list',
+    '.group-item'
+  ].join(',');
+
+  document.querySelectorAll('.players .player-card').forEach((card) => {
+    card.addEventListener('click', (e) => {
+      const target = e.target;
+      if (!(target instanceof Element)) return;
+      if (card.classList.contains('is-editing')) return;
+      if (target.closest(nonToggleSelector)) return;
+
+      const selectedText = typeof window.getSelection === 'function' ? String(window.getSelection() || '').trim() : '';
+      if (selectedText) return;
+
+      const checkbox = card.querySelector('.player-select');
+      if (!checkbox) return;
+      checkbox.checked = !checkbox.checked;
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  });
 }
 // Render the entire application into the root element. Each call replaces
 // existing content to reflect the current state. Event handlers are
@@ -2650,12 +2683,10 @@ function render() {
         </div>
         <div class="live-net-court" role="group" aria-label="Net ${idx + 1} teams">
           <div class="live-net-team">
-            <span class="small">Side A</span>
             <strong>Team ${match.teamA}</strong>
           </div>
           <div class="live-net-divider" aria-hidden="true">NET</div>
           <div class="live-net-team">
-            <span class="small">Side B</span>
             <strong>Team ${match.teamB}</strong>
           </div>
         </div>
