@@ -1008,6 +1008,35 @@ function normalizeLiveMatchResults(resultsByMatch, matchups) {
   return normalized;
 }
 
+function normalizeLiveMatchSkillSnapshots(snapshotsByMatch, resultsByMatch) {
+  const source = snapshotsByMatch && typeof snapshotsByMatch === 'object' ? snapshotsByMatch : {};
+  const resultKeys = Object.keys(resultsByMatch && typeof resultsByMatch === 'object' ? resultsByMatch : {});
+  const knownPlayerKeys = new Set(
+    (state.players || []).map((player) => playerIdentityKey(player)).filter(Boolean)
+  );
+  const normalized = {};
+
+  resultKeys.forEach((matchKey) => {
+    const rawSnapshot = source[matchKey];
+    if (!rawSnapshot || typeof rawSnapshot !== 'object') return;
+
+    const cleaned = {};
+    Object.entries(rawSnapshot).forEach(([playerKeyRaw, skillRaw]) => {
+      const playerKey = String(playerKeyRaw || '').trim();
+      if (!playerKey || !knownPlayerKeys.has(playerKey)) return;
+      const skill = Number(skillRaw);
+      if (!Number.isFinite(skill)) return;
+      cleaned[playerKey] = clampSkillOneDecimal(skill);
+    });
+
+    if (Object.keys(cleaned).length) {
+      normalized[matchKey] = cleaned;
+    }
+  });
+
+  return normalized;
+}
+
 function clampSkillOneDecimal(value) {
   const numeric = Number(value) || 0;
   const rounded = Math.round(numeric * 10) / 10;
@@ -1022,6 +1051,67 @@ function parseLiveMatchKey(matchKey) {
     teamA: Number(match[1]),
     teamB: Number(match[2])
   };
+}
+
+function captureLiveMatchSkillSnapshot(teamA, teamB) {
+  ensurePlayerIdentityKeys();
+  const teamNumbers = [teamA, teamB].filter((value) => Number.isInteger(value) && value > 0);
+  if (!teamNumbers.length) return {};
+
+  const playerByKey = new Map();
+  (state.players || []).forEach((player) => {
+    const key = playerIdentityKey(player);
+    if (key) playerByKey.set(key, player);
+  });
+
+  const snapshot = {};
+  teamNumbers.forEach((teamNumber) => {
+    const teamIndex = teamNumber - 1;
+    const team = Array.isArray(state.generatedTeams) ? state.generatedTeams[teamIndex] : null;
+    if (!Array.isArray(team)) return;
+
+    team.forEach((member) => {
+      const key = playerIdentityKey(member);
+      if (!key || Object.prototype.hasOwnProperty.call(snapshot, key)) return;
+      const source = playerByKey.get(key) || member;
+      snapshot[key] = clampSkillOneDecimal(Number(source.skill) || 0);
+    });
+  });
+
+  return snapshot;
+}
+
+function restoreLiveMatchSkillSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return false;
+
+  const normalized = {};
+  Object.entries(snapshot).forEach(([playerKeyRaw, skillRaw]) => {
+    const playerKey = String(playerKeyRaw || '').trim();
+    if (!playerKey) return;
+    const skill = Number(skillRaw);
+    if (!Number.isFinite(skill)) return;
+    normalized[playerKey] = clampSkillOneDecimal(skill);
+  });
+
+  const keys = Object.keys(normalized);
+  if (!keys.length) return false;
+  const keySet = new Set(keys);
+
+  state.players = (state.players || []).map((player) => {
+    const key = playerIdentityKey(player);
+    if (!keySet.has(key)) return player;
+    return { ...player, skill: normalized[key] };
+  });
+
+  state.generatedTeams = (state.generatedTeams || []).map((team) => (
+    (Array.isArray(team) ? team : []).map((member) => {
+      const key = playerIdentityKey(member);
+      if (!keySet.has(key)) return member;
+      return { ...member, skill: normalized[key] };
+    })
+  ));
+
+  return true;
 }
 
 function applySkillDeltaToGeneratedTeam(teamNumber, delta) {
@@ -1353,6 +1443,7 @@ const state = {
   generatedTeams: [], // result of the last team generation
   generatedTeamsSummary: null, // fairness details from the latest generation
   liveMatchResults: {}, // map of matchup key ("1-2") -> winner team number
+  liveMatchSkillSnapshots: {}, // map of matchup key -> playerKey skill snapshot before result apply
   groupCount: 2,      // number of teams requested when generating groups
   playerTab: 'all',   // current active tab: 'all', 'in', 'out', 'skill'
   skillSubTab: null,  // current skill range selected, like '1.0', '2.0', etc.
@@ -1400,11 +1491,13 @@ const LS_ADMIN_KEY = 'athletic_specimen_is_admin';
 const LS_GENERATED_TEAMS_KEY = 'athletic_specimen_generated_team_keys';
 const LS_GENERATED_SUMMARY_KEY = 'athletic_specimen_generated_teams_summary';
 const LS_LIVE_MATCH_RESULTS_KEY = 'athletic_specimen_live_match_results';
+const LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY = 'athletic_specimen_live_match_skill_snapshots';
 
 function clearStoredGeneratedTeams() {
   localStorage.removeItem(LS_GENERATED_TEAMS_KEY);
   localStorage.removeItem(LS_GENERATED_SUMMARY_KEY);
   localStorage.removeItem(LS_LIVE_MATCH_RESULTS_KEY);
+  localStorage.removeItem(LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY);
 }
 
 function sanitizeGeneratedTeamsSummary(summary) {
@@ -1498,7 +1591,13 @@ function loadGeneratedTeamsFromLocal() {
       state.generatedTeams = [];
       state.generatedTeamsSummary = null;
       state.liveMatchResults = {};
-      if (localStorage.getItem(LS_GENERATED_TEAMS_KEY) || localStorage.getItem(LS_GENERATED_SUMMARY_KEY) || localStorage.getItem(LS_LIVE_MATCH_RESULTS_KEY)) {
+      state.liveMatchSkillSnapshots = {};
+      if (
+        localStorage.getItem(LS_GENERATED_TEAMS_KEY) ||
+        localStorage.getItem(LS_GENERATED_SUMMARY_KEY) ||
+        localStorage.getItem(LS_LIVE_MATCH_RESULTS_KEY) ||
+        localStorage.getItem(LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY)
+      ) {
         shouldPersistMigration = true;
       }
       return shouldPersistMigration;
@@ -1521,10 +1620,18 @@ function loadGeneratedTeamsFromLocal() {
     if (JSON.stringify(normalizedResults) !== JSON.stringify(storedResults || {})) {
       shouldPersistMigration = true;
     }
+
+    const storedSnapshots = JSON.parse(localStorage.getItem(LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY) || '{}');
+    const normalizedSnapshots = normalizeLiveMatchSkillSnapshots(storedSnapshots, normalizedResults);
+    state.liveMatchSkillSnapshots = normalizedSnapshots;
+    if (JSON.stringify(normalizedSnapshots) !== JSON.stringify(storedSnapshots || {})) {
+      shouldPersistMigration = true;
+    }
   } catch (err) {
     state.generatedTeams = [];
     state.generatedTeamsSummary = null;
     state.liveMatchResults = {};
+    state.liveMatchSkillSnapshots = {};
     shouldPersistMigration = true;
   }
 
@@ -1554,6 +1661,14 @@ function saveGeneratedTeamsToLocal() {
     localStorage.setItem(LS_LIVE_MATCH_RESULTS_KEY, JSON.stringify(normalizedResults));
   } else {
     localStorage.removeItem(LS_LIVE_MATCH_RESULTS_KEY);
+  }
+
+  const normalizedSnapshots = normalizeLiveMatchSkillSnapshots(state.liveMatchSkillSnapshots, normalizedResults);
+  state.liveMatchSkillSnapshots = normalizedSnapshots;
+  if (Object.keys(normalizedSnapshots).length) {
+    localStorage.setItem(LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY, JSON.stringify(normalizedSnapshots));
+  } else {
+    localStorage.removeItem(LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY);
   }
 }
 
@@ -2521,6 +2636,8 @@ function render() {
     const liveMatchups = deriveLiveTeamMatchups(state.generatedTeams);
     const resultsByMatch = normalizeLiveMatchResults(state.liveMatchResults, liveMatchups.matchups);
     state.liveMatchResults = resultsByMatch;
+    const snapshotsByMatch = normalizeLiveMatchSkillSnapshots(state.liveMatchSkillSnapshots, resultsByMatch);
+    state.liveMatchSkillSnapshots = snapshotsByMatch;
     const matchupRows = liveMatchups.matchups.map((match, idx) => {
       const matchKey = liveMatchupKey(match.teamA, match.teamB);
       const winner = Number(resultsByMatch[matchKey]) || 0;
@@ -3689,6 +3806,7 @@ if (logoutBtn) {
       state.generatedTeams = generated.teams;
       state.generatedTeamsSummary = generated.summary;
       state.liveMatchResults = {};
+      state.liveMatchSkillSnapshots = {};
       saveLocal();
       render();
     });
@@ -3705,22 +3823,32 @@ if (logoutBtn) {
       const { teamA, teamB } = parsed;
       if (winnerTeam !== teamA && winnerTeam !== teamB) return;
 
+      const existingResults = state.liveMatchResults || {};
+      const existingSnapshots = state.liveMatchSkillSnapshots || {};
       const loserTeam = winnerTeam === teamA ? teamB : teamA;
-      const previousWinner = Number((state.liveMatchResults || {})[matchKey]) || 0;
+      const previousWinner = Number(existingResults[matchKey]) || 0;
       if (previousWinner === winnerTeam) return; // prevent duplicate stacking on same result click
 
       if (previousWinner === teamA || previousWinner === teamB) {
-        const previousLoser = previousWinner === teamA ? teamB : teamA;
-        applySkillDeltaToGeneratedTeam(previousWinner, -0.1);
-        applySkillDeltaToGeneratedTeam(previousLoser, +0.1);
+        const restored = restoreLiveMatchSkillSnapshot(existingSnapshots[matchKey]);
+        if (!restored) {
+          const previousLoser = previousWinner === teamA ? teamB : teamA;
+          applySkillDeltaToGeneratedTeam(previousWinner, -0.1);
+          applySkillDeltaToGeneratedTeam(previousLoser, +0.1);
+        }
       }
 
+      const baselineSnapshot = captureLiveMatchSkillSnapshot(teamA, teamB);
       applySkillDeltaToGeneratedTeam(winnerTeam, +0.1);
       applySkillDeltaToGeneratedTeam(loserTeam, -0.1);
 
       state.liveMatchResults = {
-        ...(state.liveMatchResults || {}),
+        ...existingResults,
         [matchKey]: winnerTeam
+      };
+      state.liveMatchSkillSnapshots = {
+        ...existingSnapshots,
+        [matchKey]: baselineSnapshot
       };
       saveLocal();
       queueSaveToSupabase();
@@ -3740,16 +3868,23 @@ if (logoutBtn) {
       if (!parsed) return;
       const { teamA, teamB } = parsed;
 
+      const existingSnapshots = state.liveMatchSkillSnapshots || {};
       const previousWinner = Number(existingResults[matchKey]) || 0;
+      const restored = restoreLiveMatchSkillSnapshot(existingSnapshots[matchKey]);
       if (previousWinner === teamA || previousWinner === teamB) {
-        const previousLoser = previousWinner === teamA ? teamB : teamA;
-        applySkillDeltaToGeneratedTeam(previousWinner, -0.1);
-        applySkillDeltaToGeneratedTeam(previousLoser, +0.1);
+        if (!restored) {
+          const previousLoser = previousWinner === teamA ? teamB : teamA;
+          applySkillDeltaToGeneratedTeam(previousWinner, -0.1);
+          applySkillDeltaToGeneratedTeam(previousLoser, +0.1);
+        }
       }
 
       const nextResults = { ...existingResults };
       delete nextResults[matchKey];
+      const nextSnapshots = { ...existingSnapshots };
+      delete nextSnapshots[matchKey];
       state.liveMatchResults = nextResults;
+      state.liveMatchSkillSnapshots = nextSnapshots;
 
       saveLocal();
       queueSaveToSupabase();
