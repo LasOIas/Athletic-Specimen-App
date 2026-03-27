@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.1';
+const APP_VERSION = '2026.03.27.2';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -1256,9 +1256,14 @@ function maybeAdvanceLiveCourtsFromResults() {
   );
 
   if (!areAllLiveMatchResultsRecorded(liveMatchups.matchups, normalizedResults)) return false;
+  // Single-court rounds have no meaningful court movement; keep the
+  // recorded result visible so it can be reviewed/cleared.
+  if (liveMatchups.matchups.length < 2) return false;
 
   const nextOrder = deriveNextLiveCourtOrder(currentOrder, liveMatchups, normalizedResults);
   if (!nextOrder) return false;
+  const orderChanged = nextOrder.some((teamNo, idx) => teamNo !== currentOrder[idx]);
+  if (!orderChanged) return false;
 
   state.liveCourtOrder = nextOrder;
   state.liveMatchResults = {};
