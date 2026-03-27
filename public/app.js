@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.6';
+const APP_VERSION = '2026.03.27.8';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -3393,36 +3393,6 @@ function render() {
 
     <button id="btn-open-group-manager" class="secondary">Manage Groups</button>
   </div>
-
-  <!-- lightweight modal -->
-  <div id="groupManager" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:10000;">
-    <div style="max-width:720px; margin:6vh auto; background:#fff; border-radius:12px; box-shadow:0 12px 32px rgba(0,0,0,.18); overflow:hidden;">
-      <div style="display:flex; align-items:center; padding:12px 16px; background:#f8fafc;">
-        <h3 style="margin:0; font-size:18px;">Manage Groups</h3>
-        <span style="flex:1"></span>
-        <button id="btn-close-group-manager" class="secondary">Close</button>
-      </div>
-
-      <div style="padding:16px;">
-        <!-- add -->
-        <div class="card" style="padding:12px; margin-bottom:12px;">
-          <div class="row">
-            <input type="text" id="gm-new-name" placeholder="New group name" />
-            <button id="gm-add" class="primary">Add Group</button>
-          </div>
-        </div>
-        <!-- list -->
-        <div class="card" style="padding:12px;">
-          <table class="table" style="width:100%;">
-            <thead>
-              <tr><th style="text-align:left;">Group</th><th>Checked In</th><th>Total</th><th style="width:160px;">Actions</th></tr>
-            </thead>
-            <tbody id="gm-rows"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  </div>
 `
 }
     <!-- Skill range sub-filter (only when Filter = Skill) -->
@@ -3529,6 +3499,35 @@ function render() {
           <div id="admin-player-groups-preview" class="admin-player-groups-preview">${topFormContext.previewHTML}</div>
         </div>
         <button id="btn-save-player" class="admin-player-save-btn">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="groupManager" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:12500; padding:12px; overflow:auto;">
+  <div style="max-width:720px; max-height:calc(100vh - 24px); margin:0 auto; background:#fff; border-radius:12px; box-shadow:0 12px 32px rgba(0,0,0,.18); overflow:hidden; display:flex; flex-direction:column;">
+    <div style="display:flex; align-items:center; padding:12px 16px; background:#f8fafc;">
+      <h3 style="margin:0; font-size:18px;">Manage Groups</h3>
+      <span style="flex:1"></span>
+      <button id="btn-close-group-manager" class="secondary">Close</button>
+    </div>
+
+    <div style="padding:16px; overflow:auto; -webkit-overflow-scrolling:touch;">
+      <!-- add -->
+      <div class="card" style="padding:12px; margin-bottom:12px;">
+        <div class="row">
+          <input type="text" id="gm-new-name" placeholder="New group name" />
+          <button id="gm-add" class="primary">Add Group</button>
+        </div>
+      </div>
+      <!-- list -->
+      <div class="card gm-table-wrap" style="padding:12px;">
+        <table class="table gm-table" style="width:100%;">
+          <thead>
+            <tr><th style="text-align:left;">Group</th><th>Checked In</th><th>Total</th><th style="text-align:left;">Actions</th></tr>
+          </thead>
+          <tbody id="gm-rows"></tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -3994,11 +3993,11 @@ function gmPopulate() {
   if (rowsEl) {
     rowsEl.innerHTML = list.map(g => `
       <tr data-group="${g}">
-        <td><strong>${g}</strong></td>
-        <td style="text-align:center;">${ins[g] || 0}</td>
-        <td style="text-align:center;">${totals[g] || 0}</td>
+        <td style="overflow-wrap:anywhere;"><strong>${g}</strong></td>
+        <td style="text-align:center; white-space:nowrap;">${ins[g] || 0}</td>
+        <td style="text-align:center; white-space:nowrap;">${totals[g] || 0}</td>
         <td>
-          <div class="row" style="gap:6px; justify-content:flex-end;">
+          <div class="row gm-actions-row" style="gap:6px; justify-content:flex-start; flex-wrap:wrap;">
             <button class="gm-rename secondary" data-group="${g}">Rename</button>
             <button class="gm-delete danger" data-group="${g}">Delete</button>
           </div>
