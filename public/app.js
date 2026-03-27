@@ -387,7 +387,8 @@ function openInlineEditRow(row) {
             remoteOK = true;
           }
 
-          if (remoteOK) queueSupabaseRefresh();
+          const catalogOK = await ensureGroupCatalogEntriesSupabase(groups);
+          if (remoteOK || catalogOK) queueSupabaseRefresh();
         } catch (err) {
           console.error('Supabase save error', err);
         }
@@ -2217,6 +2218,23 @@ async function renameGroupCatalogEntrySupabase(oldGroupName, newGroupName) {
   }
 }
 
+async function ensureGroupCatalogEntriesSupabase(groupNames) {
+  if (!supabaseClient) return false;
+  const normalized = normalizeGroupList(groupNames);
+  if (!normalized.length) return false;
+
+  let wroteAny = false;
+  for (const groupName of normalized) {
+    try {
+      const ok = await ensureGroupCatalogEntrySupabase(groupName);
+      if (ok) wroteAny = true;
+    } catch (err) {
+      console.error('Supabase group catalog ensure error', err);
+    }
+  }
+  return wroteAny;
+}
+
 async function deleteGroupCatalogEntrySupabase(groupName) {
   if (!supabaseClient) return false;
   const rowName = toGroupCatalogRowName(groupName);
@@ -3899,11 +3917,15 @@ if (logoutBtn) {
         updated[idx] = { ...previous, name, skill, group: nextPrimary, groups: nextGroups };
         state.players = updated;
 
-        if (supabaseClient && updated[idx].id) {
+        if (supabaseClient) {
           (async () => {
             try {
-              const remoteOK = await updatePlayerFieldsSupabase(updated[idx].id, { name, skill, group: nextPrimary });
-              if (remoteOK) queueSupabaseRefresh();
+              let remoteOK = false;
+              if (updated[idx].id) {
+                remoteOK = await updatePlayerFieldsSupabase(updated[idx].id, { name, skill, group: nextPrimary });
+              }
+              const catalogOK = await ensureGroupCatalogEntriesSupabase(nextGroups);
+              if (remoteOK || catalogOK) queueSupabaseRefresh();
             } catch (err) {
               console.error('Supabase update error', err);
             }
@@ -3924,22 +3946,25 @@ if (logoutBtn) {
         if (supabaseClient) {
           (async () => {
             try {
+              let remoteOK = false;
               try {
                 const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
-                queueSupabaseRefresh();
+                remoteOK = true;
                 if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
               } catch {
                 try {
                   const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-                  queueSupabaseRefresh();
+                  remoteOK = true;
                   if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
                 } catch {
                   // 3rd fallback: table has neither 'group' nor 'tag'
                   const { data } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-                  queueSupabaseRefresh();
+                  remoteOK = true;
                   if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
                 }
               }
+              const catalogOK = await ensureGroupCatalogEntriesSupabase(groups);
+              if (remoteOK || catalogOK) queueSupabaseRefresh();
             } catch (err) {
               console.error('Supabase insert error', err);
             }
@@ -4072,21 +4097,24 @@ if (logoutBtn) {
         if (supabaseClient) {
           (async () => {
             try {
+              let remoteOK = false;
               try {
                 const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
-                queueSupabaseRefresh();
+                remoteOK = true;
                 if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
               } catch {
                 try {
                   const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-                  queueSupabaseRefresh();
+                  remoteOK = true;
                   if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
                 } catch {
                   const { data } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-                  queueSupabaseRefresh();
+                  remoteOK = true;
                   if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
                 }
               }
+              const catalogOK = await ensureGroupCatalogEntriesSupabase(group ? [group] : []);
+              if (remoteOK || catalogOK) queueSupabaseRefresh();
             } catch (err) {
               console.error('Supabase insert error', err);
             }
@@ -4406,10 +4434,11 @@ if (assignBtn) {
 
     // Supabase updates (primary group only)
     try {
+      const catalogTouched = await ensureGroupCatalogEntriesSupabase([dest]);
       for (const update of remoteUpdates) {
         await updatePlayerFieldsSupabase(update.id, { group: update.group });
       }
-      if (remoteUpdates.length) await syncFromSupabase();
+      if (remoteUpdates.length || catalogTouched) await syncFromSupabase();
     } catch (e) {
       console.error('Supabase bulk assign error', e);
     }
