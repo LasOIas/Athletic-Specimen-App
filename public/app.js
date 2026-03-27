@@ -2178,6 +2178,25 @@ async function deleteGroupCatalogEntrySupabase(groupName) {
   }
 }
 
+async function backfillGroupCatalogToSupabase() {
+  if (!supabaseClient || !state.isAdmin) return;
+
+  const candidates = normalizeGroupList([
+    ...(state.groups || []).filter((groupName) => groupName && groupName !== 'All'),
+    ...getAvailableGroups()
+  ]);
+
+  if (!candidates.length) return;
+
+  for (const groupName of candidates) {
+    try {
+      await ensureGroupCatalogEntrySupabase(groupName);
+    } catch (err) {
+      console.error('Supabase group catalog backfill error', err);
+    }
+  }
+}
+
 // map teamId -> { poolId, number } after pools are saved
 function computePoolNumbers(t) {
   const map = {};
@@ -3734,6 +3753,12 @@ if (loginBtn) {
       sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
       try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
       await syncFromSupabase();                  // re-fetch full dataset
+      if (state.isAdmin) {
+        (async () => {
+          await backfillGroupCatalogToSupabase();
+          queueSupabaseRefresh();
+        })();
+      }
       render();
       return;
     }
@@ -3751,6 +3776,12 @@ if (loginBtn) {
       sessionStorage.setItem(LS_LIMITED_GROUP_KEY, group);
       try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, group); } catch {}
       await syncFromSupabase();                  // re-fetch only that group
+      if (state.isAdmin) {
+        (async () => {
+          await backfillGroupCatalogToSupabase();
+          queueSupabaseRefresh();
+        })();
+      }
       render();
       return;
     }
@@ -4397,6 +4428,12 @@ function init() {
   (async () => {
     await detectPlayersSchema();
     await syncFromSupabase();
+    if (state.isAdmin) {
+      (async () => {
+        await backfillGroupCatalogToSupabase();
+        queueSupabaseRefresh();
+      })();
+    }
     render();
   })();
 }
