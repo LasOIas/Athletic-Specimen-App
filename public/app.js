@@ -25,6 +25,7 @@ const LS_GROUPS_KEY = 'athletic_specimen_groups';
 const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
 const UNGROUPED_FILTER_VALUE = '__ungrouped__';
 const UNGROUPED_FILTER_LABEL = 'Ungrouped (No Groups)';
+const GROUP_CATALOG_NAME_PREFIX = '__as_group__:';
 
 const selectedSet = () => new Set(state.selectedIds || []);
 
@@ -596,6 +597,30 @@ function escapeHTMLText(value) {
 
 function normalizeGroupName(value) {
   return String(value || '').trim();
+}
+
+function toGroupCatalogRowName(groupName) {
+  const normalized = normalizeGroupName(groupName);
+  if (!normalized) return '';
+  return `${GROUP_CATALOG_NAME_PREFIX}${normalized}`;
+}
+
+function parseGroupCatalogRowName(rowName) {
+  const name = String(rowName || '');
+  if (!name.startsWith(GROUP_CATALOG_NAME_PREFIX)) return '';
+  return normalizeGroupName(name.slice(GROUP_CATALOG_NAME_PREFIX.length));
+}
+
+function mergeRemoteGroupCatalogIntoState(groupNames) {
+  const normalized = normalizeGroupList(groupNames);
+  if (!normalized.length) return;
+
+  const localGroups = Array.isArray(state.groups) ? state.groups : [];
+  const merged = normalizeGroupList([
+    ...localGroups.filter((groupName) => groupName && groupName !== 'All'),
+    ...normalized
+  ]);
+  state.groups = ['All', ...merged];
 }
 
 function normalizeGroupList(values) {
@@ -1993,17 +2018,26 @@ async function syncFromSupabase() {
     }
     if (!Array.isArray(data)) return;
 
-    const remotePlayers = data.map((p) => {
+    const remoteGroupCatalog = [];
+    const remotePlayers = [];
+    data.forEach((p) => {
+      const catalogGroup = parseGroupCatalogRowName(p && p.name);
+      if (catalogGroup) {
+        remoteGroupCatalog.push(catalogGroup);
+        return;
+      }
+
       const group = normalizeGroupName(p.group || p.tag || '');
-      return {
+      remotePlayers.push({
         name: p.name,
         skill: Number(p.skill) || 0,
         id: p.id,
         checked_in: !!p.checked_in,
         group,
         groups: group ? [group] : []
-      };
+      });
     });
+    mergeRemoteGroupCatalogIntoState(remoteGroupCatalog);
 
     const merged = mergePlayersAfterSync(remotePlayers);
     state.players = merged.players;
@@ -2062,6 +2096,84 @@ async function updatePlayerFieldsSupabase(id, fields) {
     return true;
   } catch (e) {
     console.error('Supabase update error', e);
+    return false;
+  }
+}
+
+async function ensureGroupCatalogEntrySupabase(groupName) {
+  if (!supabaseClient) return false;
+  const normalized = normalizeGroupName(groupName);
+  if (!normalized) return false;
+  const rowName = toGroupCatalogRowName(normalized);
+
+  try {
+    const { data: existing, error: selectError } = await supabaseClient
+      .from('players')
+      .select('id')
+      .eq('name', rowName)
+      .limit(1);
+    if (selectError) throw selectError;
+    if (Array.isArray(existing) && existing.length) return true;
+
+    const payload = { name: rowName, skill: 0 };
+    if (HAS_GROUP) payload.group = '';
+    else if (HAS_TAG) payload.tag = '';
+
+    const { error: insertError } = await supabaseClient.from('players').insert([payload]);
+    if (insertError) throw insertError;
+    return true;
+  } catch (err) {
+    console.error('Supabase group catalog upsert error', err);
+    return false;
+  }
+}
+
+async function renameGroupCatalogEntrySupabase(oldGroupName, newGroupName) {
+  if (!supabaseClient) return false;
+  const oldRowName = toGroupCatalogRowName(oldGroupName);
+  const newRowName = toGroupCatalogRowName(newGroupName);
+  if (!oldRowName || !newRowName) return false;
+  if (oldRowName === newRowName) return true;
+
+  try {
+    const { data: existing, error: selectError } = await supabaseClient
+      .from('players')
+      .select('id')
+      .eq('name', oldRowName)
+      .limit(1);
+    if (selectError) throw selectError;
+
+    if (Array.isArray(existing) && existing.length) {
+      const id = existing[0].id;
+      const { error: updateError } = await supabaseClient
+        .from('players')
+        .update({ name: newRowName })
+        .eq('id', id);
+      if (updateError) throw updateError;
+      return true;
+    }
+
+    return await ensureGroupCatalogEntrySupabase(newGroupName);
+  } catch (err) {
+    console.error('Supabase group catalog rename error', err);
+    return false;
+  }
+}
+
+async function deleteGroupCatalogEntrySupabase(groupName) {
+  if (!supabaseClient) return false;
+  const rowName = toGroupCatalogRowName(groupName);
+  if (!rowName) return false;
+
+  try {
+    const { error } = await supabaseClient
+      .from('players')
+      .delete()
+      .eq('name', rowName);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error('Supabase group catalog delete error', err);
     return false;
   }
 }
@@ -3532,6 +3644,12 @@ if (gmOpen && gmRoot) {
     saveLocal();
     render();
     gmPopulate();
+    if (supabaseClient) {
+      (async () => {
+        const synced = await ensureGroupCatalogEntrySupabase(name);
+        if (synced) queueSupabaseRefresh();
+      })();
+    }
     if (input) input.value = '';
   });
 
@@ -3557,6 +3675,7 @@ if (gmOpen && gmRoot) {
       if (state.activeGroup === oldName) state.activeGroup = newName;
 
       try {
+        await renameGroupCatalogEntrySupabase(oldName, newName);
         const ids = state.players.filter(p => p.group === newName).map(p => p.id).filter(Boolean);
         for (const id of ids) { await updatePlayerFieldsSupabase(id, { group: newName }); }
         await syncFromSupabase();
@@ -3584,6 +3703,7 @@ if (gmOpen && gmRoot) {
       if (state.activeGroup === name) state.activeGroup = 'All';
 
       try {
+        await deleteGroupCatalogEntrySupabase(name);
         const ids = state.players.filter(p => !p.group).map(p => p.id).filter(Boolean);
         for (const id of ids) { await updatePlayerFieldsSupabase(id, { group: '' }); }
         await syncFromSupabase();
