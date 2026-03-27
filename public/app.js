@@ -962,6 +962,10 @@ function queueSaveToSupabase() {
 let refreshTimeout;
 let refreshQueued = false;
 let refreshRunning = false;
+let groupCatalogSyncTimeout;
+let groupCatalogSyncQueued = false;
+let groupCatalogSyncRunning = false;
+let lastGroupCatalogSyncSignature = '';
 function queueSupabaseRefresh(delay = 160) {
   if (!supabaseClient) return;
   refreshQueued = true;
@@ -986,6 +990,46 @@ async function runQueuedSupabaseRefresh() {
     if (refreshQueued) {
       refreshTimeout = setTimeout(() => {
         void runQueuedSupabaseRefresh();
+      }, 0);
+    }
+  }
+}
+
+function computeGroupCatalogSyncSignature() {
+  const candidates = normalizeGroupList([
+    ...(state.groups || []).filter((groupName) => groupName && groupName !== 'All'),
+    ...getAvailableGroups()
+  ]);
+  return candidates.join('|');
+}
+
+function queueGroupCatalogSync(delay = 280) {
+  if (!supabaseClient || !state.isAdmin) return;
+  groupCatalogSyncQueued = true;
+  clearTimeout(groupCatalogSyncTimeout);
+  groupCatalogSyncTimeout = setTimeout(() => {
+    void runQueuedGroupCatalogSync();
+  }, Math.max(0, Number(delay) || 0));
+}
+
+async function runQueuedGroupCatalogSync() {
+  if (!supabaseClient || !state.isAdmin || groupCatalogSyncRunning || !groupCatalogSyncQueued) return;
+  groupCatalogSyncRunning = true;
+  groupCatalogSyncQueued = false;
+
+  try {
+    const signature = computeGroupCatalogSyncSignature();
+    if (signature && signature === lastGroupCatalogSyncSignature) return;
+    const wroteAny = await backfillGroupCatalogToSupabase();
+    if (signature) lastGroupCatalogSyncSignature = signature;
+    if (wroteAny) queueSupabaseRefresh();
+  } catch (err) {
+    console.error('Background group catalog sync error:', err);
+  } finally {
+    groupCatalogSyncRunning = false;
+    if (groupCatalogSyncQueued) {
+      groupCatalogSyncTimeout = setTimeout(() => {
+        void runQueuedGroupCatalogSync();
       }, 0);
     }
   }
@@ -1915,6 +1959,9 @@ function saveLocal() {
     localStorage.setItem(LS_GROUPS_KEY, JSON.stringify(state.groups.filter(g => g && g !== 'All')));
     localStorage.setItem(LS_ACTIVE_GROUP_KEY, state.activeGroup || 'All');
     saveGeneratedTeamsToLocal();
+    if (state.isAdmin && supabaseClient) {
+      queueGroupCatalogSync();
+    }
   } catch (err) {
     console.error('Error saving to localStorage', err);
   }
@@ -2254,22 +2301,25 @@ async function deleteGroupCatalogEntrySupabase(groupName) {
 }
 
 async function backfillGroupCatalogToSupabase() {
-  if (!supabaseClient || !state.isAdmin) return;
+  if (!supabaseClient || !state.isAdmin) return false;
 
   const candidates = normalizeGroupList([
     ...(state.groups || []).filter((groupName) => groupName && groupName !== 'All'),
     ...getAvailableGroups()
   ]);
 
-  if (!candidates.length) return;
+  if (!candidates.length) return false;
+  let wroteAny = false;
 
   for (const groupName of candidates) {
     try {
-      await ensureGroupCatalogEntrySupabase(groupName);
+      const ok = await ensureGroupCatalogEntrySupabase(groupName);
+      if (ok) wroteAny = true;
     } catch (err) {
       console.error('Supabase group catalog backfill error', err);
     }
   }
+  return wroteAny;
 }
 
 // map teamId -> { poolId, number } after pools are saved
