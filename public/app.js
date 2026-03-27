@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.8';
+const APP_VERSION = '2026.03.27.10';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -664,19 +664,32 @@ function parsePlayerGroupsTag(rawTagValue) {
   }
 }
 
-function parseRemotePlayerGroups(row) {
+function parseRemotePlayerGroupDetails(row) {
   const primaryGroup = normalizeGroupName(row && row.group);
   const encodedGroups = parsePlayerGroupsTag(row && row.tag);
 
   if (Array.isArray(encodedGroups) && encodedGroups.length) {
-    return normalizeGroupList([
-      ...(primaryGroup ? [primaryGroup] : []),
-      ...encodedGroups
-    ]);
+    return {
+      groups: normalizeGroupList([
+        ...(primaryGroup ? [primaryGroup] : []),
+        ...encodedGroups
+      ]),
+      hasEncodedGroups: true
+    };
   }
 
-  const fallbackPrimary = normalizeGroupName((row && (row.group || row.tag)) || '');
-  return fallbackPrimary ? [fallbackPrimary] : [];
+  const fallbackTag = normalizeGroupName(row && row.tag);
+  return {
+    groups: normalizeGroupList([
+      ...(primaryGroup ? [primaryGroup] : []),
+      ...(fallbackTag ? [fallbackTag] : [])
+    ]),
+    hasEncodedGroups: false
+  };
+}
+
+function parseRemotePlayerGroups(row) {
+  return parseRemotePlayerGroupDetails(row).groups;
 }
 
 function mergeRemoteGroupCatalogIntoState(groupNames) {
@@ -2092,14 +2105,18 @@ function mergePlayersAfterSync(remotePlayers) {
     const prev = prevById.get(String(remotePlayer.id));
     if (!prev) return remotePlayer;
 
+    const hasEncodedGroups = !!remotePlayer.hasEncodedGroups;
     const remoteGroups = getPlayerGroups(remotePlayer);
     const prevGroups = getPlayerGroups(prev);
-    const groups = normalizeGroupList([
-      ...remoteGroups,
-      ...prevGroups
-    ]);
+    const groups = hasEncodedGroups
+      ? remoteGroups
+      : normalizeGroupList([
+          ...remoteGroups,
+          ...prevGroups
+        ]);
 
-    return { ...remotePlayer, group: groups[0] || '', groups };
+    const { hasEncodedGroups: _ignoredFlag, ...remoteWithoutFlag } = remotePlayer;
+    return { ...remoteWithoutFlag, group: groups[0] || '', groups };
   });
 
   const remoteByName = new Map();
@@ -2214,7 +2231,8 @@ async function syncFromSupabase() {
         return;
       }
 
-      const memberships = parseRemotePlayerGroups(p);
+      const membershipDetails = parseRemotePlayerGroupDetails(p);
+      const memberships = membershipDetails.groups;
       const group = memberships[0] || '';
       remotePlayers.push({
         name: p.name,
@@ -2222,7 +2240,8 @@ async function syncFromSupabase() {
         id: p.id,
         checked_in: !!p.checked_in,
         group,
-        groups: memberships
+        groups: memberships,
+        hasEncodedGroups: membershipDetails.hasEncodedGroups
       });
     });
     mergeRemoteGroupCatalogIntoState(remoteGroupCatalog);
@@ -2296,6 +2315,16 @@ async function updatePlayerFieldsSupabase(id, fields) {
   }
 }
 
+async function listGroupCatalogRowsSupabase() {
+  if (!supabaseClient) return [];
+  const { data, error } = await supabaseClient
+    .from('players')
+    .select('id,name,group,tag')
+    .ilike('name', `${GROUP_CATALOG_NAME_PREFIX}%`);
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
+}
+
 async function ensureGroupCatalogEntrySupabase(groupName) {
   if (!supabaseClient) return false;
   if (!HAS_GROUP && !HAS_TAG) {
@@ -2304,20 +2333,23 @@ async function ensureGroupCatalogEntrySupabase(groupName) {
   const normalized = normalizeGroupName(groupName);
   if (!normalized) return false;
   const rowName = toGroupCatalogRowName(normalized);
+  const targetKey = normalizeGroupKey(normalized);
 
   try {
-    const { data: existing, error: selectError } = await supabaseClient
-      .from('players')
-      .select('id,group,tag')
-      .eq('name', rowName)
-      .limit(1);
-    if (selectError) throw selectError;
-    if (Array.isArray(existing) && existing.length) {
-      const existingRow = existing[0];
+    const catalogRows = await listGroupCatalogRowsSupabase();
+    const matchingRows = catalogRows.filter((row) => {
+      const parsed = parseGroupCatalogRowName(row && row.name);
+      return parsed && normalizeGroupKey(parsed) === targetKey;
+    });
+
+    if (matchingRows.length) {
+      const existingRow = matchingRows[0];
       const payload = {};
+      if (existingRow.name !== rowName) payload.name = rowName;
       if (HAS_GROUP && normalizeGroupName(existingRow.group || '') !== normalized) {
         payload.group = normalized;
-      } else if (HAS_TAG && normalizeGroupName(existingRow.tag || '') !== normalized) {
+      }
+      if (HAS_TAG && normalizeGroupName(existingRow.tag || '') !== normalized) {
         payload.tag = normalized;
       }
 
@@ -2328,12 +2360,26 @@ async function ensureGroupCatalogEntrySupabase(groupName) {
           .eq('id', existingRow.id);
         if (updateError) throw updateError;
       }
+
+      const duplicateIds = matchingRows
+        .slice(1)
+        .map((row) => row && row.id)
+        .filter(Boolean);
+      for (const duplicateId of duplicateIds) {
+        const { error: deleteError } = await supabaseClient
+          .from('players')
+          .delete()
+          .eq('id', duplicateId);
+        if (deleteError) {
+          console.error('Supabase group catalog duplicate delete error', deleteError);
+        }
+      }
       return true;
     }
 
     const payload = { name: rowName, skill: 0 };
     if (HAS_GROUP) payload.group = normalized;
-    else if (HAS_TAG) payload.tag = normalized;
+    if (HAS_TAG) payload.tag = normalized;
 
     const { error: insertError } = await supabaseClient.from('players').insert([payload]);
     if (insertError) throw insertError;
@@ -2349,34 +2395,17 @@ async function renameGroupCatalogEntrySupabase(oldGroupName, newGroupName) {
   if (!HAS_GROUP && !HAS_TAG) {
     await detectPlayersSchema();
   }
-  const oldRowName = toGroupCatalogRowName(oldGroupName);
-  const newRowName = toGroupCatalogRowName(newGroupName);
-  const normalizedNew = normalizeGroupName(newGroupName);
-  if (!oldRowName || !newRowName) return false;
-  if (oldRowName === newRowName) return true;
+  const oldNormalized = normalizeGroupName(oldGroupName);
+  const newNormalized = normalizeGroupName(newGroupName);
+  if (!oldNormalized || !newNormalized) return false;
+  const oldKey = normalizeGroupKey(oldNormalized);
+  const newKey = normalizeGroupKey(newNormalized);
 
   try {
-    const { data: existing, error: selectError } = await supabaseClient
-      .from('players')
-      .select('id')
-      .eq('name', oldRowName)
-      .limit(1);
-    if (selectError) throw selectError;
-
-    if (Array.isArray(existing) && existing.length) {
-      const id = existing[0].id;
-      const payload = { name: newRowName };
-      if (HAS_GROUP) payload.group = normalizedNew;
-      else if (HAS_TAG) payload.tag = normalizedNew;
-      const { error: updateError } = await supabaseClient
-        .from('players')
-        .update(payload)
-        .eq('id', id);
-      if (updateError) throw updateError;
-      return true;
+    if (oldKey !== newKey) {
+      await deleteGroupCatalogEntrySupabase(oldNormalized);
     }
-
-    return await ensureGroupCatalogEntrySupabase(newGroupName);
+    return await ensureGroupCatalogEntrySupabase(newNormalized);
   } catch (err) {
     console.error('Supabase group catalog rename error', err);
     return false;
@@ -2402,15 +2431,33 @@ async function ensureGroupCatalogEntriesSupabase(groupNames) {
 
 async function deleteGroupCatalogEntrySupabase(groupName) {
   if (!supabaseClient) return false;
-  const rowName = toGroupCatalogRowName(groupName);
-  if (!rowName) return false;
+  const targetKey = normalizeGroupKey(groupName);
+  if (!targetKey) return false;
 
   try {
-    const { error } = await supabaseClient
-      .from('players')
-      .delete()
-      .eq('name', rowName);
-    if (error) throw error;
+    const catalogRows = await listGroupCatalogRowsSupabase();
+    const matchingIds = catalogRows
+      .filter((row) => {
+        const parsed = parseGroupCatalogRowName(row && row.name);
+        return parsed && normalizeGroupKey(parsed) === targetKey;
+      })
+      .map((row) => row && row.id)
+      .filter(Boolean);
+
+    if (!matchingIds.length) return true;
+
+    let failed = false;
+    for (const id of matchingIds) {
+      const { error } = await supabaseClient
+        .from('players')
+        .delete()
+        .eq('id', id);
+      if (error) {
+        failed = true;
+        console.error('Supabase group catalog delete error', error);
+      }
+    }
+    if (failed) return false;
     return true;
   } catch (err) {
     console.error('Supabase group catalog delete error', err);
@@ -3315,8 +3362,8 @@ function render() {
       <div class="card admin-header">
         <h2>Admin Dashboard</h2>
         <div class="admin-header-actions">
-          <select id="admin-quick-open" aria-label="Quick Open">
-            <option value="">Quick Open...</option>
+          <select id="admin-quick-open" aria-label="Menu">
+            <option value="">Menu</option>
             <option value="checkin">Check In</option>
             <option value="add-player">Add/Update Player</option>
           </select>
@@ -3977,12 +4024,14 @@ function gmPopulate() {
   if (!gmRoot) return;
 
   // Build a canonical group list (exclude "All")
-  const known = new Set(state.groups.filter(g => g && g !== 'All'));
+  const known = [
+    ...(state.groups || []).filter((groupName) => groupName && groupName !== 'All')
+  ];
   // Include any groups that might exist on players but not in state.groups
   state.players.forEach(p => {
-    getPlayerGroups(p).forEach((g) => known.add(g));
+    known.push(...getPlayerGroups(p));
   });
-  const list = Array.from(known).sort((a,b)=>a.localeCompare(b));
+  const list = normalizeGroupList(known).sort((a,b)=>a.localeCompare(b));
 
   // Fill rows with counts + actions
   const byGroup = computeCheckedInByGroup();
@@ -4019,11 +4068,9 @@ if (gmOpen && gmRoot) {
   const gmAdd = gmRoot.querySelector('#gm-add');
   if (gmAdd) gmAdd.addEventListener('click', () => {
     const input = gmRoot.querySelector('#gm-new-name');
-    const name  = (input && input.value || '').trim();
+    const name  = normalizeGroupName(input && input.value || '');
     if (!name) return;
-    if (!state.groups.includes(name)) {
-      state.groups = Array.from(new Set([...state.groups, name]));
-    }
+    state.groups = ['All', ...normalizeGroupList([...(state.groups || []).filter((groupName) => groupName && groupName !== 'All'), name])];
     state.activeGroup = name;
     saveLocal();
     render();
@@ -4044,24 +4091,31 @@ if (gmOpen && gmRoot) {
 
     // Rename
     if (renameBtn) {
-      const oldName = renameBtn.getAttribute('data-group');
+      const oldName = normalizeGroupName(renameBtn.getAttribute('data-group'));
       if (!oldName) return;
-      const newName = prompt(`Rename "${oldName}" to:`, oldName);
-      if (!newName || newName === oldName) return;
+      const requestedName = prompt(`Rename "${oldName}" to:`, oldName);
+      const newName = normalizeGroupName(requestedName);
+      if (!newName) return;
+      const oldKey = normalizeGroupKey(oldName);
+      if (normalizeGroupKey(newName) === oldKey && newName === oldName) return;
 
-      state.groups  = state.groups.map(g => g === oldName ? newName : g);
+      state.groups = ['All', ...normalizeGroupList(
+        (state.groups || [])
+          .filter((groupName) => groupName && groupName !== 'All')
+          .map((groupName) => (normalizeGroupKey(groupName) === oldKey ? newName : groupName))
+      )];
       state.players = state.players.map((player) => {
         const memberships = getPlayerGroups(player);
-        if (!memberships.includes(oldName)) return player;
-        const nextGroups = normalizeGroupList(memberships.map((group) => (group === oldName ? newName : group)));
+        if (!memberships.some((group) => normalizeGroupKey(group) === oldKey)) return player;
+        const nextGroups = normalizeGroupList(memberships.map((group) => (normalizeGroupKey(group) === oldKey ? newName : group)));
         return { ...player, group: nextGroups[0] || '', groups: nextGroups };
       });
-      if (state.activeGroup === oldName) state.activeGroup = newName;
+      if (normalizeGroupKey(state.activeGroup || '') === oldKey) state.activeGroup = newName;
 
       try {
         await renameGroupCatalogEntrySupabase(oldName, newName);
         const updates = state.players
-          .filter((player) => player.id && getPlayerGroups(player).includes(newName))
+          .filter((player) => player.id && playerBelongsToGroup(player, newName))
           .map((player) => ({
             id: player.id,
             group: getPlayerPrimaryGroup(player),
@@ -4081,18 +4135,21 @@ if (gmOpen && gmRoot) {
 
     // Delete
     if (deleteBtn) {
-      const name = deleteBtn.getAttribute('data-group');
+      const name = normalizeGroupName(deleteBtn.getAttribute('data-group'));
       if (!name) return;
       if (!confirm(`Delete "${name}" and remove the group from all players?`)) return;
+      const targetKey = normalizeGroupKey(name);
 
-      state.groups  = state.groups.filter(g => g !== name);
+      state.groups = ['All', ...normalizeGroupList(
+        (state.groups || []).filter((groupName) => groupName && groupName !== 'All' && normalizeGroupKey(groupName) !== targetKey)
+      )];
       state.players = state.players.map((player) => {
         const memberships = getPlayerGroups(player);
-        if (!memberships.includes(name)) return player;
-        const nextGroups = memberships.filter((group) => group !== name);
+        if (!memberships.some((group) => normalizeGroupKey(group) === targetKey)) return player;
+        const nextGroups = memberships.filter((group) => normalizeGroupKey(group) !== targetKey);
         return { ...player, group: nextGroups[0] || '', groups: nextGroups };
       });
-      if (state.activeGroup === name) state.activeGroup = 'All';
+      if (normalizeGroupKey(state.activeGroup || '') === targetKey) state.activeGroup = 'All';
 
       try {
         await deleteGroupCatalogEntrySupabase(name);
