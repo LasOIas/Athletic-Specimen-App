@@ -19,6 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const APP_VERSION = '2026.03.27.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -3433,7 +3434,7 @@ function render() {
   // Build the final page markup
   const adminLoginHTML = !state.isAdmin ? `
     <div class="card">
-      <h2>Admin Login</h2>
+      <h2>Admin Login <span class="app-version-pill">v${APP_VERSION}</span></h2>
       <div class="row">
         <input type="password" id="admin-code" placeholder="Enter admin code" />
         <button id="btn-admin-login">Login</button>
@@ -3444,7 +3445,7 @@ function render() {
   // Build final page markup. Hide full players list on public side. The list is only shown in admin panel.
   const html = `
     <div class="container">
-<h1 class="title">${state.limitedGroup ? state.limitedGroup : 'Athletic Specimen'}</h1>
+<h1 class="title">${state.limitedGroup ? state.limitedGroup : 'Athletic Specimen'} <span class="app-version-inline">v${APP_VERSION}</span></h1>
 
 <p class="small" style="text-align:center; margin-bottom:0.25rem;">
   Checked In: <strong>${state.checkedIn.length}</strong>
