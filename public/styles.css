@@ -362,11 +362,15 @@ body {
 
 @media (max-width: 480px) {
   .card-generate-teams .live-nets-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(132px, 1fr));
   }
 
   .card-generate-teams .live-net-card {
-    min-height: 0;
+    min-height: 208px;
+  }
+
+  .card-generate-teams .live-net-court {
+    min-height: 124px;
   }
 }
 
@@ -851,3 +855,64 @@ body {
 .my-8 { margin: 8px 0; }
 .mb-6 { margin-bottom: 6px; }
 .w-100 { width: 100px; }
+
+/* Mobile density + reduced page scroll (all features remain available) */
+@media (max-width: 768px) {
+  .container {
+    padding: 0.6rem;
+  }
+
+  .title {
+    font-size: 1.45rem;
+    margin-bottom: 0.6rem;
+  }
+
+  .card {
+    padding: 0.72rem;
+    margin-bottom: 0.72rem;
+  }
+
+  .row {
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+  }
+
+  .player-card {
+    padding: 10px;
+    margin-bottom: 10px;
+    gap: 6px;
+  }
+
+  .card-checkin .checkin-actions button,
+  .card-generate-teams .generate-teams-controls button,
+  .card-add-player .admin-player-save-btn {
+    min-height: 34px;
+  }
+
+  .card-generate-teams .live-matchups-board {
+    max-height: 46vh;
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .card-generate-teams .teams {
+    max-height: 42vh;
+    overflow: auto;
+    padding-right: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #filtersBody {
+    max-height: 30vh;
+    overflow: auto;
+    padding-right: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .players {
+    max-height: 55vh;
+    overflow: auto;
+    padding-right: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+}
