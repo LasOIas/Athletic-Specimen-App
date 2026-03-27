@@ -605,6 +605,10 @@ function normalizeGroupName(value) {
   return String(value || '').trim();
 }
 
+function normalizeGroupKey(value) {
+  return normalizeGroupName(value).toLowerCase();
+}
+
 function toGroupCatalogRowName(groupName) {
   const normalized = normalizeGroupName(groupName);
   if (!normalized) return '';
@@ -678,8 +682,9 @@ function normalizeGroupList(values) {
   const out = [];
   values.forEach((value) => {
     const group = normalizeGroupName(value);
-    if (!group || seen.has(group)) return;
-    seen.add(group);
+    const key = normalizeGroupKey(group);
+    if (!group || !key || seen.has(key)) return;
+    seen.add(key);
     out.push(group);
   });
   return out;
@@ -701,9 +706,9 @@ function getPlayerPrimaryGroup(player) {
 }
 
 function playerBelongsToGroup(player, groupName) {
-  const target = normalizeGroupName(groupName);
-  if (!target) return false;
-  return getPlayerGroups(player).includes(target);
+  const targetKey = normalizeGroupKey(groupName);
+  if (!targetKey) return false;
+  return getPlayerGroups(player).some((group) => normalizeGroupKey(group) === targetKey);
 }
 
 function isPlayerUngrouped(player) {
