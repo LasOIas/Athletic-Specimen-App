@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.4';
+const APP_VERSION = '2026.03.27.5';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -3559,41 +3559,27 @@ ${state.isAdmin && !state.limitedGroup ? `
   </div>
 ` : ''}
       ${adminLoginHTML}
+      ${state.isAdmin ? adminHTML : ''}
   <div class="grid-2">
   <div class="card card-checkin">
-    <div class="card-collapsible-head">
-      <h2>Check In</h2>
-      <div class="card-collapsible-head-actions">
-        ${renderCardCollapseToggle('public-checkin', 'card-body-public-checkin')}
-      </div>
-    </div>
-    <div id="card-body-public-checkin" class="card-collapse-body ${isCardCollapsed('public-checkin') ? 'is-collapsed' : ''}">
+    <h2>Check In</h2>
     <input type="text" id="check-name" placeholder="First and Last Name" />
     <div class="row checkin-actions">
       <button id="btn-check-in">Check In</button>
       <button id="btn-check-out">Check Out</button>
     </div>
     ${checkMsg}
-    </div>
   </div>
 
   ${!state.isAdmin ? `
   <div class="card card-register">
-    <div class="card-collapsible-head">
-      <h2>Register Player</h2>
-      <div class="card-collapsible-head-actions">
-        ${renderCardCollapseToggle('public-register', 'card-body-public-register')}
-      </div>
-    </div>
-    <div id="card-body-public-register" class="card-collapse-body ${isCardCollapsed('public-register') ? 'is-collapsed' : ''}">
+    <h2>Register Player</h2>
     <input type="text" id="register-name" placeholder="First and Last Name" />
     <button id="btn-register">Register</button>
     ${regMsg}
-    </div>
   </div>
   ` : ``}
 </div>
-      ${adminHTML}
     </div>
   `;
 
