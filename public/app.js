@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.3';
+const APP_VERSION = '2026.03.27.4';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -3319,39 +3319,6 @@ function render() {
           <button id="btn-logout">Logout</button>
         </div>
       </div>
-      <div class="card card-add-player">
-        <div class="card-collapsible-head">
-          <h3>Add/Update Player</h3>
-          <div class="card-collapsible-head-actions">
-            ${renderCardCollapseToggle('admin-add-player', 'card-body-admin-add-player')}
-          </div>
-        </div>
-        <div id="card-body-admin-add-player" class="card-collapse-body ${isCardCollapsed('admin-add-player') ? 'is-collapsed' : ''}">
-        <div class="row admin-player-form-row">
-          <input type="text" id="admin-player-name" placeholder="Name" />
-          <input type="number" id="admin-player-skill" placeholder="Skill" step="0.1" />
-          <div class="admin-player-groups-field">
-            <input
-              type="text"
-              id="admin-player-groups"
-              list="admin-player-groups-options"
-              placeholder="Groups (comma separated)"
-              autocomplete="off"
-              spellcheck="false"
-              aria-describedby="admin-player-groups-help"
-            />
-            <datalist id="admin-player-groups-options">
-              ${topFormGroupOptions.map((groupName) => `<option value="${escapeHTML(groupName)}"></option>`).join('')}
-            </datalist>
-            <div id="admin-player-groups-help" class="small admin-player-groups-help">
-              ${escapeHTML(topFormContext.helpText)}
-            </div>
-            <div id="admin-player-groups-preview" class="admin-player-groups-preview">${topFormContext.previewHTML}</div>
-          </div>
-          <button id="btn-save-player" class="admin-player-save-btn">Save</button>
-        </div>
-        </div>
-      </div>
      <div class="card card-generate-teams">
   <div class="card-collapsible-head">
     <h3>Generate Teams</h3>
@@ -3386,6 +3353,39 @@ function render() {
     </div>
   </div>
   <div id="card-body-admin-players" class="card-collapse-body ${isCardCollapsed('admin-players') ? 'is-collapsed' : ''}">
+  <div class="card-add-player">
+    <div class="card-collapsible-head">
+      <h3>Add/Update Player</h3>
+      <div class="card-collapsible-head-actions">
+        ${renderCardCollapseToggle('admin-add-player', 'card-body-admin-add-player')}
+      </div>
+    </div>
+    <div id="card-body-admin-add-player" class="card-collapse-body ${isCardCollapsed('admin-add-player') ? 'is-collapsed' : ''}">
+    <div class="row admin-player-form-row">
+      <input type="text" id="admin-player-name" placeholder="Name" />
+      <input type="number" id="admin-player-skill" placeholder="Skill" step="0.1" />
+      <div class="admin-player-groups-field">
+        <input
+          type="text"
+          id="admin-player-groups"
+          list="admin-player-groups-options"
+          placeholder="Groups (comma separated)"
+          autocomplete="off"
+          spellcheck="false"
+          aria-describedby="admin-player-groups-help"
+        />
+        <datalist id="admin-player-groups-options">
+          ${topFormGroupOptions.map((groupName) => `<option value="${escapeHTML(groupName)}"></option>`).join('')}
+        </datalist>
+        <div id="admin-player-groups-help" class="small admin-player-groups-help">
+          ${escapeHTML(topFormContext.helpText)}
+        </div>
+        <div id="admin-player-groups-preview" class="admin-player-groups-preview">${topFormContext.previewHTML}</div>
+      </div>
+      <button id="btn-save-player" class="admin-player-save-btn">Save</button>
+    </div>
+    </div>
+  </div>
   <!-- Collapsible body: put ALL your filter controls INSIDE this div -->
   <div id="filtersBody">
     <h4 style="margin-bottom: 0.5rem;">Filters</h4>
