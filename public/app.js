@@ -2000,6 +2000,10 @@ async function syncFromSupabase() {
   if (!supabaseClient) return;
 
   try {
+    if (!HAS_GROUP && !HAS_TAG) {
+      await detectPlayersSchema();
+    }
+
     // when tenant-limited, only fetch that group to reduce data exposure and payload size
     let query = supabaseClient.from('players').select('*');
 
@@ -2011,12 +2015,38 @@ async function syncFromSupabase() {
       }
     }
 
-    const { data, error } = await query;
+    const { data: fetchedData, error } = await query;
     if (error) {
       console.error('Supabase fetch error', error);
       return;
     }
-    if (!Array.isArray(data)) return;
+    if (!Array.isArray(fetchedData)) return;
+
+    let data = fetchedData;
+    if (state.limitedGroup) {
+      const limitedCatalogRowName = toGroupCatalogRowName(state.limitedGroup);
+      if (limitedCatalogRowName) {
+        const { data: catalogRows, error: catalogError } = await supabaseClient
+          .from('players')
+          .select('*')
+          .eq('name', limitedCatalogRowName)
+          .limit(1);
+
+        if (catalogError) {
+          console.error('Supabase limited catalog fetch error', catalogError);
+        } else if (Array.isArray(catalogRows) && catalogRows.length) {
+          const byIdentity = new Set(
+            data.map((row) => String((row && row.id) || (row && row.name) || '')).filter(Boolean)
+          );
+          catalogRows.forEach((row) => {
+            const key = String((row && row.id) || (row && row.name) || '');
+            if (!key || byIdentity.has(key)) return;
+            byIdentity.add(key);
+            data.push(row);
+          });
+        }
+      }
+    }
 
     const remoteGroupCatalog = [];
     const remotePlayers = [];
@@ -2102,6 +2132,9 @@ async function updatePlayerFieldsSupabase(id, fields) {
 
 async function ensureGroupCatalogEntrySupabase(groupName) {
   if (!supabaseClient) return false;
+  if (!HAS_GROUP && !HAS_TAG) {
+    await detectPlayersSchema();
+  }
   const normalized = normalizeGroupName(groupName);
   if (!normalized) return false;
   const rowName = toGroupCatalogRowName(normalized);
@@ -2109,15 +2142,32 @@ async function ensureGroupCatalogEntrySupabase(groupName) {
   try {
     const { data: existing, error: selectError } = await supabaseClient
       .from('players')
-      .select('id')
+      .select('id,group,tag')
       .eq('name', rowName)
       .limit(1);
     if (selectError) throw selectError;
-    if (Array.isArray(existing) && existing.length) return true;
+    if (Array.isArray(existing) && existing.length) {
+      const existingRow = existing[0];
+      const payload = {};
+      if (HAS_GROUP && normalizeGroupName(existingRow.group || '') !== normalized) {
+        payload.group = normalized;
+      } else if (HAS_TAG && normalizeGroupName(existingRow.tag || '') !== normalized) {
+        payload.tag = normalized;
+      }
+
+      if (Object.keys(payload).length) {
+        const { error: updateError } = await supabaseClient
+          .from('players')
+          .update(payload)
+          .eq('id', existingRow.id);
+        if (updateError) throw updateError;
+      }
+      return true;
+    }
 
     const payload = { name: rowName, skill: 0 };
-    if (HAS_GROUP) payload.group = '';
-    else if (HAS_TAG) payload.tag = '';
+    if (HAS_GROUP) payload.group = normalized;
+    else if (HAS_TAG) payload.tag = normalized;
 
     const { error: insertError } = await supabaseClient.from('players').insert([payload]);
     if (insertError) throw insertError;
@@ -2130,8 +2180,12 @@ async function ensureGroupCatalogEntrySupabase(groupName) {
 
 async function renameGroupCatalogEntrySupabase(oldGroupName, newGroupName) {
   if (!supabaseClient) return false;
+  if (!HAS_GROUP && !HAS_TAG) {
+    await detectPlayersSchema();
+  }
   const oldRowName = toGroupCatalogRowName(oldGroupName);
   const newRowName = toGroupCatalogRowName(newGroupName);
+  const normalizedNew = normalizeGroupName(newGroupName);
   if (!oldRowName || !newRowName) return false;
   if (oldRowName === newRowName) return true;
 
@@ -2145,9 +2199,12 @@ async function renameGroupCatalogEntrySupabase(oldGroupName, newGroupName) {
 
     if (Array.isArray(existing) && existing.length) {
       const id = existing[0].id;
+      const payload = { name: newRowName };
+      if (HAS_GROUP) payload.group = normalizedNew;
+      else if (HAS_TAG) payload.tag = normalizedNew;
       const { error: updateError } = await supabaseClient
         .from('players')
-        .update({ name: newRowName })
+        .update(payload)
         .eq('id', id);
       if (updateError) throw updateError;
       return true;
