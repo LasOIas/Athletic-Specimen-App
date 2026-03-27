@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.5';
+const APP_VERSION = '2026.03.27.6';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -3315,6 +3315,11 @@ function render() {
       <div class="card admin-header">
         <h2>Admin Dashboard</h2>
         <div class="admin-header-actions">
+          <select id="admin-quick-open" aria-label="Quick Open">
+            <option value="">Quick Open...</option>
+            <option value="checkin">Check In</option>
+            <option value="add-player">Add/Update Player</option>
+          </select>
           <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
           <button id="btn-logout">Logout</button>
         </div>
@@ -3353,39 +3358,6 @@ function render() {
     </div>
   </div>
   <div id="card-body-admin-players" class="card-collapse-body ${isCardCollapsed('admin-players') ? 'is-collapsed' : ''}">
-  <div class="card-add-player">
-    <div class="card-collapsible-head">
-      <h3>Add/Update Player</h3>
-      <div class="card-collapsible-head-actions">
-        ${renderCardCollapseToggle('admin-add-player', 'card-body-admin-add-player')}
-      </div>
-    </div>
-    <div id="card-body-admin-add-player" class="card-collapse-body ${isCardCollapsed('admin-add-player') ? 'is-collapsed' : ''}">
-    <div class="row admin-player-form-row">
-      <input type="text" id="admin-player-name" placeholder="Name" />
-      <input type="number" id="admin-player-skill" placeholder="Skill" step="0.1" />
-      <div class="admin-player-groups-field">
-        <input
-          type="text"
-          id="admin-player-groups"
-          list="admin-player-groups-options"
-          placeholder="Groups (comma separated)"
-          autocomplete="off"
-          spellcheck="false"
-          aria-describedby="admin-player-groups-help"
-        />
-        <datalist id="admin-player-groups-options">
-          ${topFormGroupOptions.map((groupName) => `<option value="${escapeHTML(groupName)}"></option>`).join('')}
-        </datalist>
-        <div id="admin-player-groups-help" class="small admin-player-groups-help">
-          ${escapeHTML(topFormContext.helpText)}
-        </div>
-        <div id="admin-player-groups-preview" class="admin-player-groups-preview">${topFormContext.previewHTML}</div>
-      </div>
-      <button id="btn-save-player" class="admin-player-save-btn">Save</button>
-    </div>
-    </div>
-  </div>
   <!-- Collapsible body: put ALL your filter controls INSIDE this div -->
   <div id="filtersBody">
     <h4 style="margin-bottom: 0.5rem;">Filters</h4>
@@ -3510,6 +3482,57 @@ function render() {
   </div>
   </div>
 </div>
+
+<div id="admin-checkin-modal" class="popup-overlay" style="display:none;" aria-hidden="true">
+  <div class="popup-card card" role="dialog" aria-modal="true" aria-labelledby="admin-checkin-modal-title">
+    <div class="popup-header">
+      <h3 id="admin-checkin-modal-title">Check In</h3>
+      <button type="button" class="secondary" data-role="close-popup" data-target="admin-checkin-modal">Close</button>
+    </div>
+    <div class="popup-body">
+      <input type="text" id="check-name" placeholder="First and Last Name" />
+      <div class="row checkin-actions">
+        <button id="btn-check-in">Check In</button>
+        <button id="btn-check-out">Check Out</button>
+      </div>
+      ${checkMsg}
+    </div>
+  </div>
+</div>
+
+<div id="admin-add-player-modal" class="popup-overlay" style="display:none;" aria-hidden="true">
+  <div class="popup-card card" role="dialog" aria-modal="true" aria-labelledby="admin-add-player-modal-title">
+    <div class="popup-header">
+      <h3 id="admin-add-player-modal-title">Add/Update Player</h3>
+      <button type="button" class="secondary" data-role="close-popup" data-target="admin-add-player-modal">Close</button>
+    </div>
+    <div class="popup-body">
+      <div class="row admin-player-form-row">
+        <input type="text" id="admin-player-name" placeholder="Name" />
+        <input type="number" id="admin-player-skill" placeholder="Skill" step="0.1" />
+        <div class="admin-player-groups-field">
+          <input
+            type="text"
+            id="admin-player-groups"
+            list="admin-player-groups-options"
+            placeholder="Groups (comma separated)"
+            autocomplete="off"
+            spellcheck="false"
+            aria-describedby="admin-player-groups-help"
+          />
+          <datalist id="admin-player-groups-options">
+            ${topFormGroupOptions.map((groupName) => `<option value="${escapeHTML(groupName)}"></option>`).join('')}
+          </datalist>
+          <div id="admin-player-groups-help" class="small admin-player-groups-help">
+            ${escapeHTML(topFormContext.helpText)}
+          </div>
+          <div id="admin-player-groups-preview" class="admin-player-groups-preview">${topFormContext.previewHTML}</div>
+        </div>
+        <button id="btn-save-player" class="admin-player-save-btn">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
 </div>
   ` : '';
 
@@ -3560,6 +3583,7 @@ ${state.isAdmin && !state.limitedGroup ? `
 ` : ''}
       ${adminLoginHTML}
       ${state.isAdmin ? adminHTML : ''}
+  ${!state.isAdmin ? `
   <div class="grid-2">
   <div class="card card-checkin">
     <h2>Check In</h2>
@@ -3571,15 +3595,14 @@ ${state.isAdmin && !state.limitedGroup ? `
     ${checkMsg}
   </div>
 
-  ${!state.isAdmin ? `
   <div class="card card-register">
     <h2>Register Player</h2>
     <input type="text" id="register-name" placeholder="First and Last Name" />
     <button id="btn-register">Register</button>
     ${regMsg}
   </div>
+  </div>
   ` : ``}
-</div>
     </div>
   `;
 
@@ -3908,6 +3931,44 @@ if (adminGroupsInput && adminGroupsPreview) {
   });
   syncTopFormGroupContext();
 }
+
+const openPopup = (popupId) => {
+  const popup = document.getElementById(popupId);
+  if (!popup) return;
+  popup.style.display = 'flex';
+  popup.setAttribute('aria-hidden', 'false');
+};
+const closePopup = (popupId) => {
+  const popup = document.getElementById(popupId);
+  if (!popup) return;
+  popup.style.display = 'none';
+  popup.setAttribute('aria-hidden', 'true');
+};
+
+const adminQuickOpen = document.getElementById('admin-quick-open');
+if (adminQuickOpen) {
+  adminQuickOpen.addEventListener('change', () => {
+    const value = String(adminQuickOpen.value || '').trim();
+    if (value === 'checkin') openPopup('admin-checkin-modal');
+    if (value === 'add-player') openPopup('admin-add-player-modal');
+    adminQuickOpen.value = '';
+  });
+}
+
+document.querySelectorAll('[data-role="close-popup"]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const popupId = String(btn.getAttribute('data-target') || '').trim();
+    if (!popupId) return;
+    closePopup(popupId);
+  });
+});
+
+document.querySelectorAll('.popup-overlay').forEach((popup) => {
+  popup.addEventListener('click', (e) => {
+    if (e.target !== popup) return;
+    closePopup(popup.id);
+  });
+});
 
 // ----- Group Manager (master admin) -----
 const gmOpen  = document.getElementById('btn-open-group-manager');
