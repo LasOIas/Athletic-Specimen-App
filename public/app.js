@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.2';
+const APP_VERSION = '2026.03.27.3';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -145,6 +145,20 @@ function openInlineEditRow(row) {
   window.__menusBound = true;
 
   document.addEventListener('click', async function onGlobalClick(e) {
+    const collapseToggle = e.target.closest('[data-role="toggle-card-collapse"]');
+    if (collapseToggle) {
+      e.stopPropagation();
+      e.preventDefault();
+      const cardId = String(collapseToggle.getAttribute('data-card-id') || '').trim();
+      if (!cardId) return;
+      const nextCollapsed = { ...(state.collapsedCards || {}) };
+      if (nextCollapsed[cardId]) delete nextCollapsed[cardId];
+      else nextCollapsed[cardId] = true;
+      state.collapsedCards = nextCollapsed;
+      saveLocal();
+      render();
+      return;
+    }
     // 1) Toggle the dropdown when ⋮ is clicked
     const dots = e.target.closest('.btn-actions');
     if (dots) {
@@ -1716,12 +1730,22 @@ const state = {
   skillSubTab: null,  // current skill range selected, like '1.0', '2.0', etc.
   loaded: false,      // becomes true after Supabase loads
   searchTerm: '',
+  collapsedCards: {}, // map of card id -> true when collapsed
   groups: ['All', 'Athletic Specimen'],
   activeGroup: 'All',
   selectedIds: [], // player.id[] currently selected (admin bulk)
   limitedGroup: null, // when set, admin is locked to this group
   adminCodeMap: {}   // live copy used by the UI
 };
+
+function normalizeCollapsedCardsState(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out = {};
+  Object.keys(value).forEach((key) => {
+    if (value[key]) out[String(key)] = true;
+  });
+  return out;
+}
 
 function getAvailableGroups() {
   const fromPlayersSet = new Set();
@@ -1760,6 +1784,7 @@ const LS_GENERATED_SUMMARY_KEY = 'athletic_specimen_generated_teams_summary';
 const LS_LIVE_COURT_ORDER_KEY = 'athletic_specimen_live_court_order';
 const LS_LIVE_MATCH_RESULTS_KEY = 'athletic_specimen_live_match_results';
 const LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY = 'athletic_specimen_live_match_skill_snapshots';
+const LS_COLLAPSED_CARDS_KEY = 'athletic_specimen_collapsed_cards';
 
 function clearStoredGeneratedTeams() {
   localStorage.removeItem(LS_GENERATED_TEAMS_KEY);
@@ -1996,6 +2021,17 @@ function loadLocal() {
     const groups = JSON.parse(localStorage.getItem(LS_GROUPS_KEY) || '[]');
     if (Array.isArray(groups) && groups.length) state.groups = Array.from(new Set(['All', ...groups.filter(Boolean)]));
   } catch {}
+  try {
+    const storedCollapsedCards = JSON.parse(localStorage.getItem(LS_COLLAPSED_CARDS_KEY) || '{}');
+    const normalizedCollapsedCards = normalizeCollapsedCardsState(storedCollapsedCards);
+    state.collapsedCards = normalizedCollapsedCards;
+    if (JSON.stringify(normalizedCollapsedCards) !== JSON.stringify(storedCollapsedCards || {})) {
+      shouldPersistMigration = true;
+    }
+  } catch {
+    state.collapsedCards = {};
+    if (localStorage.getItem(LS_COLLAPSED_CARDS_KEY)) shouldPersistMigration = true;
+  }
   const ag = localStorage.getItem(LS_ACTIVE_GROUP_KEY);
   if (ag) {
     const normalizedActiveGroup = normalizeActiveGroupSelection(ag);
@@ -2021,10 +2057,16 @@ function saveLocal() {
     normalizePlayerGroupsInState();
     ensurePlayerIdentityKeys();
     state.checkedIn = normalizeCheckedInEntries(state.checkedIn);
+    state.collapsedCards = normalizeCollapsedCardsState(state.collapsedCards);
     localStorage.setItem(LS_PLAYERS_KEY, JSON.stringify(state.players));
     localStorage.setItem(LS_CHECKIN_KEY, JSON.stringify(state.checkedIn));
     localStorage.setItem(LS_GROUPS_KEY, JSON.stringify(state.groups.filter(g => g && g !== 'All')));
     localStorage.setItem(LS_ACTIVE_GROUP_KEY, state.activeGroup || 'All');
+    if (Object.keys(state.collapsedCards).length) {
+      localStorage.setItem(LS_COLLAPSED_CARDS_KEY, JSON.stringify(state.collapsedCards));
+    } else {
+      localStorage.removeItem(LS_COLLAPSED_CARDS_KEY);
+    }
     saveGeneratedTeamsToLocal();
     if (state.isAdmin && supabaseClient) {
       queueGroupCatalogSync();
@@ -3131,6 +3173,20 @@ function render() {
   const isActiveGroupValue = (value) => normalizeActiveGroupSelection(value || 'All') === normalizedActiveGroup;
   const topFormGroupOptions = getTopFormGroupDatalistOptions();
   const topFormContext = renderTopFormGroupsHelpAndPreview('', '');
+  const isCardCollapsed = (cardId) => !!(state.collapsedCards && state.collapsedCards[cardId]);
+  const renderCardCollapseToggle = (cardId, bodyId) => {
+    const collapsed = isCardCollapsed(cardId);
+    return `
+      <button
+        type="button"
+        class="secondary card-collapse-toggle"
+        data-role="toggle-card-collapse"
+        data-card-id="${escapeHTML(cardId)}"
+        aria-controls="${escapeHTML(bodyId)}"
+        aria-expanded="${collapsed ? 'false' : 'true'}"
+      >${collapsed ? 'Expand' : 'Collapse'}</button>
+    `;
+  };
 
   // Build registration and check‑in messages
   const regMsg = messages.registration ? `<p class="msg">${escapeHTML(messages.registration)}</p>` : '';
@@ -3264,7 +3320,13 @@ function render() {
         </div>
       </div>
       <div class="card card-add-player">
-        <h3>Add/Update Player</h3>
+        <div class="card-collapsible-head">
+          <h3>Add/Update Player</h3>
+          <div class="card-collapsible-head-actions">
+            ${renderCardCollapseToggle('admin-add-player', 'card-body-admin-add-player')}
+          </div>
+        </div>
+        <div id="card-body-admin-add-player" class="card-collapse-body ${isCardCollapsed('admin-add-player') ? 'is-collapsed' : ''}">
         <div class="row admin-player-form-row">
           <input type="text" id="admin-player-name" placeholder="Name" />
           <input type="number" id="admin-player-skill" placeholder="Skill" step="0.1" />
@@ -3288,9 +3350,16 @@ function render() {
           </div>
           <button id="btn-save-player" class="admin-player-save-btn">Save</button>
         </div>
+        </div>
       </div>
      <div class="card card-generate-teams">
-  <h3>Generate Teams</h3>
+  <div class="card-collapsible-head">
+    <h3>Generate Teams</h3>
+    <div class="card-collapsible-head-actions">
+      ${renderCardCollapseToggle('admin-generate-teams', 'card-body-admin-generate-teams')}
+    </div>
+  </div>
+  <div id="card-body-admin-generate-teams" class="card-collapse-body ${isCardCollapsed('admin-generate-teams') ? 'is-collapsed' : ''}">
   <p class="small generate-teams-summary">
     Teams of 6: <strong>${Math.floor(state.checkedIn.length / 6)}</strong> |
     Teams of 4: <strong>${Math.floor(state.checkedIn.length / 4)}</strong> |
@@ -3306,11 +3375,17 @@ function render() {
   ${teamsFairnessHTML}
   ${liveMatchupsHTML}
   ${teamsHTML}
+  </div>
 </div>
-<div class="row" style="justify-content:space-between; align-items:center; margin-top:8px;">
-  <h3>Players${normalizedActiveGroup !== 'All' ? ` <span class="small" style="font-weight:500;">(${escapeHTML(activeGroupLabel)} Roster)</span>` : ''}</h3>
-  <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
-</div>
+<div class="card card-players">
+  <div class="card-collapsible-head">
+    <h3>Players${normalizedActiveGroup !== 'All' ? ` <span class="small" style="font-weight:500;">(${escapeHTML(activeGroupLabel)} Roster)</span>` : ''}</h3>
+    <div class="card-collapsible-head-actions">
+      <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
+      ${renderCardCollapseToggle('admin-players', 'card-body-admin-players')}
+    </div>
+  </div>
+  <div id="card-body-admin-players" class="card-collapse-body ${isCardCollapsed('admin-players') ? 'is-collapsed' : ''}">
   <!-- Collapsible body: put ALL your filter controls INSIDE this div -->
   <div id="filtersBody">
     <h4 style="margin-bottom: 0.5rem;">Filters</h4>
@@ -3433,6 +3508,8 @@ function render() {
   <div class="players">
     ${renderFilteredPlayers()}
   </div>
+  </div>
+</div>
 </div>
   ` : '';
 
@@ -3482,23 +3559,37 @@ ${state.isAdmin && !state.limitedGroup ? `
   </div>
 ` : ''}
       ${adminLoginHTML}
-      <div class="grid-2">
+  <div class="grid-2">
   <div class="card card-checkin">
-    <h2>Check In</h2>
+    <div class="card-collapsible-head">
+      <h2>Check In</h2>
+      <div class="card-collapsible-head-actions">
+        ${renderCardCollapseToggle('public-checkin', 'card-body-public-checkin')}
+      </div>
+    </div>
+    <div id="card-body-public-checkin" class="card-collapse-body ${isCardCollapsed('public-checkin') ? 'is-collapsed' : ''}">
     <input type="text" id="check-name" placeholder="First and Last Name" />
     <div class="row checkin-actions">
       <button id="btn-check-in">Check In</button>
       <button id="btn-check-out">Check Out</button>
     </div>
     ${checkMsg}
+    </div>
   </div>
 
   ${!state.isAdmin ? `
-  <div class="card">
-    <h2>Register Player</h2>
+  <div class="card card-register">
+    <div class="card-collapsible-head">
+      <h2>Register Player</h2>
+      <div class="card-collapsible-head-actions">
+        ${renderCardCollapseToggle('public-register', 'card-body-public-register')}
+      </div>
+    </div>
+    <div id="card-body-public-register" class="card-collapse-body ${isCardCollapsed('public-register') ? 'is-collapsed' : ''}">
     <input type="text" id="register-name" placeholder="First and Last Name" />
     <button id="btn-register">Register</button>
     ${regMsg}
+    </div>
   </div>
   ` : ``}
 </div>
