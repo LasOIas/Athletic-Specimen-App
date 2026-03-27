@@ -26,6 +26,7 @@ const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
 const UNGROUPED_FILTER_VALUE = '__ungrouped__';
 const UNGROUPED_FILTER_LABEL = 'Ungrouped (No Groups)';
 const GROUP_CATALOG_NAME_PREFIX = '__as_group__:';
+const GROUPS_TAG_PREFIX = '__as_groups__:';
 
 const selectedSet = () => new Set(state.selectedIds || []);
 
@@ -370,10 +371,14 @@ function openInlineEditRow(row) {
         try {
           let remoteOK = false;
           if (next.id) {
-            remoteOK = await updatePlayerFieldsSupabase(next.id, { name, skill, group });
+            remoteOK = await updatePlayerFieldsSupabase(next.id, { name, skill, group, groups });
           } else {
+            const encodedGroupsTag = serializePlayerGroupsTag(groups, group);
             try {
-              const { error } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+              const insertRow = HAS_TAG
+                ? { name, skill, group, tag: encodedGroupsTag }
+                : { name, skill, group };
+              const { error } = await supabaseClient.from('players').insert([insertRow]).select();
               if (error) throw error;
             } catch {
               try {
@@ -610,6 +615,49 @@ function parseGroupCatalogRowName(rowName) {
   const name = String(rowName || '');
   if (!name.startsWith(GROUP_CATALOG_NAME_PREFIX)) return '';
   return normalizeGroupName(name.slice(GROUP_CATALOG_NAME_PREFIX.length));
+}
+
+function serializePlayerGroupsTag(groups, primaryGroup = '') {
+  const primary = normalizeGroupName(primaryGroup);
+  const normalized = normalizeGroupList(groups);
+  const ordered = normalizeGroupList([
+    ...(primary ? [primary] : []),
+    ...normalized
+  ]);
+  if (!ordered.length) return '';
+  try {
+    return `${GROUPS_TAG_PREFIX}${encodeURIComponent(JSON.stringify(ordered))}`;
+  } catch {
+    return '';
+  }
+}
+
+function parsePlayerGroupsTag(rawTagValue) {
+  const raw = String(rawTagValue || '').trim();
+  if (!raw.startsWith(GROUPS_TAG_PREFIX)) return null;
+  const encoded = raw.slice(GROUPS_TAG_PREFIX.length);
+  if (!encoded) return [];
+  try {
+    const parsed = JSON.parse(decodeURIComponent(encoded));
+    return normalizeGroupList(parsed);
+  } catch {
+    return [];
+  }
+}
+
+function parseRemotePlayerGroups(row) {
+  const primaryGroup = normalizeGroupName(row && row.group);
+  const encodedGroups = parsePlayerGroupsTag(row && row.tag);
+
+  if (Array.isArray(encodedGroups) && encodedGroups.length) {
+    return normalizeGroupList([
+      ...(primaryGroup ? [primaryGroup] : []),
+      ...encodedGroups
+    ]);
+  }
+
+  const fallbackPrimary = normalizeGroupName((row && (row.group || row.tag)) || '');
+  return fallbackPrimary ? [fallbackPrimary] : [];
 }
 
 function mergeRemoteGroupCatalogIntoState(groupNames) {
@@ -944,10 +992,18 @@ function queueSaveToSupabase() {
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {
     try {
+      if (!HAS_GROUP && !HAS_TAG) {
+        await detectPlayersSchema();
+      }
+
       const rows = state.players.map(p => {
         const base = { id: p.id || undefined, name: p.name, skill: p.skill };
         const grp = getPlayerPrimaryGroup(p);
-        if (HAS_GROUP)      return { ...base, group: grp };
+        if (HAS_GROUP) {
+          const row = { ...base, group: grp };
+          if (HAS_TAG) row.tag = serializePlayerGroupsTag(getPlayerGroups(p), grp);
+          return row;
+        }
         if (HAS_TAG)        return { ...base, tag: grp };
         return base; // no group-like column in table
       });
@@ -2105,14 +2161,15 @@ async function syncFromSupabase() {
         return;
       }
 
-      const group = normalizeGroupName(p.group || p.tag || '');
+      const memberships = parseRemotePlayerGroups(p);
+      const group = memberships[0] || '';
       remotePlayers.push({
         name: p.name,
         skill: Number(p.skill) || 0,
         id: p.id,
         checked_in: !!p.checked_in,
         group,
-        groups: group ? [group] : []
+        groups: memberships
       });
     });
     mergeRemoteGroupCatalogIntoState(remoteGroupCatalog);
@@ -2158,14 +2215,22 @@ async function detectPlayersSchema() {
 
 async function updatePlayerFieldsSupabase(id, fields) {
   if (!supabaseClient || !id) return false;
+  if (!HAS_GROUP && !HAS_TAG) {
+    await detectPlayersSchema();
+  }
 
-  const { group, ...rest } = fields || {};
+  const { group, groups, ...rest } = fields || {};
   const payload = { ...rest };
+  const normalizedGroup = typeof group === 'undefined' ? undefined : normalizeGroupName(group);
 
   if (typeof group !== 'undefined') {
-    if (HAS_GROUP)      payload.group = group || '';
-    else if (HAS_TAG)   payload.tag   = group || '';
-    // else: table has neither -> don’t send a group-like column
+    if (HAS_GROUP) payload.group = normalizedGroup || '';
+    else if (HAS_TAG) payload.tag = normalizedGroup || '';
+    // else: table has neither group-like column
+  }
+
+  if (HAS_GROUP && HAS_TAG && typeof groups !== 'undefined') {
+    payload.tag = serializePlayerGroupsTag(groups, normalizedGroup || '');
   }
 
   try {
@@ -2319,6 +2384,33 @@ async function backfillGroupCatalogToSupabase() {
       console.error('Supabase group catalog backfill error', err);
     }
   }
+  return wroteAny;
+}
+
+async function backfillPlayerMembershipsToSupabase() {
+  if (!supabaseClient || !state.isAdmin || !HAS_GROUP || !HAS_TAG) return false;
+
+  let wroteAny = false;
+  const updates = (state.players || [])
+    .filter((player) => player && player.id)
+    .map((player) => ({
+      id: player.id,
+      group: getPlayerPrimaryGroup(player),
+      groups: getPlayerGroups(player)
+    }));
+
+  for (const update of updates) {
+    try {
+      const ok = await updatePlayerFieldsSupabase(update.id, {
+        group: update.group,
+        groups: update.groups
+      });
+      if (ok) wroteAny = true;
+    } catch (err) {
+      console.error('Supabase player membership backfill error', err);
+    }
+  }
+
   return wroteAny;
 }
 
@@ -3820,8 +3912,16 @@ if (gmOpen && gmRoot) {
 
       try {
         await renameGroupCatalogEntrySupabase(oldName, newName);
-        const ids = state.players.filter(p => p.group === newName).map(p => p.id).filter(Boolean);
-        for (const id of ids) { await updatePlayerFieldsSupabase(id, { group: newName }); }
+        const updates = state.players
+          .filter((player) => player.id && getPlayerGroups(player).includes(newName))
+          .map((player) => ({
+            id: player.id,
+            group: getPlayerPrimaryGroup(player),
+            groups: getPlayerGroups(player)
+          }));
+        for (const update of updates) {
+          await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+        }
         await syncFromSupabase();
       } catch (e) { console.error('Supabase rename error', e); }
 
@@ -3848,8 +3948,16 @@ if (gmOpen && gmRoot) {
 
       try {
         await deleteGroupCatalogEntrySupabase(name);
-        const ids = state.players.filter(p => !p.group).map(p => p.id).filter(Boolean);
-        for (const id of ids) { await updatePlayerFieldsSupabase(id, { group: '' }); }
+        const updates = state.players
+          .filter((player) => player.id)
+          .map((player) => ({
+            id: player.id,
+            group: getPlayerPrimaryGroup(player),
+            groups: getPlayerGroups(player)
+          }));
+        for (const update of updates) {
+          await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+        }
         await syncFromSupabase();
       } catch (e) { console.error('Supabase delete group error', e); }
 
@@ -3880,8 +3988,9 @@ if (loginBtn) {
       await syncFromSupabase();                  // re-fetch full dataset
       if (state.isAdmin) {
         (async () => {
-          await backfillGroupCatalogToSupabase();
-          queueSupabaseRefresh();
+          const catalogSynced = await backfillGroupCatalogToSupabase();
+          const membershipsSynced = await backfillPlayerMembershipsToSupabase();
+          if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
         })();
       }
       render();
@@ -3903,8 +4012,9 @@ if (loginBtn) {
       await syncFromSupabase();                  // re-fetch only that group
       if (state.isAdmin) {
         (async () => {
-          await backfillGroupCatalogToSupabase();
-          queueSupabaseRefresh();
+          const catalogSynced = await backfillGroupCatalogToSupabase();
+          const membershipsSynced = await backfillPlayerMembershipsToSupabase();
+          if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
         })();
       }
       render();
@@ -3972,7 +4082,12 @@ if (logoutBtn) {
             try {
               let remoteOK = false;
               if (updated[idx].id) {
-                remoteOK = await updatePlayerFieldsSupabase(updated[idx].id, { name, skill, group: nextPrimary });
+                remoteOK = await updatePlayerFieldsSupabase(updated[idx].id, {
+                  name,
+                  skill,
+                  group: nextPrimary,
+                  groups: nextGroups
+                });
               }
               const catalogOK = await ensureGroupCatalogEntriesSupabase(nextGroups);
               if (remoteOK || catalogOK) queueSupabaseRefresh();
@@ -3997,8 +4112,12 @@ if (logoutBtn) {
           (async () => {
             try {
               let remoteOK = false;
+              const encodedGroupsTag = serializePlayerGroupsTag(groups, group);
               try {
-                const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+                const insertRow = HAS_TAG
+                  ? { name, skill, group, tag: encodedGroupsTag }
+                  : { name, skill, group };
+                const { data } = await supabaseClient.from('players').insert([insertRow]).select();
                 remoteOK = true;
                 if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
               } catch {
@@ -4139,8 +4258,9 @@ if (logoutBtn) {
         const group = state.limitedGroup
           ? state.limitedGroup
           : (activeGroupForRegister && activeGroupForRegister !== 'All' && activeGroupForRegister !== UNGROUPED_FILTER_VALUE ? activeGroupForRegister : '');
+        const groups = group ? [group] : [];
         const skill = 0.0;
-        const newPlayer = { name, skill, group };
+        const newPlayer = { name, skill, group, groups };
         const inserted = { ...newPlayer };
         state.players = [...state.players, inserted];
 
@@ -4148,8 +4268,12 @@ if (logoutBtn) {
           (async () => {
             try {
               let remoteOK = false;
+              const encodedGroupsTag = serializePlayerGroupsTag(groups, group);
               try {
-                const { data } = await supabaseClient.from('players').insert([{ name, skill, group }]).select();
+                const insertRow = HAS_TAG
+                  ? { name, skill, group, tag: encodedGroupsTag }
+                  : { name, skill, group };
+                const { data } = await supabaseClient.from('players').insert([insertRow]).select();
                 remoteOK = true;
                 if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
               } catch {
@@ -4478,7 +4602,7 @@ if (assignBtn) {
       if (hasSameGroups && getPlayerPrimaryGroup(player) === nextPrimary) return player;
 
       const nextPlayer = { ...player, group: nextPrimary, groups: nextGroups };
-      if (nextPlayer.id) remoteUpdates.push({ id: nextPlayer.id, group: nextPrimary });
+      if (nextPlayer.id) remoteUpdates.push({ id: nextPlayer.id, group: nextPrimary, groups: nextGroups });
       return nextPlayer;
     });
 
@@ -4486,7 +4610,7 @@ if (assignBtn) {
     try {
       const catalogTouched = await ensureGroupCatalogEntriesSupabase([dest]);
       for (const update of remoteUpdates) {
-        await updatePlayerFieldsSupabase(update.id, { group: update.group });
+        await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
       }
       if (remoteUpdates.length || catalogTouched) await syncFromSupabase();
     } catch (e) {
@@ -4524,14 +4648,14 @@ if (removeBtn) {
       const nextGroups = currentGroups.filter((group) => group !== targetGroup);
       const nextPrimary = nextGroups[0] || '';
       const nextPlayer = { ...player, group: nextPrimary, groups: nextGroups };
-      if (nextPlayer.id) remoteUpdates.push({ id: nextPlayer.id, group: nextPrimary });
+      if (nextPlayer.id) remoteUpdates.push({ id: nextPlayer.id, group: nextPrimary, groups: nextGroups });
       return nextPlayer;
     });
 
     // Supabase updates (primary group only)
     try {
       for (const update of remoteUpdates) {
-        await updatePlayerFieldsSupabase(update.id, { group: update.group });
+        await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
       }
       if (remoteUpdates.length) await syncFromSupabase();
     } catch (e) {
@@ -4566,8 +4690,9 @@ function init() {
     await syncFromSupabase();
     if (state.isAdmin) {
       (async () => {
-        await backfillGroupCatalogToSupabase();
-        queueSupabaseRefresh();
+        const catalogSynced = await backfillGroupCatalogToSupabase();
+        const membershipsSynced = await backfillPlayerMembershipsToSupabase();
+        if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
       })();
     }
     render();
@@ -4585,3 +4710,4 @@ if (document.readyState === 'loading') {
   initTournamentView();
   bindTournamentTab();
 }
+
