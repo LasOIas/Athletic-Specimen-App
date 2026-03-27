@@ -2044,11 +2044,11 @@ function mergePlayersAfterSync(remotePlayers) {
     const prev = prevById.get(String(remotePlayer.id));
     if (!prev) return remotePlayer;
 
-    const remotePrimary = getPlayerPrimaryGroup(remotePlayer);
+    const remoteGroups = getPlayerGroups(remotePlayer);
     const prevGroups = getPlayerGroups(prev);
     const groups = normalizeGroupList([
-      ...(remotePrimary ? [remotePrimary] : []),
-      ...prevGroups.filter((group) => group !== remotePrimary)
+      ...remoteGroups,
+      ...prevGroups
     ]);
 
     return { ...remotePlayer, group: groups[0] || '', groups };
