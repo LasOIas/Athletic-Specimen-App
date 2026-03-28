@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.11';
+const APP_VERSION = '2026.03.27.12';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -28,6 +28,7 @@ const UNGROUPED_FILTER_VALUE = '__ungrouped__';
 const UNGROUPED_FILTER_LABEL = 'Ungrouped (No Groups)';
 const GROUP_CATALOG_NAME_PREFIX = '__as_group__:';
 const GROUPS_TAG_PREFIX = '__as_groups__:';
+const SUPABASE_AUTHORITATIVE = true;
 
 const selectedSet = () => new Set(state.selectedIds || []);
 
@@ -1056,6 +1057,7 @@ let groupCatalogSyncTimeout;
 let groupCatalogSyncQueued = false;
 let groupCatalogSyncRunning = false;
 let lastGroupCatalogSyncSignature = '';
+let crossDeviceRefreshInterval = null;
 function queueSupabaseRefresh(delay = 160) {
   if (!supabaseClient) return;
   refreshQueued = true;
@@ -2091,6 +2093,28 @@ function saveLocal() {
 }
 
 function mergePlayersAfterSync(remotePlayers) {
+  const remoteList = Array.isArray(remotePlayers) ? remotePlayers : [];
+  const cleanedRemotePlayers = remoteList.map((remotePlayer) => {
+    if (!remotePlayer || typeof remotePlayer !== 'object') return remotePlayer;
+    const { hasEncodedGroups: _ignoredFlag, ...remoteWithoutFlag } = remotePlayer;
+    const groups = getPlayerGroups(remoteWithoutFlag);
+    return { ...remoteWithoutFlag, group: groups[0] || '', groups };
+  });
+
+  const remoteChecked = new Set(
+    cleanedRemotePlayers
+      .filter((p) => p && p.checked_in)
+      .map((p) => playerIdentityKey(p))
+      .filter(Boolean)
+  );
+
+  if (SUPABASE_AUTHORITATIVE) {
+    return {
+      players: cleanedRemotePlayers,
+      checkedIn: [...remoteChecked]
+    };
+  }
+
   const prevPlayers = Array.isArray(state.players) ? state.players : [];
   const prevChecked = new Set(state.checkedIn || []);
   ensurePlayerIdentityKeys();
@@ -2101,7 +2125,7 @@ function mergePlayersAfterSync(remotePlayers) {
     prevById.set(String(player.id), player);
   });
 
-  const mergedRemotePlayers = (Array.isArray(remotePlayers) ? remotePlayers : []).map((remotePlayer) => {
+  const mergedRemotePlayers = cleanedRemotePlayers.map((remotePlayer) => {
     if (!remotePlayer || typeof remotePlayer !== 'object' || !remotePlayer.id) return remotePlayer;
     const prev = prevById.get(String(remotePlayer.id));
     if (!prev) return remotePlayer;
@@ -2116,8 +2140,7 @@ function mergePlayersAfterSync(remotePlayers) {
           ...prevGroups
         ]);
 
-    const { hasEncodedGroups: _ignoredFlag, ...remoteWithoutFlag } = remotePlayer;
-    return { ...remoteWithoutFlag, group: groups[0] || '', groups };
+    return { ...remotePlayer, group: groups[0] || '', groups };
   });
 
   const remoteByName = new Map();
@@ -2152,13 +2175,6 @@ function mergePlayersAfterSync(remotePlayers) {
     preservedLocalOnly.push(p);
     if (localWasChecked) carriedChecked.add(localKey);
   });
-
-  const remoteChecked = new Set(
-    mergedRemotePlayers
-      .filter((p) => p.checked_in)
-      .map((p) => playerIdentityKey(p))
-      .filter(Boolean)
-  );
 
   return {
     players: [...mergedRemotePlayers, ...preservedLocalOnly],
@@ -2245,12 +2261,21 @@ async function syncFromSupabase() {
         hasEncodedGroups: membershipDetails.hasEncodedGroups
       });
     });
-    mergeRemoteGroupCatalogIntoState(remoteGroupCatalog);
-
     const merged = mergePlayersAfterSync(remotePlayers);
     state.players = merged.players;
     normalizePlayerGroupsInState();
     state.checkedIn = normalizeCheckedInEntries(merged.checkedIn);
+    if (SUPABASE_AUTHORITATIVE) {
+      const groupsFromPlayers = normalizeGroupList(
+        state.players.flatMap((player) => getPlayerGroups(player))
+      );
+      state.groups = ['All', ...normalizeGroupList([
+        ...remoteGroupCatalog,
+        ...groupsFromPlayers
+      ])];
+    } else {
+      mergeRemoteGroupCatalogIntoState(remoteGroupCatalog);
+    }
     state.loaded = true;
   } catch (err) {
     console.error('Error syncing from Supabase', err);
@@ -5023,8 +5048,11 @@ if (removeBtn) {
 function init() {
   // Load from localStorage
   loadLocal();
-  // Render immediately from local state; remote schema detect/sync runs in background.
-  render();
+  // If Supabase is unavailable, local data is the runtime source.
+  // When Supabase is available, sync first and render from cloud-backed state.
+  if (!supabaseClient) {
+    render();
+  }
 
   // Register service worker for PWA offline support
   if ('serviceWorker' in navigator) {
@@ -5034,18 +5062,28 @@ function init() {
   }
 
   // Sync from supabase if available
-  (async () => {
-    await detectPlayersSchema();
-    await syncFromSupabase();
-    if (state.isAdmin) {
-      (async () => {
-        const catalogSynced = await backfillGroupCatalogToSupabase();
-        const membershipsSynced = await backfillPlayerMembershipsToSupabase();
-        if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
-      })();
-    }
-    render();
-  })();
+  if (supabaseClient) {
+    (async () => {
+      await detectPlayersSchema();
+      await syncFromSupabase();
+      if (state.isAdmin) {
+        (async () => {
+          const catalogSynced = await backfillGroupCatalogToSupabase();
+          const membershipsSynced = await backfillPlayerMembershipsToSupabase();
+          if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
+        })();
+      }
+      render();
+
+      if (!crossDeviceRefreshInterval) {
+        // Keep multiple devices converged without requiring a full page refresh.
+        crossDeviceRefreshInterval = setInterval(() => {
+          if (document.hidden) return;
+          queueSupabaseRefresh(0);
+        }, 15000);
+      }
+    })();
+  }
 }
 
 if (document.readyState === 'loading') {
