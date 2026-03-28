@@ -58,80 +58,17 @@
     <div class="tournament-sheet">
       <div class="tournament-header">
         <h2>Tournament Center</h2>
-        <button id="closeTournamentBtn">Close</button>
-      </div>
-
-      <!-- Select tournament -->
-      <div class="card mb-12">
-        <div class="tournament-actions">
+        <div class="tournament-actions mb-8">
           <label for="tournamentSelect">Tournament</label>
-              <select id="tournamentSelect" class="min-w-220"></select>
+          <select id="tournamentSelect" class="min-w-220"></select>
+          <button id="closeTournamentBtn">Close</button>
         </div>
       </div>
 
-      <!-- Public next matches -->
-      <div class="card mb-12">
-        <h3 class="mt-0">Public Schedule and Next Match</h3>
-        <div id="publicNextMatches"></div>
-      </div>
-
-      <!-- Pool standings -->
-      <div class="card mb-12">
-        <h3 class="mt-0">Pool Standings</h3>
-        <div id="poolStandings"></div>
-      </div>
-
-      <!-- Report score -->
-      <div class="card mb-12">
-        <h3 class="mt-0">Report Score</h3>
-        <div class="tournament-actions mb-8">
-          <label for="reportMatchSelect">Match</label>
-          <select id="reportMatchSelect" class="min-w-280"></select>
-
-          <label for="teamA_score">Team A</label>
-          <input id="teamA_score" type="number" min="0" step="1" class="w-90" />
-
-          <label for="teamB_score">Team B</label>
-          <input id="teamB_score" type="number" min="0" step="1" class="w-90" />
-
-          <label for="reporterTeam">Your team name</label>
-          <input id="reporterTeam" type="text" placeholder="Type your team name" class="min-w-180" />
-
-          <button id="submitScoreBtn">Submit score</button>
-        </div>
-        <p id="reportStatus" class="small m-0"></p>
-      </div>
-
-      <!-- Admin area (auto-hidden if not admin) -->
-      <div id="adminTournament" class="card mb-12">
-        <h3 class="mt-0">Admin Setup</h3>
-
-        <div class="tournament-actions mb-8">
-          <input id="newTournamentName" type="text" placeholder="Tournament name" />
-          <input id="newTournamentNets" type="number" min="1" value="3" class="w-100" />
-          <button id="createTournamentBtn">Create</button>
-        </div>
-
-        <h4 class="my-8">Add teams (one per line)</h4>
-        <textarea id="bulkTeams" rows="6" class="full-width"></textarea>
-        <div class="my-8">
-          <button id="addTeamsBtn">Add teams</button>
-        </div>
-
-        <h4 class="my-8">Pools JSON</h4>
-        <p class="small m-0 mb-6">
-          Example:
-          <code>[{"name":"Pool A","teams":["Team 1","Team 2","Team 3","Team 4"]},{"name":"Pool B","teams":["Team 5","Team 6","Team 7","Team 8"]}]</code>
-        </p>
-        <textarea id="poolsJson" rows="6" class="full-width">[]</textarea>
-        <div class="tournament-actions my-8">
-          <button id="savePoolsBtn">Save pools</button>
-          <button id="generatePoolScheduleBtn">Generate pool schedule</button>
-        </div>
-
-        <h4 class="my-8">Admin Rankings</h4>
-        <div id="adminRankings"></div>
-      </div>
+      <div id="tournamentGlobalNotice" class="small mb-8"></div>
+      <div id="tournamentHeaderCard" class="card mb-12"></div>
+      <div id="adminTournament" class="card mb-12"></div>
+      <div id="publicTournamentView" class="card mb-12"></div>
     </div>
   </div>
 
