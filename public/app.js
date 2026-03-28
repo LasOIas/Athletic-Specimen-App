@@ -311,7 +311,11 @@ function restoreTransientInteractionState(snapshot) {
     }
 
     // 2) Keep clicks inside an open dropdown from closing it via bubbling
-    if (e.target.closest('.card-menu')) {
+    if (
+      e.target.closest('.card-menu') &&
+      !e.target.closest('[data-role="menu-edit"]') &&
+      !e.target.closest('[data-role="menu-delete"]')
+    ) {
       e.stopPropagation();
       return;
     }
