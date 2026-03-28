@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.16';
+const APP_VERSION = '2026.03.27.17';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -752,6 +752,77 @@ function playerBelongsToGroup(player, groupName) {
 
 function isPlayerUngrouped(player) {
   return getPlayerGroups(player).length === 0;
+}
+
+function sanitizePlayersAgainstAllowedGroups(allowedGroups) {
+  const allowed = normalizeGroupList(allowedGroups);
+  if (!allowed.length) return false;
+  const allowedKeys = new Set(allowed.map((groupName) => normalizeGroupKey(groupName)));
+
+  let changed = false;
+  state.players = (state.players || []).map((player) => {
+    if (!player || typeof player !== 'object') return player;
+    const currentGroups = getPlayerGroups(player);
+    const nextGroups = currentGroups.filter((groupName) => allowedKeys.has(normalizeGroupKey(groupName)));
+    const nextPrimary = nextGroups[0] || '';
+    const currentPrimary = normalizeGroupName(player.group || '');
+    const groupsUnchanged = currentGroups.length === nextGroups.length &&
+      currentGroups.every((groupName, index) => groupName === nextGroups[index]);
+    if (groupsUnchanged && currentPrimary === nextPrimary) return player;
+    changed = true;
+    return { ...player, group: nextPrimary, groups: nextGroups };
+  });
+
+  return changed;
+}
+
+function enforceCanonicalGroupState(options = {}) {
+  const catalogGroups = Array.isArray(options.catalogGroups)
+    ? normalizeGroupList(options.catalogGroups)
+    : null;
+  const includeExistingGroupsWhenNoCatalog = options.includeExistingGroupsWhenNoCatalog !== false;
+  const hasCatalog = Array.isArray(catalogGroups) && catalogGroups.length > 0;
+
+  normalizePlayerGroupsInState();
+  if (hasCatalog) {
+    sanitizePlayersAgainstAllowedGroups(catalogGroups);
+  }
+  normalizePlayerGroupsInState();
+
+  const groupsFromPlayers = normalizeGroupList(
+    (state.players || []).flatMap((player) => getPlayerGroups(player))
+  );
+  const existingGroups = includeExistingGroupsWhenNoCatalog
+    ? normalizeGroupList((state.groups || []).filter((groupName) => groupName && groupName !== 'All'))
+    : [];
+  const canonicalGroups = hasCatalog
+    ? catalogGroups
+    : normalizeGroupList([
+        ...existingGroups,
+        ...groupsFromPlayers
+      ]);
+  const withLimited = state.limitedGroup
+    ? normalizeGroupList([state.limitedGroup, ...canonicalGroups])
+    : canonicalGroups;
+  state.groups = ['All', ...withLimited];
+
+  const currentActive = normalizeActiveGroupSelection(state.activeGroup || 'All');
+  if (state.limitedGroup) {
+    state.activeGroup = normalizeGroupName(state.limitedGroup);
+  } else if (currentActive === 'All' || currentActive === UNGROUPED_FILTER_VALUE) {
+    state.activeGroup = currentActive;
+  } else {
+    const activeKey = normalizeGroupKey(currentActive);
+    const match = withLimited.find((groupName) => normalizeGroupKey(groupName) === activeKey);
+    state.activeGroup = match || 'All';
+  }
+}
+
+function persistCanonicalGroupCache() {
+  try {
+    localStorage.setItem(LS_GROUPS_KEY, JSON.stringify(getAvailableGroups()));
+    localStorage.setItem(LS_ACTIVE_GROUP_KEY, normalizeActiveGroupSelection(state.activeGroup || 'All'));
+  } catch {}
 }
 
 function normalizePlayerGroupShape(player) {
@@ -1921,14 +1992,8 @@ function normalizeCollapsedCardsState(value) {
 }
 
 function getAvailableGroups() {
-  const fromPlayersSet = new Set();
-  (state.players || []).forEach((player) => {
-    getPlayerGroups(player).forEach((group) => fromPlayersSet.add(group));
-  });
-  const fromPlayers = Array.from(fromPlayersSet);
-  const merged = Array.from(new Set([...(state.groups || []).filter(g => g && g !== 'All'), ...fromPlayers]));
-  // Return available groups for selection (exclude the 'All' sentinel)
-  return merged.filter(Boolean);
+  // Canonical group list for UI selection comes from state.groups.
+  return normalizeGroupList((state.groups || []).filter((groupName) => groupName && groupName !== 'All'));
 }
 
 function showTournamentView(show) {
@@ -2189,10 +2254,13 @@ function loadLocal() {
   const storedSubtab = sessionStorage.getItem(LS_SUBTAB_KEY);
   if (storedSubtab) state.skillSubTab = storedSubtab;
 
-  try {
-    const groups = JSON.parse(localStorage.getItem(LS_GROUPS_KEY) || '[]');
-    if (Array.isArray(groups) && groups.length) state.groups = Array.from(new Set(['All', ...groups.filter(Boolean)]));
-  } catch {}
+  const authoritativeSharedData = SUPABASE_AUTHORITATIVE && !!supabaseClient;
+  if (!authoritativeSharedData) {
+    try {
+      const groups = JSON.parse(localStorage.getItem(LS_GROUPS_KEY) || '[]');
+      if (Array.isArray(groups) && groups.length) state.groups = Array.from(new Set(['All', ...groups.filter(Boolean)]));
+    } catch {}
+  }
   try {
     const storedCollapsedCards = JSON.parse(localStorage.getItem(LS_COLLAPSED_CARDS_KEY) || '{}');
     const normalizedCollapsedCards = normalizeCollapsedCardsState(storedCollapsedCards);
@@ -2217,6 +2285,19 @@ function loadLocal() {
   if (lim) {
     state.limitedGroup = lim;
     state.activeGroup = lim;
+  }
+
+  const beforeCanonicalGroups = JSON.stringify(state.groups || []);
+  const beforeCanonicalActive = normalizeActiveGroupSelection(state.activeGroup || 'All');
+  if (authoritativeSharedData) {
+    enforceCanonicalGroupState({ includeExistingGroupsWhenNoCatalog: false });
+  } else {
+    enforceCanonicalGroupState();
+  }
+  const afterCanonicalGroups = JSON.stringify(state.groups || []);
+  const afterCanonicalActive = normalizeActiveGroupSelection(state.activeGroup || 'All');
+  if (beforeCanonicalGroups !== afterCanonicalGroups || beforeCanonicalActive !== afterCanonicalActive) {
+    shouldPersistMigration = true;
   }
 
   if (shouldPersistMigration) saveLocal();
@@ -2433,15 +2514,14 @@ async function syncFromSupabase() {
     normalizePlayerGroupsInState();
     state.checkedIn = normalizeCheckedInEntries(merged.checkedIn);
     if (SUPABASE_AUTHORITATIVE) {
-      const groupsFromPlayers = normalizeGroupList(
-        state.players.flatMap((player) => getPlayerGroups(player))
-      );
-      state.groups = ['All', ...normalizeGroupList([
-        ...remoteGroupCatalog,
-        ...groupsFromPlayers
-      ])];
+      enforceCanonicalGroupState({
+        catalogGroups: remoteGroupCatalog,
+        includeExistingGroupsWhenNoCatalog: false
+      });
+      persistCanonicalGroupCache();
     } else {
       mergeRemoteGroupCatalogIntoState(remoteGroupCatalog);
+      enforceCanonicalGroupState();
     }
     state.loaded = true;
     if (SUPABASE_AUTHORITATIVE) {
@@ -4498,6 +4578,11 @@ if (gmOpen && gmRoot) {
         return { ...player, group: nextGroups[0] || '', groups: nextGroups };
       });
       if (normalizeGroupKey(state.activeGroup || '') === targetKey) state.activeGroup = 'All';
+      enforceCanonicalGroupState({
+        catalogGroups: (state.groups || []).filter((groupName) => groupName && groupName !== 'All'),
+        includeExistingGroupsWhenNoCatalog: false
+      });
+      persistCanonicalGroupCache();
 
       let deleteRemoteFailed = false;
       try {
