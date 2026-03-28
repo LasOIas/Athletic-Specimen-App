@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.12';
+const APP_VERSION = '2026.03.27.14';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -1058,6 +1058,7 @@ let groupCatalogSyncQueued = false;
 let groupCatalogSyncRunning = false;
 let lastGroupCatalogSyncSignature = '';
 let crossDeviceRefreshInterval = null;
+let supabaseLiveSyncChannel = null;
 function queueSupabaseRefresh(delay = 160) {
   if (!supabaseClient) return;
   refreshQueued = true;
@@ -1065,6 +1066,24 @@ function queueSupabaseRefresh(delay = 160) {
   refreshTimeout = setTimeout(() => {
     void runQueuedSupabaseRefresh();
   }, Math.max(0, Number(delay) || 0));
+}
+
+function ensureSupabaseLiveSync() {
+  if (!supabaseClient || supabaseLiveSyncChannel) return;
+  try {
+    supabaseLiveSyncChannel = supabaseClient
+      .channel('athletic-specimen-live-sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'players' },
+        () => {
+          queueSupabaseRefresh(0);
+        }
+      )
+      .subscribe();
+  } catch (err) {
+    console.error('Supabase live sync subscribe error', err);
+  }
 }
 
 async function runQueuedSupabaseRefresh() {
@@ -1769,8 +1788,7 @@ function getAvailableGroups() {
     getPlayerGroups(player).forEach((group) => fromPlayersSet.add(group));
   });
   const fromPlayers = Array.from(fromPlayersSet);
-  const fromConfig = Array.from(new Set(Object.values(state.adminCodeMap || ADMIN_CODE_MAP || {}).map(v => String(v || '').trim()).filter(Boolean)));
-  const merged = Array.from(new Set([...(state.groups || []).filter(g => g && g !== 'All'), ...fromPlayers, ...fromConfig]));
+  const merged = Array.from(new Set([...(state.groups || []).filter(g => g && g !== 'All'), ...fromPlayers]));
   // Return available groups for selection (exclude the 'All' sentinel)
   return merged.filter(Boolean);
 }
@@ -5056,9 +5074,15 @@ function init() {
 
   // Register service worker for PWA offline support
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch((err) => {
-      console.warn('Service worker registration failed', err);
-    });
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+      .then((registration) => {
+        if (registration && typeof registration.update === 'function') {
+          registration.update().catch(() => {});
+        }
+      })
+      .catch((err) => {
+        console.warn('Service worker registration failed', err);
+      });
   }
 
   // Sync from supabase if available
@@ -5066,6 +5090,7 @@ function init() {
     (async () => {
       await detectPlayersSchema();
       await syncFromSupabase();
+      ensureSupabaseLiveSync();
       if (state.isAdmin) {
         (async () => {
           const catalogSynced = await backfillGroupCatalogToSupabase();

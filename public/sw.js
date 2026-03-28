@@ -1,4 +1,4 @@
-const CACHE_NAME = 'athletic-specimen-cache-v3';
+const CACHE_NAME = 'athletic-specimen-cache-v4';
 const ASSETS = [
   '/',
   '/index.html',
