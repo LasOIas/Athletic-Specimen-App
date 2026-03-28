@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.14';
+const APP_VERSION = '2026.03.27.15';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -280,14 +280,18 @@ function openInlineEditRow(row) {
 
       const removed = state.players[idx];
 
-      try {
-        if (supabaseClient && removed.id) {
-          await supabaseClient.from('players').delete().eq('id', removed.id);
-          await syncFromSupabase();
+      let remoteDeleteFailed = false;
+      if (supabaseClient && removed.id) {
+        try {
+          const { error } = await supabaseClient.from('players').delete().eq('id', removed.id);
+          if (error) throw error;
+        } catch (err) {
+          remoteDeleteFailed = true;
+          console.error('Supabase delete error', err);
+          await reconcileToSupabaseAuthority('player-delete');
         }
-      } catch (err) {
-        console.error('Supabase delete error', err);
       }
+      if (remoteDeleteFailed) return;
 
       state.players = state.players.filter(p => String(p.id) !== id);
       checkOutPlayer(removed);
@@ -295,7 +299,7 @@ function openInlineEditRow(row) {
 
       // close any open menu and re-render
       document.querySelectorAll('.menu-wrap.menu-open').forEach(w => w.classList.remove('menu-open'));
-      queueSaveToSupabase();
+      if (supabaseClient && removed.id) queueSupabaseRefresh();
       render();
       return;
     }
@@ -369,7 +373,6 @@ function openInlineEditRow(row) {
 
     // Persist local and render immediately for responsive inline edits.
     saveLocal();
-    try { queueSaveToSupabase(); } catch {}
     closeInlineEditRow(row);
     render();
 
@@ -408,10 +411,12 @@ function openInlineEditRow(row) {
             remoteOK = true;
           }
 
-          const catalogOK = await ensureGroupCatalogEntriesSupabase(groups);
-          if (remoteOK || catalogOK) queueSupabaseRefresh();
+          await ensureGroupCatalogEntriesSupabase(groups);
+          if (remoteOK) queueSupabaseRefresh();
+          else await reconcileToSupabaseAuthority('inline-edit-save');
         } catch (err) {
           console.error('Supabase save error', err);
+          await reconcileToSupabaseAuthority('inline-edit-save');
         }
       })();
     }
@@ -564,19 +569,20 @@ function resetGeneratedTeamDragState() {
     if (!changed) return;
 
     saveLocal();
-    queueSaveToSupabase();
     render();
 
     if (supabaseClient && player.id) {
       (async () => {
         try {
-          await supabaseClient
+          const { error } = await supabaseClient
             .from('players')
             .update({ checked_in: !!inBtn })
             .eq('id', player.id);
+          if (error) throw error;
           queueSupabaseRefresh();
         } catch (err) {
           console.error(inBtn ? 'Supabase update error' : 'Supabase check-out error', err);
+          await reconcileToSupabaseAuthority(inBtn ? 'delegated-check-in' : 'delegated-check-out');
         }
       })();
     }
@@ -1024,6 +1030,7 @@ let saveTimeout;
 let forceSaveRunning = false;
 function queueSaveToSupabase() {
   if (!supabaseClient) return;
+  if (SUPABASE_AUTHORITATIVE) return;
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {
     try {
@@ -1091,7 +1098,8 @@ async function runQueuedSupabaseRefresh() {
   refreshRunning = true;
   refreshQueued = false;
   try {
-    await syncFromSupabase();
+    const synced = await syncFromSupabase();
+    if (!synced) return;
     saveLocal();
     render();
   } catch (err) {
@@ -1448,6 +1456,45 @@ function applySkillDeltaToGeneratedTeam(teamNumber, delta) {
       return { ...member, skill: clampSkillOneDecimal((Number(member.skill) || 0) + delta) };
     })
   ));
+}
+
+async function syncLiveMatchSkillsToSupabase(teamNumbers) {
+  if (!supabaseClient) return true;
+
+  const normalizedTeams = Array.from(new Set(
+    (Array.isArray(teamNumbers) ? teamNumbers : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0)
+  ));
+  if (!normalizedTeams.length) return true;
+
+  const keySet = new Set();
+  normalizedTeams.forEach((teamNumber) => {
+    const teamIndex = teamNumber - 1;
+    const team = Array.isArray(state.generatedTeams) ? state.generatedTeams[teamIndex] : null;
+    if (!Array.isArray(team)) return;
+    team.forEach((member) => {
+      const key = playerIdentityKey(member);
+      if (key) keySet.add(key);
+    });
+  });
+  if (!keySet.size) return true;
+
+  const targets = (state.players || []).filter((player) => {
+    if (!player || !player.id) return false;
+    const key = playerIdentityKey(player);
+    return keySet.has(key);
+  });
+  if (!targets.length) return true;
+
+  let allOK = true;
+  for (const player of targets) {
+    const ok = await updatePlayerFieldsSupabase(player.id, {
+      skill: clampSkillOneDecimal(Number(player.skill) || 0)
+    });
+    if (!ok) allOK = false;
+  }
+  return allOK;
 }
 
 function generateOneBalancedCandidate(eligiblePlayers, groupCount) {
@@ -2206,7 +2253,7 @@ function mergePlayersAfterSync(remotePlayers) {
 // state.players and updates state.checkedIn with identity keys for players
 // marked checked_in.
 async function syncFromSupabase() {
-  if (!supabaseClient) return;
+  if (!supabaseClient) return false;
 
   try {
     if (!HAS_GROUP && !HAS_TAG) {
@@ -2227,9 +2274,9 @@ async function syncFromSupabase() {
     const { data: fetchedData, error } = await query;
     if (error) {
       console.error('Supabase fetch error', error);
-      return;
+      return false;
     }
-    if (!Array.isArray(fetchedData)) return;
+    if (!Array.isArray(fetchedData)) return false;
 
     let data = fetchedData;
     if (state.limitedGroup) {
@@ -2295,9 +2342,25 @@ async function syncFromSupabase() {
       mergeRemoteGroupCatalogIntoState(remoteGroupCatalog);
     }
     state.loaded = true;
+    return true;
   } catch (err) {
     console.error('Error syncing from Supabase', err);
+    return false;
   }
+}
+
+async function reconcileToSupabaseAuthority(contextLabel = '') {
+  if (!supabaseClient || !SUPABASE_AUTHORITATIVE) return false;
+  const synced = await syncFromSupabase();
+  if (!synced) {
+    if (contextLabel) {
+      console.warn(`Supabase authority reconcile skipped (${contextLabel}) because sync failed.`);
+    }
+    return false;
+  }
+  saveLocal();
+  render();
+  return true;
 }
 
 // Detect whether the 'players' table uses 'group' or 'tag'
@@ -2663,8 +2726,8 @@ async function forceSaveAllToSupabase() {
   summary.catalogSynced = await backfillGroupCatalogToSupabase();
   summary.membershipsBackfilled = await backfillPlayerMembershipsToSupabase();
 
-  await syncFromSupabase();
-  saveLocal();
+  const synced = await syncFromSupabase();
+  if (synced) saveLocal();
   return summary;
 }
 
@@ -4232,8 +4295,14 @@ if (gmOpen && gmRoot) {
     gmPopulate();
     if (supabaseClient) {
       (async () => {
-        const synced = await ensureGroupCatalogEntrySupabase(name);
-        if (synced) queueSupabaseRefresh();
+        try {
+          const synced = await ensureGroupCatalogEntrySupabase(name);
+          if (synced) queueSupabaseRefresh();
+          else await reconcileToSupabaseAuthority('group-add');
+        } catch (err) {
+          console.error('Supabase group add error', err);
+          await reconcileToSupabaseAuthority('group-add');
+        }
       })();
     }
     if (input) input.value = '';
@@ -4267,6 +4336,7 @@ if (gmOpen && gmRoot) {
       });
       if (normalizeGroupKey(state.activeGroup || '') === oldKey) state.activeGroup = newName;
 
+      let renameRemoteFailed = false;
       try {
         await renameGroupCatalogEntrySupabase(oldName, newName);
         const updates = state.players
@@ -4277,10 +4347,20 @@ if (gmOpen && gmRoot) {
             groups: getPlayerGroups(player)
           }));
         for (const update of updates) {
-          await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+          const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+          if (!ok) renameRemoteFailed = true;
         }
-        await syncFromSupabase();
-      } catch (e) { console.error('Supabase rename error', e); }
+        const synced = await syncFromSupabase();
+        if (!synced) renameRemoteFailed = true;
+      } catch (e) {
+        renameRemoteFailed = true;
+        console.error('Supabase rename error', e);
+      }
+      if (renameRemoteFailed) {
+        await reconcileToSupabaseAuthority('group-rename');
+        gmPopulate();
+        return;
+      }
 
       saveLocal();
       render();
@@ -4306,6 +4386,7 @@ if (gmOpen && gmRoot) {
       });
       if (normalizeGroupKey(state.activeGroup || '') === targetKey) state.activeGroup = 'All';
 
+      let deleteRemoteFailed = false;
       try {
         await deleteGroupCatalogEntrySupabase(name);
         const updates = state.players
@@ -4316,10 +4397,20 @@ if (gmOpen && gmRoot) {
             groups: getPlayerGroups(player)
           }));
         for (const update of updates) {
-          await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+          const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+          if (!ok) deleteRemoteFailed = true;
         }
-        await syncFromSupabase();
-      } catch (e) { console.error('Supabase delete group error', e); }
+        const synced = await syncFromSupabase();
+        if (!synced) deleteRemoteFailed = true;
+      } catch (e) {
+        deleteRemoteFailed = true;
+        console.error('Supabase delete group error', e);
+      }
+      if (deleteRemoteFailed) {
+        await reconcileToSupabaseAuthority('group-delete');
+        gmPopulate();
+        return;
+      }
 
       saveLocal();
       render();
@@ -4480,11 +4571,36 @@ if (saveSupabaseBtn) {
                   group: nextPrimary,
                   groups: nextGroups
                 });
+              } else {
+                const encodedGroupsTag = serializePlayerGroupsTag(nextGroups, nextPrimary);
+                try {
+                  const insertRow = HAS_TAG
+                    ? { name, skill, group: nextPrimary, tag: encodedGroupsTag }
+                    : { name, skill, group: nextPrimary };
+                  const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
+                  if (error) throw error;
+                  if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
+                  remoteOK = true;
+                } catch {
+                  try {
+                    const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: nextPrimary }]).select();
+                    if (error) throw error;
+                    if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
+                    remoteOK = true;
+                  } catch {
+                    const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                    if (error) throw error;
+                    if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
+                    remoteOK = true;
+                  }
+                }
               }
-              const catalogOK = await ensureGroupCatalogEntriesSupabase(nextGroups);
-              if (remoteOK || catalogOK) queueSupabaseRefresh();
+              await ensureGroupCatalogEntriesSupabase(nextGroups);
+              if (remoteOK) queueSupabaseRefresh();
+              else await reconcileToSupabaseAuthority('admin-save-player-update');
             } catch (err) {
               console.error('Supabase update error', err);
+              await reconcileToSupabaseAuthority('admin-save-player-update');
             }
           })();
         }
@@ -4509,25 +4625,30 @@ if (saveSupabaseBtn) {
                 const insertRow = HAS_TAG
                   ? { name, skill, group, tag: encodedGroupsTag }
                   : { name, skill, group };
-                const { data } = await supabaseClient.from('players').insert([insertRow]).select();
+                const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
+                if (error) throw error;
                 remoteOK = true;
                 if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
               } catch {
                 try {
-                  const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+                  if (error) throw error;
                   remoteOK = true;
                   if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
                 } catch {
                   // 3rd fallback: table has neither 'group' nor 'tag'
-                  const { data } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                  if (error) throw error;
                   remoteOK = true;
                   if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
                 }
               }
-              const catalogOK = await ensureGroupCatalogEntriesSupabase(groups);
-              if (remoteOK || catalogOK) queueSupabaseRefresh();
+              await ensureGroupCatalogEntriesSupabase(groups);
+              if (remoteOK) queueSupabaseRefresh();
+              else await reconcileToSupabaseAuthority('admin-save-player-insert');
             } catch (err) {
               console.error('Supabase insert error', err);
+              await reconcileToSupabaseAuthority('admin-save-player-insert');
             }
           })();
         }
@@ -4537,7 +4658,6 @@ if (saveSupabaseBtn) {
       if (skillInput) skillInput.value = '';
       if (groupsInput) groupsInput.value = '';
       saveLocal();
-      queueSaveToSupabase();
       // Small floating toast like public registration
       try {
         const toast = document.createElement('div');
@@ -4566,10 +4686,12 @@ if (saveSupabaseBtn) {
           if (supabaseClient && player.id) {
             (async () => {
               try {
-                await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+                const { error } = await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+                if (error) throw error;
                 queueSupabaseRefresh();
               } catch (err) {
                 console.error('Supabase update error', err);
+                await reconcileToSupabaseAuthority('public-check-in');
               }
             })();
           }
@@ -4584,7 +4706,6 @@ if (saveSupabaseBtn) {
       setTimeout(() => { messages.checkIn = ''; render(); }, 3000);
       if (input) input.value = '';
       saveLocal();
-      queueSaveToSupabase();
       render();
     });
   }
@@ -4602,10 +4723,12 @@ if (saveSupabaseBtn) {
           if (supabaseClient && player.id) {
             (async () => {
               try {
-                await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+                const { error } = await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+                if (error) throw error;
                 queueSupabaseRefresh();
               } catch (err) {
                 console.error('Supabase check-out error', err);
+                await reconcileToSupabaseAuthority('public-check-out');
               }
             })();
           }
@@ -4620,7 +4743,6 @@ if (saveSupabaseBtn) {
       setTimeout(() => { messages.checkIn = ''; render(); }, 3000);
       if (input) input.value = '';
       saveLocal();
-      queueSaveToSupabase();
       render();
     });
   }
@@ -4665,24 +4787,29 @@ if (saveSupabaseBtn) {
                 const insertRow = HAS_TAG
                   ? { name, skill, group, tag: encodedGroupsTag }
                   : { name, skill, group };
-                const { data } = await supabaseClient.from('players').insert([insertRow]).select();
+                const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
+                if (error) throw error;
                 remoteOK = true;
                 if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
               } catch {
                 try {
-                  const { data } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+                  if (error) throw error;
                   remoteOK = true;
                   if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
                 } catch {
-                  const { data } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                  if (error) throw error;
                   remoteOK = true;
                   if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
                 }
               }
-              const catalogOK = await ensureGroupCatalogEntriesSupabase(group ? [group] : []);
-              if (remoteOK || catalogOK) queueSupabaseRefresh();
+              await ensureGroupCatalogEntriesSupabase(group ? [group] : []);
+              if (remoteOK) queueSupabaseRefresh();
+              else await reconcileToSupabaseAuthority('public-register');
             } catch (err) {
               console.error('Supabase insert error', err);
+              await reconcileToSupabaseAuthority('public-register');
             }
           })();
         }
@@ -4691,7 +4818,6 @@ if (saveSupabaseBtn) {
         setTimeout(() => { messages.registration = ''; render(); }, 2500);
         if (input) input.value = '';
         saveLocal();
-        queueSaveToSupabase();
         render();
       });
     }
@@ -4709,16 +4835,17 @@ if (saveSupabaseBtn) {
     resetBtn.addEventListener('click', () => {
       state.checkedIn = [];
       saveLocal();
-      queueSaveToSupabase();
       render();
 
       if (supabaseClient) {
         (async () => {
           try {
-            await supabaseClient.from('players').update({ checked_in: false }).eq('checked_in', true);
+            const { error } = await supabaseClient.from('players').update({ checked_in: false }).eq('checked_in', true);
+            if (error) throw error;
             queueSupabaseRefresh();
           } catch (err) {
             console.error('Supabase reset error', err);
+            await reconcileToSupabaseAuthority('reset-check-ins');
           }
         })();
       }
@@ -4788,10 +4915,16 @@ if (saveSupabaseBtn) {
       };
       const courtsAdvanced = maybeAdvanceLiveCourtsFromResults();
       saveLocal();
-      queueSaveToSupabase();
       render();
       if (courtsAdvanced) {
         showTeamMoveToast('Courts advanced. Winners moved left.');
+      }
+      if (supabaseClient) {
+        (async () => {
+          const synced = await syncLiveMatchSkillsToSupabase([teamA, teamB]);
+          if (synced) queueSupabaseRefresh();
+          else await reconcileToSupabaseAuthority('live-match-result-skill-sync');
+        })();
       }
     });
   });
@@ -4827,8 +4960,14 @@ if (saveSupabaseBtn) {
       state.liveMatchSkillSnapshots = nextSnapshots;
 
       saveLocal();
-      queueSaveToSupabase();
       render();
+      if (supabaseClient) {
+        (async () => {
+          const synced = await syncLiveMatchSkillsToSupabase([teamA, teamB]);
+          if (synced) queueSupabaseRefresh();
+          else await reconcileToSupabaseAuthority('live-match-clear-skill-sync');
+        })();
+      }
     });
   });
 
@@ -4933,18 +5072,19 @@ const runBulkAttendanceAction = (shouldCheckIn) => {
   });
 
   saveLocal();
-  queueSaveToSupabase();
   render();
 
   if (supabaseClient && remoteIds.size) {
     (async () => {
       try {
         for (const id of remoteIds) {
-          await supabaseClient.from('players').update({ checked_in: shouldCheckIn }).eq('id', id);
+          const { error } = await supabaseClient.from('players').update({ checked_in: shouldCheckIn }).eq('id', id);
+          if (error) throw error;
         }
         queueSupabaseRefresh();
       } catch (err) {
         console.error(shouldCheckIn ? 'Supabase bulk check-in error' : 'Supabase bulk check-out error', err);
+        await reconcileToSupabaseAuthority(shouldCheckIn ? 'bulk-check-in' : 'bulk-check-out');
       }
     })();
   }
@@ -4999,14 +5139,24 @@ if (assignBtn) {
     });
 
     // Supabase updates (primary group only)
+    let remoteAssignFailed = false;
     try {
       const catalogTouched = await ensureGroupCatalogEntriesSupabase([dest]);
       for (const update of remoteUpdates) {
-        await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+        const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+        if (!ok) remoteAssignFailed = true;
       }
-      if (remoteUpdates.length || catalogTouched) await syncFromSupabase();
+      if (remoteUpdates.length || catalogTouched) {
+        const synced = await syncFromSupabase();
+        if (!synced) remoteAssignFailed = true;
+      }
     } catch (e) {
+      remoteAssignFailed = true;
       console.error('Supabase bulk assign error', e);
+    }
+    if (remoteAssignFailed) {
+      await reconcileToSupabaseAuthority('bulk-assign-group');
+      return;
     }
 
     saveLocal();
@@ -5045,13 +5195,23 @@ if (removeBtn) {
     });
 
     // Supabase updates (primary group only)
+    let remoteRemoveFailed = false;
     try {
       for (const update of remoteUpdates) {
-        await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+        const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+        if (!ok) remoteRemoveFailed = true;
       }
-      if (remoteUpdates.length) await syncFromSupabase();
+      if (remoteUpdates.length) {
+        const synced = await syncFromSupabase();
+        if (!synced) remoteRemoveFailed = true;
+      }
     } catch (e) {
+      remoteRemoveFailed = true;
       console.error('Supabase bulk remove group error', e);
+    }
+    if (remoteRemoveFailed) {
+      await reconcileToSupabaseAuthority('bulk-remove-group');
+      return;
     }
 
     saveLocal();
@@ -5089,7 +5249,8 @@ function init() {
   if (supabaseClient) {
     (async () => {
       await detectPlayersSchema();
-      await syncFromSupabase();
+      const synced = await syncFromSupabase();
+      if (synced) saveLocal();
       ensureSupabaseLiveSync();
       if (state.isAdmin) {
         (async () => {
