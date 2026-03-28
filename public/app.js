@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.15';
+const APP_VERSION = '2026.03.27.16';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -29,6 +29,10 @@ const UNGROUPED_FILTER_LABEL = 'Ungrouped (No Groups)';
 const GROUP_CATALOG_NAME_PREFIX = '__as_group__:';
 const GROUPS_TAG_PREFIX = '__as_groups__:';
 const SUPABASE_AUTHORITATIVE = true;
+const SHARED_SYNC_PENDING = 'pending';
+const SHARED_SYNC_LIVE = 'live';
+const SHARED_SYNC_FALLBACK = 'fallback';
+const SHARED_SYNC_LOCAL_ONLY = 'local-only';
 
 const selectedSet = () => new Set(state.selectedIds || []);
 
@@ -1093,13 +1097,61 @@ function ensureSupabaseLiveSync() {
   }
 }
 
+let authorityRefreshHooksBound = false;
+function ensureAuthorityRefreshHooks() {
+  if (authorityRefreshHooksBound || !supabaseClient) return;
+  authorityRefreshHooksBound = true;
+
+  const triggerRefresh = (reason) => {
+    if (!supabaseClient) return;
+    if (SUPABASE_AUTHORITATIVE && (reason === 'online' || reason === 'pageshow')) {
+      setSharedSyncState(SHARED_SYNC_PENDING);
+      render();
+    }
+    ensureSupabaseLiveSync();
+    queueSupabaseRefresh(0);
+  };
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    triggerRefresh('visibility');
+  });
+
+  window.addEventListener('focus', () => {
+    triggerRefresh('focus');
+  });
+
+  window.addEventListener('online', () => {
+    triggerRefresh('online');
+  });
+
+  window.addEventListener('offline', () => {
+    if (!SUPABASE_AUTHORITATIVE) return;
+    setSharedSyncState(SHARED_SYNC_FALLBACK, 'Offline. Showing local cache.');
+    render();
+  });
+
+  window.addEventListener('pageshow', (event) => {
+    if (event && event.persisted) {
+      triggerRefresh('pageshow');
+    }
+  });
+}
+
 async function runQueuedSupabaseRefresh() {
   if (!supabaseClient || refreshRunning || !refreshQueued) return;
   refreshRunning = true;
   refreshQueued = false;
   try {
+    const prevSyncState = state.sharedSyncState;
+    const prevSyncError = state.sharedSyncError;
     const synced = await syncFromSupabase();
-    if (!synced) return;
+    if (!synced) {
+      if (prevSyncState !== state.sharedSyncState || prevSyncError !== state.sharedSyncError) {
+        render();
+      }
+      return;
+    }
     saveLocal();
     render();
   } catch (err) {
@@ -1817,8 +1869,47 @@ const state = {
   activeGroup: 'All',
   selectedIds: [], // player.id[] currently selected (admin bulk)
   limitedGroup: null, // when set, admin is locked to this group
-  adminCodeMap: {}   // live copy used by the UI
+  adminCodeMap: {},   // live copy used by the UI
+  sharedSyncState: (SUPABASE_AUTHORITATIVE && supabaseClient)
+    ? SHARED_SYNC_PENDING
+    : SHARED_SYNC_LOCAL_ONLY,
+  sharedSyncError: '',
+  lastSharedSyncAt: 0
 };
+
+function setSharedSyncState(nextState, errorMessage = '') {
+  state.sharedSyncState = nextState;
+  state.sharedSyncError = errorMessage || '';
+  if (nextState === SHARED_SYNC_LIVE) {
+    state.lastSharedSyncAt = Date.now();
+  }
+}
+
+function formatLastSharedSyncLabel() {
+  if (!state.lastSharedSyncAt) return '';
+  try {
+    return new Date(state.lastSharedSyncAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function buildSharedSyncNoticeHTML() {
+  if (!SUPABASE_AUTHORITATIVE || !supabaseClient) return '';
+
+  if (state.sharedSyncState === SHARED_SYNC_PENDING) {
+    return `<p class="small shared-sync-notice is-pending">Syncing shared data from Supabase...</p>`;
+  }
+  if (state.sharedSyncState === SHARED_SYNC_FALLBACK) {
+    const detail = state.sharedSyncError ? ` ${escapeHTMLText(state.sharedSyncError)}` : '';
+    return `<p class="small shared-sync-notice is-fallback">Using local fallback cache.${detail}</p>`;
+  }
+  if (state.sharedSyncState === SHARED_SYNC_LIVE) {
+    const at = formatLastSharedSyncLabel();
+    return `<p class="small shared-sync-notice is-live">Supabase authoritative sync${at ? ` • Updated ${escapeHTMLText(at)}` : ''}</p>`;
+  }
+  return '';
+}
 
 function normalizeCollapsedCardsState(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -2256,6 +2347,9 @@ async function syncFromSupabase() {
   if (!supabaseClient) return false;
 
   try {
+    if (SUPABASE_AUTHORITATIVE && state.sharedSyncState !== SHARED_SYNC_LIVE) {
+      setSharedSyncState(SHARED_SYNC_PENDING);
+    }
     if (!HAS_GROUP && !HAS_TAG) {
       await detectPlayersSchema();
     }
@@ -2274,9 +2368,17 @@ async function syncFromSupabase() {
     const { data: fetchedData, error } = await query;
     if (error) {
       console.error('Supabase fetch error', error);
+      if (SUPABASE_AUTHORITATIVE) {
+        setSharedSyncState(SHARED_SYNC_FALLBACK, 'Supabase fetch failed. Showing local cache.');
+      }
       return false;
     }
-    if (!Array.isArray(fetchedData)) return false;
+    if (!Array.isArray(fetchedData)) {
+      if (SUPABASE_AUTHORITATIVE) {
+        setSharedSyncState(SHARED_SYNC_FALLBACK, 'Unexpected Supabase response. Showing local cache.');
+      }
+      return false;
+    }
 
     let data = fetchedData;
     if (state.limitedGroup) {
@@ -2342,9 +2444,18 @@ async function syncFromSupabase() {
       mergeRemoteGroupCatalogIntoState(remoteGroupCatalog);
     }
     state.loaded = true;
+    if (SUPABASE_AUTHORITATIVE) {
+      setSharedSyncState(SHARED_SYNC_LIVE);
+    }
     return true;
   } catch (err) {
     console.error('Error syncing from Supabase', err);
+    if (SUPABASE_AUTHORITATIVE) {
+      const fallbackDetail = navigator.onLine
+        ? 'Sync failed while online. Showing local cache.'
+        : 'Offline. Showing local cache.';
+      setSharedSyncState(SHARED_SYNC_FALLBACK, fallbackDetail);
+    }
     return false;
   }
 }
@@ -3435,6 +3546,7 @@ function render() {
   const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
   const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE ? UNGROUPED_FILTER_LABEL : (normalizedActiveGroup || 'All');
   const isActiveGroupValue = (value) => normalizeActiveGroupSelection(value || 'All') === normalizedActiveGroup;
+  const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
   const topFormGroupOptions = getTopFormGroupDatalistOptions();
   const topFormContext = renderTopFormGroupsHelpAndPreview('', '');
   const isCardCollapsed = (cardId) => !!(state.collapsedCards && state.collapsedCards[cardId]);
@@ -3815,6 +3927,7 @@ function render() {
   const html = `
     <div class="container">
 <h1 class="title">${state.limitedGroup ? state.limitedGroup : 'Athletic Specimen'} <span class="app-version-inline">v${APP_VERSION}</span></h1>
+${sharedSyncNoticeHTML}
 
 <p class="small" style="text-align:center; margin-bottom:0.25rem;">
   Checked In: <strong>${state.checkedIn.length}</strong>
@@ -5226,6 +5339,11 @@ if (removeBtn) {
 function init() {
   // Load from localStorage
   loadLocal();
+  if (!supabaseClient) {
+    setSharedSyncState(SHARED_SYNC_LOCAL_ONLY);
+  } else if (SUPABASE_AUTHORITATIVE) {
+    setSharedSyncState(SHARED_SYNC_PENDING);
+  }
   // If Supabase is unavailable, local data is the runtime source.
   // When Supabase is available, sync first and render from cloud-backed state.
   if (!supabaseClient) {
@@ -5247,6 +5365,7 @@ function init() {
 
   // Sync from supabase if available
   if (supabaseClient) {
+    ensureAuthorityRefreshHooks();
     (async () => {
       await detectPlayersSchema();
       const synced = await syncFromSupabase();

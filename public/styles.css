@@ -42,6 +42,24 @@ body {
   vertical-align: middle;
 }
 
+.shared-sync-notice {
+  text-align: center;
+  margin: -0.35rem 0 0.45rem;
+}
+
+.shared-sync-notice.is-live {
+  color: #0f766e;
+}
+
+.shared-sync-notice.is-pending {
+  color: #0f766e;
+}
+
+.shared-sync-notice.is-fallback {
+  color: #b45309;
+  font-weight: 600;
+}
+
 .card {
   background-color: #ffffff;
   padding: 1rem;

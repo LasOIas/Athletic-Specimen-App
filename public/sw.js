@@ -1,4 +1,4 @@
-const CACHE_NAME = 'athletic-specimen-cache-v4';
+const CACHE_NAME = 'athletic-specimen-cache-v5';
 const ASSETS = [
   '/',
   '/index.html',
@@ -35,8 +35,9 @@ self.addEventListener('fetch', (event) => {
 
   // Prefer network for app shell assets so deploy updates are not hidden by stale cache.
   if (event.request.mode === 'navigate' || isShellAsset) {
+    const freshRequest = new Request(event.request, { cache: 'no-store' });
     event.respondWith(
-      fetch(event.request)
+      fetch(freshRequest)
         .then((response) => {
           if (isSameOrigin && response && response.ok) {
             const cloned = response.clone();
