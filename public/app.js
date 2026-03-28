@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.03.27.10';
+const APP_VERSION = '2026.03.27.11';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -1020,6 +1020,7 @@ function checkOutPlayer(player) {
 }
 
 let saveTimeout;
+let forceSaveRunning = false;
 function queueSaveToSupabase() {
   if (!supabaseClient) return;
   clearTimeout(saveTimeout);
@@ -2514,6 +2515,116 @@ async function backfillPlayerMembershipsToSupabase() {
   return wroteAny;
 }
 
+async function forceSaveAllToSupabase() {
+  if (!supabaseClient) {
+    throw new Error('Supabase is not configured.');
+  }
+
+  if (!HAS_GROUP && !HAS_TAG) {
+    await detectPlayersSchema();
+  }
+
+  // Cancel any pending delayed save; this path is an explicit immediate sync.
+  clearTimeout(saveTimeout);
+
+  normalizePlayerGroupsInState();
+  ensurePlayerIdentityKeys();
+  state.checkedIn = normalizeCheckedInEntries(state.checkedIn);
+  const checkedSet = new Set(state.checkedIn || []);
+
+  const summary = {
+    updated: 0,
+    inserted: 0,
+    matchedByName: 0,
+    failed: 0,
+    catalogSynced: false,
+    membershipsBackfilled: false
+  };
+
+  const { data: existingRows, error: existingError } = await supabaseClient
+    .from('players')
+    .select('id,name');
+  if (existingError) throw existingError;
+
+  const existingByName = new Map();
+  (existingRows || []).forEach((row) => {
+    const isCatalogRow = !!parseGroupCatalogRowName(row && row.name);
+    if (isCatalogRow) return;
+    const key = normalize(row && row.name);
+    if (!key || existingByName.has(key)) return;
+    existingByName.set(key, row);
+  });
+
+  for (const player of (state.players || [])) {
+    if (!player || typeof player !== 'object') continue;
+    const playerName = String(player.name || '').trim();
+    if (!playerName) continue;
+
+    const primaryGroup = getPlayerPrimaryGroup(player);
+    const groups = getPlayerGroups(player);
+    const checkedIn = !!checkedSet.has(playerIdentityKey(player));
+    const skill = Number(player.skill) || 0;
+
+    let remoteId = player.id ? String(player.id) : '';
+    if (!remoteId) {
+      const matched = existingByName.get(normalize(playerName));
+      if (matched && matched.id) {
+        remoteId = String(matched.id);
+        player.id = remoteId;
+        summary.matchedByName += 1;
+      }
+    }
+
+    if (remoteId) {
+      const ok = await updatePlayerFieldsSupabase(remoteId, {
+        name: playerName,
+        skill,
+        checked_in: checkedIn,
+        group: primaryGroup,
+        groups
+      });
+      if (ok) summary.updated += 1;
+      else summary.failed += 1;
+      continue;
+    }
+
+    const insertPayload = { name: playerName, skill, checked_in: checkedIn };
+    if (HAS_GROUP) insertPayload.group = primaryGroup;
+    if (HAS_TAG) {
+      insertPayload.tag = HAS_GROUP
+        ? serializePlayerGroupsTag(groups, primaryGroup)
+        : (primaryGroup || '');
+    }
+
+    const { data: insertedRows, error: insertError } = await supabaseClient
+      .from('players')
+      .insert([insertPayload])
+      .select('id,name');
+
+    if (insertError) {
+      console.error('Supabase force insert error', insertError);
+      summary.failed += 1;
+      continue;
+    }
+
+    const insertedId = Array.isArray(insertedRows) && insertedRows.length
+      ? insertedRows[0].id
+      : null;
+    if (insertedId) {
+      player.id = insertedId;
+      existingByName.set(normalize(playerName), { id: insertedId, name: playerName });
+    }
+    summary.inserted += 1;
+  }
+
+  summary.catalogSynced = await backfillGroupCatalogToSupabase();
+  summary.membershipsBackfilled = await backfillPlayerMembershipsToSupabase();
+
+  await syncFromSupabase();
+  saveLocal();
+  return summary;
+}
+
 // map teamId -> { poolId, number } after pools are saved
 function computePoolNumbers(t) {
   const map = {};
@@ -3367,6 +3478,7 @@ function render() {
             <option value="checkin">Check In</option>
             <option value="add-player">Add/Update Player</option>
           </select>
+          <button id="btn-save-supabase" class="primary">Save to Supabase</button>
           <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
           <button id="btn-logout">Logout</button>
         </div>
@@ -4242,6 +4354,38 @@ if (logoutBtn) {
     try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
     await syncFromSupabase();                    // load public view dataset
     render();
+  });
+}
+
+const saveSupabaseBtn = document.getElementById('btn-save-supabase');
+if (saveSupabaseBtn) {
+  saveSupabaseBtn.addEventListener('click', async () => {
+    if (forceSaveRunning) return;
+    if (!supabaseClient) {
+      alert('Supabase is not configured for this app.');
+      return;
+    }
+
+    forceSaveRunning = true;
+    saveSupabaseBtn.disabled = true;
+    saveSupabaseBtn.textContent = 'Saving...';
+
+    try {
+      const summary = await forceSaveAllToSupabase();
+      const pieces = [
+        `Updated ${summary.updated}`,
+        `Inserted ${summary.inserted}`
+      ];
+      if (summary.matchedByName) pieces.push(`Matched ${summary.matchedByName} by name`);
+      if (summary.failed) pieces.push(`Failed ${summary.failed}`);
+      alert(`Saved to Supabase. ${pieces.join(' • ')}`);
+    } catch (err) {
+      console.error('Manual save to Supabase error', err);
+      alert('Save to Supabase failed. Check connection and try again.');
+    } finally {
+      forceSaveRunning = false;
+      render();
+    }
   });
 }
 
