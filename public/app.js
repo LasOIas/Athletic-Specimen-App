@@ -6861,42 +6861,64 @@ async function handleTournamentAdminAction(action, trigger, activeTournament) {
 
 function ensureTournamentOverlayBindings() {
   if (ensureTournamentOverlayBindings._bound) return;
+  const toEventElement = (rawTarget) => {
+    if (rawTarget instanceof Element) return rawTarget;
+    if (rawTarget && rawTarget.parentElement instanceof Element) return rawTarget.parentElement;
+    return null;
+  };
 
-  const root = document.getElementById('view-tournament');
-  const select = document.getElementById('tournamentSelect');
-  const closeBtn = document.getElementById('closeTournamentBtn');
-  if (!root) return;
+  // Canonical delegated change routing for tournament controls.
+  document.addEventListener('change', (event) => {
+    const target = toEventElement(event.target);
+    if (!target) return;
 
-  if (select) {
-    select.addEventListener('change', () => {
-      const selected = String(select.value || '').trim();
-      TournamentManager.setActive(selected);
-      clearTournamentNotice();
-      initTournamentView();
-    });
-  }
+    const select = target.closest('#view-tournament #tournamentSelect');
+    if (!select) return;
 
-  if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
-      showTournamentView(false);
-    });
-  }
+    const selected = String(select.value || '').trim();
+    TournamentManager.setActive(selected);
+    clearTournamentNotice();
+    initTournamentView();
+  });
 
-  if (root) {
-    root.addEventListener('click', async (event) => {
-      const rawTarget = event.target;
-      const target = rawTarget instanceof Element
-        ? rawTarget
-        : (rawTarget && rawTarget.parentElement ? rawTarget.parentElement : null);
-      if (!target) return;
-      const trigger = target.closest('[data-tr-action]');
-      if (!trigger) return;
+  // Canonical delegated click routing for tournament controls.
+  document.addEventListener('click', async (event) => {
+    const target = toEventElement(event.target);
+    if (!target) return;
+
+    const closeBtn = target.closest('#view-tournament #closeTournamentBtn');
+    if (closeBtn) {
       event.preventDefault();
-      const action = String(trigger.getAttribute('data-tr-action') || '').trim();
-      if (!action) return;
-      await handleTournamentAction(action, trigger);
-    }, true);
-  }
+      showTournamentView(false);
+      return;
+    }
+
+    const trigger = target.closest('#view-tournament [data-tr-action]');
+    if (!trigger) return;
+
+    event.preventDefault();
+    const action = String(trigger.getAttribute('data-tr-action') || '').trim();
+    if (!action) return;
+    await handleTournamentAction(action, trigger);
+  }, true);
+
+  // Tournament forms (if present) route through the same canonical handler.
+  document.addEventListener('submit', async (event) => {
+    const target = toEventElement(event.target);
+    const form = target && target.matches('form') ? target : target?.closest('form');
+    if (!form || !form.closest('#view-tournament')) return;
+
+    const submitter = event.submitter instanceof Element
+      ? event.submitter
+      : form.querySelector('[data-tr-action]');
+    if (!submitter) return;
+
+    const action = String(submitter.getAttribute('data-tr-action') || '').trim();
+    if (!action) return;
+
+    event.preventDefault();
+    await handleTournamentAction(action, submitter);
+  }, true);
 
   ensureTournamentOverlayBindings._bound = true;
 }
