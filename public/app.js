@@ -28,11 +28,14 @@ const UNGROUPED_FILTER_VALUE = '__ungrouped__';
 const UNGROUPED_FILTER_LABEL = 'Ungrouped (No Groups)';
 const GROUP_CATALOG_NAME_PREFIX = '__as_group__:';
 const GROUPS_TAG_PREFIX = '__as_groups__:';
+const TOURNAMENT_STATE_ROW_NAME = '__as_tournament_state__';
+const TOURNAMENT_STATE_TAG_PREFIX = '__as_tournament_store__:';
 const SUPABASE_AUTHORITATIVE = true;
 const SHARED_SYNC_PENDING = 'pending';
 const SHARED_SYNC_LIVE = 'live';
 const SHARED_SYNC_FALLBACK = 'fallback';
 const SHARED_SYNC_LOCAL_ONLY = 'local-only';
+const SHARED_SYNC_CONFLICT_RESOLVED = 'conflict-resolved';
 
 const selectedSet = () => new Set(state.selectedIds || []);
 
@@ -144,12 +147,28 @@ function openInlineEditRow(row) {
   }
 }
 
+function findInlineEditRowByPlayerKey(playerKey) {
+  const key = String(playerKey || '').trim();
+  if (!key) return null;
+  const rows = document.querySelectorAll('.edit-row[data-player-key]');
+  for (const row of rows) {
+    if (String(row.getAttribute('data-player-key') || '') === key) {
+      return row;
+    }
+  }
+  return null;
+}
+
 function captureTransientInteractionState() {
   const snapshot = {
     searchFocused: false,
     searchSelectionStart: null,
     searchSelectionEnd: null,
-    openMenuPlayerId: ''
+    openMenuPlayerKey: '',
+    openMenuPlayerId: '',
+    openEditRowPlayerKey: '',
+    openGroupSelectPlayerKey: '',
+    openPopupId: ''
   };
 
   const searchInput = document.getElementById('player-search');
@@ -163,9 +182,25 @@ function captureTransientInteractionState() {
       : null;
   }
 
-  const openMenuButton = document.querySelector('.menu-wrap.menu-open .btn-actions[data-id]');
+  const openMenuButton = document.querySelector('.menu-wrap.menu-open .btn-actions');
   if (openMenuButton) {
+    snapshot.openMenuPlayerKey = String(openMenuButton.getAttribute('data-player-key') || '');
     snapshot.openMenuPlayerId = String(openMenuButton.getAttribute('data-id') || '');
+  }
+
+  const openEditRow = document.querySelector('.edit-row.show[data-player-key]');
+  if (openEditRow) {
+    snapshot.openEditRowPlayerKey = String(openEditRow.getAttribute('data-player-key') || '');
+  }
+
+  const openGroupSelect = document.querySelector('.group-select.open[data-player-key]');
+  if (openGroupSelect) {
+    snapshot.openGroupSelectPlayerKey = String(openGroupSelect.getAttribute('data-player-key') || '');
+  }
+
+  const openPopup = document.querySelector('.popup-overlay[aria-hidden="false"]');
+  if (openPopup && openPopup.id) {
+    snapshot.openPopupId = String(openPopup.id);
   }
 
   return snapshot;
@@ -174,9 +209,33 @@ function captureTransientInteractionState() {
 function restoreTransientInteractionState(snapshot) {
   if (!snapshot || typeof snapshot !== 'object') return;
 
-  if (snapshot.openMenuPlayerId) {
-    const menuButton = Array.from(document.querySelectorAll('.menu-wrap .btn-actions[data-id]'))
-      .find((button) => String(button.getAttribute('data-id') || '') === snapshot.openMenuPlayerId);
+  if (snapshot.openPopupId) {
+    const popup = document.getElementById(snapshot.openPopupId);
+    if (popup) {
+      popup.style.display = 'flex';
+      popup.setAttribute('aria-hidden', 'false');
+    }
+  }
+
+  if (snapshot.openEditRowPlayerKey) {
+    const row = findInlineEditRowByPlayerKey(snapshot.openEditRowPlayerKey);
+    if (row) openInlineEditRow(row);
+  }
+
+  if (snapshot.openGroupSelectPlayerKey) {
+    const select = Array.from(document.querySelectorAll('.group-select[data-player-key]'))
+      .find((el) => String(el.getAttribute('data-player-key') || '') === snapshot.openGroupSelectPlayerKey);
+    if (select) select.classList.add('open');
+  }
+
+  if (snapshot.openMenuPlayerKey || snapshot.openMenuPlayerId) {
+    const menuButton = Array.from(document.querySelectorAll('.menu-wrap .btn-actions'))
+      .find((button) => {
+        const buttonKey = String(button.getAttribute('data-player-key') || '');
+        const buttonId = String(button.getAttribute('data-id') || '');
+        if (snapshot.openMenuPlayerKey && buttonKey === snapshot.openMenuPlayerKey) return true;
+        return !snapshot.openMenuPlayerKey && snapshot.openMenuPlayerId && buttonId === snapshot.openMenuPlayerId;
+      });
     if (menuButton) {
       const wrap = menuButton.closest('.menu-wrap');
       if (wrap) wrap.classList.add('menu-open');
@@ -208,6 +267,9 @@ function restoreTransientInteractionState(snapshot) {
   window.__menusBound = true;
 
   document.addEventListener('click', async function onGlobalClick(e) {
+    const target = e.target;
+    if (!(target instanceof Element)) return;
+
     const collapseToggle = e.target.closest('[data-role="toggle-card-collapse"]');
     if (collapseToggle) {
       e.stopPropagation();
@@ -329,8 +391,9 @@ function restoreTransientInteractionState(snapshot) {
     if (editBtn) {
       e.stopPropagation();
       e.preventDefault();
-      const idx = parseInt(editBtn.getAttribute('data-index'), 10);
-      const row = document.querySelector(`.edit-row[data-index="${idx}"]`);
+      const playerKey = String(editBtn.getAttribute('data-player-key') || '').trim();
+      const row = findInlineEditRowByPlayerKey(playerKey)
+        || editBtn.closest('.player-card')?.querySelector('.edit-row');
       if (row) {
         const wasOpen = row.classList.contains('show');
         closeAllInlineEditRows();
@@ -358,6 +421,13 @@ function restoreTransientInteractionState(snapshot) {
       if (idx === -1) return;
 
       const removed = state.players[idx];
+      const removedName = String(removed && removed.name || '').trim() || `Player ${id}`;
+      const confirmed = confirmDangerousActionOrAbort({
+        title: `Delete player "${removedName}"?`,
+        detail: 'This permanently removes the player from roster and check-in data.',
+        confirmText: 'DELETE'
+      });
+      if (!confirmed) return;
 
       let remoteDeleteFailed = false;
       if (supabaseClient && removed.id) {
@@ -368,6 +438,15 @@ function restoreTransientInteractionState(snapshot) {
           remoteDeleteFailed = true;
           console.error('Supabase delete error', err);
           await reconcileToSupabaseAuthority('player-delete');
+          recordOperatorAction({
+            scope: 'players',
+            action: 'delete-player-failed',
+            entityType: 'player',
+            entityId: String(removed.id || playerIdentityKey(removed) || ''),
+            title: `Delete failed for "${removedName}".`,
+            detail: 'Supabase write failed. Latest shared state was restored.',
+            tone: 'error'
+          });
         }
       }
       if (remoteDeleteFailed) return;
@@ -383,6 +462,15 @@ function restoreTransientInteractionState(snapshot) {
         if (button) button.setAttribute('aria-expanded', 'false');
       });
       if (supabaseClient && removed.id) queueSupabaseRefresh();
+      recordOperatorAction({
+        scope: 'players',
+        action: 'delete-player',
+        entityType: 'player',
+        entityId: String(removed.id || playerIdentityKey(removed) || ''),
+        title: `Deleted player "${removedName}".`,
+        detail: 'Player removal was applied.',
+        tone: 'warning'
+      });
       render();
       return;
     }
@@ -421,14 +509,11 @@ function restoreTransientInteractionState(snapshot) {
     e.preventDefault();
     e.stopPropagation();
 
-    const idxAttr = parseInt(btn.getAttribute('data-index'), 10);
-    const idAttr  = btn.getAttribute('data-id');
-    const hasStableId = !!idAttr && idAttr !== 'undefined' && idAttr !== 'null';
-    const idxFromData = Number.isNaN(idxAttr) ? -1 : idxAttr;
-
-    // Locate the edit row using the index we render onto it
-    const row = document.querySelector(`.edit-row[data-index="${idxFromData}"]`) || btn.closest('.edit-row');
+    const idAttr = String(btn.getAttribute('data-id') || '').trim();
+    const buttonPlayerKey = String(btn.getAttribute('data-player-key') || '').trim();
+    const row = btn.closest('.edit-row') || findInlineEditRowByPlayerKey(buttonPlayerKey);
     if (!row) return;
+    const rowPlayerKey = String(row.getAttribute('data-player-key') || buttonPlayerKey).trim();
 
     const nameInput  = row.querySelector('.edit-name');
     const skillInput = row.querySelector('.edit-skill');
@@ -448,10 +533,14 @@ function restoreTransientInteractionState(snapshot) {
     // Clamp and keep one decimal place
     skill = Math.max(0, Math.min(10, Math.round(skill * 10) / 10));
 
-    // Prefer updating by id; fall back to idx
+    // Prefer stable identity key targeting, then persistent id targeting.
     let idx = -1;
-    if (hasStableId) idx = state.players.findIndex(p => String(p.id) === String(idAttr));
-    if (idx === -1) idx = idxFromData;
+    if (rowPlayerKey) {
+      idx = state.players.findIndex((p) => playerIdentityKey(p) === rowPlayerKey);
+    }
+    if (idx === -1 && idAttr && idAttr !== 'undefined' && idAttr !== 'null') {
+      idx = state.players.findIndex((p) => String(p.id) === idAttr);
+    }
     if (idx < 0 || !state.players[idx]) return;
 
     const prev = state.players[idx];
@@ -734,6 +823,51 @@ function parseGroupCatalogRowName(rowName) {
   return normalizeGroupName(name.slice(GROUP_CATALOG_NAME_PREFIX.length));
 }
 
+function isTournamentStateRow(row) {
+  return String(row && row.name || '').trim() === TOURNAMENT_STATE_ROW_NAME;
+}
+
+function serializeTournamentStoreTag(storeSnapshot) {
+  const snapshot = storeSnapshot && typeof storeSnapshot === 'object'
+    ? storeSnapshot
+    : { activeTournamentId: '', tournaments: [] };
+  try {
+    const envelope = {
+      updatedAt: Date.now(),
+      store: snapshot
+    };
+    return `${TOURNAMENT_STATE_TAG_PREFIX}${encodeURIComponent(JSON.stringify(envelope))}`;
+  } catch {
+    return '';
+  }
+}
+
+function parseTournamentStoreTagEnvelope(rawTagValue) {
+  const raw = String(rawTagValue || '').trim();
+  if (!raw.startsWith(TOURNAMENT_STATE_TAG_PREFIX)) return null;
+  const encoded = raw.slice(TOURNAMENT_STATE_TAG_PREFIX.length);
+  if (!encoded) return null;
+  try {
+    const parsed = JSON.parse(decodeURIComponent(encoded));
+    // Backward compatibility: allow direct store payload without envelope.
+    if (parsed && typeof parsed === 'object' && parsed.store && typeof parsed.store === 'object') {
+      return {
+        updatedAt: Number(parsed.updatedAt) || 0,
+        store: parsed.store
+      };
+    }
+    if (parsed && typeof parsed === 'object') {
+      return {
+        updatedAt: Number(parsed.updatedAt) || 0,
+        store: parsed
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 function serializePlayerGroupsTag(groups, primaryGroup = '') {
   const primary = normalizeGroupName(primaryGroup);
   const normalized = normalizeGroupList(groups);
@@ -937,6 +1071,31 @@ function normalizePlayerGroupsInState() {
   (state.players || []).forEach((player) => {
     if (normalizePlayerGroupShape(player)) changed = true;
   });
+  return changed;
+}
+
+function enforceSharedPlayerModelParity() {
+  if (!supabaseClient || !SUPABASE_AUTHORITATIVE || !PLAYERS_SCHEMA_DETECTED) return false;
+  if (HAS_GROUP && HAS_TAG) return false;
+
+  const supportsPrimaryOnly = HAS_GROUP || HAS_TAG;
+  let changed = false;
+
+  state.players = (state.players || []).map((player) => {
+    if (!player || typeof player !== 'object') return player;
+    const currentGroups = getPlayerGroups(player);
+    const primary = supportsPrimaryOnly ? normalizeGroupName(currentGroups[0] || player.group || '') : '';
+    const nextGroups = primary ? [primary] : [];
+    const currentPrimary = normalizeGroupName(player.group || '');
+    const sameShape =
+      currentPrimary === primary &&
+      currentGroups.length === nextGroups.length &&
+      currentGroups.every((groupName, idx) => groupName === nextGroups[idx]);
+    if (sameShape) return player;
+    changed = true;
+    return { ...player, group: primary, groups: nextGroups };
+  });
+
   return changed;
 }
 
@@ -1228,6 +1387,8 @@ let groupCatalogSyncRunning = false;
 let lastGroupCatalogSyncSignature = '';
 let crossDeviceRefreshInterval = null;
 let supabaseLiveSyncChannel = null;
+let supabaseSyncRequestSeq = 0;
+let supabaseSyncAppliedSeq = 0;
 function queueSupabaseRefresh(delay = 160) {
   if (!supabaseClient) return;
   refreshQueued = true;
@@ -1262,8 +1423,15 @@ function ensureAuthorityRefreshHooks() {
 
   const triggerRefresh = (reason) => {
     if (!supabaseClient) return;
-    if (SUPABASE_AUTHORITATIVE && (reason === 'online' || reason === 'pageshow')) {
+    if (
+      SUPABASE_AUTHORITATIVE &&
+      state.sharedSyncState !== SHARED_SYNC_LOCAL_ONLY &&
+      state.sharedSyncState !== SHARED_SYNC_PENDING
+    ) {
       setSharedSyncState(SHARED_SYNC_PENDING);
+      if (state.tournamentSyncState !== SHARED_SYNC_LOCAL_ONLY) {
+        setTournamentSyncState(SHARED_SYNC_PENDING);
+      }
       render();
     }
     ensureSupabaseLiveSync();
@@ -1286,6 +1454,7 @@ function ensureAuthorityRefreshHooks() {
   window.addEventListener('offline', () => {
     if (!SUPABASE_AUTHORITATIVE) return;
     setSharedSyncState(SHARED_SYNC_FALLBACK, 'Offline. Showing local cache.');
+    setTournamentSyncState(SHARED_SYNC_FALLBACK, 'Offline. Showing local cache.');
     render();
   });
 
@@ -1333,7 +1502,7 @@ function computeGroupCatalogSyncSignature() {
 }
 
 function queueGroupCatalogSync(delay = 280) {
-  if (!supabaseClient || !state.isAdmin) return;
+  if (!canRunAdminSharedBackfill()) return;
   groupCatalogSyncQueued = true;
   clearTimeout(groupCatalogSyncTimeout);
   groupCatalogSyncTimeout = setTimeout(() => {
@@ -1342,7 +1511,7 @@ function queueGroupCatalogSync(delay = 280) {
 }
 
 async function runQueuedGroupCatalogSync() {
-  if (!supabaseClient || !state.isAdmin || groupCatalogSyncRunning || !groupCatalogSyncQueued) return;
+  if (!canRunAdminSharedBackfill() || groupCatalogSyncRunning || !groupCatalogSyncQueued) return;
   groupCatalogSyncRunning = true;
   groupCatalogSyncQueued = false;
 
@@ -1886,7 +2055,6 @@ function renderFilteredPlayers() {
   const activeGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
   const checkedSet = new Set(state.checkedIn || []);
   const selectedIds = new Set((state.selectedIds || []).map((id) => String(id)));
-  const playerIndexByRef = new Map(state.players.map((player, idx) => [player, idx]));
 
   // group filter
   if (activeGroup && activeGroup !== 'All') {
@@ -1929,9 +2097,10 @@ function renderFilteredPlayers() {
   if (!filtered.length) return '<p>No players found.</p>';
 
   return filtered.map((player) => {
-    const idx = playerIndexByRef.has(player) ? playerIndexByRef.get(player) : -1;
     const checked = checkedSet.has(playerIdentityKey(player));
     const isSelected = selectedIds.has(String(player.id));
+    const playerKey = playerIdentityKey(player);
+    const playerKeyValue = escapeHTMLText(playerKey);
     const playerGroup = getPlayerPrimaryGroup(player);
     const playerGroups = getPlayerGroups(player);
     const playerGroupsValue = escapeHTMLText(JSON.stringify(playerGroups));
@@ -1942,13 +2111,13 @@ function renderFilteredPlayers() {
       : '<span class="small player-group-none">Ungrouped</span>';
 
     return `
-      <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-index="${idx}">
+      <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-player-key="${playerKeyValue}">
         ${state.isAdmin ? `
   <div class="menu-wrap">
     <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
-            data-id="${player.id}" title="More actions">⋮</button>
+            data-id="${player.id}" data-player-key="${playerKeyValue}" title="More actions">⋮</button>
     <div class="card-menu" role="menu">
-      <button type="button" class="menu-item" data-role="menu-edit" data-index="${idx}">Edit</button>
+      <button type="button" class="menu-item" data-role="menu-edit" data-player-key="${playerKeyValue}">Edit</button>
       <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
     </div>
   </div>
@@ -1975,10 +2144,10 @@ function renderFilteredPlayers() {
         </div>
 
         ${state.isAdmin ? `
-          <div class="edit-row" data-index="${idx}">
+          <div class="edit-row" data-player-key="${playerKeyValue}">
         <input type="text" class="edit-name" placeholder="Name" value="${player.name}" />
         <input type="number" class="edit-skill" placeholder="Skill" step="0.1" value="${player.skill}" />
-        <div class="group-select" data-index="${idx}">
+        <div class="group-select" data-player-key="${playerKeyValue}">
           <input type="hidden" class="edit-group" value="${playerGroup || ''}" />
           <input type="hidden" class="edit-groups" value="${playerGroupsValue}" />
           <button type="button" class="group-btn">${playerGroup || 'Group'}</button>
@@ -1995,8 +2164,8 @@ function renderFilteredPlayers() {
           <div class="group-chips">${renderEditGroupChipsMarkup(playerGroups)}</div>
         </div>
         <div class="edit-actions">
-          <button type="button" class="btn-save-edit success" data-index="${idx}" data-id="${player.id}">Save</button>
-          <button type="button" class="btn-cancel-edit secondary" data-index="${idx}">Cancel</button>
+          <button type="button" class="btn-save-edit success" data-player-key="${playerKeyValue}" data-id="${player.id}">Save</button>
+          <button type="button" class="btn-cancel-edit secondary" data-player-key="${playerKeyValue}">Cancel</button>
         </div>
       </div>
         ` : ''}
@@ -2032,14 +2201,28 @@ const state = {
     ? SHARED_SYNC_PENDING
     : SHARED_SYNC_LOCAL_ONLY,
   sharedSyncError: '',
-  lastSharedSyncAt: 0
+  lastSharedSyncAt: 0,
+  tournamentSyncState: (SUPABASE_AUTHORITATIVE && supabaseClient)
+    ? SHARED_SYNC_PENDING
+    : SHARED_SYNC_LOCAL_ONLY,
+  tournamentSyncError: '',
+  lastTournamentSyncAt: 0,
+  operatorActions: []
 };
 
 function setSharedSyncState(nextState, errorMessage = '') {
   state.sharedSyncState = nextState;
   state.sharedSyncError = errorMessage || '';
-  if (nextState === SHARED_SYNC_LIVE) {
+  if (nextState === SHARED_SYNC_LIVE || nextState === SHARED_SYNC_CONFLICT_RESOLVED) {
     state.lastSharedSyncAt = Date.now();
+  }
+}
+
+function setTournamentSyncState(nextState, errorMessage = '') {
+  state.tournamentSyncState = nextState;
+  state.tournamentSyncError = errorMessage || '';
+  if (nextState === SHARED_SYNC_LIVE || nextState === SHARED_SYNC_CONFLICT_RESOLVED) {
+    state.lastTournamentSyncAt = Date.now();
   }
 }
 
@@ -2052,21 +2235,372 @@ function formatLastSharedSyncLabel() {
   }
 }
 
+function formatLastTournamentSyncLabel() {
+  if (!state.lastTournamentSyncAt) return '';
+  try {
+    return new Date(state.lastTournamentSyncAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function getSharedGroupSyncModeLabel() {
+  if (!SUPABASE_AUTHORITATIVE || !supabaseClient || !PLAYERS_SCHEMA_DETECTED) return '';
+  if (HAS_GROUP && HAS_TAG) return ' Group sync mode: multi-group cloud canonical.';
+  if (HAS_GROUP || HAS_TAG) return ' Group sync mode: primary-only cloud canonical.';
+  return ' Group sync mode: none (local-only groups).';
+}
+
 function buildSharedSyncNoticeHTML() {
   if (!SUPABASE_AUTHORITATIVE || !supabaseClient) return '';
+  const modeLabel = getSharedGroupSyncModeLabel();
 
   if (state.sharedSyncState === SHARED_SYNC_PENDING) {
-    return `<p class="small shared-sync-notice is-pending">Syncing shared data from Supabase...</p>`;
+    return `<p class="small shared-sync-notice is-pending">Syncing shared data from Supabase...${escapeHTMLText(modeLabel)}</p>`;
   }
   if (state.sharedSyncState === SHARED_SYNC_FALLBACK) {
     const detail = state.sharedSyncError ? ` ${escapeHTMLText(state.sharedSyncError)}` : '';
-    return `<p class="small shared-sync-notice is-fallback">Using local fallback cache.${detail}</p>`;
+    return `<p class="small shared-sync-notice is-fallback">Using local fallback cache.${detail}${escapeHTMLText(modeLabel)}</p>`;
   }
   if (state.sharedSyncState === SHARED_SYNC_LIVE) {
     const at = formatLastSharedSyncLabel();
-    return `<p class="small shared-sync-notice is-live">Supabase authoritative sync${at ? ` • Updated ${escapeHTMLText(at)}` : ''}</p>`;
+    return `<p class="small shared-sync-notice is-live">Supabase authoritative sync${at ? ` | Updated ${escapeHTMLText(at)}` : ''}.${escapeHTMLText(modeLabel)}</p>`;
+  }
+  if (state.sharedSyncState === SHARED_SYNC_CONFLICT_RESOLVED) {
+    const detail = state.sharedSyncError ? ` ${escapeHTMLText(state.sharedSyncError)}` : '';
+    const at = formatLastSharedSyncLabel();
+    return `<p class="small shared-sync-notice is-live">Supabase conflict resolved.${detail}${at ? ` | Updated ${escapeHTMLText(at)}` : ''}.${escapeHTMLText(modeLabel)}</p>`;
   }
   return '';
+}
+
+function canRunAdminSharedBackfill() {
+  if (!supabaseClient || !state.isAdmin) return false;
+  if (!SUPABASE_AUTHORITATIVE) return true;
+  return state.sharedSyncState === SHARED_SYNC_LIVE || state.sharedSyncState === SHARED_SYNC_CONFLICT_RESOLVED;
+}
+
+function getTournamentSharedModeLabel() {
+  if (!supabaseClient || !SUPABASE_AUTHORITATIVE) return 'Local-only tournament mode.';
+  if (!PLAYERS_SCHEMA_DETECTED) return 'Detecting tournament sync schema...';
+  if (!HAS_TAG) return 'Tournament cloud sync unavailable (players.tag required).';
+  return 'Tournament cloud sync is canonical.';
+}
+
+function buildTournamentSyncNoticeHTML() {
+  const modeLabel = getTournamentSharedModeLabel();
+  const detail = state.tournamentSyncError ? ` ${escapeHTMLText(state.tournamentSyncError)}` : '';
+  const at = formatLastTournamentSyncLabel();
+
+  if (!supabaseClient || !SUPABASE_AUTHORITATIVE) {
+    return `<p class="small shared-sync-notice is-fallback">${escapeHTMLText(modeLabel)}</p>`;
+  }
+  if (!PLAYERS_SCHEMA_DETECTED) {
+    return `<p class="small shared-sync-notice is-pending">${escapeHTMLText(modeLabel)}</p>`;
+  }
+  if (!HAS_TAG) {
+    return `<p class="small shared-sync-notice is-fallback">${escapeHTMLText(modeLabel)}${detail}</p>`;
+  }
+  if (state.tournamentSyncState === SHARED_SYNC_PENDING) {
+    return `<p class="small shared-sync-notice is-pending">Syncing tournament state from Supabase...${detail}</p>`;
+  }
+  if (state.tournamentSyncState === SHARED_SYNC_FALLBACK) {
+    return `<p class="small shared-sync-notice is-fallback">Tournament sync fallback (local cache active).${detail}</p>`;
+  }
+  if (state.tournamentSyncState === SHARED_SYNC_CONFLICT_RESOLVED) {
+    return `<p class="small shared-sync-notice is-live">Tournament conflict resolved.${detail}${at ? ` | Updated ${escapeHTMLText(at)}` : ''}</p>`;
+  }
+  if (state.tournamentSyncState === SHARED_SYNC_LIVE) {
+    return `<p class="small shared-sync-notice is-live">Tournament authoritative sync${at ? ` | Updated ${escapeHTMLText(at)}` : ''}</p>`;
+  }
+  return `<p class="small shared-sync-notice is-pending">${escapeHTMLText(modeLabel)}</p>`;
+}
+
+const MAX_OPERATOR_ACTIONS = 18;
+
+function createOperatorActionId() {
+  return `op_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function formatOperatorActionTimeLabel(ts) {
+  if (!ts) return '';
+  try {
+    return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function recordOperatorAction({
+  scope = 'general',
+  action = '',
+  entityType = '',
+  entityId = '',
+  title = '',
+  detail = '',
+  tone = 'info',
+  undo = null
+} = {}) {
+  const safeTitle = String(title || '').trim();
+  if (!safeTitle) return null;
+  const safeTone = tone === 'error' || tone === 'success' || tone === 'warning' ? tone : 'info';
+  const entry = {
+    id: createOperatorActionId(),
+    at: Date.now(),
+    scope: String(scope || 'general'),
+    action: String(action || ''),
+    entityType: String(entityType || ''),
+    entityId: String(entityId || ''),
+    title: safeTitle,
+    detail: String(detail || '').trim(),
+    tone: safeTone,
+    undo: undo && typeof undo === 'object'
+      ? { ...undo, used: false }
+      : null
+  };
+  state.operatorActions = [entry, ...(state.operatorActions || [])].slice(0, MAX_OPERATOR_ACTIONS);
+  return entry.id;
+}
+
+function markOperatorActionUndoUsed(actionId) {
+  const target = String(actionId || '').trim();
+  if (!target) return;
+  state.operatorActions = (state.operatorActions || []).map((entry) => {
+    if (!entry || entry.id !== target || !entry.undo) return entry;
+    return { ...entry, undo: { ...entry.undo, used: true } };
+  });
+}
+
+function renderOperatorActionsLogHTML() {
+  const items = Array.isArray(state.operatorActions) ? state.operatorActions.slice(0, 10) : [];
+  if (!items.length) return '<p class="small">No recent admin actions.</p>';
+  return `
+    <ul class="operator-actions-log" style="list-style:none; margin:0; padding:0;">
+      ${items.map((entry) => {
+        const ts = formatOperatorActionTimeLabel(entry.at);
+        const metaParts = [entry.scope, entry.action].filter(Boolean).join(' / ');
+        const canUndo = !!(entry.undo && !entry.undo.used);
+        return `
+          <li class="small" style="padding:0.45rem 0; border-top:1px solid #e2e8f0;">
+            <div>
+              <strong>${escapeHTMLText(entry.title)}</strong>
+              ${ts ? `<span style="opacity:0.75;"> | ${escapeHTMLText(ts)}</span>` : ''}
+            </div>
+            ${entry.detail ? `<div style="opacity:0.9;">${escapeHTMLText(entry.detail)}</div>` : ''}
+            ${metaParts ? `<div style="opacity:0.7;">${escapeHTMLText(metaParts)}</div>` : ''}
+            ${canUndo
+              ? `<div style="margin-top:0.25rem;"><button type="button" class="secondary" data-role="undo-operator-action" data-action-id="${escapeHTMLText(entry.id)}">Undo</button></div>`
+              : ''}
+          </li>
+        `;
+      }).join('')}
+    </ul>
+  `;
+}
+
+function confirmDangerousActionOrAbort({ title, detail, confirmText }) {
+  const expected = String(confirmText || '').trim();
+  if (!expected) return false;
+  const promptText = `${String(title || '').trim()}\n\n${String(detail || '').trim()}\n\nType "${expected}" to confirm.`;
+  const response = window.prompt(promptText, '');
+  return String(response || '').trim() === expected;
+}
+
+async function syncCheckedInStateToSupabase() {
+  if (!supabaseClient) return true;
+  ensurePlayerIdentityKeys();
+  const checkedSet = new Set(normalizeCheckedInEntries(state.checkedIn || []));
+  let failed = false;
+  for (const player of (state.players || [])) {
+    if (!player || !player.id) continue;
+    const shouldBeCheckedIn = checkedSet.has(playerIdentityKey(player));
+    const ok = await updatePlayerFieldsSupabase(player.id, { checked_in: shouldBeCheckedIn });
+    if (!ok) failed = true;
+  }
+  if (failed) return false;
+  queueSupabaseRefresh();
+  return true;
+}
+
+async function runOperatorActionUndo(actionId) {
+  const target = String(actionId || '').trim();
+  if (!target) return;
+  const entry = (state.operatorActions || []).find((item) => item && item.id === target);
+  if (!entry || !entry.undo || entry.undo.used) return;
+
+  const undoType = String(entry.undo.kind || '').trim();
+  if (undoType === 'tournament-store') {
+    TournamentManager.replaceStore(entry.undo.storeSnapshot || { activeTournamentId: '', tournaments: [] });
+    if (SUPABASE_AUTHORITATIVE && supabaseClient) {
+      const synced = await syncTournamentStoreToSupabase();
+      if (!synced) {
+        await reconcileTournamentToSupabaseAuthority('operator-undo-tournament');
+        setTournamentNotice(
+          'Undo failed to sync. Restored latest shared tournament state.',
+          TOURNAMENT_NOTICE_ERROR
+        );
+        recordOperatorAction({
+          scope: 'tournament',
+          action: 'undo-failed',
+          entityType: entry.entityType || 'tournament',
+          entityId: entry.entityId || '',
+          title: 'Undo failed: restored shared tournament state instead.',
+          detail: entry.title,
+          tone: 'error'
+        });
+        render();
+        initTournamentView();
+        return;
+      }
+    }
+    markOperatorActionUndoUsed(target);
+    setTournamentNotice('Undo applied for tournament action.', TOURNAMENT_NOTICE_SUCCESS);
+    recordOperatorAction({
+      scope: 'tournament',
+      action: 'undo',
+      entityType: entry.entityType || 'tournament',
+      entityId: entry.entityId || '',
+      title: 'Undo applied for tournament action.',
+      detail: entry.title,
+      tone: 'success'
+    });
+    render();
+    initTournamentView();
+    return;
+  }
+
+  if (undoType === 'checkins') {
+    state.checkedIn = normalizeCheckedInEntries(entry.undo.checkedIn || []);
+    saveLocal();
+    render();
+    if (supabaseClient) {
+      const synced = await syncCheckedInStateToSupabase();
+      if (!synced) {
+        await reconcileToSupabaseAuthority('operator-undo-reset-checkins');
+        recordOperatorAction({
+          scope: 'players',
+          action: 'undo-failed',
+          entityType: 'checkins',
+          entityId: '',
+          title: 'Undo failed: restored latest shared check-in state.',
+          detail: entry.title,
+          tone: 'error'
+        });
+        return;
+      }
+    }
+    markOperatorActionUndoUsed(target);
+    recordOperatorAction({
+      scope: 'players',
+      action: 'undo',
+      entityType: 'checkins',
+      entityId: '',
+      title: 'Undo applied for check-in reset.',
+      detail: entry.title,
+      tone: 'success'
+    });
+    render();
+  }
+}
+
+function applyTournamentStoreFromAuthority(storeSnapshot) {
+  if (typeof TournamentManager === 'undefined' || !TournamentManager || typeof TournamentManager.replaceStore !== 'function') {
+    return false;
+  }
+  const before = JSON.stringify(TournamentManager.getStoreSnapshot());
+  const nextSnapshot = storeSnapshot && typeof storeSnapshot === 'object'
+    ? storeSnapshot
+    : { activeTournamentId: '', tournaments: [] };
+  TournamentManager.replaceStore(nextSnapshot);
+  const after = JSON.stringify(TournamentManager.getStoreSnapshot());
+  return before !== after;
+}
+
+async function syncTournamentStoreToSupabase() {
+  if (!supabaseClient || !SUPABASE_AUTHORITATIVE) {
+    setTournamentSyncState(SHARED_SYNC_LOCAL_ONLY, 'Supabase unavailable for tournament sync.');
+    return false;
+  }
+  if (!PLAYERS_SCHEMA_DETECTED) {
+    await detectPlayersSchema();
+  }
+  if (!HAS_TAG) {
+    setTournamentSyncState(SHARED_SYNC_FALLBACK, 'Tournament sync requires players.tag support.');
+    return false;
+  }
+
+  const snapshot = TournamentManager.getStoreSnapshot();
+  const encodedTag = serializeTournamentStoreTag(snapshot);
+  if (!encodedTag) {
+    setTournamentSyncState(SHARED_SYNC_FALLBACK, 'Tournament sync payload encoding failed.');
+    return false;
+  }
+
+  setTournamentSyncState(SHARED_SYNC_PENDING);
+  try {
+    const { data: rows, error: listError } = await supabaseClient
+      .from('players')
+      .select('id')
+      .eq('name', TOURNAMENT_STATE_ROW_NAME);
+    if (listError) throw listError;
+
+    const payload = {
+      name: TOURNAMENT_STATE_ROW_NAME,
+      skill: 0,
+      checked_in: false,
+      tag: encodedTag
+    };
+    if (HAS_GROUP) payload.group = '';
+
+    const existingRows = Array.isArray(rows) ? rows : [];
+    if (existingRows.length) {
+      const primary = existingRows[0];
+      const { error: updateError } = await supabaseClient
+        .from('players')
+        .update(payload)
+        .eq('id', primary.id);
+      if (updateError) throw updateError;
+
+      for (const duplicate of existingRows.slice(1)) {
+        const duplicateId = String(duplicate && duplicate.id || '').trim();
+        if (!duplicateId) continue;
+        const { error: deleteError } = await supabaseClient
+          .from('players')
+          .delete()
+          .eq('id', duplicateId);
+        if (deleteError) {
+          console.error('Supabase tournament duplicate delete error', deleteError);
+        }
+      }
+    } else {
+      const { error: insertError } = await supabaseClient
+        .from('players')
+        .insert([payload]);
+      if (insertError) throw insertError;
+    }
+
+    setTournamentSyncState(SHARED_SYNC_LIVE);
+    queueSupabaseRefresh(0);
+    return true;
+  } catch (err) {
+    console.error('Supabase tournament sync error', err);
+    setTournamentSyncState(SHARED_SYNC_FALLBACK, 'Tournament write failed. Showing local fallback.');
+    return false;
+  }
+}
+
+async function reconcileTournamentToSupabaseAuthority(contextLabel = '') {
+  if (!supabaseClient || !SUPABASE_AUTHORITATIVE) return false;
+  const synced = await syncFromSupabase();
+  if (!synced) return false;
+  if (contextLabel) {
+    setTournamentSyncState(
+      SHARED_SYNC_CONFLICT_RESOLVED,
+      `Recovered via Supabase authority (${contextLabel}).`
+    );
+  }
+  initTournamentView();
+  return true;
 }
 
 function normalizeCollapsedCardsState(value) {
@@ -2395,6 +2929,8 @@ function loadLocal() {
 function saveLocal() {
   try {
     normalizePlayerGroupsInState();
+    enforceSharedPlayerModelParity();
+    normalizePlayerGroupsInState();
     ensurePlayerIdentityKeys();
     state.checkedIn = normalizeCheckedInEntries(state.checkedIn);
     state.collapsedCards = normalizeCollapsedCardsState(state.collapsedCards);
@@ -2408,7 +2944,7 @@ function saveLocal() {
       localStorage.removeItem(LS_COLLAPSED_CARDS_KEY);
     }
     saveGeneratedTeamsToLocal();
-    if (state.isAdmin && supabaseClient) {
+    if (canRunAdminSharedBackfill()) {
       queueGroupCatalogSync();
     }
   } catch (err) {
@@ -2513,10 +3049,22 @@ function mergePlayersAfterSync(remotePlayers) {
 // marked checked_in.
 async function syncFromSupabase() {
   if (!supabaseClient) return false;
+  const requestSeq = ++supabaseSyncRequestSeq;
 
   try {
-    if (SUPABASE_AUTHORITATIVE && state.sharedSyncState !== SHARED_SYNC_LIVE) {
+    if (
+      SUPABASE_AUTHORITATIVE &&
+      state.sharedSyncState !== SHARED_SYNC_LIVE &&
+      state.sharedSyncState !== SHARED_SYNC_CONFLICT_RESOLVED
+    ) {
       setSharedSyncState(SHARED_SYNC_PENDING);
+    }
+    if (
+      SUPABASE_AUTHORITATIVE &&
+      state.tournamentSyncState !== SHARED_SYNC_LOCAL_ONLY &&
+      state.tournamentSyncState !== SHARED_SYNC_PENDING
+    ) {
+      setTournamentSyncState(SHARED_SYNC_PENDING);
     }
     if (!HAS_GROUP && !HAS_TAG) {
       await detectPlayersSchema();
@@ -2536,14 +3084,22 @@ async function syncFromSupabase() {
     const { data: fetchedData, error } = await query;
     if (error) {
       console.error('Supabase fetch error', error);
+      if (requestSeq < supabaseSyncRequestSeq || requestSeq < supabaseSyncAppliedSeq) {
+        return false;
+      }
       if (SUPABASE_AUTHORITATIVE) {
         setSharedSyncState(SHARED_SYNC_FALLBACK, 'Supabase fetch failed. Showing local cache.');
+        setTournamentSyncState(SHARED_SYNC_FALLBACK, 'Supabase fetch failed. Showing local cache.');
       }
       return false;
     }
     if (!Array.isArray(fetchedData)) {
+      if (requestSeq < supabaseSyncRequestSeq || requestSeq < supabaseSyncAppliedSeq) {
+        return false;
+      }
       if (SUPABASE_AUTHORITATIVE) {
         setSharedSyncState(SHARED_SYNC_FALLBACK, 'Unexpected Supabase response. Showing local cache.');
+        setTournamentSyncState(SHARED_SYNC_FALLBACK, 'Unexpected Supabase response. Showing local cache.');
       }
       return false;
     }
@@ -2572,11 +3128,46 @@ async function syncFromSupabase() {
           });
         }
       }
+
+      const { data: tournamentRows, error: tournamentError } = await supabaseClient
+        .from('players')
+        .select('*')
+        .eq('name', TOURNAMENT_STATE_ROW_NAME)
+        .limit(5);
+      if (tournamentError) {
+        console.error('Supabase limited tournament state fetch error', tournamentError);
+      } else if (Array.isArray(tournamentRows) && tournamentRows.length) {
+        const byIdentity = new Set(
+          data.map((row) => String((row && row.id) || (row && row.name) || '')).filter(Boolean)
+        );
+        tournamentRows.forEach((row) => {
+          const key = String((row && row.id) || (row && row.name) || '');
+          if (!key || byIdentity.has(key)) return;
+          byIdentity.add(key);
+          data.push(row);
+        });
+      }
     }
 
     const remoteGroupCatalog = [];
     const remotePlayers = [];
+    const remoteTournamentEnvelopes = [];
+    let invalidTournamentPayloadFound = false;
     data.forEach((p) => {
+      if (isTournamentStateRow(p)) {
+        const envelope = parseTournamentStoreTagEnvelope(p && p.tag);
+        if (envelope && envelope.store && typeof envelope.store === 'object') {
+          const rowUpdatedAt = Number(new Date(p && p.updated_at).getTime()) || 0;
+          remoteTournamentEnvelopes.push({
+            updatedAt: Math.max(Number(envelope.updatedAt) || 0, rowUpdatedAt),
+            store: envelope.store
+          });
+        } else {
+          invalidTournamentPayloadFound = true;
+        }
+        return;
+      }
+
       const catalogGroup = parseGroupCatalogRowName(p && p.name);
       if (catalogGroup) {
         remoteGroupCatalog.push(catalogGroup);
@@ -2596,8 +3187,42 @@ async function syncFromSupabase() {
         hasEncodedGroups: membershipDetails.hasEncodedGroups
       });
     });
+
+    // Ignore stale responses so older reads can't overwrite newer authoritative syncs.
+    if (requestSeq < supabaseSyncRequestSeq || requestSeq < supabaseSyncAppliedSeq) {
+      return true;
+    }
+
+    if (SUPABASE_AUTHORITATIVE) {
+      if (!PLAYERS_SCHEMA_DETECTED) {
+        setTournamentSyncState(SHARED_SYNC_PENDING);
+      } else if (!HAS_TAG) {
+        setTournamentSyncState(
+          SHARED_SYNC_FALLBACK,
+          'Tournament sync unavailable in this schema (players.tag required).'
+        );
+      } else {
+        remoteTournamentEnvelopes.sort((a, b) => b.updatedAt - a.updatedAt);
+        const hasValidTournamentStore = remoteTournamentEnvelopes.length > 0;
+        if (!hasValidTournamentStore && invalidTournamentPayloadFound) {
+          setTournamentSyncState(
+            SHARED_SYNC_FALLBACK,
+            'Tournament cloud payload is invalid. Using local fallback.'
+          );
+        } else {
+          const latestStore = hasValidTournamentStore
+            ? remoteTournamentEnvelopes[0].store
+            : { activeTournamentId: '', tournaments: [] };
+          applyTournamentStoreFromAuthority(latestStore);
+          setTournamentSyncState(SHARED_SYNC_LIVE);
+        }
+      }
+    }
+
     const merged = mergePlayersAfterSync(remotePlayers);
     state.players = merged.players;
+    normalizePlayerGroupsInState();
+    enforceSharedPlayerModelParity();
     normalizePlayerGroupsInState();
     state.checkedIn = normalizeCheckedInEntries(merged.checkedIn);
     if (SUPABASE_AUTHORITATIVE) {
@@ -2611,17 +3236,22 @@ async function syncFromSupabase() {
       enforceCanonicalGroupState();
     }
     state.loaded = true;
+    supabaseSyncAppliedSeq = Math.max(supabaseSyncAppliedSeq, requestSeq);
     if (SUPABASE_AUTHORITATIVE) {
       setSharedSyncState(SHARED_SYNC_LIVE);
     }
     return true;
   } catch (err) {
     console.error('Error syncing from Supabase', err);
+    if (requestSeq < supabaseSyncRequestSeq || requestSeq < supabaseSyncAppliedSeq) {
+      return false;
+    }
     if (SUPABASE_AUTHORITATIVE) {
       const fallbackDetail = navigator.onLine
         ? 'Sync failed while online. Showing local cache.'
         : 'Offline. Showing local cache.';
       setSharedSyncState(SHARED_SYNC_FALLBACK, fallbackDetail);
+      setTournamentSyncState(SHARED_SYNC_FALLBACK, fallbackDetail);
     }
     return false;
   }
@@ -2636,6 +3266,12 @@ async function reconcileToSupabaseAuthority(contextLabel = '') {
     }
     return false;
   }
+  if (contextLabel) {
+    setSharedSyncState(
+      SHARED_SYNC_CONFLICT_RESOLVED,
+      `Recovered via Supabase authority (${contextLabel}).`
+    );
+  }
   saveLocal();
   render();
   return true;
@@ -2646,6 +3282,7 @@ async function reconcileToSupabaseAuthority(contextLabel = '') {
 let HAS_GROUP = false;
 let HAS_TAG = false;
 let PREFER_TAG_COLUMN = false;
+let PLAYERS_SCHEMA_DETECTED = false;
 
 async function detectPlayersSchema() {
   if (!supabaseClient) return;
@@ -2664,9 +3301,25 @@ async function detectPlayersSchema() {
 
   // prefer tag only if tag exists and group does not
   PREFER_TAG_COLUMN = HAS_TAG && !HAS_GROUP;
+  PLAYERS_SCHEMA_DETECTED = true;
 
   if (!HAS_GROUP && !HAS_TAG) {
     console.warn('[players] No group-like column found (neither "group" nor "tag"). Group changes will be local-only.');
+  }
+
+  if (enforceSharedPlayerModelParity()) {
+    normalizePlayerGroupsInState();
+    state.checkedIn = normalizeCheckedInEntries(state.checkedIn);
+  }
+
+  if (SUPABASE_AUTHORITATIVE && supabaseClient) {
+    if (HAS_TAG) {
+      if (state.tournamentSyncState !== SHARED_SYNC_LIVE && state.tournamentSyncState !== SHARED_SYNC_CONFLICT_RESOLVED) {
+        setTournamentSyncState(SHARED_SYNC_PENDING);
+      }
+    } else {
+      setTournamentSyncState(SHARED_SYNC_FALLBACK, 'Tournament sync unavailable in this schema (players.tag required).');
+    }
   }
 }
 
@@ -2678,16 +3331,21 @@ async function updatePlayerFieldsSupabase(id, fields) {
 
   const { group, groups, ...rest } = fields || {};
   const payload = { ...rest };
-  const normalizedGroup = typeof group === 'undefined' ? undefined : normalizeGroupName(group);
+  const normalizedGroup = normalizeGroupName(typeof group === 'undefined' ? '' : group);
+  const normalizedGroups = normalizeGroupList(Array.isArray(groups) ? groups : []);
+  const canonicalGroups = (HAS_GROUP && HAS_TAG)
+    ? normalizeGroupList([...(normalizedGroup ? [normalizedGroup] : []), ...normalizedGroups])
+    : (normalizedGroup ? [normalizedGroup] : (normalizedGroups[0] ? [normalizedGroups[0]] : []));
+  const canonicalPrimary = canonicalGroups[0] || '';
 
-  if (typeof group !== 'undefined') {
-    if (HAS_GROUP) payload.group = normalizedGroup || '';
-    else if (HAS_TAG) payload.tag = normalizedGroup || '';
+  if (typeof group !== 'undefined' || typeof groups !== 'undefined') {
+    if (HAS_GROUP) payload.group = canonicalPrimary;
+    else if (HAS_TAG) payload.tag = canonicalPrimary;
     // else: table has neither group-like column
   }
 
-  if (HAS_GROUP && HAS_TAG && typeof groups !== 'undefined') {
-    payload.tag = serializePlayerGroupsTag(groups, normalizedGroup || '');
+  if (HAS_GROUP && HAS_TAG && (typeof group !== 'undefined' || typeof groups !== 'undefined')) {
+    payload.tag = serializePlayerGroupsTag(canonicalGroups, canonicalPrimary);
   }
 
   try {
@@ -2922,7 +3580,8 @@ async function forceSaveAllToSupabase() {
     matchedByName: 0,
     failed: 0,
     catalogSynced: false,
-    membershipsBackfilled: false
+    membershipsBackfilled: false,
+    tournamentSynced: false
   };
 
   const { data: existingRows, error: existingError } = await supabaseClient
@@ -2933,7 +3592,7 @@ async function forceSaveAllToSupabase() {
   const existingByName = new Map();
   (existingRows || []).forEach((row) => {
     const isCatalogRow = !!parseGroupCatalogRowName(row && row.name);
-    if (isCatalogRow) return;
+    if (isCatalogRow || isTournamentStateRow(row)) return;
     const key = normalize(row && row.name);
     if (!key || existingByName.has(key)) return;
     existingByName.set(key, row);
@@ -3003,6 +3662,7 @@ async function forceSaveAllToSupabase() {
 
   summary.catalogSynced = await backfillGroupCatalogToSupabase();
   summary.membershipsBackfilled = await backfillPlayerMembershipsToSupabase();
+  summary.tournamentSynced = await syncTournamentStoreToSupabase();
 
   const synced = await syncFromSupabase();
   if (synced) saveLocal();
@@ -3031,6 +3691,8 @@ const TournamentManager = (() => {
   const LS_KEY = 'athletic_specimen_tournaments_v2';
   const FORMAT_RR = 'round_robin';
   const FORMAT_SE = 'single_elimination';
+  const SOURCE_CHECKED_IN = 'checked_in';
+  const SOURCE_GENERATED_TEAMS = 'generated_teams';
   const STATUS_SETUP = 'setup';
   const STATUS_ACTIVE = 'active';
   const STATUS_COMPLETED = 'completed';
@@ -3055,6 +3717,11 @@ const TournamentManager = (() => {
   function normalizeFormat(value) {
     const raw = String(value || '').trim();
     return raw === FORMAT_SE ? FORMAT_SE : FORMAT_RR;
+  }
+
+  function normalizeSourceMode(value) {
+    const raw = String(value || '').trim();
+    return raw === SOURCE_GENERATED_TEAMS ? SOURCE_GENERATED_TEAMS : SOURCE_CHECKED_IN;
   }
 
   function cloneDeep(value) {
@@ -3114,6 +3781,7 @@ const TournamentManager = (() => {
       ? rawTournament.matches.map((match) => normalizeMatchRecord(match))
       : [];
     const format = normalizeFormat(rawTournament?.format);
+    const sourceMode = normalizeSourceMode(rawTournament?.sourceMode);
     const courtCount = clampCourtCount(rawTournament?.courtCount);
     const teamCount = clampTeamCount(rawTournament?.teamCount || teams.length || 2);
     const sourceGroup = normalizeActiveGroupSelection(rawTournament?.sourceGroup || 'All');
@@ -3126,6 +3794,7 @@ const TournamentManager = (() => {
       id: String(rawTournament?.id || uid()),
       name: String(rawTournament?.name || 'Tournament').trim() || 'Tournament',
       format,
+      sourceMode,
       status,
       courtCount,
       sourceGroup,
@@ -3140,18 +3809,22 @@ const TournamentManager = (() => {
     };
   }
 
+  function normalizeStorePayload(rawStore) {
+    if (!rawStore || typeof rawStore !== 'object') return blankStore();
+    const tournaments = Array.isArray(rawStore.tournaments)
+      ? rawStore.tournaments.map((t) => normalizeTournamentRecord(t))
+      : [];
+    const validIds = new Set(tournaments.map((t) => t.id));
+    const activeTournamentId = validIds.has(String(rawStore.activeTournamentId || ''))
+      ? String(rawStore.activeTournamentId)
+      : (tournaments[0]?.id || '');
+    return { activeTournamentId, tournaments };
+  }
+
   function loadStore() {
     try {
       const raw = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
-      if (!raw || typeof raw !== 'object') return blankStore();
-      const tournaments = Array.isArray(raw.tournaments)
-        ? raw.tournaments.map((t) => normalizeTournamentRecord(t))
-        : [];
-      const validIds = new Set(tournaments.map((t) => t.id));
-      const activeTournamentId = validIds.has(String(raw.activeTournamentId || ''))
-        ? String(raw.activeTournamentId)
-        : (tournaments[0]?.id || '');
-      return { activeTournamentId, tournaments };
+      return normalizeStorePayload(raw);
     } catch {
       return blankStore();
     }
@@ -3163,6 +3836,12 @@ const TournamentManager = (() => {
 
   function getStoreSnapshot() {
     return cloneDeep(loadStore());
+  }
+
+  function replaceStore(rawStore) {
+    const normalized = normalizeStorePayload(rawStore);
+    saveStore(normalized);
+    return cloneDeep(normalized);
   }
 
   function getAll() {
@@ -3258,6 +3937,55 @@ const TournamentManager = (() => {
       summary: generated.summary || null,
       sourceCount: sourcePlayers.length
     };
+  }
+
+  function buildTeamsFromGeneratedTeams() {
+    ensurePlayerIdentityKeys();
+    const sourceTeams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
+    if (sourceTeams.length < 2) {
+      return {
+        ok: false,
+        error: 'Need at least two generated teams. Generate teams first in the Teams section.'
+      };
+    }
+
+    const seen = new Set();
+    const teams = sourceTeams.map((members, index) => {
+      const memberKeys = Array.from(
+        new Set(
+          (Array.isArray(members) ? members : [])
+            .map((member) => playerIdentityKey(member))
+            .filter((key) => key && !seen.has(key))
+        )
+      );
+      memberKeys.forEach((key) => seen.add(key));
+      return {
+        id: uid(),
+        name: `Team ${index + 1}`,
+        seed: index + 1,
+        memberKeys
+      };
+    }).filter((team) => team.memberKeys.length > 0);
+
+    if (teams.length < 2) {
+      return { ok: false, error: 'Need at least two non-empty generated teams for tournament matches.' };
+    }
+
+    return {
+      ok: true,
+      teams,
+      teamCount: teams.length,
+      summary: sanitizeGeneratedTeamsSummary(state.generatedTeamsSummary) || null,
+      sourceCount: seen.size
+    };
+  }
+
+  function buildTeamsFromSource(sourceMode, groupFilter, requestedTeamCount) {
+    const mode = normalizeSourceMode(sourceMode);
+    if (mode === SOURCE_GENERATED_TEAMS) {
+      return buildTeamsFromGeneratedTeams();
+    }
+    return buildTeamsFromCheckedIn(groupFilter, requestedTeamCount);
   }
 
   function getTeamMap(tournament) {
@@ -3486,12 +4214,13 @@ const TournamentManager = (() => {
     return { ok: true, tournament };
   }
 
-  function createTournament({ name, format, courtCount, groupFilter, teamCount }) {
+  function createTournament({ name, format, sourceMode, courtCount, groupFilter, teamCount }) {
     const safeName = String(name || '').trim();
     if (!safeName) return { ok: false, error: 'Tournament name is required.' };
 
+    const normalizedSourceMode = normalizeSourceMode(sourceMode);
     const group = normalizeActiveGroupSelection(groupFilter || 'All');
-    const built = buildTeamsFromCheckedIn(group, teamCount);
+    const built = buildTeamsFromSource(normalizedSourceMode, group, teamCount);
     if (!built.ok) return built;
 
     const now = Date.now();
@@ -3499,6 +4228,7 @@ const TournamentManager = (() => {
       id: uid(),
       name: safeName,
       format: normalizeFormat(format),
+      sourceMode: normalizedSourceMode,
       status: STATUS_SETUP,
       courtCount: clampCourtCount(courtCount),
       sourceGroup: group,
@@ -3533,13 +4263,15 @@ const TournamentManager = (() => {
     return { ok: true };
   }
 
-  function rebuildTeams(id, { groupFilter, teamCount }) {
+  function rebuildTeams(id, { sourceMode, groupFilter, teamCount }) {
     return mutateTournament(id, (tournament) => {
+      const mode = normalizeSourceMode(sourceMode || tournament.sourceMode || SOURCE_CHECKED_IN);
       const group = normalizeActiveGroupSelection(
         groupFilter || tournament.sourceGroup || 'All'
       );
-      const built = buildTeamsFromCheckedIn(group, teamCount || tournament.teamCount);
+      const built = buildTeamsFromSource(mode, group, teamCount || tournament.teamCount);
       if (!built.ok) return built;
+      tournament.sourceMode = mode;
       tournament.sourceGroup = group;
       tournament.teamCount = built.teamCount;
       tournament.teams = built.teams;
@@ -3736,6 +4468,8 @@ const TournamentManager = (() => {
   return {
     FORMAT_RR,
     FORMAT_SE,
+    SOURCE_CHECKED_IN,
+    SOURCE_GENERATED_TEAMS,
     STATUS_SETUP,
     STATUS_ACTIVE,
     STATUS_COMPLETED,
@@ -3743,6 +4477,7 @@ const TournamentManager = (() => {
     MATCH_LIVE,
     MATCH_FINAL,
     getStoreSnapshot,
+    replaceStore,
     getAll,
     getById,
     getActiveId,
@@ -3764,6 +4499,13 @@ const TournamentManager = (() => {
 
 function formatTournamentFormatLabel(format) {
   return format === TournamentManager.FORMAT_SE ? 'Single Elimination' : 'Round Robin';
+}
+
+function formatTournamentSourceLabel(tournament) {
+  const mode = String(tournament?.sourceMode || TournamentManager.SOURCE_CHECKED_IN);
+  const groupLabel = formatTournamentGroupLabel(tournament?.sourceGroup || 'All');
+  if (mode === TournamentManager.SOURCE_GENERATED_TEAMS) return 'Generated Teams';
+  return `Checked-In (${groupLabel})`;
 }
 
 function formatTournamentStatusLabel(status) {
@@ -3844,7 +4586,25 @@ function renderTournamentHeaderCardHTML(tournament) {
     ? Math.max(1, Number.parseInt(tournament.courtCount, 10) || 2)
     : 2;
   const format = tournament ? tournament.format : TournamentManager.FORMAT_RR;
+  const sourceMode = tournament
+    ? String(tournament.sourceMode || TournamentManager.SOURCE_CHECKED_IN)
+    : TournamentManager.SOURCE_CHECKED_IN;
+  const sourceModeIsGenerated = sourceMode === TournamentManager.SOURCE_GENERATED_TEAMS;
   const nameValue = tournament ? tournament.name : '';
+  const matchCount = Array.isArray(tournament?.matches) ? tournament.matches.length : 0;
+  const finalCount = Array.isArray(tournament?.matches)
+    ? tournament.matches.filter((match) => match.status === TournamentManager.MATCH_FINAL).length
+    : 0;
+  const nextStepText = tournament
+    ? (
+      matchCount === 0
+        ? 'Generate matches to begin the tournament.'
+        : (tournament.status === TournamentManager.STATUS_COMPLETED
+          ? 'Tournament is complete. Review standings or reset matches.'
+          : `${matchCount - finalCount} matches remain. Start or finalize the next match.`)
+    )
+    : 'Create a tournament to begin.';
+  const tournamentSyncNoticeHTML = buildTournamentSyncNoticeHTML();
 
   const summaryHTML = tournament ? `
     <div class="tournament-meta-grid">
@@ -3852,9 +4612,10 @@ function renderTournamentHeaderCardHTML(tournament) {
       <div><strong>Format:</strong> ${escapeHTMLText(formatTournamentFormatLabel(tournament.format))}</div>
       <div><strong>Status:</strong> ${escapeHTMLText(formatTournamentStatusLabel(tournament.status))}</div>
       <div><strong>Courts:</strong> ${Number(tournament.courtCount) || 1}</div>
-      <div><strong>Source:</strong> Checked-In (${escapeHTMLText(formatTournamentGroupLabel(tournament.sourceGroup))})</div>
+      <div><strong>Source:</strong> ${escapeHTMLText(formatTournamentSourceLabel(tournament))}</div>
       <div><strong>Teams:</strong> ${(tournament.teams || []).length}</div>
     </div>
+    <p class="small" style="margin-top:0.55rem;"><strong>Next Step:</strong> ${escapeHTMLText(nextStepText)}</p>
   ` : '<p class="small">Create a tournament to start event flow.</p>';
 
   const adminControlsHTML = state.isAdmin ? `
@@ -3866,12 +4627,17 @@ function renderTournamentHeaderCardHTML(tournament) {
           <option value="${TournamentManager.FORMAT_RR}" ${format === TournamentManager.FORMAT_RR ? 'selected' : ''}>Round Robin</option>
           <option value="${TournamentManager.FORMAT_SE}" ${format === TournamentManager.FORMAT_SE ? 'selected' : ''}>Single Elimination</option>
         </select>
+        <select id="trn-source-mode">
+          <option value="${TournamentManager.SOURCE_CHECKED_IN}" ${!sourceModeIsGenerated ? 'selected' : ''}>Source: Checked-In</option>
+          <option value="${TournamentManager.SOURCE_GENERATED_TEAMS}" ${sourceModeIsGenerated ? 'selected' : ''}>Source: Generated Teams</option>
+        </select>
         <input type="number" id="trn-court-count" min="1" max="8" value="${courtCount}" />
-        <select id="trn-source-group" ${isLockedToGroup ? 'disabled' : ''}>
+        <select id="trn-source-group" ${(isLockedToGroup || sourceModeIsGenerated) ? 'disabled' : ''}>
           ${getTournamentGroupOptions(selectedGroup)}
         </select>
         <input type="number" id="trn-team-count" min="2" max="24" value="${teamCount}" />
       </div>
+      ${sourceModeIsGenerated ? '<p class="small" style="margin-top:-0.2rem;">Generated Teams source uses current Teams tab assignments.</p>' : ''}
       <div class="row">
         <button type="button" data-tr-action="create-tournament">Create Tournament</button>
         ${tournament ? `
@@ -3885,6 +4651,7 @@ function renderTournamentHeaderCardHTML(tournament) {
   ` : '';
 
   return `
+    ${tournamentSyncNoticeHTML}
     ${summaryHTML}
     ${adminControlsHTML}
   `;
@@ -4189,7 +4956,29 @@ function initTournamentView() {
   const headerCard = document.getElementById('tournamentHeaderCard');
   const adminCard = document.getElementById('adminTournament');
   const publicCard = document.getElementById('publicTournamentView');
+  const select = document.getElementById('tournamentSelect');
   if (!globalNotice || !headerCard || !adminCard || !publicCard) return;
+
+  const awaitingAuthorityHydration = (
+    !!supabaseClient &&
+    SUPABASE_AUTHORITATIVE &&
+    !state.loaded &&
+    state.tournamentSyncState === SHARED_SYNC_PENDING
+  );
+  if (awaitingAuthorityHydration) {
+    if (select) {
+      select.innerHTML = '<option value="">Syncing tournaments...</option>';
+      select.value = TOURNAMENT_UNSET_VALUE;
+    }
+    globalNotice.innerHTML = renderTournamentNoticeHTML();
+    headerCard.innerHTML = renderTournamentHeaderCardHTML(null);
+    adminCard.style.display = state.isAdmin ? 'block' : 'none';
+    adminCard.innerHTML = state.isAdmin
+      ? '<p class="small">Tournament state is syncing from Supabase.</p>'
+      : '';
+    publicCard.innerHTML = '<p class="small">Tournament state is syncing from Supabase.</p>';
+    return;
+  }
 
   refreshTournamentSelectUI();
   const tournament = getActiveTournamentFromSelect();
@@ -4214,7 +5003,98 @@ function ensureTournamentTabClickable() {
   btn.setAttribute('tabindex', '0');
 }
 
-function handleTournamentAction(action, trigger) {
+function getTournamentMatchLabel(tournament, matchId) {
+  const target = String(matchId || '').trim();
+  if (!target) return 'match';
+  const match = (tournament?.matches || []).find((item) => String(item?.id || '') === target);
+  if (!match) return 'match';
+  return `R${Number(match.round) || 1} M${Number(match.slot) || 1}`;
+}
+
+async function commitTournamentMutation(result, {
+  successMessage = 'Tournament updated.',
+  fallbackErrorMessage = 'Tournament action failed.',
+  contextLabel = 'tournament-write',
+  actionMeta = null
+} = {}) {
+  const meta = actionMeta && typeof actionMeta === 'object' ? actionMeta : null;
+  const resolveMetaValue = (value, fallback = '') => {
+    try {
+      return typeof value === 'function' ? value(result) : value;
+    } catch {
+      return fallback;
+    }
+  };
+  const baseScope = String(resolveMetaValue(meta?.scope, 'tournament') || 'tournament');
+  const baseAction = String(resolveMetaValue(meta?.action, '') || '').trim() || contextLabel || 'mutation';
+  const baseEntityType = String(resolveMetaValue(meta?.entityType, 'tournament') || 'tournament');
+  const baseEntityId = String(resolveMetaValue(meta?.entityId, '') || '').trim();
+  const baseDetail = String(resolveMetaValue(meta?.detail, '') || '').trim();
+
+  const recordFailure = (title, detailOverride = '') => {
+    if (!meta) return;
+    recordOperatorAction({
+      scope: baseScope,
+      action: `${baseAction}-failed`,
+      entityType: baseEntityType,
+      entityId: baseEntityId,
+      title: String(title || '').trim() || 'Tournament action failed.',
+      detail: String(detailOverride || baseDetail || '').trim(),
+      tone: 'error'
+    });
+  };
+
+  if (!result || result.ok === false) {
+    const msg = result && result.error ? result.error : fallbackErrorMessage;
+    setTournamentNotice(msg, TOURNAMENT_NOTICE_ERROR);
+    recordFailure('Tournament action failed.', msg);
+    initTournamentView();
+    return false;
+  }
+
+  if (SUPABASE_AUTHORITATIVE && supabaseClient) {
+    const synced = await syncTournamentStoreToSupabase();
+    if (!synced) {
+      await reconcileTournamentToSupabaseAuthority(contextLabel || 'tournament-write');
+      setTournamentNotice(
+        'Tournament change was not saved to Supabase. Restored latest shared state.',
+        TOURNAMENT_NOTICE_ERROR
+      );
+      recordFailure(
+        'Tournament write failed. Restored latest shared state.',
+        `Change was reverted during reconcile (${contextLabel || 'tournament-write'}).`
+      );
+      initTournamentView();
+      return false;
+    }
+  }
+
+  if (meta) {
+    const toneRaw = String(resolveMetaValue(meta.tone, 'info') || 'info').trim();
+    const tone = toneRaw === 'success' || toneRaw === 'warning' || toneRaw === 'error' ? toneRaw : 'info';
+    const undoSnapshot = resolveMetaValue(meta.undoSnapshot, null);
+    const undoPayload = undoSnapshot && typeof undoSnapshot === 'object'
+      ? { kind: 'tournament-store', storeSnapshot: undoSnapshot }
+      : null;
+
+    recordOperatorAction({
+      scope: baseScope,
+      action: baseAction,
+      entityType: baseEntityType,
+      entityId: baseEntityId,
+      title: String(resolveMetaValue(meta.title, successMessage) || successMessage || 'Tournament updated.').trim(),
+      detail: baseDetail,
+      tone,
+      undo: undoPayload
+    });
+  }
+
+  setTournamentNotice(successMessage, TOURNAMENT_NOTICE_SUCCESS);
+  initTournamentView();
+  return true;
+}
+
+async function handleTournamentAction(action, trigger) {
   const activeTournament = getActiveTournamentFromSelect();
   const activeId = activeTournament?.id || '';
 
@@ -4222,23 +5102,38 @@ function handleTournamentAction(action, trigger) {
     if (!state.isAdmin) return;
     const name = String(document.getElementById('trn-name')?.value || '').trim();
     const format = String(document.getElementById('trn-format')?.value || TournamentManager.FORMAT_RR);
+    const sourceMode = String(document.getElementById('trn-source-mode')?.value || TournamentManager.SOURCE_CHECKED_IN);
     const courtCount = Number.parseInt(document.getElementById('trn-court-count')?.value || '2', 10);
     const groupFilter = String(document.getElementById('trn-source-group')?.value || 'All');
     const teamCount = Number.parseInt(document.getElementById('trn-team-count')?.value || '2', 10);
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
 
     const created = TournamentManager.createTournament({
       name,
       format,
+      sourceMode,
       courtCount,
       groupFilter,
       teamCount
     });
-    if (!created.ok) {
-      setTournamentNotice(created.error || 'Unable to create tournament.', TOURNAMENT_NOTICE_ERROR);
-    } else {
-      setTournamentNotice('Tournament created. Build matches when teams look right.', TOURNAMENT_NOTICE_SUCCESS);
-    }
-    initTournamentView();
+    await commitTournamentMutation(created, {
+      successMessage: 'Tournament created. Build matches when teams look right.',
+      fallbackErrorMessage: 'Unable to create tournament.',
+      contextLabel: 'tournament-create',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'create-tournament',
+        entityType: 'tournament',
+        entityId: (mutationResult) => mutationResult?.tournament?.id || '',
+        title: (mutationResult) => {
+          const createdName = String(mutationResult?.tournament?.name || name || 'Tournament').trim();
+          return `Created tournament "${createdName}".`;
+        },
+        detail: `Format: ${formatTournamentFormatLabel(format)} | Source: ${sourceMode === TournamentManager.SOURCE_GENERATED_TEAMS ? 'Generated Teams' : `Checked-In (${formatTournamentGroupLabel(groupFilter)})`}.`,
+        tone: 'success',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
     return;
   }
 
@@ -4250,37 +5145,132 @@ function handleTournamentAction(action, trigger) {
   }
 
   if (action === 'delete-tournament') {
-    if (!window.confirm('Delete this tournament and all matches?')) return;
+    const safeTournamentName = String(activeTournament?.name || 'this tournament').trim() || 'this tournament';
+    const confirmed = confirmDangerousActionOrAbort({
+      title: `Delete tournament "${safeTournamentName}"?`,
+      detail: 'This removes all teams, matches, and recorded tournament results from shared state.',
+      confirmText: 'DELETE'
+    });
+    if (!confirmed) return;
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
     const deleted = TournamentManager.deleteTournament(activeId);
-    if (!deleted.ok) setTournamentNotice(deleted.error || 'Delete failed.', TOURNAMENT_NOTICE_ERROR);
-    else setTournamentNotice('Tournament deleted.', TOURNAMENT_NOTICE_SUCCESS);
-    initTournamentView();
+    await commitTournamentMutation(deleted, {
+      successMessage: 'Tournament deleted.',
+      fallbackErrorMessage: 'Delete failed.',
+      contextLabel: 'tournament-delete',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'delete-tournament',
+        entityType: 'tournament',
+        entityId: activeId,
+        title: `Deleted tournament "${safeTournamentName}".`,
+        detail: 'Tournament record and match history were removed.',
+        tone: 'warning',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
     return;
   }
 
   if (action === 'rebuild-teams') {
+    const sourceMode = String(
+      document.getElementById('trn-source-mode')?.value
+      || activeTournament.sourceMode
+      || TournamentManager.SOURCE_CHECKED_IN
+    );
     const groupFilter = String(document.getElementById('trn-source-group')?.value || activeTournament.sourceGroup || 'All');
     const teamCount = Number.parseInt(document.getElementById('trn-team-count')?.value || String(activeTournament.teamCount || 2), 10);
-    const rebuilt = TournamentManager.rebuildTeams(activeId, { groupFilter, teamCount });
-    if (!rebuilt.ok) setTournamentNotice(rebuilt.error || 'Team build failed.', TOURNAMENT_NOTICE_ERROR);
-    else setTournamentNotice('Teams rebuilt from checked-in players.', TOURNAMENT_NOTICE_SUCCESS);
-    initTournamentView();
+    const existingMatchCount = Array.isArray(activeTournament.matches) ? activeTournament.matches.length : 0;
+    if (existingMatchCount > 0) {
+      const confirmed = confirmDangerousActionOrAbort({
+        title: `Rebuild teams for "${activeTournament.name}"?`,
+        detail: `This clears ${existingMatchCount} existing matches and resets progression from the selected source.`,
+        confirmText: 'REBUILD'
+      });
+      if (!confirmed) return;
+    }
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const rebuilt = TournamentManager.rebuildTeams(activeId, { sourceMode, groupFilter, teamCount });
+    await commitTournamentMutation(rebuilt, {
+      successMessage: 'Teams rebuilt from selected source.',
+      fallbackErrorMessage: 'Team build failed.',
+      contextLabel: 'tournament-rebuild-teams',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'rebuild-teams',
+        entityType: 'tournament',
+        entityId: activeId,
+        title: `Rebuilt teams for "${activeTournament.name}".`,
+        detail: `Source: ${sourceMode === TournamentManager.SOURCE_GENERATED_TEAMS ? 'Generated Teams' : `Checked-In (${formatTournamentGroupLabel(groupFilter)})`}.`,
+        tone: 'warning',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
     return;
   }
 
   if (action === 'generate-matches') {
+    const existingMatchCount = Array.isArray(activeTournament.matches) ? activeTournament.matches.length : 0;
+    if (existingMatchCount > 0) {
+      const confirmed = confirmDangerousActionOrAbort({
+        title: `Regenerate matches for "${activeTournament.name}"?`,
+        detail: `This replaces ${existingMatchCount} existing matches using current teams.`,
+        confirmText: 'REGENERATE'
+      });
+      if (!confirmed) return;
+    }
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
     const generated = TournamentManager.generateMatches(activeId);
-    if (!generated.ok) setTournamentNotice(generated.error || 'Match generation failed.', TOURNAMENT_NOTICE_ERROR);
-    else setTournamentNotice('Matches generated.', TOURNAMENT_NOTICE_SUCCESS);
-    initTournamentView();
+    await commitTournamentMutation(generated, {
+      successMessage: 'Matches generated.',
+      fallbackErrorMessage: 'Match generation failed.',
+      contextLabel: 'tournament-generate-matches',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'generate-matches',
+        entityType: 'tournament',
+        entityId: activeId,
+        title: `Generated matches for "${activeTournament.name}".`,
+        detail: (mutationResult) => {
+          const count = Array.isArray(mutationResult?.tournament?.matches)
+            ? mutationResult.tournament.matches.length
+            : 0;
+          return `${count} matches scheduled.`;
+        },
+        tone: 'warning',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
     return;
   }
 
   if (action === 'reset-matches') {
+    const matchCount = Array.isArray(activeTournament.matches) ? activeTournament.matches.length : 0;
+    const confirmed = confirmDangerousActionOrAbort({
+      title: `Reset matches for "${activeTournament.name}"?`,
+      detail: matchCount > 0
+        ? `This resets ${matchCount} matches from current teams and clears recorded outcomes.`
+        : 'This rebuilds matches from current teams.',
+      confirmText: 'RESET'
+    });
+    if (!confirmed) return;
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
     const reset = TournamentManager.resetMatches(activeId);
-    if (!reset.ok) setTournamentNotice(reset.error || 'Reset failed.', TOURNAMENT_NOTICE_ERROR);
-    else setTournamentNotice('Matches reset from current teams.', TOURNAMENT_NOTICE_SUCCESS);
-    initTournamentView();
+    await commitTournamentMutation(reset, {
+      successMessage: 'Matches reset from current teams.',
+      fallbackErrorMessage: 'Reset failed.',
+      contextLabel: 'tournament-reset-matches',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'reset-matches',
+        entityType: 'tournament',
+        entityId: activeId,
+        title: `Reset matches for "${activeTournament.name}".`,
+        detail: 'Match outcomes were cleared and rebuilt from current teams.',
+        tone: 'warning',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
     return;
   }
 
@@ -4290,29 +5280,69 @@ function handleTournamentAction(action, trigger) {
     const input = Array.from(document.querySelectorAll('[data-tr-role="team-name-input"]'))
       .find((el) => String(el.getAttribute('data-team-id') || '') === teamId);
     const name = String(input?.value || '').trim();
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
     const renamed = TournamentManager.renameTeam(activeId, teamId, name);
-    if (!renamed.ok) setTournamentNotice(renamed.error || 'Rename failed.', TOURNAMENT_NOTICE_ERROR);
-    else setTournamentNotice('Team name updated.', TOURNAMENT_NOTICE_SUCCESS);
-    initTournamentView();
+    await commitTournamentMutation(renamed, {
+      successMessage: 'Team name updated.',
+      fallbackErrorMessage: 'Rename failed.',
+      contextLabel: 'tournament-rename-team',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'rename-team',
+        entityType: 'team',
+        entityId: teamId,
+        title: `Renamed team to "${name || 'Untitled Team'}".`,
+        detail: `Tournament: ${activeTournament.name}`,
+        tone: 'info',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
     return;
   }
 
   if (action === 'move-member') {
     const memberKey = String(document.getElementById('trn-move-member')?.value || '').trim();
     const toTeamId = String(document.getElementById('trn-move-target-team')?.value || '').trim();
+    const targetTeamName = getTournamentTeamName(activeTournament, toTeamId);
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
     const moved = TournamentManager.moveMember(activeId, memberKey, toTeamId);
-    if (!moved.ok) setTournamentNotice(moved.error || 'Move failed.', TOURNAMENT_NOTICE_ERROR);
-    else setTournamentNotice('Player moved.', TOURNAMENT_NOTICE_SUCCESS);
-    initTournamentView();
+    await commitTournamentMutation(moved, {
+      successMessage: 'Player moved.',
+      fallbackErrorMessage: 'Move failed.',
+      contextLabel: 'tournament-move-member',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'move-member',
+        entityType: 'team',
+        entityId: toTeamId,
+        title: `Moved player to ${targetTeamName}.`,
+        detail: `Tournament: ${activeTournament.name}`,
+        tone: 'info',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
     return;
   }
 
   if (action === 'start-match') {
     const matchId = String(trigger?.getAttribute('data-match-id') || '').trim();
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
     const started = TournamentManager.startMatch(activeId, matchId);
-    if (!started.ok) setTournamentNotice(started.error || 'Unable to start match.', TOURNAMENT_NOTICE_ERROR);
-    else setTournamentNotice('Match started.', TOURNAMENT_NOTICE_SUCCESS);
-    initTournamentView();
+    await commitTournamentMutation(started, {
+      successMessage: 'Match started.',
+      fallbackErrorMessage: 'Unable to start match.',
+      contextLabel: 'tournament-start-match',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'start-match',
+        entityType: 'match',
+        entityId: matchId,
+        title: `Started ${getTournamentMatchLabel(activeTournament, matchId)}.`,
+        detail: `Tournament: ${activeTournament.name}`,
+        tone: 'info',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
     return;
   }
 
@@ -4324,10 +5354,23 @@ function handleTournamentAction(action, trigger) {
       .find((el) => String(el.getAttribute('data-tr-score-b-for') || '') === matchId);
     const scoreA = Number(scoreAInput?.value);
     const scoreB = Number(scoreBInput?.value);
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
     const finalized = TournamentManager.finalizeMatch(activeId, matchId, scoreA, scoreB);
-    if (!finalized.ok) setTournamentNotice(finalized.error || 'Result save failed.', TOURNAMENT_NOTICE_ERROR);
-    else setTournamentNotice('Match finalized.', TOURNAMENT_NOTICE_SUCCESS);
-    initTournamentView();
+    await commitTournamentMutation(finalized, {
+      successMessage: 'Match finalized.',
+      fallbackErrorMessage: 'Result save failed.',
+      contextLabel: 'tournament-finalize-match',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'finalize-match',
+        entityType: 'match',
+        entityId: matchId,
+        title: `Finalized ${getTournamentMatchLabel(activeTournament, matchId)} (${Number.isFinite(scoreA) ? scoreA : 0}-${Number.isFinite(scoreB) ? scoreB : 0}).`,
+        detail: `Tournament: ${activeTournament.name}`,
+        tone: 'success',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
   }
 }
 
@@ -4355,13 +5398,13 @@ function ensureTournamentOverlayBindings() {
   }
 
   if (root) {
-    root.addEventListener('click', (event) => {
+    root.addEventListener('click', async (event) => {
       const trigger = event.target.closest('[data-tr-action]');
       if (!trigger) return;
       event.preventDefault();
       const action = String(trigger.getAttribute('data-tr-action') || '').trim();
       if (!action) return;
-      handleTournamentAction(action, trigger);
+      await handleTournamentAction(action, trigger);
     });
   }
 }
@@ -4630,6 +5673,10 @@ function render() {
           <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
           <button id="btn-logout">Logout</button>
         </div>
+      </div>
+      <div class="card">
+        <h3>Recent Actions</h3>
+        ${renderOperatorActionsLogHTML()}
       </div>
      <div class="card card-generate-teams">
   <div class="card-collapsible-head">
@@ -5416,7 +6463,12 @@ if (gmOpen && gmRoot) {
     if (deleteBtn) {
       const name = normalizeGroupName(deleteBtn.getAttribute('data-group'));
       if (!name) return;
-      if (!confirm(`Delete "${name}" and remove the group from all players?`)) return;
+      const confirmed = confirmDangerousActionOrAbort({
+        title: `Delete group "${name}"?`,
+        detail: 'This removes the group from all players and cannot be auto-undone.',
+        confirmText: name
+      });
+      if (!confirmed) return;
       const targetKey = normalizeGroupKey(name);
 
       state.groups = ['All', ...normalizeGroupList(
@@ -5457,6 +6509,15 @@ if (gmOpen && gmRoot) {
       }
       if (deleteRemoteFailed) {
         await reconcileToSupabaseAuthority('group-delete');
+        recordOperatorAction({
+          scope: 'players',
+          action: 'delete-group-failed',
+          entityType: 'group',
+          entityId: targetKey,
+          title: `Delete failed for group "${name}".`,
+          detail: 'Supabase write failed. Latest shared state was restored.',
+          tone: 'error'
+        });
         gmPopulate();
         return;
       }
@@ -5464,6 +6525,15 @@ if (gmOpen && gmRoot) {
       saveLocal();
       render();
       gmPopulate();
+      recordOperatorAction({
+        scope: 'players',
+        action: 'delete-group',
+        entityType: 'group',
+        entityId: targetKey,
+        title: `Deleted group "${name}".`,
+        detail: 'Group membership was removed from affected players.',
+        tone: 'warning'
+      });
     }
   });
 }
@@ -5485,8 +6555,9 @@ if (loginBtn) {
       sessionStorage.setItem(LS_ADMIN_KEY, 'true');
       sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
       try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
-      await syncFromSupabase();                  // re-fetch full dataset
-      if (state.isAdmin) {
+      const synced = await syncFromSupabase();   // re-fetch full dataset
+      if (synced) saveLocal();
+      if (synced && canRunAdminSharedBackfill()) {
         (async () => {
           const catalogSynced = await backfillGroupCatalogToSupabase();
           const membershipsSynced = await backfillPlayerMembershipsToSupabase();
@@ -5509,8 +6580,9 @@ if (loginBtn) {
       sessionStorage.setItem(LS_ADMIN_KEY, 'true');
       sessionStorage.setItem(LS_LIMITED_GROUP_KEY, group);
       try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, group); } catch {}
-      await syncFromSupabase();                  // re-fetch only that group
-      if (state.isAdmin) {
+      const synced = await syncFromSupabase();   // re-fetch only that group
+      if (synced) saveLocal();
+      if (synced && canRunAdminSharedBackfill()) {
         (async () => {
           const catalogSynced = await backfillGroupCatalogToSupabase();
           const membershipsSynced = await backfillPlayerMembershipsToSupabase();
@@ -5535,7 +6607,8 @@ if (logoutBtn) {
     sessionStorage.removeItem(LS_ADMIN_KEY);
     sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
     try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
-    await syncFromSupabase();                    // load public view dataset
+    const synced = await syncFromSupabase();     // load public view dataset
+    if (synced) saveLocal();
     render();
   });
 }
@@ -5561,7 +6634,8 @@ if (saveSupabaseBtn) {
       ];
       if (summary.matchedByName) pieces.push(`Matched ${summary.matchedByName} by name`);
       if (summary.failed) pieces.push(`Failed ${summary.failed}`);
-      alert(`Saved to Supabase. ${pieces.join(' • ')}`);
+      if (summary.tournamentSynced) pieces.push('Tournament synced');
+      alert(`Saved to Supabase. ${pieces.join(' | ')}`);
     } catch (err) {
       console.error('Manual save to Supabase error', err);
       alert('Save to Supabase failed. Check connection and try again.');
@@ -5881,25 +6955,66 @@ if (saveSupabaseBtn) {
   // --- Reset all checkins ---
   const resetBtn = document.getElementById('btn-reset-checkins');
   if (resetBtn) {
-    resetBtn.addEventListener('click', () => {
+    resetBtn.addEventListener('click', async () => {
+      const previouslyCheckedIn = normalizeCheckedInEntries(state.checkedIn || []);
+      const confirmed = confirmDangerousActionOrAbort({
+        title: `Reset all check-ins (${previouslyCheckedIn.length} currently checked in)?`,
+        detail: 'This will check everyone out and sync that state to Supabase.',
+        confirmText: 'RESET'
+      });
+      if (!confirmed) return;
+
       state.checkedIn = [];
       saveLocal();
       render();
+      recordOperatorAction({
+        scope: 'players',
+        action: 'reset-checkins',
+        entityType: 'checkins',
+        entityId: '',
+        title: 'Reset all check-ins.',
+        detail: `${previouslyCheckedIn.length} players were checked out.`,
+        tone: 'warning',
+        undo: {
+          kind: 'checkins',
+          checkedIn: previouslyCheckedIn
+        }
+      });
 
       if (supabaseClient) {
-        (async () => {
-          try {
-            const { error } = await supabaseClient.from('players').update({ checked_in: false }).eq('checked_in', true);
-            if (error) throw error;
-            queueSupabaseRefresh();
-          } catch (err) {
-            console.error('Supabase reset error', err);
-            await reconcileToSupabaseAuthority('reset-check-ins');
-          }
-        })();
+        try {
+          const { error } = await supabaseClient.from('players').update({ checked_in: false }).eq('checked_in', true);
+          if (error) throw error;
+          queueSupabaseRefresh();
+        } catch (err) {
+          console.error('Supabase reset error', err);
+          await reconcileToSupabaseAuthority('reset-check-ins');
+          recordOperatorAction({
+            scope: 'players',
+            action: 'reset-checkins-failed',
+            entityType: 'checkins',
+            entityId: '',
+            title: 'Reset check-ins failed to sync.',
+            detail: 'Supabase write failed. Latest shared state was restored.',
+            tone: 'error'
+          });
+        }
       }
     });
   }
+
+  document.querySelectorAll('[data-role="undo-operator-action"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const actionId = String(btn.getAttribute('data-action-id') || '').trim();
+      if (!actionId) return;
+      btn.disabled = true;
+      try {
+        await runOperatorActionUndo(actionId);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
 
   // --- Team generator controls ---
   const groupCountInput = document.getElementById('group-count');
@@ -6034,17 +7149,24 @@ if (saveSupabaseBtn) {
   const searchInput = document.getElementById('player-search');
   const clearBtn = document.getElementById('player-search-clear');
   if (searchInput) {
-    const toggleClear = () => {
-      if (clearBtn) clearBtn.style.display = searchInput.value.trim() ? 'inline' : 'none';
-    };
-    searchInput.addEventListener('input', () => {
-      state.searchTerm = searchInput.value;
+    const rerenderPlayersListPreservingTransientState = () => {
+      const snapshot = captureTransientInteractionState();
       const container = document.querySelector('.players');
       if (container) {
         container.innerHTML = renderFilteredPlayers();
         bindPlayerRowHandlers();
         bindSelectionHandlers();
       }
+      updateBulkBarVisibility();
+      restoreTransientInteractionState(snapshot);
+    };
+
+    const toggleClear = () => {
+      if (clearBtn) clearBtn.style.display = searchInput.value.trim() ? 'inline' : 'none';
+    };
+    searchInput.addEventListener('input', () => {
+      state.searchTerm = searchInput.value;
+      rerenderPlayersListPreservingTransientState();
       toggleClear();
     });
     toggleClear();
@@ -6054,12 +7176,15 @@ if (saveSupabaseBtn) {
       state.searchTerm = '';
       const si = document.getElementById('player-search');
       if (si) { si.value = ''; si.focus(); }
+      const snapshot = captureTransientInteractionState();
       const container = document.querySelector('.players');
       if (container) {
         container.innerHTML = renderFilteredPlayers();
         bindPlayerRowHandlers();
         bindSelectionHandlers();
       }
+      updateBulkBarVisibility();
+      restoreTransientInteractionState(snapshot);
       clearBtn.style.display = 'none';
     });
   }
@@ -6277,8 +7402,10 @@ function init() {
   loadLocal();
   if (!supabaseClient) {
     setSharedSyncState(SHARED_SYNC_LOCAL_ONLY);
+    setTournamentSyncState(SHARED_SYNC_LOCAL_ONLY);
   } else if (SUPABASE_AUTHORITATIVE) {
     setSharedSyncState(SHARED_SYNC_PENDING);
+    setTournamentSyncState(SHARED_SYNC_PENDING);
   }
   // If Supabase is unavailable, local data is the runtime source.
   // When Supabase is available, sync first and render from cloud-backed state.
@@ -6288,7 +7415,7 @@ function init() {
 
   // Register service worker for PWA offline support
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+    navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(APP_VERSION)}`, { updateViaCache: 'none' })
       .then((registration) => {
         if (registration && typeof registration.update === 'function') {
           registration.update().catch(() => {});
@@ -6307,7 +7434,7 @@ function init() {
       const synced = await syncFromSupabase();
       if (synced) saveLocal();
       ensureSupabaseLiveSync();
-      if (state.isAdmin) {
+      if (synced && canRunAdminSharedBackfill()) {
         (async () => {
           const catalogSynced = await backfillGroupCatalogToSupabase();
           const membershipsSynced = await backfillPlayerMembershipsToSupabase();
@@ -6338,4 +7465,5 @@ if (document.readyState === 'loading') {
   initTournamentView();
   bindTournamentTab();
 }
+
 
