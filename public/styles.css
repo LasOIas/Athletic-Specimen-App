@@ -1018,6 +1018,45 @@ body {
   color: #991b1b;
 }
 
+.tournament-runtime-trace {
+  margin-top: 0.45rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
+}
+
+.tournament-runtime-trace-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #334155;
+}
+
+.tournament-runtime-trace-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.tournament-runtime-trace-item {
+  margin: 0;
+  padding: 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: #0f172a;
+}
+
+.tournament-runtime-trace-item.is-error {
+  color: #b91c1c;
+}
+
+.tournament-runtime-trace-item.is-success {
+  color: #166534;
+}
+
 .tournament-meta-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

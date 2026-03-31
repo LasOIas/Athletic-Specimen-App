@@ -2792,10 +2792,14 @@ function getAvailableGroups() {
 }
 
 function showTournamentView(show) {
+  if (show) ensureTournamentOverlayBindings();
   const v = document.getElementById('view-tournament');
   if (!v) return;
   v.style.display = show ? 'block' : 'none';
   v.setAttribute('aria-hidden', show ? 'false' : 'true');
+  if (show) {
+    pushTournamentRuntimeTrace('view opened.');
+  }
 }
 
 // Message state used for transient user feedback; messages auto clear
@@ -3860,11 +3864,23 @@ const TOURNAMENT_NOTICE_INFO = 'info';
 const TOURNAMENT_NOTICE_ERROR = 'error';
 const TOURNAMENT_NOTICE_SUCCESS = 'success';
 const TOURNAMENT_UNSET_VALUE = '';
+const TOURNAMENT_RUNTIME_DEBUG_STORAGE_KEY = 'athletic_specimen_tournament_debug';
+const TOURNAMENT_RUNTIME_TRACE_LIMIT = 8;
+const TOURNAMENT_RUNTIME_DEBUG_ENABLED = (() => {
+  try {
+    const params = new URLSearchParams(window.location.search || '');
+    if (params.get('trDebug') === '1' || params.get('tournamentDebug') === '1') return true;
+    return localStorage.getItem(TOURNAMENT_RUNTIME_DEBUG_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+})();
 const tournamentViewState = {
   noticeText: '',
   noticeTone: TOURNAMENT_NOTICE_INFO,
   section: 'overview',
-  playerSearch: ''
+  playerSearch: '',
+  runtimeTrace: []
 };
 
 function setTournamentNotice(text, tone = TOURNAMENT_NOTICE_INFO) {
@@ -3874,6 +3890,67 @@ function setTournamentNotice(text, tone = TOURNAMENT_NOTICE_INFO) {
 
 function clearTournamentNotice() {
   setTournamentNotice('', TOURNAMENT_NOTICE_INFO);
+}
+
+function formatTournamentRuntimeTraceTime(timestamp) {
+  if (!Number.isFinite(timestamp)) return '';
+  try {
+    return new Date(timestamp).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  } catch {
+    return '';
+  }
+}
+
+function pushTournamentRuntimeTrace(message, tone = TOURNAMENT_NOTICE_INFO) {
+  if (!TOURNAMENT_RUNTIME_DEBUG_ENABLED) return;
+  const text = String(message || '').trim();
+  if (!text) return;
+  const safeTone = tone === TOURNAMENT_NOTICE_ERROR || tone === TOURNAMENT_NOTICE_SUCCESS
+    ? tone
+    : TOURNAMENT_NOTICE_INFO;
+  const next = [{
+    id: `trdbg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
+    text,
+    tone: safeTone,
+    at: Date.now()
+  }];
+  if (Array.isArray(tournamentViewState.runtimeTrace)) {
+    next.push(...tournamentViewState.runtimeTrace);
+  }
+  tournamentViewState.runtimeTrace = next.slice(0, TOURNAMENT_RUNTIME_TRACE_LIMIT);
+}
+
+function renderTournamentRuntimeTraceHTML() {
+  if (!TOURNAMENT_RUNTIME_DEBUG_ENABLED) return '';
+  const rows = Array.isArray(tournamentViewState.runtimeTrace)
+    ? tournamentViewState.runtimeTrace.filter((entry) => entry && entry.text)
+    : [];
+  if (!rows.length) return '';
+  const itemsHTML = rows.map((entry) => {
+    const timeLabel = formatTournamentRuntimeTraceTime(Number(entry.at));
+    const tone = entry.tone === TOURNAMENT_NOTICE_ERROR || entry.tone === TOURNAMENT_NOTICE_SUCCESS
+      ? entry.tone
+      : TOURNAMENT_NOTICE_INFO;
+    const prefix = timeLabel ? `[${timeLabel}] ` : '';
+    return `<li class="tournament-runtime-trace-item is-${tone}">${escapeHTMLText(`${prefix}${entry.text}`)}</li>`;
+  }).join('');
+  return `
+    <div class="tournament-runtime-trace">
+      <p class="tournament-runtime-trace-title">Tournament Runtime Debug (v${escapeHTMLText(APP_VERSION)})</p>
+      <ul class="tournament-runtime-trace-list">${itemsHTML}</ul>
+    </div>
+  `;
+}
+
+function showTournamentActionBlocked(reason) {
+  const message = String(reason || '').trim() || 'Tournament action blocked.';
+  setTournamentNotice(message, TOURNAMENT_NOTICE_ERROR);
+  pushTournamentRuntimeTrace(`action blocked: ${message}`, TOURNAMENT_NOTICE_ERROR);
+  initTournamentView();
 }
 
 const TournamentManager = (() => {
@@ -5262,12 +5339,17 @@ function getRoundRobinStandingsForView(tournament) {
 }
 
 function renderTournamentNoticeHTML() {
-  if (!tournamentViewState.noticeText) return '';
-  const tone = tournamentViewState.noticeTone || TOURNAMENT_NOTICE_INFO;
-  const safeTone = tone === TOURNAMENT_NOTICE_ERROR || tone === TOURNAMENT_NOTICE_SUCCESS
-    ? tone
-    : TOURNAMENT_NOTICE_INFO;
-  return `<p class="tournament-notice is-${safeTone}">${escapeHTMLText(tournamentViewState.noticeText)}</p>`;
+  const chunks = [];
+  if (tournamentViewState.noticeText) {
+    const tone = tournamentViewState.noticeTone || TOURNAMENT_NOTICE_INFO;
+    const safeTone = tone === TOURNAMENT_NOTICE_ERROR || tone === TOURNAMENT_NOTICE_SUCCESS
+      ? tone
+      : TOURNAMENT_NOTICE_INFO;
+    chunks.push(`<p class="tournament-notice is-${safeTone}">${escapeHTMLText(tournamentViewState.noticeText)}</p>`);
+  }
+  const runtimeTraceHTML = renderTournamentRuntimeTraceHTML();
+  if (runtimeTraceHTML) chunks.push(runtimeTraceHTML);
+  return chunks.join('');
 }
 
 function renderTournamentHeaderCardHTML(tournament) {
@@ -5924,6 +6006,7 @@ function refreshTournamentSelectUI() {
 }
 
 function initTournamentView() {
+  ensureTournamentOverlayBindings();
   const globalNotice = document.getElementById('tournamentGlobalNotice');
   const headerCard = document.getElementById('tournamentHeaderCard');
   const adminCard = document.getElementById('adminTournament');
@@ -5964,6 +6047,14 @@ function initTournamentView() {
 }
 
 async function handleTournamentAction(action, trigger) {
+  const actionName = String(action || '').trim();
+  if (!actionName) {
+    showTournamentActionBlocked('Tournament control is missing action wiring.');
+    return;
+  }
+  action = actionName;
+  pushTournamentRuntimeTrace(`action received: ${action}`);
+
   if (action === 'set-section') {
     const section = String(trigger?.getAttribute('data-section') || '').trim();
     if (TournamentSubApp.SECTIONS.includes(section)) tournamentViewState.section = section;
@@ -5984,7 +6075,10 @@ async function handleTournamentAction(action, trigger) {
   }
 
   if (action === 'create-tournament') {
-    if (!state.isAdmin) return;
+    if (!state.isAdmin) {
+      showTournamentActionBlocked('Admin access is required to create a tournament event.');
+      return;
+    }
     const name = String(document.getElementById('trn-name')?.value || '').trim();
     if (!name) {
       setTournamentNotice('Event name is required.', TOURNAMENT_NOTICE_ERROR);
@@ -6037,11 +6131,13 @@ async function handleTournamentAction(action, trigger) {
     return;
   }
 
-  if (!state.isAdmin) return;
+  if (!state.isAdmin) {
+    showTournamentActionBlocked('Admin access is required for tournament edits.');
+    return;
+  }
   const activeTournament = getActiveTournamentFromSelect();
   if (!activeTournament || !activeTournament.id) {
-    setTournamentNotice('Select a tournament first.', TOURNAMENT_NOTICE_ERROR);
-    initTournamentView();
+    showTournamentActionBlocked('Select a tournament first.');
     return;
   }
 
@@ -6855,72 +6951,109 @@ async function handleTournamentAdminAction(action, trigger, activeTournament) {
     return;
   }
 
-  setTournamentNotice('Action unavailable in this section.', TOURNAMENT_NOTICE_ERROR);
-  initTournamentView();
+  showTournamentActionBlocked('Action unavailable in this section.');
 }
 
 function ensureTournamentOverlayBindings() {
   if (ensureTournamentOverlayBindings._bound) return;
+  const tournamentRoot = document.getElementById('view-tournament');
+  if (!tournamentRoot) {
+    pushTournamentRuntimeTrace('binding delayed: #view-tournament not found.', TOURNAMENT_NOTICE_ERROR);
+    return;
+  }
   const toEventElement = (rawTarget) => {
     if (rawTarget instanceof Element) return rawTarget;
     if (rawTarget && rawTarget.parentElement instanceof Element) return rawTarget.parentElement;
     return null;
   };
+  const reportInteractionFailure = (contextLabel, err) => {
+    const message = `Tournament interaction failed (${contextLabel}).`;
+    console.error(message, err);
+    setTournamentNotice(message, TOURNAMENT_NOTICE_ERROR);
+    pushTournamentRuntimeTrace(`${contextLabel} failed: ${err?.message || 'runtime error'}`, TOURNAMENT_NOTICE_ERROR);
+    initTournamentView();
+  };
 
   // Canonical delegated change routing for tournament controls.
   document.addEventListener('change', (event) => {
-    const target = toEventElement(event.target);
-    if (!target) return;
+    try {
+      const target = toEventElement(event.target);
+      if (!target) return;
 
-    const select = target.closest('#view-tournament #tournamentSelect');
-    if (!select) return;
+      const select = target.closest('#view-tournament #tournamentSelect');
+      if (!select) return;
 
-    const selected = String(select.value || '').trim();
-    TournamentManager.setActive(selected);
-    clearTournamentNotice();
-    initTournamentView();
+      const selected = String(select.value || '').trim();
+      pushTournamentRuntimeTrace(`select changed: ${selected || '(none)'}`);
+      TournamentManager.setActive(selected);
+      clearTournamentNotice();
+      initTournamentView();
+    } catch (err) {
+      reportInteractionFailure('change', err);
+    }
   });
 
   // Canonical delegated click routing for tournament controls.
   document.addEventListener('click', async (event) => {
-    const target = toEventElement(event.target);
-    if (!target) return;
+    try {
+      const target = toEventElement(event.target);
+      if (!target) return;
 
-    const closeBtn = target.closest('#view-tournament #closeTournamentBtn');
-    if (closeBtn) {
+      const closeBtn = target.closest('#view-tournament #closeTournamentBtn');
+      if (closeBtn) {
+        event.preventDefault();
+        pushTournamentRuntimeTrace('close requested.');
+        showTournamentView(false);
+        return;
+      }
+
+      const trigger = target.closest('#view-tournament [data-tr-action]');
+      if (!trigger) return;
+
       event.preventDefault();
-      showTournamentView(false);
-      return;
+      const action = String(trigger.getAttribute('data-tr-action') || '').trim();
+      if (!action) {
+        showTournamentActionBlocked('Tournament action wiring is missing.');
+        return;
+      }
+      pushTournamentRuntimeTrace(`click received: ${action}`);
+      await handleTournamentAction(action, trigger);
+    } catch (err) {
+      reportInteractionFailure('click', err);
     }
-
-    const trigger = target.closest('#view-tournament [data-tr-action]');
-    if (!trigger) return;
-
-    event.preventDefault();
-    const action = String(trigger.getAttribute('data-tr-action') || '').trim();
-    if (!action) return;
-    await handleTournamentAction(action, trigger);
   }, true);
 
   // Tournament forms (if present) route through the same canonical handler.
   document.addEventListener('submit', async (event) => {
-    const target = toEventElement(event.target);
-    const form = target && target.matches('form') ? target : target?.closest('form');
-    if (!form || !form.closest('#view-tournament')) return;
+    try {
+      const target = toEventElement(event.target);
+      const form = target && target.matches('form') ? target : target?.closest('form');
+      if (!form || !form.closest('#view-tournament')) return;
+      event.preventDefault();
 
-    const submitter = event.submitter instanceof Element
-      ? event.submitter
-      : form.querySelector('[data-tr-action]');
-    if (!submitter) return;
+      const submitter = event.submitter instanceof Element
+        ? event.submitter
+        : form.querySelector('[data-tr-action]');
+      if (!submitter) {
+        showTournamentActionBlocked('Tournament form submitter is missing action wiring.');
+        return;
+      }
 
-    const action = String(submitter.getAttribute('data-tr-action') || '').trim();
-    if (!action) return;
+      const action = String(submitter.getAttribute('data-tr-action') || '').trim();
+      if (!action) {
+        showTournamentActionBlocked('Tournament form action wiring is missing.');
+        return;
+      }
 
-    event.preventDefault();
-    await handleTournamentAction(action, submitter);
+      pushTournamentRuntimeTrace(`submit received: ${action}`);
+      await handleTournamentAction(action, submitter);
+    } catch (err) {
+      reportInteractionFailure('submit', err);
+    }
   }, true);
 
   ensureTournamentOverlayBindings._bound = true;
+  pushTournamentRuntimeTrace(`binding initialized (click/change/submit delegated, v${APP_VERSION}).`, TOURNAMENT_NOTICE_SUCCESS);
 }
 
 function bindTournamentTab() {
