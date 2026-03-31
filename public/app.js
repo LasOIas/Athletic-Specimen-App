@@ -6884,8 +6884,11 @@ function ensureTournamentOverlayBindings() {
 
   if (root) {
     root.addEventListener('click', async (event) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
+      const rawTarget = event.target;
+      const target = rawTarget instanceof Element
+        ? rawTarget
+        : (rawTarget && rawTarget.parentElement ? rawTarget.parentElement : null);
+      if (!target) return;
       const trigger = target.closest('[data-tr-action]');
       if (!trigger) return;
       event.preventDefault();
@@ -6913,8 +6916,11 @@ function bindTournamentTab() {
 
   if (!bindTournamentTab._delegated) {
     document.addEventListener('click', (event) => {
-      const target = event.target;
-      if (!(target instanceof Element)) return;
+      const rawTarget = event.target;
+      const target = rawTarget instanceof Element
+        ? rawTarget
+        : (rawTarget && rawTarget.parentElement ? rawTarget.parentElement : null);
+      if (!target) return;
       const opener = target.closest('[data-tab="tournament"], a[href="#tournament"]');
       if (!opener) return;
       event.preventDefault();
