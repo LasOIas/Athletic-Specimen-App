@@ -3862,7 +3862,9 @@ const TOURNAMENT_NOTICE_SUCCESS = 'success';
 const TOURNAMENT_UNSET_VALUE = '';
 const tournamentViewState = {
   noticeText: '',
-  noticeTone: TOURNAMENT_NOTICE_INFO
+  noticeTone: TOURNAMENT_NOTICE_INFO,
+  section: 'overview',
+  playerSearch: ''
 };
 
 function setTournamentNotice(text, tone = TOURNAMENT_NOTICE_INFO) {
@@ -3920,9 +3922,10 @@ const TournamentManager = (() => {
   }
 
   function normalizeTeamRecord(rawTeam, index = 0) {
-    const memberKeys = Array.isArray(rawTeam?.memberKeys)
-      ? Array.from(new Set(rawTeam.memberKeys.map((key) => String(key || '').trim()).filter(Boolean)))
-      : [];
+    const sourceMembers = Array.isArray(rawTeam?.memberKeys)
+      ? rawTeam.memberKeys
+      : (Array.isArray(rawTeam?.memberIds) ? rawTeam.memberIds : []);
+    const memberKeys = Array.from(new Set(sourceMembers.map((key) => String(key || '').trim()).filter(Boolean)));
     return {
       id: String(rawTeam?.id || uid()),
       name: String(rawTeam?.name || `Team ${index + 1}`).trim() || `Team ${index + 1}`,
@@ -3961,6 +3964,24 @@ const TournamentManager = (() => {
   }
 
   function normalizeTournamentRecord(rawTournament) {
+    const players = Array.isArray(rawTournament?.players)
+      ? rawTournament.players
+        .map((player, index) => {
+          const name = String(player?.name || '').trim();
+          if (!name) return null;
+          return {
+            id: String(player?.id || uid()),
+            name,
+            skill: Number.isFinite(Number(player?.skill)) ? Number(player.skill) : 0,
+            seed: Number.isFinite(Number(player?.seed)) ? Number(player.seed) : index + 1,
+            notes: String(player?.notes || '').trim(),
+            active: player?.active !== false,
+            availability: String(player?.availability || 'available').trim() || 'available',
+            teamId: player?.teamId ? String(player.teamId) : ''
+          };
+        })
+        .filter(Boolean)
+      : [];
     const teams = Array.isArray(rawTournament?.teams)
       ? rawTournament.teams.map((team, index) => normalizeTeamRecord(team, index))
       : [];
@@ -3988,6 +4009,28 @@ const TournamentManager = (() => {
       teamCount,
       teams,
       matches,
+      players,
+      phase: String(rawTournament?.phase || '').trim(),
+      sourceSummary: String(rawTournament?.sourceSummary || '').trim(),
+      settings: rawTournament?.settings && typeof rawTournament.settings === 'object'
+        ? {
+          tieBreak: String(rawTournament.settings.tieBreak || 'pd').trim() || 'pd'
+        }
+        : { tieBreak: 'pd' },
+      history: Array.isArray(rawTournament?.history)
+        ? rawTournament.history
+          .map((entry) => {
+            const message = String(entry?.message || '').trim();
+            if (!message) return null;
+            return {
+              id: String(entry?.id || uid()),
+              at: Number(entry?.at) || Date.now(),
+              action: String(entry?.action || 'update').trim() || 'update',
+              message
+            };
+          })
+          .filter(Boolean)
+        : [],
       teamBuildSummary: rawTournament?.teamBuildSummary && typeof rawTournament.teamBuildSummary === 'object'
         ? rawTournament.teamBuildSummary
         : null,
@@ -4684,501 +4727,6 @@ const TournamentManager = (() => {
   };
 })();
 
-function formatTournamentFormatLabel(format) {
-  return format === TournamentManager.FORMAT_SE ? 'Single Elimination' : 'Round Robin';
-}
-
-function formatTournamentSourceLabel(tournament) {
-  const mode = String(tournament?.sourceMode || TournamentManager.SOURCE_CHECKED_IN);
-  const groupLabel = formatTournamentGroupLabel(tournament?.sourceGroup || 'All');
-  if (mode === TournamentManager.SOURCE_GENERATED_TEAMS) return 'Generated Teams';
-  return `Checked-In (${groupLabel})`;
-}
-
-function formatTournamentStatusLabel(status) {
-  if (status === TournamentManager.STATUS_COMPLETED) return 'Completed';
-  if (status === TournamentManager.STATUS_ACTIVE) return 'Active';
-  return 'Setup';
-}
-
-function formatTournamentGroupLabel(groupValue) {
-  const normalized = normalizeActiveGroupSelection(groupValue || 'All');
-  if (normalized === UNGROUPED_FILTER_VALUE) return UNGROUPED_FILTER_LABEL;
-  return normalized || 'All';
-}
-
-function getTournamentGroupOptions(selectedValue) {
-  const selected = normalizeActiveGroupSelection(selectedValue || 'All');
-  const groups = state.limitedGroup
-    ? [normalizeGroupName(state.limitedGroup)]
-    : getAvailableGroups();
-  const options = ['All', ...groups.filter((groupName) => groupName && groupName !== 'All')];
-  const normalizedOptions = Array.from(new Set(options.map((option) => normalizeActiveGroupSelection(option))));
-  if (!normalizedOptions.includes(UNGROUPED_FILTER_VALUE)) {
-    normalizedOptions.push(UNGROUPED_FILTER_VALUE);
-  }
-  return normalizedOptions.map((value) => {
-    const label = value === UNGROUPED_FILTER_VALUE ? UNGROUPED_FILTER_LABEL : value;
-    const isSelected = normalizeActiveGroupSelection(value) === selected;
-    return `<option value="${escapeHTMLText(value)}" ${isSelected ? 'selected' : ''}>${escapeHTMLText(label)}</option>`;
-  }).join('');
-}
-
-function getTournamentPlayerLookup() {
-  ensurePlayerIdentityKeys();
-  const map = new Map();
-  (state.players || []).forEach((player) => {
-    const key = playerIdentityKey(player);
-    if (!key) return;
-    map.set(key, player);
-  });
-  return map;
-}
-
-function getTournamentTeamName(tournament, teamId) {
-  if (!teamId) return 'TBD';
-  const team = (tournament?.teams || []).find((item) => item.id === teamId);
-  return team ? team.name : 'TBD';
-}
-
-function buildTournamentStatusBadge(status) {
-  const normalized = status === TournamentManager.MATCH_FINAL
-    ? 'final'
-    : (status === TournamentManager.MATCH_LIVE ? 'live' : 'scheduled');
-  const label = normalized === 'final' ? 'Final' : (normalized === 'live' ? 'Live' : 'Scheduled');
-  return `<span class="tournament-status-badge is-${normalized}">${label}</span>`;
-}
-
-function renderTournamentNoticeHTML() {
-  if (!tournamentViewState.noticeText) return '';
-  const tone = tournamentViewState.noticeTone || TOURNAMENT_NOTICE_INFO;
-  const safeTone = tone === TOURNAMENT_NOTICE_ERROR || tone === TOURNAMENT_NOTICE_SUCCESS
-    ? tone
-    : TOURNAMENT_NOTICE_INFO;
-  return `<p class="tournament-notice is-${safeTone}">${escapeHTMLText(tournamentViewState.noticeText)}</p>`;
-}
-
-function renderTournamentHeaderCardHTML(tournament) {
-  const defaultGroup = state.limitedGroup
-    ? normalizeGroupName(state.limitedGroup)
-    : normalizeActiveGroupSelection(state.activeGroup || 'All');
-  const selectedGroup = tournament
-    ? normalizeActiveGroupSelection(tournament.sourceGroup || defaultGroup || 'All')
-    : normalizeActiveGroupSelection(defaultGroup || 'All');
-  const isLockedToGroup = !!state.limitedGroup;
-  const teamCount = tournament
-    ? Math.max(2, Number.parseInt(tournament.teamCount, 10) || 2)
-    : Math.max(2, Math.floor((state.checkedIn || []).length / 6) || 2);
-  const courtCount = tournament
-    ? Math.max(1, Number.parseInt(tournament.courtCount, 10) || 2)
-    : 2;
-  const format = tournament ? tournament.format : TournamentManager.FORMAT_RR;
-  const sourceMode = tournament
-    ? String(tournament.sourceMode || TournamentManager.SOURCE_CHECKED_IN)
-    : TournamentManager.SOURCE_CHECKED_IN;
-  const sourceModeIsGenerated = sourceMode === TournamentManager.SOURCE_GENERATED_TEAMS;
-  const nameValue = tournament ? tournament.name : '';
-  const matchCount = Array.isArray(tournament?.matches) ? tournament.matches.length : 0;
-  const finalCount = Array.isArray(tournament?.matches)
-    ? tournament.matches.filter((match) => match.status === TournamentManager.MATCH_FINAL).length
-    : 0;
-  const nextStepText = tournament
-    ? (
-      matchCount === 0
-        ? 'Generate matches to begin the tournament.'
-        : (tournament.status === TournamentManager.STATUS_COMPLETED
-          ? 'Tournament is complete. Review standings or reset matches.'
-          : `${matchCount - finalCount} matches remain. Start or finalize the next match.`)
-    )
-    : 'Create a tournament to begin.';
-  const tournamentSyncNoticeHTML = buildTournamentSyncNoticeHTML();
-
-  const summaryHTML = tournament ? `
-    <div class="tournament-meta-grid">
-      <div><strong>Name:</strong> ${escapeHTMLText(tournament.name)}</div>
-      <div><strong>Format:</strong> ${escapeHTMLText(formatTournamentFormatLabel(tournament.format))}</div>
-      <div><strong>Status:</strong> ${escapeHTMLText(formatTournamentStatusLabel(tournament.status))}</div>
-      <div><strong>Courts:</strong> ${Number(tournament.courtCount) || 1}</div>
-      <div><strong>Source:</strong> ${escapeHTMLText(formatTournamentSourceLabel(tournament))}</div>
-      <div><strong>Teams:</strong> ${(tournament.teams || []).length}</div>
-    </div>
-    <p class="small" style="margin-top:0.55rem;"><strong>Next Step:</strong> ${escapeHTMLText(nextStepText)}</p>
-  ` : '<p class="small">Create a tournament to start event flow.</p>';
-
-  const adminControlsHTML = state.isAdmin ? `
-    <div class="tournament-section">
-      <h4>Create / Update Tournament</h4>
-      <div class="tournament-input-grid">
-        <input type="text" id="trn-name" placeholder="Tournament name" value="${escapeHTMLText(nameValue)}" />
-        <select id="trn-format">
-          <option value="${TournamentManager.FORMAT_RR}" ${format === TournamentManager.FORMAT_RR ? 'selected' : ''}>Round Robin</option>
-          <option value="${TournamentManager.FORMAT_SE}" ${format === TournamentManager.FORMAT_SE ? 'selected' : ''}>Single Elimination</option>
-        </select>
-        <select id="trn-source-mode">
-          <option value="${TournamentManager.SOURCE_CHECKED_IN}" ${!sourceModeIsGenerated ? 'selected' : ''}>Source: Checked-In</option>
-          <option value="${TournamentManager.SOURCE_GENERATED_TEAMS}" ${sourceModeIsGenerated ? 'selected' : ''}>Source: Generated Teams</option>
-        </select>
-        <input type="number" id="trn-court-count" min="1" max="8" value="${courtCount}" />
-        <select id="trn-source-group" ${(isLockedToGroup || sourceModeIsGenerated) ? 'disabled' : ''}>
-          ${getTournamentGroupOptions(selectedGroup)}
-        </select>
-        <input type="number" id="trn-team-count" min="2" max="24" value="${teamCount}" />
-      </div>
-      ${sourceModeIsGenerated ? '<p class="small" style="margin-top:-0.2rem;">Generated Teams source uses current Teams tab assignments.</p>' : ''}
-      <div class="row">
-        <button type="button" data-tr-action="create-tournament">Create Tournament</button>
-        ${tournament ? `
-          <button type="button" class="secondary" data-tr-action="rebuild-teams">Auto Build Teams</button>
-          <button type="button" class="secondary" data-tr-action="generate-matches">Generate Matches</button>
-          <button type="button" class="secondary" data-tr-action="reset-matches">Reset Matches</button>
-          <button type="button" class="danger" data-tr-action="delete-tournament">Delete Tournament</button>
-        ` : ''}
-      </div>
-    </div>
-  ` : '';
-
-  return `
-    ${tournamentSyncNoticeHTML}
-    ${summaryHTML}
-    ${adminControlsHTML}
-  `;
-}
-
-function renderTournamentAdminCardHTML(tournament) {
-  if (!state.isAdmin) return '';
-  if (!tournament) {
-    return '<p class="small">No tournament selected. Create one to access admin controls.</p>';
-  }
-
-  const playerLookup = getTournamentPlayerLookup();
-  const teams = tournament.teams || [];
-  const matches = (tournament.matches || []).slice().sort((a, b) => {
-    if (a.round !== b.round) return a.round - b.round;
-    if (a.slot !== b.slot) return a.slot - b.slot;
-    return String(a.id).localeCompare(String(b.id));
-  });
-
-  const teamCardsHTML = teams.length ? `
-    <div class="tournament-team-grid">
-      ${teams.map((team) => {
-        const members = (team.memberKeys || []).map((key) => {
-          const player = playerLookup.get(key);
-          if (!player) return `<li class="small">${escapeHTMLText(key)}</li>`;
-          return `<li>${escapeHTMLText(player.name)} <span class="small">(Skill ${Number(player.skill) || 0})</span></li>`;
-        }).join('');
-        return `
-          <article class="tournament-team-card">
-            <div class="row tournament-team-row">
-              <input
-                type="text"
-                data-tr-role="team-name-input"
-                data-team-id="${escapeHTMLText(team.id)}"
-                value="${escapeHTMLText(team.name)}"
-              />
-              <button type="button" class="secondary" data-tr-action="rename-team" data-team-id="${escapeHTMLText(team.id)}">Save Name</button>
-            </div>
-            <p class="small">Members: ${(team.memberKeys || []).length}</p>
-            <ul class="tournament-team-members">${members || '<li class="small">No players</li>'}</ul>
-          </article>
-        `;
-      }).join('')}
-    </div>
-  ` : '<p class="small">No teams yet. Use Auto Build Teams.</p>';
-
-  const memberOptions = teams.flatMap((team) => {
-    return (team.memberKeys || []).map((memberKey) => {
-      const player = playerLookup.get(memberKey);
-      const playerName = player ? player.name : memberKey;
-      return `<option value="${escapeHTMLText(memberKey)}">${escapeHTMLText(playerName)} (${escapeHTMLText(team.name)})</option>`;
-    });
-  }).join('');
-
-  const targetTeamOptions = teams.map((team) =>
-    `<option value="${escapeHTMLText(team.id)}">${escapeHTMLText(team.name)}</option>`
-  ).join('');
-
-  const matchRowsHTML = matches.length
-    ? matches.map((match) => {
-        const teamA = getTournamentTeamName(tournament, match.teamAId);
-        const teamB = getTournamentTeamName(tournament, match.teamBId);
-        const winnerLabel = match.winnerTeamId
-          ? getTournamentTeamName(tournament, match.winnerTeamId)
-          : '-';
-        const scoreAValue = Number.isFinite(Number(match.scoreA)) ? Number(match.scoreA) : '';
-        const scoreBValue = Number.isFinite(Number(match.scoreB)) ? Number(match.scoreB) : '';
-        const showControls = match.status !== TournamentManager.MATCH_FINAL && !!match.teamAId && !!match.teamBId;
-
-        return `
-          <tr>
-            <td>R${match.round} M${match.slot}</td>
-            <td>Net ${match.court || '-'}</td>
-            <td>${escapeHTMLText(teamA)} vs ${escapeHTMLText(teamB)}</td>
-            <td>${buildTournamentStatusBadge(match.status)}</td>
-            <td>${escapeHTMLText(winnerLabel)}</td>
-            <td>
-              ${showControls ? `
-                <div class="tournament-match-actions">
-                  ${match.status === TournamentManager.MATCH_SCHEDULED
-                    ? `<button type="button" class="secondary" data-tr-action="start-match" data-match-id="${escapeHTMLText(match.id)}">Start</button>`
-                    : ''}
-                  <input type="number" min="0" step="1" class="tournament-score-input" data-tr-score-a-for="${escapeHTMLText(match.id)}" value="${scoreAValue}" />
-                  <input type="number" min="0" step="1" class="tournament-score-input" data-tr-score-b-for="${escapeHTMLText(match.id)}" value="${scoreBValue}" />
-                  <button type="button" data-tr-action="finalize-match" data-match-id="${escapeHTMLText(match.id)}">Finalize</button>
-                </div>
-              ` : '<span class="small">No action</span>'}
-            </td>
-          </tr>
-        `;
-      }).join('')
-    : '<tr><td colspan="6" class="small">No matches generated yet.</td></tr>';
-
-  const standingsHTML = tournament.format === TournamentManager.FORMAT_RR
-    ? (() => {
-        const rows = TournamentManager.getRoundRobinStandings(tournament);
-        if (!rows.length) return '<p class="small">Standings will update as results are finalized.</p>';
-        return `
-          <table class="table">
-            <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>PF</th><th>PA</th><th>PD</th></tr></thead>
-            <tbody>
-              ${rows.map((row, index) => `
-                <tr>
-                  <td>${index + 1}</td>
-                  <td>${escapeHTMLText(row.teamName)}</td>
-                  <td>${row.wins}</td>
-                  <td>${row.losses}</td>
-                  <td>${row.pf}</td>
-                  <td>${row.pa}</td>
-                  <td>${row.pd}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        `;
-      })()
-    : (() => {
-        const championId = TournamentManager.getChampionTeamId(tournament);
-        const championName = championId ? getTournamentTeamName(tournament, championId) : '';
-        return championName
-          ? `<p class="small"><strong>Champion:</strong> ${escapeHTMLText(championName)}</p>`
-          : '<p class="small">Bracket winner will appear after final match.</p>';
-      })();
-
-  return `
-    <div class="tournament-section">
-      <h4>Teams</h4>
-      ${teamCardsHTML}
-      <div class="tournament-manual-move">
-        <h5>Manual Team Move</h5>
-        <div class="row">
-          <select id="trn-move-member">${memberOptions || '<option value="">No players assigned</option>'}</select>
-          <select id="trn-move-target-team">${targetTeamOptions || '<option value="">No teams</option>'}</select>
-          <button type="button" data-tr-action="move-member">Move Player</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="tournament-section">
-      <h4>Matches</h4>
-      <table class="table tournament-match-table">
-        <thead>
-          <tr><th>Match</th><th>Court</th><th>Teams</th><th>Status</th><th>Winner</th><th>Actions</th></tr>
-        </thead>
-        <tbody>${matchRowsHTML}</tbody>
-      </table>
-    </div>
-
-    <div class="tournament-section">
-      <h4>${tournament.format === TournamentManager.FORMAT_RR ? 'Standings' : 'Bracket Summary'}</h4>
-      ${standingsHTML}
-    </div>
-  `;
-}
-
-function renderTournamentBracketHTML(tournament) {
-  const rounds = TournamentManager.getSingleEliminationRounds(tournament);
-  if (!rounds.length) return '<p class="small">No bracket generated yet.</p>';
-  return `
-    <div class="tournament-bracket-grid">
-      ${rounds.map((roundInfo) => `
-        <section class="tournament-bracket-round">
-          <h5>Round ${roundInfo.round}</h5>
-          ${roundInfo.matches.map((match) => `
-            <article class="tournament-bracket-match">
-              <div class="small">Net ${match.court || '-'}</div>
-              <div><strong>${escapeHTMLText(getTournamentTeamName(tournament, match.teamAId))}</strong></div>
-              <div><strong>${escapeHTMLText(getTournamentTeamName(tournament, match.teamBId))}</strong></div>
-              <div class="small">${buildTournamentStatusBadge(match.status)}</div>
-              ${match.winnerTeamId
-                ? `<div class="small">Winner: ${escapeHTMLText(getTournamentTeamName(tournament, match.winnerTeamId))}</div>`
-                : ''}
-            </article>
-          `).join('')}
-        </section>
-      `).join('')}
-    </div>
-  `;
-}
-
-function renderTournamentPublicCardHTML(tournament) {
-  if (!tournament) {
-    return '<p class="small">No tournament selected yet.</p>';
-  }
-
-  const matches = (tournament.matches || []).slice().sort((a, b) => {
-    if (a.round !== b.round) return a.round - b.round;
-    if (a.slot !== b.slot) return a.slot - b.slot;
-    return String(a.id).localeCompare(String(b.id));
-  });
-  const liveMatches = matches.filter((match) => match.status === TournamentManager.MATCH_LIVE);
-  const scheduledMatches = matches.filter((match) => match.status === TournamentManager.MATCH_SCHEDULED);
-  const finalMatches = matches.filter((match) => match.status === TournamentManager.MATCH_FINAL);
-
-  const renderMatchList = (rows, emptyText) => {
-    if (!rows.length) return `<p class="small">${escapeHTMLText(emptyText)}</p>`;
-    return `
-      <ul class="tournament-public-match-list">
-        ${rows.map((match) => `
-          <li>
-            <strong>Net ${match.court || '-'}</strong> -
-            ${escapeHTMLText(getTournamentTeamName(tournament, match.teamAId))} vs
-            ${escapeHTMLText(getTournamentTeamName(tournament, match.teamBId))}
-            ${match.status === TournamentManager.MATCH_FINAL && match.winnerTeamId
-              ? ` <span class="small">(Winner: ${escapeHTMLText(getTournamentTeamName(tournament, match.winnerTeamId))})</span>`
-              : ''}
-          </li>
-        `).join('')}
-      </ul>
-    `;
-  };
-
-  const formatSpecificHTML = tournament.format === TournamentManager.FORMAT_RR
-    ? (() => {
-        const rows = TournamentManager.getRoundRobinStandings(tournament);
-        if (!rows.length) return '<p class="small">Standings will appear once results are finalized.</p>';
-        return `
-          <table class="table">
-            <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>PD</th></tr></thead>
-            <tbody>
-              ${rows.map((row, index) => `
-                <tr>
-                  <td>${index + 1}</td>
-                  <td>${escapeHTMLText(row.teamName)}</td>
-                  <td>${row.wins}</td>
-                  <td>${row.losses}</td>
-                  <td>${row.pd}</td>
-                </tr>
-              `).join('')}
-            </tbody>
-          </table>
-        `;
-      })()
-    : renderTournamentBracketHTML(tournament);
-
-  return `
-    <div class="tournament-section">
-      <h4>Public Tournament View</h4>
-      <p class="small">
-        ${escapeHTMLText(tournament.name)} -
-        ${escapeHTMLText(formatTournamentFormatLabel(tournament.format))} -
-        ${escapeHTMLText(formatTournamentStatusLabel(tournament.status))}
-      </p>
-      <div class="tournament-public-grid">
-        <div>
-          <h5>Live Matches</h5>
-          ${renderMatchList(liveMatches, 'No matches live right now.')}
-        </div>
-        <div>
-          <h5>Upcoming Matches</h5>
-          ${renderMatchList(scheduledMatches, 'No upcoming matches.')}
-        </div>
-        <div>
-          <h5>Final Results</h5>
-          ${renderMatchList(finalMatches, 'No final results yet.')}
-        </div>
-      </div>
-    </div>
-
-    <div class="tournament-section">
-      <h4>${tournament.format === TournamentManager.FORMAT_RR ? 'Standings' : 'Bracket'}</h4>
-      ${formatSpecificHTML}
-    </div>
-  `;
-}
-
-function getActiveTournamentFromSelect() {
-  const select = document.getElementById('tournamentSelect');
-  const selectedId = select ? String(select.value || '').trim() : '';
-  return selectedId ? TournamentManager.getById(selectedId) : null;
-}
-
-function refreshTournamentSelectUI() {
-  const select = document.getElementById('tournamentSelect');
-  if (!select) return '';
-  const all = TournamentManager.getAll();
-  const activeId = TournamentManager.getActiveId();
-  select.innerHTML = all.length
-    ? all.map((tournament) => `
-        <option value="${escapeHTMLText(tournament.id)}" ${tournament.id === activeId ? 'selected' : ''}>
-          ${escapeHTMLText(tournament.name)}
-        </option>
-      `).join('')
-    : '<option value="">No tournaments</option>';
-  if (!all.length) {
-    select.value = TOURNAMENT_UNSET_VALUE;
-    TournamentManager.setActive('');
-    return '';
-  }
-  if (activeId) {
-    select.value = activeId;
-    return activeId;
-  }
-  const fallbackId = String(select.value || all[0].id || '');
-  TournamentManager.setActive(fallbackId);
-  select.value = fallbackId;
-  return fallbackId;
-}
-
-function initTournamentView() {
-  const globalNotice = document.getElementById('tournamentGlobalNotice');
-  const headerCard = document.getElementById('tournamentHeaderCard');
-  const adminCard = document.getElementById('adminTournament');
-  const publicCard = document.getElementById('publicTournamentView');
-  const select = document.getElementById('tournamentSelect');
-  if (!globalNotice || !headerCard || !adminCard || !publicCard) return;
-
-  const awaitingAuthorityHydration = (
-    !!supabaseClient &&
-    SUPABASE_AUTHORITATIVE &&
-    !state.loaded &&
-    state.tournamentSyncState === SHARED_SYNC_PENDING
-  );
-  if (awaitingAuthorityHydration) {
-    if (select) {
-      select.innerHTML = '<option value="">Syncing tournaments...</option>';
-      select.value = TOURNAMENT_UNSET_VALUE;
-    }
-    globalNotice.innerHTML = renderTournamentNoticeHTML();
-    headerCard.innerHTML = renderTournamentHeaderCardHTML(null);
-    adminCard.style.display = state.isAdmin ? 'block' : 'none';
-    adminCard.innerHTML = state.isAdmin
-      ? '<p class="small">Tournament state is syncing from Supabase.</p>'
-      : '';
-    publicCard.innerHTML = '<p class="small">Tournament state is syncing from Supabase.</p>';
-    return;
-  }
-
-  refreshTournamentSelectUI();
-  const tournament = getActiveTournamentFromSelect();
-
-  globalNotice.innerHTML = renderTournamentNoticeHTML();
-  headerCard.innerHTML = renderTournamentHeaderCardHTML(tournament);
-  adminCard.style.display = state.isAdmin ? 'block' : 'none';
-  adminCard.innerHTML = state.isAdmin
-    ? renderTournamentAdminCardHTML(tournament)
-    : '';
-  publicCard.innerHTML = renderTournamentPublicCardHTML(tournament);
-}
-
 function ensureTournamentTabClickable() {
   const btn = document.getElementById('tab-tournament');
   if (!btn) return;
@@ -5295,42 +4843,1193 @@ async function commitTournamentMutation(result, {
   return true;
 }
 
+const TournamentSubApp = (() => {
+  const PHASE_SETUP = 'setup';
+  const PHASE_READY = 'ready';
+  const PHASE_RUNNING = 'running';
+  const PHASE_PAUSED = 'paused';
+  const PHASE_COMPLETED = 'completed';
+  const SECTION_OVERVIEW = 'overview';
+  const SECTION_PLAYERS = 'players';
+  const SECTION_TEAMS = 'teams';
+  const SECTION_MATCHES = 'matches';
+  const SECTION_COURTS = 'courts';
+  const SECTION_STANDINGS = 'standings';
+  const SECTION_SETTINGS = 'settings';
+  const SECTION_HISTORY = 'history';
+  const SECTIONS = [
+    SECTION_OVERVIEW,
+    SECTION_PLAYERS,
+    SECTION_TEAMS,
+    SECTION_MATCHES,
+    SECTION_COURTS,
+    SECTION_STANDINGS,
+    SECTION_SETTINGS,
+    SECTION_HISTORY
+  ];
+
+  const uid = (prefix = 'trn') => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+
+  const clampCourtCount = (value) => {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return 2;
+    return Math.max(1, Math.min(8, parsed));
+  };
+  const clampSkill = (value) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.max(0, Math.min(10, Math.round(parsed * 10) / 10));
+  };
+  const asArray = (value) => Array.isArray(value) ? value : [];
+  const sortMatches = (matches) => asArray(matches).slice().sort((a, b) => {
+    if (a.round !== b.round) return a.round - b.round;
+    if (a.slot !== b.slot) return a.slot - b.slot;
+    return String(a.id || '').localeCompare(String(b.id || ''));
+  });
+  const baseStatusFromPhase = (phase) => (
+    phase === PHASE_COMPLETED
+      ? TournamentManager.STATUS_COMPLETED
+      : (phase === PHASE_SETUP ? TournamentManager.STATUS_SETUP : TournamentManager.STATUS_ACTIVE)
+  );
+  const normalizePhase = (value) => {
+    const raw = String(value || '').trim();
+    if ([PHASE_SETUP, PHASE_READY, PHASE_RUNNING, PHASE_PAUSED, PHASE_COMPLETED].includes(raw)) return raw;
+    return PHASE_SETUP;
+  };
+
+  function derivePhase(record) {
+    if (record.phase === PHASE_PAUSED) return PHASE_PAUSED;
+    const matches = asArray(record.matches);
+    const hasLive = matches.some((match) => match.status === TournamentManager.MATCH_LIVE);
+    const hasScheduled = matches.some((match) => match.status === TournamentManager.MATCH_SCHEDULED);
+    const hasFinal = matches.some((match) => match.status === TournamentManager.MATCH_FINAL);
+    const allFinal = matches.length > 0 && matches.every((match) => match.status === TournamentManager.MATCH_FINAL);
+    const playableTeams = asArray(record.teams).filter((team) => asArray(team.memberKeys).length > 0).length;
+    if (allFinal) return PHASE_COMPLETED;
+    if (hasLive) return PHASE_RUNNING;
+    if (hasScheduled || hasFinal) return PHASE_READY;
+    if (playableTeams >= 2) return PHASE_READY;
+    return PHASE_SETUP;
+  }
+
+  function canonicalizeTournament(rawTournament = {}) {
+    const teams = asArray(rawTournament.teams).map((team, index) => {
+      const memberKeys = Array.from(new Set(
+        asArray(team?.memberKeys || team?.memberIds)
+          .map((memberId) => String(memberId || '').trim())
+          .filter(Boolean)
+      ));
+      return {
+        id: String(team?.id || uid('tt')),
+        name: String(team?.name || `Team ${index + 1}`).trim() || `Team ${index + 1}`,
+        seed: Number.isFinite(Number(team?.seed)) ? Number(team.seed) : index + 1,
+        notes: String(team?.notes || '').trim(),
+        memberKeys
+      };
+    }).sort((a, b) => a.seed - b.seed).map((team, index) => ({ ...team, seed: index + 1 }));
+
+    const membershipByPlayer = new Map();
+    teams.forEach((team) => {
+      (team.memberKeys || []).forEach((memberId) => {
+        const safeId = String(memberId || '').trim();
+        if (!safeId || membershipByPlayer.has(safeId)) return;
+        membershipByPlayer.set(safeId, team.id);
+      });
+    });
+
+    let players = asArray(rawTournament.players).map((player, index) => {
+      const playerId = String(player?.id || uid('tp'));
+      const fallbackTeamId = membershipByPlayer.get(playerId) || '';
+      const name = String(player?.name || '').trim() || `Player ${index + 1}`;
+      return {
+        id: playerId,
+        name,
+        skill: clampSkill(player?.skill),
+        seed: Number.isFinite(Number(player?.seed)) ? Number(player.seed) : index + 1,
+        notes: String(player?.notes || '').trim(),
+        active: player?.active !== false,
+        availability: String(player?.availability || 'available').trim() || 'available',
+        teamId: player?.teamId ? String(player.teamId) : fallbackTeamId
+      };
+    });
+
+    // Migration safety: older tournament records could carry only team.memberKeys
+    // from main-app identity keys without tournament-owned player entities.
+    if (!players.length && teams.length) {
+      ensurePlayerIdentityKeys();
+      const mainByIdentity = new Map();
+      (state.players || []).forEach((player) => {
+        const identity = playerIdentityKey(player);
+        if (!identity || mainByIdentity.has(identity)) return;
+        mainByIdentity.set(identity, player);
+      });
+      membershipByPlayer.forEach((teamId, legacyId) => {
+        const sourcePlayer = mainByIdentity.get(legacyId) || null;
+        const displayName = sourcePlayer && sourcePlayer.name
+          ? String(sourcePlayer.name).trim()
+          : '';
+        players.push({
+          id: legacyId,
+          name: displayName || `Imported Player ${players.length + 1}`,
+          skill: clampSkill(sourcePlayer ? sourcePlayer.skill : 0),
+          seed: players.length + 1,
+          notes: 'Migrated from legacy tournament team membership.',
+          active: true,
+          availability: 'available',
+          teamId
+        });
+      });
+    }
+
+    const playerById = new Map(players.map((player) => [player.id, player]));
+    const teamById = new Map(teams.map((team) => [team.id, team]));
+    teams.forEach((team) => { team.memberKeys = []; });
+    players.forEach((player) => {
+      const team = player.teamId ? teamById.get(player.teamId) : null;
+      if (!team || !player.active) {
+        player.teamId = '';
+        return;
+      }
+      if (!team.memberKeys.includes(player.id)) team.memberKeys.push(player.id);
+    });
+
+    const matches = sortMatches(asArray(rawTournament.matches).map((match) => {
+      const statusRaw = String(match?.status || '').trim();
+      const status = statusRaw === TournamentManager.MATCH_LIVE || statusRaw === TournamentManager.MATCH_FINAL
+        ? statusRaw
+        : TournamentManager.MATCH_SCHEDULED;
+      const teamAId = match?.teamAId ? String(match.teamAId) : null;
+      const teamBId = match?.teamBId ? String(match.teamBId) : null;
+      return {
+        id: String(match?.id || uid('tm')),
+        round: Math.max(1, Number.parseInt(match?.round, 10) || 1),
+        slot: Math.max(1, Number.parseInt(match?.slot, 10) || 1),
+        bracket: TournamentManager.FORMAT_RR,
+        court: Math.max(1, Number.parseInt(match?.court, 10) || 1),
+        status,
+        teamAId: teamById.has(teamAId) ? teamAId : null,
+        teamBId: teamById.has(teamBId) ? teamBId : null,
+        scoreA: Number.isFinite(Number(match?.scoreA)) ? Number(match.scoreA) : null,
+        scoreB: Number.isFinite(Number(match?.scoreB)) ? Number(match.scoreB) : null,
+        winnerTeamId: match?.winnerTeamId ? String(match.winnerTeamId) : null,
+        loserTeamId: match?.loserTeamId ? String(match.loserTeamId) : null
+      };
+    }));
+
+    const history = asArray(rawTournament.history).map((entry) => ({
+      id: String(entry?.id || uid('th')),
+      at: Number(entry?.at) || Date.now(),
+      action: String(entry?.action || 'update').trim() || 'update',
+      message: String(entry?.message || '').trim()
+    })).filter((entry) => entry.message);
+
+    const phase = derivePhase({
+      ...rawTournament,
+      players,
+      teams,
+      matches,
+      phase: normalizePhase(rawTournament.phase)
+    });
+
+    return {
+      id: String(rawTournament.id || uid('trn')),
+      name: String(rawTournament.name || 'Tournament Event').trim() || 'Tournament Event',
+      format: TournamentManager.FORMAT_RR,
+      sourceMode: 'independent',
+      sourceGroup: 'All',
+      sourceSummary: String(rawTournament.sourceSummary || '').trim() || 'manual',
+      courtCount: clampCourtCount(rawTournament.courtCount),
+      teamCount: teams.length,
+      teams,
+      matches,
+      players,
+      history,
+      settings: rawTournament.settings && typeof rawTournament.settings === 'object'
+        ? { tieBreak: String(rawTournament.settings.tieBreak || 'pd').trim() || 'pd' }
+        : { tieBreak: 'pd' },
+      teamBuildSummary: rawTournament.teamBuildSummary && typeof rawTournament.teamBuildSummary === 'object'
+        ? rawTournament.teamBuildSummary
+        : null,
+      phase,
+      status: baseStatusFromPhase(phase),
+      createdAt: Number(rawTournament.createdAt) || Date.now(),
+      updatedAt: Number(rawTournament.updatedAt) || Date.now()
+    };
+  }
+
+  function withStoreMutated(mutator) {
+    const store = TournamentManager.getStoreSnapshot();
+    const result = mutator(store);
+    if (result && result.ok === false) return result;
+    TournamentManager.replaceStore(store);
+    return result;
+  }
+
+  function mutateTournament(id, mutator) {
+    const safeId = String(id || '').trim();
+    if (!safeId) return { ok: false, error: 'Tournament not found.' };
+    return withStoreMutated((store) => {
+      const index = asArray(store.tournaments).findIndex((tournament) => String(tournament?.id || '') === safeId);
+      if (index === -1) return { ok: false, error: 'Tournament not found.' };
+      const draft = canonicalizeTournament(store.tournaments[index]);
+      const result = mutator(draft);
+      if (result && result.ok === false) return result;
+      draft.updatedAt = Date.now();
+      const canonical = canonicalizeTournament(draft);
+      store.tournaments[index] = canonical;
+      if (!store.activeTournamentId) store.activeTournamentId = canonical.id;
+      return { ok: true, tournament: canonical, ...(result && typeof result === 'object' ? result : {}) };
+    });
+  }
+
+  function addHistory(draft, action, message) {
+    draft.history = [...asArray(draft.history), {
+      id: uid('th'),
+      at: Date.now(),
+      action: String(action || 'update').trim() || 'update',
+      message: String(message || '').trim() || 'Tournament updated.'
+    }].slice(-120);
+  }
+
+  function list() {
+    return asArray(TournamentManager.getAll()).map((tournament) => canonicalizeTournament(tournament));
+  }
+
+  function byId(id) {
+    const found = TournamentManager.getById(id);
+    return found ? canonicalizeTournament(found) : null;
+  }
+
+  return {
+    PHASE_SETUP,
+    PHASE_READY,
+    PHASE_RUNNING,
+    PHASE_PAUSED,
+    PHASE_COMPLETED,
+    SECTION_OVERVIEW,
+    SECTION_PLAYERS,
+    SECTION_TEAMS,
+    SECTION_MATCHES,
+    SECTION_COURTS,
+    SECTION_STANDINGS,
+    SECTION_SETTINGS,
+    SECTION_HISTORY,
+    SECTIONS,
+    uid,
+    clampCourtCount,
+    clampSkill,
+    sortMatches,
+    canonicalizeTournament,
+    withStoreMutated,
+    mutateTournament,
+    addHistory,
+    list,
+    byId
+  };
+})();
+
+function formatTournamentFormatLabel() {
+  return 'Round Robin';
+}
+
+function formatTournamentSourceLabel(tournament) {
+  const summary = String(tournament?.sourceSummary || 'manual').trim();
+  if (summary === 'manual') return 'Manual';
+  if (summary === 'imported-main-checked') return 'Imported: Checked-In Players';
+  if (summary === 'imported-main-all') return 'Imported: Main Roster';
+  if (summary === 'imported-generated-teams') return 'Imported: Generated Teams';
+  if (summary === 'auto-built-teams') return 'Auto Built Teams';
+  return summary;
+}
+
+function formatTournamentStatusLabel(status) {
+  const raw = String(status || '').trim();
+  if (raw === TournamentSubApp.PHASE_COMPLETED) return 'Completed';
+  if (raw === TournamentSubApp.PHASE_PAUSED) return 'Paused';
+  if (raw === TournamentSubApp.PHASE_RUNNING) return 'Live';
+  if (raw === TournamentSubApp.PHASE_READY) return 'Ready';
+  return 'Setup';
+}
+
+function getTournamentPlayerLookup(tournament) {
+  return new Map((Array.isArray(tournament?.players) ? tournament.players : []).map((player) => [player.id, player]));
+}
+
+function getTournamentTeamLookup(tournament) {
+  return new Map((Array.isArray(tournament?.teams) ? tournament.teams : []).map((team) => [team.id, team]));
+}
+
+function getTournamentTeamName(tournament, teamId) {
+  if (!teamId) return 'TBD';
+  const team = getTournamentTeamLookup(tournament).get(String(teamId));
+  return team ? team.name : 'TBD';
+}
+
+function buildTournamentStatusBadge(status) {
+  const normalized = status === TournamentManager.MATCH_FINAL
+    ? 'final'
+    : (status === TournamentManager.MATCH_LIVE ? 'live' : 'scheduled');
+  const label = normalized === 'final' ? 'Final' : (normalized === 'live' ? 'Live' : 'Scheduled');
+  return `<span class="tournament-status-badge is-${normalized}">${label}</span>`;
+}
+
+function parseBulkTournamentPlayers(rawText) {
+  return String(rawText || '')
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [namePart, skillPart = ''] = line.split(',').map((part) => String(part || '').trim());
+      return {
+        name: namePart,
+        skill: skillPart === '' ? 0 : TournamentSubApp.clampSkill(skillPart)
+      };
+    })
+    .filter((entry) => entry.name);
+}
+
+function deriveTournamentNextStep(tournament) {
+  if (!tournament) return 'Create an event to begin tournament operations.';
+  const activePlayers = (tournament.players || []).filter((player) => player.active).length;
+  const playableTeams = (tournament.teams || []).filter((team) => (team.memberKeys || []).length > 0).length;
+  const matches = tournament.matches || [];
+  const live = matches.filter((match) => match.status === TournamentManager.MATCH_LIVE).length;
+  const scheduled = matches.filter((match) => match.status === TournamentManager.MATCH_SCHEDULED).length;
+  const finals = matches.filter((match) => match.status === TournamentManager.MATCH_FINAL).length;
+  if (activePlayers < 2) return 'Add at least two active tournament players.';
+  if (playableTeams < 2) return 'Create teams and assign players.';
+  if (!matches.length) return 'Generate matches from current teams.';
+  if (live > 0) return 'Finalize the current live matches.';
+  if (scheduled > 0) return 'Start the next scheduled match.';
+  if (matches.length > 0 && finals === matches.length) return 'Review standings and complete the event.';
+  return 'Review event state.';
+}
+
+function deriveTournamentCourtsView(tournament) {
+  const matches = TournamentSubApp.sortMatches(tournament?.matches || []);
+  const maxCourt = TournamentSubApp.clampCourtCount(tournament?.courtCount || 2);
+  const courts = [];
+  for (let courtNo = 1; courtNo <= maxCourt; courtNo += 1) {
+    const live = matches.find((match) => Number(match.court) === courtNo && match.status === TournamentManager.MATCH_LIVE) || null;
+    const next = matches.find((match) => Number(match.court) === courtNo && match.status === TournamentManager.MATCH_SCHEDULED) || null;
+    courts.push({ courtNo, live, next });
+  }
+  const queue = matches.filter((match) => match.status === TournamentManager.MATCH_SCHEDULED);
+  return { courts, queue };
+}
+
+function getRoundRobinStandingsForView(tournament) {
+  const teams = (tournament?.teams || []).slice().sort((a, b) => a.seed - b.seed);
+  const rows = teams.map((team) => ({
+    teamId: team.id,
+    teamName: team.name,
+    seed: team.seed,
+    wins: 0,
+    losses: 0,
+    pf: 0,
+    pa: 0,
+    pd: 0
+  }));
+  const rowById = new Map(rows.map((row) => [row.teamId, row]));
+  (tournament?.matches || []).forEach((match) => {
+    if (match.status !== TournamentManager.MATCH_FINAL) return;
+    const rowA = rowById.get(match.teamAId);
+    const rowB = rowById.get(match.teamBId);
+    const scoreA = Number(match.scoreA);
+    const scoreB = Number(match.scoreB);
+    if (!rowA || !rowB || !Number.isFinite(scoreA) || !Number.isFinite(scoreB)) return;
+    rowA.pf += scoreA;
+    rowA.pa += scoreB;
+    rowB.pf += scoreB;
+    rowB.pa += scoreA;
+    if (scoreA > scoreB) {
+      rowA.wins += 1;
+      rowB.losses += 1;
+    } else {
+      rowB.wins += 1;
+      rowA.losses += 1;
+    }
+  });
+  rows.forEach((row) => { row.pd = row.pf - row.pa; });
+  rows.sort((a, b) => {
+    if (b.wins !== a.wins) return b.wins - a.wins;
+    if (b.pd !== a.pd) return b.pd - a.pd;
+    if (b.pf !== a.pf) return b.pf - a.pf;
+    if (a.seed !== b.seed) return a.seed - b.seed;
+    return a.teamName.localeCompare(b.teamName, undefined, { sensitivity: 'base' });
+  });
+  return rows;
+}
+
+function renderTournamentNoticeHTML() {
+  if (!tournamentViewState.noticeText) return '';
+  const tone = tournamentViewState.noticeTone || TOURNAMENT_NOTICE_INFO;
+  const safeTone = tone === TOURNAMENT_NOTICE_ERROR || tone === TOURNAMENT_NOTICE_SUCCESS
+    ? tone
+    : TOURNAMENT_NOTICE_INFO;
+  return `<p class="tournament-notice is-${safeTone}">${escapeHTMLText(tournamentViewState.noticeText)}</p>`;
+}
+
+function renderTournamentHeaderCardHTML(tournament) {
+  const format = TournamentManager.FORMAT_RR;
+  const nameValue = tournament ? tournament.name : '';
+  const courtCount = tournament ? Number(tournament.courtCount || 2) : 2;
+  const playerCount = tournament ? (tournament.players || []).length : 0;
+  const activePlayerCount = tournament ? (tournament.players || []).filter((player) => player.active).length : 0;
+  const teamCount = tournament ? (tournament.teams || []).length : 0;
+  const matchCount = tournament ? (tournament.matches || []).length : 0;
+  const finalCount = tournament ? (tournament.matches || []).filter((match) => match.status === TournamentManager.MATCH_FINAL).length : 0;
+  const nextStepText = deriveTournamentNextStep(tournament);
+  const section = TournamentSubApp.SECTIONS.includes(tournamentViewState.section)
+    ? tournamentViewState.section
+    : TournamentSubApp.SECTION_OVERVIEW;
+  const tournamentSyncNoticeHTML = buildTournamentSyncNoticeHTML();
+
+  const sectionButtonsHTML = TournamentSubApp.SECTIONS.map((sectionId) => {
+    const label = sectionId.charAt(0).toUpperCase() + sectionId.slice(1);
+    const selected = sectionId === section ? 'primary' : 'secondary';
+    return `<button type="button" class="${selected}" data-tr-action="set-section" data-section="${escapeHTMLText(sectionId)}">${escapeHTMLText(label)}</button>`;
+  }).join('');
+
+  const summaryHTML = tournament ? `
+    <div class="tournament-meta-grid">
+      <div><strong>Event:</strong> ${escapeHTMLText(tournament.name)}</div>
+      <div><strong>Format:</strong> ${escapeHTMLText(formatTournamentFormatLabel(tournament.format))}</div>
+      <div><strong>Phase:</strong> ${escapeHTMLText(formatTournamentStatusLabel(tournament.phase || tournament.status))}</div>
+      <div><strong>Courts:</strong> ${Number(tournament.courtCount) || 1}</div>
+      <div><strong>Players:</strong> ${activePlayerCount} active / ${playerCount} total</div>
+      <div><strong>Teams:</strong> ${teamCount}</div>
+      <div><strong>Matches:</strong> ${finalCount} final / ${matchCount} total</div>
+      <div><strong>Source:</strong> ${escapeHTMLText(formatTournamentSourceLabel(tournament))}</div>
+    </div>
+    <p class="small" style="margin-top:0.55rem;"><strong>Next Step:</strong> ${escapeHTMLText(nextStepText)}</p>
+  ` : '<p class="small">Create a tournament event to begin setup.</p>';
+
+  const adminControlsHTML = state.isAdmin ? `
+    <div class="tournament-section">
+      <h4>Tournament App Controls</h4>
+      <div class="tournament-input-grid">
+        <input type="text" id="trn-name" placeholder="Event name" value="${escapeHTMLText(nameValue)}" />
+        <select id="trn-format">
+          <option value="${TournamentManager.FORMAT_RR}" ${format === TournamentManager.FORMAT_RR ? 'selected' : ''}>Round Robin</option>
+        </select>
+        <input type="number" id="trn-court-count" min="1" max="8" value="${courtCount}" />
+        <input type="number" id="trn-auto-team-count" min="2" max="24" value="${Math.max(2, teamCount || 2)}" />
+      </div>
+      <div class="row">
+        <button type="button" data-tr-action="${tournament ? 'save-tournament-settings' : 'create-tournament'}">${tournament ? 'Save Event Settings' : 'Create Tournament Event'}</button>
+        ${tournament ? '<button type="button" class="danger" data-tr-action="delete-tournament">Delete Event</button>' : ''}
+      </div>
+      <div class="row">${sectionButtonsHTML}</div>
+    </div>
+  ` : '';
+
+  return `
+    ${tournamentSyncNoticeHTML}
+    ${summaryHTML}
+    ${adminControlsHTML}
+  `;
+}
+
+function getTournamentPlayableTeams(tournament) {
+  return (Array.isArray(tournament?.teams) ? tournament.teams : [])
+    .filter((team) => Array.isArray(team.memberKeys) && team.memberKeys.length > 0)
+    .slice()
+    .sort((a, b) => {
+      const seedDiff = (Number(a.seed) || 0) - (Number(b.seed) || 0);
+      if (seedDiff !== 0) return seedDiff;
+      return String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' });
+    });
+}
+
+function buildTournamentRoundRobinMatches(teams, courtCount) {
+  const teamIds = (Array.isArray(teams) ? teams : []).map((team) => String(team.id || '').trim()).filter(Boolean);
+  if (teamIds.length < 2) return [];
+
+  const ids = teamIds.slice();
+  if (ids.length % 2 === 1) ids.push(null);
+  const total = ids.length;
+  const rounds = [];
+
+  for (let roundIndex = 0; roundIndex < total - 1; roundIndex += 1) {
+    const pairs = [];
+    for (let i = 0; i < total / 2; i += 1) {
+      const teamAId = ids[i];
+      const teamBId = ids[total - 1 - i];
+      if (teamAId && teamBId) pairs.push([teamAId, teamBId]);
+    }
+    rounds.push(pairs);
+    const fixed = ids[0];
+    const rotating = ids.slice(1);
+    rotating.unshift(rotating.pop());
+    ids.splice(0, ids.length, fixed, ...rotating);
+  }
+
+  const safeCourts = TournamentSubApp.clampCourtCount(courtCount);
+  const matches = [];
+  rounds.forEach((pairs, roundIndex) => {
+    pairs.forEach((pair, slotIndex) => {
+      matches.push({
+        id: TournamentSubApp.uid('tm'),
+        round: roundIndex + 1,
+        slot: slotIndex + 1,
+        bracket: TournamentManager.FORMAT_RR,
+        court: (slotIndex % safeCourts) + 1,
+        status: TournamentManager.MATCH_SCHEDULED,
+        teamAId: pair[0],
+        teamBId: pair[1],
+        scoreA: null,
+        scoreB: null,
+        winnerTeamId: null,
+        loserTeamId: null
+      });
+    });
+  });
+  return TournamentSubApp.sortMatches(matches);
+}
+
+function clearTournamentMatchesForRosterMutation(draft) {
+  const existingCount = Array.isArray(draft?.matches) ? draft.matches.length : 0;
+  if (existingCount > 0) draft.matches = [];
+  return existingCount;
+}
+
+function findTournamentElementByDataAttr(attrName, targetValue) {
+  const safeAttr = String(attrName || '').trim();
+  const safeTarget = String(targetValue || '').trim();
+  if (!safeAttr || !safeTarget) return null;
+  return Array.from(document.querySelectorAll(`[${safeAttr}]`))
+    .find((el) => String(el.getAttribute(safeAttr) || '').trim() === safeTarget) || null;
+}
+
+function buildTournamentPlayerCopiesFromMain(sourcePlayers) {
+  return (Array.isArray(sourcePlayers) ? sourcePlayers : [])
+    .map((player, index) => {
+      const name = String(player?.name || '').trim();
+      if (!name) return null;
+      return {
+        id: TournamentSubApp.uid('tp'),
+        name,
+        skill: TournamentSubApp.clampSkill(player?.skill),
+        seed: index + 1,
+        notes: '',
+        active: true,
+        availability: 'available',
+        teamId: ''
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildTournamentImportFromGeneratedTeams() {
+  const sourceTeams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
+  if (!sourceTeams.length) {
+    return { ok: false, error: 'No generated teams found. Generate teams first in the Teams area.' };
+  }
+
+  const sourceToTournamentPlayerId = new Map();
+  const players = [];
+  const teams = [];
+
+  sourceTeams.forEach((members, teamIndex) => {
+    const memberKeys = [];
+    (Array.isArray(members) ? members : []).forEach((member) => {
+      const sourceKey = playerIdentityKey(member);
+      if (!sourceKey) return;
+      let tournamentPlayerId = sourceToTournamentPlayerId.get(sourceKey);
+      if (!tournamentPlayerId) {
+        tournamentPlayerId = TournamentSubApp.uid('tp');
+        sourceToTournamentPlayerId.set(sourceKey, tournamentPlayerId);
+        players.push({
+          id: tournamentPlayerId,
+          name: String(member?.name || '').trim() || `Player ${players.length + 1}`,
+          skill: TournamentSubApp.clampSkill(member?.skill),
+          seed: players.length + 1,
+          notes: '',
+          active: true,
+          availability: 'available',
+          teamId: ''
+        });
+      }
+      memberKeys.push(tournamentPlayerId);
+    });
+    const uniqueMembers = Array.from(new Set(memberKeys));
+    if (!uniqueMembers.length) return;
+    teams.push({
+      id: TournamentSubApp.uid('tt'),
+      name: `Team ${teamIndex + 1}`,
+      seed: teams.length + 1,
+      notes: '',
+      memberKeys: uniqueMembers
+    });
+  });
+
+  if (teams.length < 2) {
+    return { ok: false, error: 'Generated teams import needs at least two non-empty teams.' };
+  }
+
+  const teamByMemberId = new Map();
+  teams.forEach((team) => {
+    (team.memberKeys || []).forEach((memberId) => {
+      if (!teamByMemberId.has(memberId)) teamByMemberId.set(memberId, team.id);
+    });
+  });
+  players.forEach((player) => {
+    player.teamId = teamByMemberId.get(player.id) || '';
+  });
+
+  return { ok: true, players, teams };
+}
+
+function renderTournamentAdminCardHTML(tournament) {
+  if (!state.isAdmin) return '';
+  if (!tournament) {
+    return '<p class="small">No event selected. Create a tournament event to begin.</p>';
+  }
+
+  const section = TournamentSubApp.SECTIONS.includes(tournamentViewState.section)
+    ? tournamentViewState.section
+    : TournamentSubApp.SECTION_OVERVIEW;
+  const players = Array.isArray(tournament.players) ? tournament.players.slice() : [];
+  const teams = Array.isArray(tournament.teams)
+    ? tournament.teams.slice().sort((a, b) => (Number(a.seed) || 0) - (Number(b.seed) || 0))
+    : [];
+  const matches = TournamentSubApp.sortMatches(tournament.matches || []);
+  const playerLookup = getTournamentPlayerLookup(tournament);
+  const teamLookup = getTournamentTeamLookup(tournament);
+  const searchRaw = String(tournamentViewState.playerSearch || '').trim();
+  const search = searchRaw.toLowerCase();
+
+  const filteredPlayers = !search
+    ? players
+    : players.filter((player) => {
+      const haystack = `${player.name || ''} ${player.notes || ''}`.toLowerCase();
+      return haystack.includes(search);
+    });
+
+  const activePlayers = players.filter((player) => player.active);
+  const unassignedActivePlayers = activePlayers.filter((player) => !player.teamId);
+  const assignPlayerOptions = activePlayers
+    .map((player) => `<option value="${escapeHTMLText(player.id)}">${escapeHTMLText(player.name)} (${Number(player.skill) || 0})</option>`)
+    .join('');
+  const assignTeamOptions = teams
+    .map((team) => `<option value="${escapeHTMLText(team.id)}">${escapeHTMLText(team.name)}</option>`)
+    .join('');
+
+  const liveMatches = matches.filter((match) => match.status === TournamentManager.MATCH_LIVE);
+  const scheduledMatches = matches.filter((match) => match.status === TournamentManager.MATCH_SCHEDULED);
+  const finalMatches = matches.filter((match) => match.status === TournamentManager.MATCH_FINAL);
+  const nextScheduledMatch = scheduledMatches[0] || null;
+
+  if (section === TournamentSubApp.SECTION_OVERVIEW) {
+    return `
+      <div class="tournament-section">
+        <h4>Overview</h4>
+        <p class="small">Use Tournament Players and Teams below to run an event without relying on checked-in state.</p>
+        <div class="tournament-meta-grid">
+          <div><strong>Players:</strong> ${players.length}</div>
+          <div><strong>Active Players:</strong> ${activePlayers.length}</div>
+          <div><strong>Teams:</strong> ${teams.length}</div>
+          <div><strong>Matches:</strong> ${matches.length}</div>
+          <div><strong>Live:</strong> ${liveMatches.length}</div>
+          <div><strong>Scheduled:</strong> ${scheduledMatches.length}</div>
+          <div><strong>Final:</strong> ${finalMatches.length}</div>
+          <div><strong>Next:</strong> ${escapeHTMLText(deriveTournamentNextStep(tournament))}</div>
+        </div>
+        <div class="row" style="margin-top:0.65rem;">
+          <button type="button" data-tr-action="import-main-checked">Import Checked-In Players</button>
+          <button type="button" class="secondary" data-tr-action="import-main-all">Import Main Roster</button>
+          <button type="button" class="secondary" data-tr-action="import-generated-teams">Import Generated Teams</button>
+        </div>
+        <div class="row" style="margin-top:0.65rem;">
+          <button type="button" class="secondary" data-tr-action="auto-build-teams">Auto Build Teams</button>
+          <button type="button" class="secondary" data-tr-action="generate-matches">Generate Matches</button>
+          <button type="button" class="secondary" data-tr-action="start-next-match" ${nextScheduledMatch ? '' : 'disabled'}>Start Next Match</button>
+          <button type="button" class="secondary" data-tr-action="reset-matches" ${matches.length ? '' : 'disabled'}>Reset Match Results</button>
+        </div>
+      </div>
+    `;
+  }
+
+  if (section === TournamentSubApp.SECTION_PLAYERS) {
+    const playerRows = filteredPlayers.length
+      ? filteredPlayers.map((player) => {
+          const teamName = player.teamId ? (teamLookup.get(player.teamId)?.name || 'Unknown Team') : 'Unassigned';
+          return `
+            <tr>
+              <td><input type="text" data-tr-player-name-id="${escapeHTMLText(player.id)}" value="${escapeHTMLText(player.name)}" /></td>
+              <td><input type="number" min="0" max="10" step="0.1" data-tr-player-skill-id="${escapeHTMLText(player.id)}" value="${Number(player.skill) || 0}" /></td>
+              <td><input type="checkbox" data-tr-player-active-id="${escapeHTMLText(player.id)}" ${player.active ? 'checked' : ''} /></td>
+              <td>${escapeHTMLText(teamName)}</td>
+              <td><input type="text" data-tr-player-notes-id="${escapeHTMLText(player.id)}" value="${escapeHTMLText(player.notes || '')}" /></td>
+              <td class="tournament-match-actions">
+                <button type="button" class="secondary" data-tr-action="save-player" data-player-id="${escapeHTMLText(player.id)}">Save</button>
+                <button type="button" class="danger" data-tr-action="remove-player" data-player-id="${escapeHTMLText(player.id)}">Delete</button>
+              </td>
+            </tr>
+          `;
+        }).join('')
+      : '<tr><td colspan="6" class="small">No players match the current search.</td></tr>';
+
+    return `
+      <div class="tournament-section">
+        <h4>Players</h4>
+        <div class="row">
+          <input type="text" id="trn-player-name" placeholder="Player name" />
+          <input type="number" id="trn-player-skill" min="0" max="10" step="0.1" value="0" />
+          <input type="text" id="trn-player-notes" placeholder="Optional notes" />
+          <button type="button" data-tr-action="add-player">Add Player</button>
+        </div>
+        <div class="row">
+          <textarea id="trn-player-bulk" rows="4" placeholder="Bulk add (one per line): Name, Skill"></textarea>
+        </div>
+        <div class="row" style="margin-top:0.4rem;">
+          <button type="button" class="secondary" data-tr-action="bulk-add-players">Bulk Add Players</button>
+        </div>
+        <div class="row" style="margin-top:0.65rem;">
+          <input type="text" id="trn-player-search" placeholder="Search players" value="${escapeHTMLText(searchRaw)}" />
+          <button type="button" class="secondary" data-tr-action="apply-player-search">Search</button>
+          <button type="button" class="secondary" data-tr-action="clear-player-search">Clear</button>
+        </div>
+        <table class="table tournament-match-table" style="margin-top:0.65rem;">
+          <thead>
+            <tr><th>Name</th><th>Skill</th><th>Active</th><th>Team</th><th>Notes</th><th>Actions</th></tr>
+          </thead>
+          <tbody>${playerRows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  if (section === TournamentSubApp.SECTION_TEAMS) {
+    const unassignedHTML = unassignedActivePlayers.length
+      ? `<p class="small">Unassigned active players: ${escapeHTMLText(unassignedActivePlayers.map((player) => player.name).join(', '))}</p>`
+      : '<p class="small">All active players are assigned.</p>';
+
+    const teamCards = teams.length
+      ? teams.map((team) => {
+          const members = (team.memberKeys || []).map((memberId) => playerLookup.get(memberId)).filter(Boolean);
+          const membersHTML = members.length
+            ? members.map((member) => `
+                <li>
+                  ${escapeHTMLText(member.name)} <span class="small">(Skill ${Number(member.skill) || 0})</span>
+                  <button type="button" class="secondary" data-tr-action="unassign-player" data-player-id="${escapeHTMLText(member.id)}" data-team-id="${escapeHTMLText(team.id)}">Remove</button>
+                </li>
+              `).join('')
+            : '<li class="small">No members yet.</li>';
+          return `
+            <article class="tournament-team-card">
+              <div class="row tournament-team-row">
+                <input type="text" data-tr-team-name-id="${escapeHTMLText(team.id)}" value="${escapeHTMLText(team.name)}" />
+                <input type="number" min="1" step="1" data-tr-team-seed-id="${escapeHTMLText(team.id)}" value="${Number(team.seed) || 1}" />
+                <button type="button" class="secondary" data-tr-action="save-team" data-team-id="${escapeHTMLText(team.id)}">Save</button>
+                <button type="button" class="danger" data-tr-action="delete-team" data-team-id="${escapeHTMLText(team.id)}">Delete</button>
+              </div>
+              <ul class="tournament-team-members">${membersHTML}</ul>
+            </article>
+          `;
+        }).join('')
+      : '<p class="small">No teams yet. Create teams manually or use Auto Build Teams.</p>';
+
+    return `
+      <div class="tournament-section">
+        <h4>Teams</h4>
+        <div class="row">
+          <input type="text" id="trn-team-name" placeholder="New team name" />
+          <button type="button" data-tr-action="add-team">Add Team</button>
+          <input type="number" id="trn-auto-team-count" min="2" max="24" value="${Math.max(2, teams.length || 2)}" />
+          <button type="button" class="secondary" data-tr-action="auto-build-teams">Auto Build Teams</button>
+        </div>
+        <div class="row" style="margin-top:0.6rem;">
+          <select id="trn-assign-player">${assignPlayerOptions || '<option value="">No active players</option>'}</select>
+          <select id="trn-assign-team">${assignTeamOptions || '<option value="">No teams</option>'}</select>
+          <button type="button" class="secondary" data-tr-action="assign-player-to-team">Assign / Move</button>
+        </div>
+        ${unassignedHTML}
+        <div class="tournament-team-grid">${teamCards}</div>
+      </div>
+    `;
+  }
+
+  if (section === TournamentSubApp.SECTION_MATCHES) {
+    const rows = matches.length
+      ? matches.map((match) => {
+          const teamAName = getTournamentTeamName(tournament, match.teamAId);
+          const teamBName = getTournamentTeamName(tournament, match.teamBId);
+          const winnerName = match.winnerTeamId ? getTournamentTeamName(tournament, match.winnerTeamId) : '-';
+          const scoreAValue = Number.isFinite(Number(match.scoreA)) ? Number(match.scoreA) : '';
+          const scoreBValue = Number.isFinite(Number(match.scoreB)) ? Number(match.scoreB) : '';
+          const canStart = match.status === TournamentManager.MATCH_SCHEDULED && !!match.teamAId && !!match.teamBId;
+          const canFinalize = match.status !== TournamentManager.MATCH_FINAL && !!match.teamAId && !!match.teamBId;
+          return `
+            <tr>
+              <td>R${Number(match.round) || 1} M${Number(match.slot) || 1}</td>
+              <td>Net ${Number(match.court) || 1}</td>
+              <td>${escapeHTMLText(teamAName)} vs ${escapeHTMLText(teamBName)}</td>
+              <td>${buildTournamentStatusBadge(match.status)}</td>
+              <td>${escapeHTMLText(winnerName)}</td>
+              <td>
+                <div class="tournament-match-actions">
+                  <input type="number" min="0" step="1" class="tournament-score-input" data-tr-score-a-for="${escapeHTMLText(match.id)}" value="${scoreAValue}" />
+                  <input type="number" min="0" step="1" class="tournament-score-input" data-tr-score-b-for="${escapeHTMLText(match.id)}" value="${scoreBValue}" />
+                  <button type="button" class="secondary" data-tr-action="start-match" data-match-id="${escapeHTMLText(match.id)}" ${canStart ? '' : 'disabled'}>Start</button>
+                  <button type="button" data-tr-action="finalize-match" data-match-id="${escapeHTMLText(match.id)}" ${canFinalize ? '' : 'disabled'}>Finalize</button>
+                  <button type="button" class="secondary" data-tr-action="clear-match-result" data-match-id="${escapeHTMLText(match.id)}" ${match.status === TournamentManager.MATCH_FINAL ? '' : 'disabled'}>Clear</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('')
+      : '<tr><td colspan="6" class="small">No matches generated yet.</td></tr>';
+
+    return `
+      <div class="tournament-section">
+        <h4>Matches</h4>
+        <div class="row">
+          <button type="button" data-tr-action="generate-matches">Generate Matches</button>
+          <button type="button" class="secondary" data-tr-action="start-next-match" ${nextScheduledMatch ? '' : 'disabled'}>Start Next Match</button>
+          <button type="button" class="secondary" data-tr-action="reset-matches" ${matches.length ? '' : 'disabled'}>Reset Results</button>
+        </div>
+        <table class="table tournament-match-table" style="margin-top:0.65rem;">
+          <thead>
+            <tr><th>Match</th><th>Court</th><th>Teams</th><th>Status</th><th>Winner</th><th>Actions</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  if (section === TournamentSubApp.SECTION_COURTS) {
+    const courtsView = deriveTournamentCourtsView(tournament);
+    const courtsHTML = courtsView.courts.map((courtEntry) => {
+      const live = courtEntry.live;
+      const next = courtEntry.next;
+      const liveText = live
+        ? `${getTournamentTeamName(tournament, live.teamAId)} vs ${getTournamentTeamName(tournament, live.teamBId)}`
+        : 'No live match';
+      const nextText = next
+        ? `${getTournamentTeamName(tournament, next.teamAId)} vs ${getTournamentTeamName(tournament, next.teamBId)}`
+        : 'No queued match';
+      return `
+        <article class="tournament-team-card">
+          <h5>Net ${courtEntry.courtNo}</h5>
+          <p class="small"><strong>Live:</strong> ${escapeHTMLText(liveText)}</p>
+          <p class="small"><strong>Next:</strong> ${escapeHTMLText(nextText)}</p>
+          ${next ? `<button type="button" class="secondary" data-tr-action="start-match" data-match-id="${escapeHTMLText(next.id)}">Start Next on Net ${courtEntry.courtNo}</button>` : ''}
+        </article>
+      `;
+    }).join('');
+
+    const queueHTML = courtsView.queue.length
+      ? `<ul class="tournament-public-match-list">${courtsView.queue.map((match) => `
+          <li>
+            R${Number(match.round) || 1} M${Number(match.slot) || 1} - Net ${Number(match.court) || 1}:
+            ${escapeHTMLText(getTournamentTeamName(tournament, match.teamAId))} vs ${escapeHTMLText(getTournamentTeamName(tournament, match.teamBId))}
+          </li>
+        `).join('')}</ul>`
+      : '<p class="small">Queue is empty.</p>';
+
+    return `
+      <div class="tournament-section">
+        <h4>Courts / Queue</h4>
+        <div class="tournament-team-grid">${courtsHTML || '<p class="small">No courts configured.</p>'}</div>
+        <h5 style="margin-top:0.7rem;">Queue</h5>
+        ${queueHTML}
+      </div>
+    `;
+  }
+
+  if (section === TournamentSubApp.SECTION_STANDINGS) {
+    const rows = getRoundRobinStandingsForView(tournament);
+    const standingsHTML = rows.length
+      ? `
+        <table class="table">
+          <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>PF</th><th>PA</th><th>PD</th></tr></thead>
+          <tbody>
+            ${rows.map((row, idx) => `
+              <tr>
+                <td>${idx + 1}</td>
+                <td>${escapeHTMLText(row.teamName)}</td>
+                <td>${row.wins}</td>
+                <td>${row.losses}</td>
+                <td>${row.pf}</td>
+                <td>${row.pa}</td>
+                <td>${row.pd}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `
+      : '<p class="small">Standings appear once matches are finalized.</p>';
+    return `
+      <div class="tournament-section">
+        <h4>Standings</h4>
+        ${standingsHTML}
+      </div>
+    `;
+  }
+
+  if (section === TournamentSubApp.SECTION_SETTINGS) {
+    return `
+      <div class="tournament-section">
+        <h4>Settings</h4>
+        <p class="small">Event settings are managed in the header card. Use this section for high-impact controls.</p>
+        <div class="row">
+          <button type="button" class="secondary" data-tr-action="generate-matches">Generate Matches</button>
+          <button type="button" class="secondary" data-tr-action="reset-matches" ${matches.length ? '' : 'disabled'}>Reset Match Results</button>
+          <button type="button" class="danger" data-tr-action="delete-tournament">Delete Event</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const entries = (Array.isArray(tournament.history) ? tournament.history : [])
+    .slice()
+    .sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0))
+    .slice(0, 60);
+  const historyHTML = entries.length
+    ? `<ul class="tournament-public-match-list">${entries.map((entry) => {
+        const when = new Date(Number(entry.at) || Date.now()).toLocaleString();
+        return `<li><strong>${escapeHTMLText(when)}:</strong> ${escapeHTMLText(entry.message || '')}</li>`;
+      }).join('')}</ul>`
+    : '<p class="small">No history yet.</p>';
+  return `
+    <div class="tournament-section">
+      <h4>History</h4>
+      ${historyHTML}
+    </div>
+  `;
+}
+
+function renderTournamentPublicCardHTML(tournament) {
+  if (!tournament) {
+    return '<p class="small">No tournament selected yet.</p>';
+  }
+
+  const matches = TournamentSubApp.sortMatches(tournament.matches || []);
+  const liveMatches = matches.filter((match) => match.status === TournamentManager.MATCH_LIVE);
+  const scheduledMatches = matches.filter((match) => match.status === TournamentManager.MATCH_SCHEDULED);
+  const finalMatches = matches.filter((match) => match.status === TournamentManager.MATCH_FINAL);
+  const standings = getRoundRobinStandingsForView(tournament);
+
+  const renderMatchList = (rows, emptyText) => {
+    if (!rows.length) return `<p class="small">${escapeHTMLText(emptyText)}</p>`;
+    return `
+      <ul class="tournament-public-match-list">
+        ${rows.map((match) => {
+          const scoreSuffix = Number.isFinite(Number(match.scoreA)) && Number.isFinite(Number(match.scoreB))
+            ? ` (${Number(match.scoreA)}-${Number(match.scoreB)})`
+            : '';
+          const winnerSuffix = match.winnerTeamId
+            ? ` <span class="small">(Winner: ${escapeHTMLText(getTournamentTeamName(tournament, match.winnerTeamId))})</span>`
+            : '';
+          return `
+            <li>
+              <strong>Net ${Number(match.court) || 1}</strong> -
+              ${escapeHTMLText(getTournamentTeamName(tournament, match.teamAId))} vs
+              ${escapeHTMLText(getTournamentTeamName(tournament, match.teamBId))}
+              ${escapeHTMLText(scoreSuffix)}${winnerSuffix}
+            </li>
+          `;
+        }).join('')}
+      </ul>
+    `;
+  };
+
+  const standingsHTML = standings.length
+    ? `
+      <table class="table">
+        <thead><tr><th>#</th><th>Team</th><th>W</th><th>L</th><th>PD</th></tr></thead>
+        <tbody>
+          ${standings.map((row, idx) => `
+            <tr>
+              <td>${idx + 1}</td>
+              <td>${escapeHTMLText(row.teamName)}</td>
+              <td>${row.wins}</td>
+              <td>${row.losses}</td>
+              <td>${row.pd}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `
+    : '<p class="small">Standings will appear as results are finalized.</p>';
+
+  return `
+    <div class="tournament-section">
+      <h4>Public Tournament View</h4>
+      <p class="small">
+        ${escapeHTMLText(tournament.name)} -
+        ${escapeHTMLText(formatTournamentFormatLabel(tournament.format))} -
+        ${escapeHTMLText(formatTournamentStatusLabel(tournament.phase || tournament.status))}
+      </p>
+      <div class="tournament-public-grid">
+        <div>
+          <h5>Live Matches</h5>
+          ${renderMatchList(liveMatches, 'No matches live right now.')}
+        </div>
+        <div>
+          <h5>Upcoming</h5>
+          ${renderMatchList(scheduledMatches, 'No upcoming matches.')}
+        </div>
+        <div>
+          <h5>Final Results</h5>
+          ${renderMatchList(finalMatches, 'No final results yet.')}
+        </div>
+      </div>
+    </div>
+
+    <div class="tournament-section">
+      <h4>Standings</h4>
+      ${standingsHTML}
+    </div>
+  `;
+}
+
+function getActiveTournamentFromSelect() {
+  const select = document.getElementById('tournamentSelect');
+  const selectedId = String(select?.value || '').trim();
+  const activeId = selectedId || String(TournamentManager.getActiveId() || '').trim();
+  return activeId ? TournamentSubApp.byId(activeId) : null;
+}
+
+function refreshTournamentSelectUI() {
+  const select = document.getElementById('tournamentSelect');
+  if (!select) return '';
+  const all = TournamentSubApp.list();
+  const currentActiveId = String(TournamentManager.getActiveId() || '').trim();
+  const resolvedActiveId = all.some((tournament) => tournament.id === currentActiveId)
+    ? currentActiveId
+    : (all[0]?.id || '');
+
+  if (resolvedActiveId !== currentActiveId) {
+    TournamentManager.setActive(resolvedActiveId);
+  }
+
+  select.innerHTML = all.length
+    ? all.map((tournament) => `
+        <option value="${escapeHTMLText(tournament.id)}" ${tournament.id === resolvedActiveId ? 'selected' : ''}>
+          ${escapeHTMLText(tournament.name)}
+        </option>
+      `).join('')
+    : '<option value="">No tournaments</option>';
+
+  if (!all.length) {
+    select.value = TOURNAMENT_UNSET_VALUE;
+    return '';
+  }
+  select.value = resolvedActiveId;
+  return resolvedActiveId;
+}
+
+function initTournamentView() {
+  const globalNotice = document.getElementById('tournamentGlobalNotice');
+  const headerCard = document.getElementById('tournamentHeaderCard');
+  const adminCard = document.getElementById('adminTournament');
+  const publicCard = document.getElementById('publicTournamentView');
+  const select = document.getElementById('tournamentSelect');
+  if (!globalNotice || !headerCard || !adminCard || !publicCard) return;
+
+  const awaitingAuthorityHydration = (
+    !!supabaseClient &&
+    SUPABASE_AUTHORITATIVE &&
+    !state.loaded &&
+    state.tournamentSyncState === SHARED_SYNC_PENDING
+  );
+
+  if (awaitingAuthorityHydration) {
+    if (select) {
+      select.innerHTML = '<option value="">Syncing tournaments...</option>';
+      select.value = TOURNAMENT_UNSET_VALUE;
+    }
+    globalNotice.innerHTML = renderTournamentNoticeHTML();
+    headerCard.innerHTML = renderTournamentHeaderCardHTML(null);
+    adminCard.style.display = state.isAdmin ? 'block' : 'none';
+    adminCard.innerHTML = state.isAdmin
+      ? '<p class="small">Tournament state is syncing from Supabase.</p>'
+      : '';
+    publicCard.innerHTML = '<p class="small">Tournament state is syncing from Supabase.</p>';
+    return;
+  }
+
+  refreshTournamentSelectUI();
+  const tournament = getActiveTournamentFromSelect();
+
+  globalNotice.innerHTML = renderTournamentNoticeHTML();
+  headerCard.innerHTML = renderTournamentHeaderCardHTML(tournament);
+  adminCard.style.display = state.isAdmin ? 'block' : 'none';
+  adminCard.innerHTML = state.isAdmin ? renderTournamentAdminCardHTML(tournament) : '';
+  publicCard.innerHTML = renderTournamentPublicCardHTML(tournament);
+}
+
 async function handleTournamentAction(action, trigger) {
-  const activeTournament = getActiveTournamentFromSelect();
-  const activeId = activeTournament?.id || '';
+  if (action === 'set-section') {
+    const section = String(trigger?.getAttribute('data-section') || '').trim();
+    if (TournamentSubApp.SECTIONS.includes(section)) tournamentViewState.section = section;
+    initTournamentView();
+    return;
+  }
+
+  if (action === 'apply-player-search') {
+    tournamentViewState.playerSearch = String(document.getElementById('trn-player-search')?.value || '').trim();
+    initTournamentView();
+    return;
+  }
+
+  if (action === 'clear-player-search') {
+    tournamentViewState.playerSearch = '';
+    initTournamentView();
+    return;
+  }
 
   if (action === 'create-tournament') {
     if (!state.isAdmin) return;
     const name = String(document.getElementById('trn-name')?.value || '').trim();
-    const format = String(document.getElementById('trn-format')?.value || TournamentManager.FORMAT_RR);
-    const sourceMode = String(document.getElementById('trn-source-mode')?.value || TournamentManager.SOURCE_CHECKED_IN);
-    const courtCount = Number.parseInt(document.getElementById('trn-court-count')?.value || '2', 10);
-    const groupFilter = String(document.getElementById('trn-source-group')?.value || 'All');
-    const teamCount = Number.parseInt(document.getElementById('trn-team-count')?.value || '2', 10);
+    if (!name) {
+      setTournamentNotice('Event name is required.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
+    const courtCount = TournamentSubApp.clampCourtCount(document.getElementById('trn-court-count')?.value || 2);
     const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
-
-    const created = TournamentManager.createTournament({
-      name,
-      format,
-      sourceMode,
-      courtCount,
-      groupFilter,
-      teamCount
+    const created = TournamentSubApp.withStoreMutated((store) => {
+      const now = Date.now();
+      const draft = TournamentSubApp.canonicalizeTournament({
+        id: TournamentSubApp.uid('trn'),
+        name,
+        format: TournamentManager.FORMAT_RR,
+        sourceMode: 'independent',
+        sourceGroup: 'All',
+        sourceSummary: 'manual',
+        courtCount,
+        teamCount: 0,
+        teams: [],
+        players: [],
+        matches: [],
+        history: [],
+        phase: TournamentSubApp.PHASE_SETUP,
+        createdAt: now,
+        updatedAt: now
+      });
+      TournamentSubApp.addHistory(draft, 'create', `Created tournament event "${draft.name}".`);
+      const canonical = TournamentSubApp.canonicalizeTournament(draft);
+      if (!Array.isArray(store.tournaments)) store.tournaments = [];
+      store.tournaments.push(canonical);
+      store.activeTournamentId = canonical.id;
+      return { ok: true, tournament: canonical };
     });
     await commitTournamentMutation(created, {
-      successMessage: 'Tournament created. Build matches when teams look right.',
-      fallbackErrorMessage: 'Unable to create tournament.',
+      successMessage: 'Tournament event created.',
+      fallbackErrorMessage: 'Unable to create tournament event.',
       contextLabel: 'tournament-create',
       actionMeta: {
         scope: 'tournament',
         action: 'create-tournament',
         entityType: 'tournament',
-        entityId: (mutationResult) => mutationResult?.tournament?.id || '',
-        title: (mutationResult) => {
-          const createdName = String(mutationResult?.tournament?.name || name || 'Tournament').trim();
-          return `Created tournament "${createdName}".`;
-        },
-        detail: `Format: ${formatTournamentFormatLabel(format)} | Source: ${sourceMode === TournamentManager.SOURCE_GENERATED_TEAMS ? 'Generated Teams' : `Checked-In (${formatTournamentGroupLabel(groupFilter)})`}.`,
+        entityId: (result) => result?.tournament?.id || '',
+        title: `Created tournament "${name}".`,
+        detail: 'Tournament is now independent and ready for player/team setup.',
         tone: 'success',
         undoSnapshot: beforeStoreSnapshot
       }
@@ -5339,17 +6038,60 @@ async function handleTournamentAction(action, trigger) {
   }
 
   if (!state.isAdmin) return;
-  if (!activeId) {
+  const activeTournament = getActiveTournamentFromSelect();
+  if (!activeTournament || !activeTournament.id) {
     setTournamentNotice('Select a tournament first.', TOURNAMENT_NOTICE_ERROR);
     initTournamentView();
     return;
   }
 
+  await handleTournamentAdminAction(action, trigger, activeTournament);
+}
+
+async function handleTournamentAdminAction(action, trigger, activeTournament) {
+  const activeId = activeTournament.id;
+  if (!activeId) return;
+
+  if (action === 'save-tournament-settings') {
+    const name = String(document.getElementById('trn-name')?.value || '').trim();
+    if (!name) {
+      setTournamentNotice('Event name is required.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
+    const courtCount = TournamentSubApp.clampCourtCount(document.getElementById('trn-court-count')?.value || activeTournament.courtCount || 2);
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const updated = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      draft.name = name;
+      draft.format = TournamentManager.FORMAT_RR;
+      draft.courtCount = courtCount;
+      if (!draft.settings || typeof draft.settings !== 'object') draft.settings = { tieBreak: 'pd' };
+      TournamentSubApp.addHistory(draft, 'settings', `Updated event settings (courts: ${courtCount}).`);
+      return { ok: true };
+    });
+    await commitTournamentMutation(updated, {
+      successMessage: 'Tournament settings saved.',
+      fallbackErrorMessage: 'Unable to save tournament settings.',
+      contextLabel: 'tournament-save-settings',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'save-settings',
+        entityType: 'tournament',
+        entityId: activeId,
+        title: `Saved settings for "${name}".`,
+        detail: `Courts: ${courtCount}.`,
+        tone: 'info',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
   if (action === 'delete-tournament') {
-    const safeTournamentName = String(activeTournament?.name || 'this tournament').trim() || 'this tournament';
+    const safeName = String(activeTournament.name || 'this tournament').trim() || 'this tournament';
     const confirmed = confirmDangerousActionOrAbort({
-      title: `Delete tournament "${safeTournamentName}"?`,
-      detail: 'This removes all teams, matches, and recorded tournament results from shared state.',
+      title: `Delete tournament "${safeName}"?`,
+      detail: 'This removes tournament players, teams, matches, standings, and history from shared state.',
       confirmText: 'DELETE'
     });
     if (!confirmed) return;
@@ -5364,8 +6106,8 @@ async function handleTournamentAction(action, trigger) {
         action: 'delete-tournament',
         entityType: 'tournament',
         entityId: activeId,
-        title: `Deleted tournament "${safeTournamentName}".`,
-        detail: 'Tournament record and match history were removed.',
+        title: `Deleted tournament "${safeName}".`,
+        detail: 'Tournament and related records were removed.',
         tone: 'warning',
         undoSnapshot: beforeStoreSnapshot
       }
@@ -5373,36 +6115,509 @@ async function handleTournamentAction(action, trigger) {
     return;
   }
 
-  if (action === 'rebuild-teams') {
-    const sourceMode = String(
-      document.getElementById('trn-source-mode')?.value
-      || activeTournament.sourceMode
-      || TournamentManager.SOURCE_CHECKED_IN
-    );
-    const groupFilter = String(document.getElementById('trn-source-group')?.value || activeTournament.sourceGroup || 'All');
-    const teamCount = Number.parseInt(document.getElementById('trn-team-count')?.value || String(activeTournament.teamCount || 2), 10);
-    const existingMatchCount = Array.isArray(activeTournament.matches) ? activeTournament.matches.length : 0;
-    if (existingMatchCount > 0) {
+  if (action === 'add-player') {
+    const name = String(document.getElementById('trn-player-name')?.value || '').trim();
+    if (!name) {
+      setTournamentNotice('Player name is required.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
+    const skill = TournamentSubApp.clampSkill(document.getElementById('trn-player-skill')?.value || 0);
+    const notes = String(document.getElementById('trn-player-notes')?.value || '').trim();
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const added = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const nextSeed = (draft.players || []).reduce((maxSeed, player) => Math.max(maxSeed, Number(player.seed) || 0), 0) + 1;
+      draft.players = [...(draft.players || []), {
+        id: TournamentSubApp.uid('tp'),
+        name,
+        skill,
+        seed: nextSeed,
+        notes,
+        active: true,
+        availability: 'available',
+        teamId: ''
+      }];
+      TournamentSubApp.addHistory(draft, 'add-player', `Added tournament player "${name}".`);
+      return { ok: true };
+    });
+    await commitTournamentMutation(added, {
+      successMessage: 'Tournament player added.',
+      fallbackErrorMessage: 'Unable to add tournament player.',
+      contextLabel: 'tournament-add-player',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'add-player',
+        entityType: 'player',
+        entityId: '',
+        title: `Added player "${name}".`,
+        detail: `Skill ${skill}.`,
+        tone: 'success',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
+  if (action === 'bulk-add-players') {
+    const parsed = parseBulkTournamentPlayers(document.getElementById('trn-player-bulk')?.value || '');
+    if (!parsed.length) {
+      setTournamentNotice('Add at least one valid line (Name, Skill).', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const bulkAdded = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      let nextSeed = (draft.players || []).reduce((maxSeed, player) => Math.max(maxSeed, Number(player.seed) || 0), 0) + 1;
+      const nextPlayers = parsed.map((entry) => ({
+        id: TournamentSubApp.uid('tp'),
+        name: entry.name,
+        skill: TournamentSubApp.clampSkill(entry.skill),
+        seed: nextSeed++,
+        notes: '',
+        active: true,
+        availability: 'available',
+        teamId: ''
+      }));
+      draft.players = [...(draft.players || []), ...nextPlayers];
+      TournamentSubApp.addHistory(draft, 'bulk-add-players', `Bulk added ${nextPlayers.length} tournament players.`);
+      return { ok: true };
+    });
+    await commitTournamentMutation(bulkAdded, {
+      successMessage: `Added ${parsed.length} tournament players.`,
+      fallbackErrorMessage: 'Bulk add failed.',
+      contextLabel: 'tournament-bulk-add-players',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'bulk-add-players',
+        entityType: 'player',
+        entityId: '',
+        title: `Bulk added ${parsed.length} players.`,
+        detail: 'Tournament roster updated.',
+        tone: 'success',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
+  if (action === 'save-player') {
+    const playerId = String(trigger?.getAttribute('data-player-id') || '').trim();
+    if (!playerId) return;
+    const name = String(findTournamentElementByDataAttr('data-tr-player-name-id', playerId)?.value || '').trim();
+    const skill = TournamentSubApp.clampSkill(findTournamentElementByDataAttr('data-tr-player-skill-id', playerId)?.value || 0);
+    const notes = String(findTournamentElementByDataAttr('data-tr-player-notes-id', playerId)?.value || '').trim();
+    const active = !!findTournamentElementByDataAttr('data-tr-player-active-id', playerId)?.checked;
+    if (!name) {
+      setTournamentNotice('Player name cannot be empty.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const saved = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const player = (draft.players || []).find((item) => String(item.id) === playerId);
+      if (!player) return { ok: false, error: 'Player not found.' };
+      const previousTeamId = String(player.teamId || '');
+      player.name = name;
+      player.skill = skill;
+      player.notes = notes;
+      player.active = active;
+      if (!active && previousTeamId) {
+        (draft.teams || []).forEach((team) => {
+          team.memberKeys = (team.memberKeys || []).filter((memberId) => memberId !== playerId);
+        });
+        player.teamId = '';
+        clearTournamentMatchesForRosterMutation(draft);
+      }
+      TournamentSubApp.addHistory(draft, 'save-player', `Updated player "${name}".`);
+      return { ok: true };
+    });
+    await commitTournamentMutation(saved, {
+      successMessage: 'Player saved.',
+      fallbackErrorMessage: 'Unable to save player.',
+      contextLabel: 'tournament-save-player',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'save-player',
+        entityType: 'player',
+        entityId: playerId,
+        title: `Saved player "${name}".`,
+        detail: `Skill ${skill}${active ? '' : ' (inactive)'}.`,
+        tone: 'info',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
+  if (action === 'remove-player') {
+    const playerId = String(trigger?.getAttribute('data-player-id') || '').trim();
+    if (!playerId) return;
+    const player = (activeTournament.players || []).find((item) => String(item.id) === playerId);
+    const playerName = player ? String(player.name || '').trim() : 'this player';
+    const confirmed = confirmDangerousActionOrAbort({
+      title: `Delete player "${playerName}"?`,
+      detail: 'This removes the player from tournament teams and may clear generated matches.',
+      confirmText: 'DELETE'
+    });
+    if (!confirmed) return;
+
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const removed = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const existing = (draft.players || []).find((item) => String(item.id) === playerId);
+      if (!existing) return { ok: false, error: 'Player not found.' };
+      draft.players = (draft.players || []).filter((item) => String(item.id) !== playerId);
+      let membershipChanged = false;
+      (draft.teams || []).forEach((team) => {
+        const next = (team.memberKeys || []).filter((memberId) => memberId !== playerId);
+        if (next.length !== (team.memberKeys || []).length) membershipChanged = true;
+        team.memberKeys = next;
+      });
+      if (membershipChanged) clearTournamentMatchesForRosterMutation(draft);
+      TournamentSubApp.addHistory(draft, 'remove-player', `Removed player "${existing.name}".`);
+      return { ok: true };
+    });
+    await commitTournamentMutation(removed, {
+      successMessage: 'Player removed.',
+      fallbackErrorMessage: 'Unable to remove player.',
+      contextLabel: 'tournament-remove-player',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'remove-player',
+        entityType: 'player',
+        entityId: playerId,
+        title: `Removed player "${playerName}".`,
+        detail: 'Tournament roster updated.',
+        tone: 'warning',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
+  if (action === 'import-main-checked' || action === 'import-main-all' || action === 'import-generated-teams') {
+    let importResult = null;
+    if (action === 'import-generated-teams') {
+      importResult = buildTournamentImportFromGeneratedTeams();
+    } else {
+      ensurePlayerIdentityKeys();
+      const sourcePlayers = action === 'import-main-checked'
+        ? (() => {
+            const checkedSet = new Set(normalizeCheckedInEntries(state.checkedIn || []));
+            return (state.players || []).filter((player) => checkedSet.has(playerIdentityKey(player)));
+          })()
+        : (state.players || []).slice();
+      const copiedPlayers = buildTournamentPlayerCopiesFromMain(sourcePlayers);
+      if (!copiedPlayers.length) {
+        importResult = {
+          ok: false,
+          error: action === 'import-main-checked'
+            ? 'No checked-in players available to import.'
+            : 'No players available in the main roster to import.'
+        };
+      } else {
+        importResult = {
+          ok: true,
+          players: copiedPlayers,
+          teams: []
+        };
+      }
+    }
+
+    if (!importResult || importResult.ok === false) {
+      setTournamentNotice(importResult?.error || 'Import failed.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
+
+    const existingCount = (activeTournament.players || []).length + (activeTournament.teams || []).length + (activeTournament.matches || []).length;
+    if (existingCount > 0) {
       const confirmed = confirmDangerousActionOrAbort({
-        title: `Rebuild teams for "${activeTournament.name}"?`,
-        detail: `This clears ${existingMatchCount} existing matches and resets progression from the selected source.`,
-        confirmText: 'REBUILD'
+        title: `Replace current tournament setup for "${activeTournament.name}"?`,
+        detail: 'Import replaces tournament players/teams and clears current matches.',
+        confirmText: 'IMPORT'
       });
       if (!confirmed) return;
     }
+
     const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
-    const rebuilt = TournamentManager.rebuildTeams(activeId, { sourceMode, groupFilter, teamCount });
-    await commitTournamentMutation(rebuilt, {
-      successMessage: 'Teams rebuilt from selected source.',
-      fallbackErrorMessage: 'Team build failed.',
-      contextLabel: 'tournament-rebuild-teams',
+    const imported = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      draft.players = importResult.players;
+      draft.teams = importResult.teams;
+      draft.teamCount = (importResult.teams || []).length;
+      draft.matches = [];
+      draft.teamBuildSummary = action === 'import-generated-teams'
+        ? sanitizeGeneratedTeamsSummary(state.generatedTeamsSummary) || null
+        : null;
+      draft.sourceSummary = action === 'import-main-checked'
+        ? 'imported-main-checked'
+        : (action === 'import-main-all' ? 'imported-main-all' : 'imported-generated-teams');
+      TournamentSubApp.addHistory(
+        draft,
+        'import',
+        `Imported ${draft.players.length} players${draft.teams.length ? ` and ${draft.teams.length} teams` : ''} (${formatTournamentSourceLabel(draft)}).`
+      );
+      return { ok: true };
+    });
+    await commitTournamentMutation(imported, {
+      successMessage: 'Import complete.',
+      fallbackErrorMessage: 'Import failed.',
+      contextLabel: 'tournament-import',
       actionMeta: {
         scope: 'tournament',
-        action: 'rebuild-teams',
+        action: 'import',
         entityType: 'tournament',
         entityId: activeId,
-        title: `Rebuilt teams for "${activeTournament.name}".`,
-        detail: `Source: ${sourceMode === TournamentManager.SOURCE_GENERATED_TEAMS ? 'Generated Teams' : `Checked-In (${formatTournamentGroupLabel(groupFilter)})`}.`,
+        title: 'Imported tournament setup.',
+        detail: `Players: ${importResult.players.length} | Teams: ${importResult.teams.length}`,
+        tone: 'warning',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
+  if (action === 'add-team') {
+    const desiredName = String(document.getElementById('trn-team-name')?.value || '').trim();
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const added = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const nextName = desiredName || `Team ${(draft.teams || []).length + 1}`;
+      const nextSeed = (draft.teams || []).reduce((maxSeed, team) => Math.max(maxSeed, Number(team.seed) || 0), 0) + 1;
+      draft.teams = [...(draft.teams || []), {
+        id: TournamentSubApp.uid('tt'),
+        name: nextName,
+        seed: nextSeed,
+        notes: '',
+        memberKeys: []
+      }];
+      draft.teamCount = draft.teams.length;
+      clearTournamentMatchesForRosterMutation(draft);
+      TournamentSubApp.addHistory(draft, 'add-team', `Added ${nextName}.`);
+      return { ok: true };
+    });
+    await commitTournamentMutation(added, {
+      successMessage: 'Team added.',
+      fallbackErrorMessage: 'Unable to add team.',
+      contextLabel: 'tournament-add-team',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'add-team',
+        entityType: 'team',
+        entityId: '',
+        title: 'Added tournament team.',
+        detail: desiredName || 'Auto-named team added.',
+        tone: 'success',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
+  if (action === 'save-team') {
+    const teamId = String(trigger?.getAttribute('data-team-id') || '').trim();
+    if (!teamId) return;
+    const name = String(findTournamentElementByDataAttr('data-tr-team-name-id', teamId)?.value || '').trim();
+    const seed = Math.max(1, Number.parseInt(findTournamentElementByDataAttr('data-tr-team-seed-id', teamId)?.value || '1', 10) || 1);
+    if (!name) {
+      setTournamentNotice('Team name cannot be empty.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const saved = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const team = (draft.teams || []).find((item) => String(item.id) === teamId);
+      if (!team) return { ok: false, error: 'Team not found.' };
+      team.name = name;
+      team.seed = seed;
+      TournamentSubApp.addHistory(draft, 'save-team', `Updated ${name}.`);
+      return { ok: true };
+    });
+    await commitTournamentMutation(saved, {
+      successMessage: 'Team saved.',
+      fallbackErrorMessage: 'Unable to save team.',
+      contextLabel: 'tournament-save-team',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'save-team',
+        entityType: 'team',
+        entityId: teamId,
+        title: `Saved ${name}.`,
+        detail: `Seed ${seed}.`,
+        tone: 'info',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
+  if (action === 'delete-team') {
+    const teamId = String(trigger?.getAttribute('data-team-id') || '').trim();
+    if (!teamId) return;
+    const teamName = getTournamentTeamName(activeTournament, teamId);
+    const confirmed = confirmDangerousActionOrAbort({
+      title: `Delete ${teamName}?`,
+      detail: 'This unassigns members and clears generated matches.',
+      confirmText: 'DELETE'
+    });
+    if (!confirmed) return;
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const deleted = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const exists = (draft.teams || []).some((team) => String(team.id) === teamId);
+      if (!exists) return { ok: false, error: 'Team not found.' };
+      draft.teams = (draft.teams || []).filter((team) => String(team.id) !== teamId);
+      (draft.players || []).forEach((player) => {
+        if (String(player.teamId || '') === teamId) player.teamId = '';
+      });
+      draft.teamCount = draft.teams.length;
+      clearTournamentMatchesForRosterMutation(draft);
+      TournamentSubApp.addHistory(draft, 'delete-team', `Deleted ${teamName}.`);
+      return { ok: true };
+    });
+    await commitTournamentMutation(deleted, {
+      successMessage: 'Team deleted.',
+      fallbackErrorMessage: 'Unable to delete team.',
+      contextLabel: 'tournament-delete-team',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'delete-team',
+        entityType: 'team',
+        entityId: teamId,
+        title: `Deleted ${teamName}.`,
+        detail: 'Team members were unassigned and matches were cleared.',
+        tone: 'warning',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
+  if (action === 'assign-player-to-team') {
+    const playerId = String(document.getElementById('trn-assign-player')?.value || '').trim();
+    const teamId = String(document.getElementById('trn-assign-team')?.value || '').trim();
+    if (!playerId || !teamId) {
+      setTournamentNotice('Select both a player and a team.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const assigned = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const player = (draft.players || []).find((item) => String(item.id) === playerId);
+      const targetTeam = (draft.teams || []).find((item) => String(item.id) === teamId);
+      if (!player) return { ok: false, error: 'Player not found.' };
+      if (!targetTeam) return { ok: false, error: 'Team not found.' };
+      (draft.teams || []).forEach((team) => {
+        team.memberKeys = (team.memberKeys || []).filter((memberId) => memberId !== playerId);
+      });
+      targetTeam.memberKeys = Array.from(new Set([...(targetTeam.memberKeys || []), playerId]));
+      player.teamId = targetTeam.id;
+      clearTournamentMatchesForRosterMutation(draft);
+      TournamentSubApp.addHistory(draft, 'assign-player', `Assigned ${player.name} to ${targetTeam.name}.`);
+      return { ok: true };
+    });
+    await commitTournamentMutation(assigned, {
+      successMessage: 'Player assigned.',
+      fallbackErrorMessage: 'Unable to assign player.',
+      contextLabel: 'tournament-assign-player',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'assign-player',
+        entityType: 'player',
+        entityId: playerId,
+        title: 'Player assignment updated.',
+        detail: `Assigned to ${getTournamentTeamName(activeTournament, teamId)}.`,
+        tone: 'info',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
+  if (action === 'unassign-player') {
+    const playerId = String(trigger?.getAttribute('data-player-id') || '').trim();
+    if (!playerId) return;
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const unassigned = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const player = (draft.players || []).find((item) => String(item.id) === playerId);
+      if (!player) return { ok: false, error: 'Player not found.' };
+      (draft.teams || []).forEach((team) => {
+        team.memberKeys = (team.memberKeys || []).filter((memberId) => memberId !== playerId);
+      });
+      player.teamId = '';
+      clearTournamentMatchesForRosterMutation(draft);
+      TournamentSubApp.addHistory(draft, 'unassign-player', `Unassigned ${player.name} from teams.`);
+      return { ok: true };
+    });
+    await commitTournamentMutation(unassigned, {
+      successMessage: 'Player unassigned.',
+      fallbackErrorMessage: 'Unable to unassign player.',
+      contextLabel: 'tournament-unassign-player',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'unassign-player',
+        entityType: 'player',
+        entityId: playerId,
+        title: 'Player unassigned from team.',
+        detail: 'Team composition changed.',
+        tone: 'warning',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
+  if (action === 'auto-build-teams') {
+    const requestedTeamCount = Math.max(2, Number.parseInt(document.getElementById('trn-auto-team-count')?.value || '2', 10) || 2);
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const built = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const activePlayers = (draft.players || []).filter((player) => player.active);
+      if (activePlayers.length < 2) {
+        return { ok: false, error: 'Need at least two active tournament players.' };
+      }
+      const checkedKeys = activePlayers.map((player) => playerIdentityKey(player));
+      const generated = generateBalancedGroups(activePlayers, checkedKeys, requestedTeamCount);
+      const teams = (generated.teams || []).map((members, index) => ({
+        id: TournamentSubApp.uid('tt'),
+        name: `Team ${index + 1}`,
+        seed: index + 1,
+        notes: '',
+        memberKeys: Array.from(new Set((members || []).map((member) => String(member.id || '').trim()).filter(Boolean)))
+      })).filter((team) => team.memberKeys.length > 0);
+
+      if (teams.length < 2) {
+        return { ok: false, error: 'Balanced team build requires at least two non-empty teams.' };
+      }
+
+      const teamByMember = new Map();
+      teams.forEach((team) => {
+        (team.memberKeys || []).forEach((memberId) => {
+          if (!teamByMember.has(memberId)) teamByMember.set(memberId, team.id);
+        });
+      });
+      (draft.players || []).forEach((player) => {
+        player.teamId = teamByMember.get(player.id) || '';
+      });
+      draft.teams = teams;
+      draft.teamCount = teams.length;
+      clearTournamentMatchesForRosterMutation(draft);
+      draft.sourceSummary = 'auto-built-teams';
+      draft.teamBuildSummary = generated.summary || null;
+      TournamentSubApp.addHistory(
+        draft,
+        'auto-build-teams',
+        `Auto built ${teams.length} teams from ${activePlayers.length} active players (fairness ${Number(generated.summary?.fairnessScore || 0).toFixed(2)}).`
+      );
+      return { ok: true };
+    });
+    await commitTournamentMutation(built, {
+      successMessage: 'Teams auto-built from tournament players.',
+      fallbackErrorMessage: 'Auto build failed.',
+      contextLabel: 'tournament-auto-build-teams',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'auto-build-teams',
+        entityType: 'tournament',
+        entityId: activeId,
+        title: 'Auto built tournament teams.',
+        detail: `Target teams: ${requestedTeamCount}.`,
         tone: 'warning',
         undoSnapshot: beforeStoreSnapshot
       }
@@ -5411,31 +6626,37 @@ async function handleTournamentAction(action, trigger) {
   }
 
   if (action === 'generate-matches') {
-    const existingMatchCount = Array.isArray(activeTournament.matches) ? activeTournament.matches.length : 0;
-    if (existingMatchCount > 0) {
+    const existingCount = Array.isArray(activeTournament.matches) ? activeTournament.matches.length : 0;
+    if (existingCount > 0) {
       const confirmed = confirmDangerousActionOrAbort({
         title: `Regenerate matches for "${activeTournament.name}"?`,
-        detail: `This replaces ${existingMatchCount} existing matches using current teams.`,
+        detail: `This replaces ${existingCount} existing matches with a new schedule.`,
         confirmText: 'REGENERATE'
       });
       if (!confirmed) return;
     }
     const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
-    const generated = TournamentManager.generateMatches(activeId);
+    const generated = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const playableTeams = getTournamentPlayableTeams(draft);
+      if (playableTeams.length < 2) {
+        return { ok: false, error: 'Need at least two teams with players before generating matches.' };
+      }
+      draft.matches = buildTournamentRoundRobinMatches(playableTeams, draft.courtCount || 2);
+      TournamentSubApp.addHistory(draft, 'generate-matches', `Generated ${draft.matches.length} round-robin matches.`);
+      return { ok: true };
+    });
     await commitTournamentMutation(generated, {
       successMessage: 'Matches generated.',
-      fallbackErrorMessage: 'Match generation failed.',
+      fallbackErrorMessage: 'Unable to generate matches.',
       contextLabel: 'tournament-generate-matches',
       actionMeta: {
         scope: 'tournament',
         action: 'generate-matches',
         entityType: 'tournament',
         entityId: activeId,
-        title: `Generated matches for "${activeTournament.name}".`,
-        detail: (mutationResult) => {
-          const count = Array.isArray(mutationResult?.tournament?.matches)
-            ? mutationResult.tournament.matches.length
-            : 0;
+        title: 'Generated tournament matches.',
+        detail: (result) => {
+          const count = Array.isArray(result?.tournament?.matches) ? result.tournament.matches.length : 0;
           return `${count} matches scheduled.`;
         },
         tone: 'warning',
@@ -5447,27 +6668,41 @@ async function handleTournamentAction(action, trigger) {
 
   if (action === 'reset-matches') {
     const matchCount = Array.isArray(activeTournament.matches) ? activeTournament.matches.length : 0;
+    if (!matchCount) {
+      setTournamentNotice('No matches to reset.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
     const confirmed = confirmDangerousActionOrAbort({
-      title: `Reset matches for "${activeTournament.name}"?`,
-      detail: matchCount > 0
-        ? `This resets ${matchCount} matches from current teams and clears recorded outcomes.`
-        : 'This rebuilds matches from current teams.',
+      title: `Reset recorded results for "${activeTournament.name}"?`,
+      detail: `This clears scores and winners for ${matchCount} matches and marks them scheduled.`,
       confirmText: 'RESET'
     });
     if (!confirmed) return;
     const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
-    const reset = TournamentManager.resetMatches(activeId);
+    const reset = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      draft.matches = TournamentSubApp.sortMatches(draft.matches || []).map((match) => ({
+        ...match,
+        status: TournamentManager.MATCH_SCHEDULED,
+        scoreA: null,
+        scoreB: null,
+        winnerTeamId: null,
+        loserTeamId: null
+      }));
+      TournamentSubApp.addHistory(draft, 'reset-matches', `Reset results for ${draft.matches.length} matches.`);
+      return { ok: true };
+    });
     await commitTournamentMutation(reset, {
-      successMessage: 'Matches reset from current teams.',
-      fallbackErrorMessage: 'Reset failed.',
+      successMessage: 'Match results reset.',
+      fallbackErrorMessage: 'Unable to reset match results.',
       contextLabel: 'tournament-reset-matches',
       actionMeta: {
         scope: 'tournament',
         action: 'reset-matches',
         entityType: 'tournament',
         entityId: activeId,
-        title: `Reset matches for "${activeTournament.name}".`,
-        detail: 'Match outcomes were cleared and rebuilt from current teams.',
+        title: 'Reset tournament match results.',
+        detail: `${matchCount} matches reset.`,
         tone: 'warning',
         undoSnapshot: beforeStoreSnapshot
       }
@@ -5475,60 +6710,43 @@ async function handleTournamentAction(action, trigger) {
     return;
   }
 
-  if (action === 'rename-team') {
-    const teamId = String(trigger?.getAttribute('data-team-id') || '').trim();
-    if (!teamId) return;
-    const input = Array.from(document.querySelectorAll('[data-tr-role="team-name-input"]'))
-      .find((el) => String(el.getAttribute('data-team-id') || '') === teamId);
-    const name = String(input?.value || '').trim();
-    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
-    const renamed = TournamentManager.renameTeam(activeId, teamId, name);
-    await commitTournamentMutation(renamed, {
-      successMessage: 'Team name updated.',
-      fallbackErrorMessage: 'Rename failed.',
-      contextLabel: 'tournament-rename-team',
-      actionMeta: {
-        scope: 'tournament',
-        action: 'rename-team',
-        entityType: 'team',
-        entityId: teamId,
-        title: `Renamed team to "${name || 'Untitled Team'}".`,
-        detail: `Tournament: ${activeTournament.name}`,
-        tone: 'info',
-        undoSnapshot: beforeStoreSnapshot
-      }
-    });
-    return;
-  }
-
-  if (action === 'move-member') {
-    const memberKey = String(document.getElementById('trn-move-member')?.value || '').trim();
-    const toTeamId = String(document.getElementById('trn-move-target-team')?.value || '').trim();
-    const targetTeamName = getTournamentTeamName(activeTournament, toTeamId);
-    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
-    const moved = TournamentManager.moveMember(activeId, memberKey, toTeamId);
-    await commitTournamentMutation(moved, {
-      successMessage: 'Player moved.',
-      fallbackErrorMessage: 'Move failed.',
-      contextLabel: 'tournament-move-member',
-      actionMeta: {
-        scope: 'tournament',
-        action: 'move-member',
-        entityType: 'team',
-        entityId: toTeamId,
-        title: `Moved player to ${targetTeamName}.`,
-        detail: `Tournament: ${activeTournament.name}`,
-        tone: 'info',
-        undoSnapshot: beforeStoreSnapshot
-      }
-    });
-    return;
+  if (action === 'start-next-match') {
+    const next = TournamentSubApp.sortMatches(activeTournament.matches || [])
+      .find((match) => match.status === TournamentManager.MATCH_SCHEDULED && !!match.teamAId && !!match.teamBId);
+    if (!next) {
+      setTournamentNotice('No scheduled match available to start.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
+    action = 'start-match';
+    trigger = {
+      getAttribute: (name) => (name === 'data-match-id' ? next.id : '')
+    };
   }
 
   if (action === 'start-match') {
     const matchId = String(trigger?.getAttribute('data-match-id') || '').trim();
+    if (!matchId) return;
     const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
-    const started = TournamentManager.startMatch(activeId, matchId);
+    const started = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const match = (draft.matches || []).find((item) => String(item.id) === matchId);
+      if (!match) return { ok: false, error: 'Match not found.' };
+      if (match.status === TournamentManager.MATCH_FINAL) return { ok: false, error: 'Match is already final.' };
+      if (!match.teamAId || !match.teamBId) return { ok: false, error: 'Match is waiting for teams.' };
+      (draft.matches || []).forEach((other) => {
+        if (String(other.id) === matchId) return;
+        if (Number(other.court) === Number(match.court) && other.status === TournamentManager.MATCH_LIVE) {
+          other.status = TournamentManager.MATCH_SCHEDULED;
+        }
+      });
+      match.status = TournamentManager.MATCH_LIVE;
+      TournamentSubApp.addHistory(
+        draft,
+        'start-match',
+        `Started ${getTournamentTeamName(draft, match.teamAId)} vs ${getTournamentTeamName(draft, match.teamBId)} on Net ${Number(match.court) || 1}.`
+      );
+      return { ok: true };
+    });
     await commitTournamentMutation(started, {
       successMessage: 'Match started.',
       fallbackErrorMessage: 'Unable to start match.',
@@ -5549,14 +6767,40 @@ async function handleTournamentAction(action, trigger) {
 
   if (action === 'finalize-match') {
     const matchId = String(trigger?.getAttribute('data-match-id') || '').trim();
-    const scoreAInput = Array.from(document.querySelectorAll('[data-tr-score-a-for]'))
-      .find((el) => String(el.getAttribute('data-tr-score-a-for') || '') === matchId);
-    const scoreBInput = Array.from(document.querySelectorAll('[data-tr-score-b-for]'))
-      .find((el) => String(el.getAttribute('data-tr-score-b-for') || '') === matchId);
+    if (!matchId) return;
+    const scoreAInput = findTournamentElementByDataAttr('data-tr-score-a-for', matchId);
+    const scoreBInput = findTournamentElementByDataAttr('data-tr-score-b-for', matchId);
     const scoreA = Number(scoreAInput?.value);
     const scoreB = Number(scoreBInput?.value);
+    if (!Number.isFinite(scoreA) || !Number.isFinite(scoreB) || scoreA < 0 || scoreB < 0) {
+      setTournamentNotice('Scores must be zero or higher numbers.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
+    if (scoreA === scoreB) {
+      setTournamentNotice('Tie scores are not supported in this first tournament format.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
     const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
-    const finalized = TournamentManager.finalizeMatch(activeId, matchId, scoreA, scoreB);
+    const finalized = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const match = (draft.matches || []).find((item) => String(item.id) === matchId);
+      if (!match) return { ok: false, error: 'Match not found.' };
+      if (!match.teamAId || !match.teamBId) return { ok: false, error: 'Match is waiting for teams.' };
+      const winnerTeamId = scoreA > scoreB ? match.teamAId : match.teamBId;
+      const loserTeamId = winnerTeamId === match.teamAId ? match.teamBId : match.teamAId;
+      match.status = TournamentManager.MATCH_FINAL;
+      match.scoreA = scoreA;
+      match.scoreB = scoreB;
+      match.winnerTeamId = winnerTeamId;
+      match.loserTeamId = loserTeamId;
+      TournamentSubApp.addHistory(
+        draft,
+        'finalize-match',
+        `Finalized ${getTournamentTeamName(draft, match.teamAId)} ${scoreA}-${scoreB} ${getTournamentTeamName(draft, match.teamBId)}.`
+      );
+      return { ok: true };
+    });
     await commitTournamentMutation(finalized, {
       successMessage: 'Match finalized.',
       fallbackErrorMessage: 'Result save failed.',
@@ -5566,13 +6810,53 @@ async function handleTournamentAction(action, trigger) {
         action: 'finalize-match',
         entityType: 'match',
         entityId: matchId,
-        title: `Finalized ${getTournamentMatchLabel(activeTournament, matchId)} (${Number.isFinite(scoreA) ? scoreA : 0}-${Number.isFinite(scoreB) ? scoreB : 0}).`,
+        title: `Finalized ${getTournamentMatchLabel(activeTournament, matchId)} (${scoreA}-${scoreB}).`,
         detail: `Tournament: ${activeTournament.name}`,
         tone: 'success',
         undoSnapshot: beforeStoreSnapshot
       }
     });
+    return;
   }
+
+  if (action === 'clear-match-result') {
+    const matchId = String(trigger?.getAttribute('data-match-id') || '').trim();
+    if (!matchId) return;
+    const beforeStoreSnapshot = TournamentManager.getStoreSnapshot();
+    const cleared = TournamentSubApp.mutateTournament(activeId, (draft) => {
+      const match = (draft.matches || []).find((item) => String(item.id) === matchId);
+      if (!match) return { ok: false, error: 'Match not found.' };
+      if (match.status !== TournamentManager.MATCH_FINAL && match.status !== TournamentManager.MATCH_LIVE) {
+        return { ok: false, error: 'Match is not finalized or live.' };
+      }
+      match.status = TournamentManager.MATCH_SCHEDULED;
+      match.scoreA = null;
+      match.scoreB = null;
+      match.winnerTeamId = null;
+      match.loserTeamId = null;
+      TournamentSubApp.addHistory(draft, 'clear-match-result', `Cleared result for ${getTournamentMatchLabel(draft, matchId)}.`);
+      return { ok: true };
+    });
+    await commitTournamentMutation(cleared, {
+      successMessage: 'Match result cleared.',
+      fallbackErrorMessage: 'Unable to clear match result.',
+      contextLabel: 'tournament-clear-match-result',
+      actionMeta: {
+        scope: 'tournament',
+        action: 'clear-match-result',
+        entityType: 'match',
+        entityId: matchId,
+        title: `Cleared result for ${getTournamentMatchLabel(activeTournament, matchId)}.`,
+        detail: `Tournament: ${activeTournament.name}`,
+        tone: 'warning',
+        undoSnapshot: beforeStoreSnapshot
+      }
+    });
+    return;
+  }
+
+  setTournamentNotice('Action unavailable in this section.', TOURNAMENT_NOTICE_ERROR);
+  initTournamentView();
 }
 
 function ensureTournamentOverlayBindings() {
