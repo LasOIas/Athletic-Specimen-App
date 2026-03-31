@@ -6861,11 +6861,11 @@ async function handleTournamentAdminAction(action, trigger, activeTournament) {
 
 function ensureTournamentOverlayBindings() {
   if (ensureTournamentOverlayBindings._bound) return;
-  ensureTournamentOverlayBindings._bound = true;
 
   const root = document.getElementById('view-tournament');
   const select = document.getElementById('tournamentSelect');
   const closeBtn = document.getElementById('closeTournamentBtn');
+  if (!root) return;
 
   if (select) {
     select.addEventListener('change', () => {
@@ -6884,14 +6884,18 @@ function ensureTournamentOverlayBindings() {
 
   if (root) {
     root.addEventListener('click', async (event) => {
-      const trigger = event.target.closest('[data-tr-action]');
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const trigger = target.closest('[data-tr-action]');
       if (!trigger) return;
       event.preventDefault();
       const action = String(trigger.getAttribute('data-tr-action') || '').trim();
       if (!action) return;
       await handleTournamentAction(action, trigger);
-    });
+    }, true);
   }
+
+  ensureTournamentOverlayBindings._bound = true;
 }
 
 function bindTournamentTab() {
@@ -6909,7 +6913,9 @@ function bindTournamentTab() {
 
   if (!bindTournamentTab._delegated) {
     document.addEventListener('click', (event) => {
-      const opener = event.target.closest('[data-tab="tournament"], a[href="#tournament"]');
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const opener = target.closest('[data-tab="tournament"], a[href="#tournament"]');
       if (!opener) return;
       event.preventDefault();
       showTournamentView(true);
