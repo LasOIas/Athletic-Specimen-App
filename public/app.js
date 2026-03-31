@@ -499,6 +499,12 @@ function restoreTransientInteractionState(snapshot) {
     if (cancelBtn) {
       e.preventDefault();
       e.stopPropagation();
+      const buttonPlayerKey = String(cancelBtn.getAttribute('data-player-key') || '').trim();
+      const row = cancelBtn.closest('.edit-row') || findInlineEditRowByPlayerKey(buttonPlayerKey);
+      if (row) {
+        closeInlineEditRow(row);
+        row.querySelectorAll('.group-select.open').forEach((select) => select.classList.remove('open'));
+      }
       render();
       return;
     }
@@ -827,12 +833,19 @@ function isTournamentStateRow(row) {
   return String(row && row.name || '').trim() === TOURNAMENT_STATE_ROW_NAME;
 }
 
-function serializeTournamentStoreTag(storeSnapshot) {
+function normalizeTournamentRevision(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+}
+
+function serializeTournamentStoreTag(storeSnapshot, revision = 0) {
   const snapshot = storeSnapshot && typeof storeSnapshot === 'object'
     ? storeSnapshot
     : { activeTournamentId: '', tournaments: [] };
   try {
     const envelope = {
+      revision: normalizeTournamentRevision(revision),
       updatedAt: Date.now(),
       store: snapshot
     };
@@ -852,12 +865,14 @@ function parseTournamentStoreTagEnvelope(rawTagValue) {
     // Backward compatibility: allow direct store payload without envelope.
     if (parsed && typeof parsed === 'object' && parsed.store && typeof parsed.store === 'object') {
       return {
+        revision: normalizeTournamentRevision(parsed.revision),
         updatedAt: Number(parsed.updatedAt) || 0,
         store: parsed.store
       };
     }
     if (parsed && typeof parsed === 'object') {
       return {
+        revision: 0,
         updatedAt: Number(parsed.updatedAt) || 0,
         store: parsed
       };
@@ -866,6 +881,48 @@ function parseTournamentStoreTagEnvelope(rawTagValue) {
   } catch {
     return null;
   }
+}
+
+function parseTournamentStateRow(row) {
+  const envelope = parseTournamentStoreTagEnvelope(row && row.tag);
+  if (!envelope || !envelope.store || typeof envelope.store !== 'object') return null;
+  const rowUpdatedAt = Number(new Date(row && row.updated_at).getTime()) || 0;
+  return {
+    rowId: String(row && row.id || '').trim(),
+    rawTag: String(row && row.tag || ''),
+    revision: normalizeTournamentRevision(envelope.revision),
+    updatedAt: Math.max(Number(envelope.updatedAt) || 0, rowUpdatedAt),
+    store: envelope.store
+  };
+}
+
+function sortTournamentStateRows(rows) {
+  return (Array.isArray(rows) ? rows.slice() : []).sort((a, b) => {
+    const revDiff = normalizeTournamentRevision(b && b.revision) - normalizeTournamentRevision(a && a.revision);
+    if (revDiff !== 0) return revDiff;
+    const atDiff = (Number(b && b.updatedAt) || 0) - (Number(a && a.updatedAt) || 0);
+    if (atDiff !== 0) return atDiff;
+    return String(b && b.rowId || '').localeCompare(String(a && a.rowId || ''));
+  });
+}
+
+function setTournamentAuthorityCursor({ revision = 0, rowId = '', rawTag = '', updatedAt = 0, known = true } = {}) {
+  state.tournamentAuthorityRevision = known ? normalizeTournamentRevision(revision) : 0;
+  state.tournamentAuthorityRowId = known ? String(rowId || '').trim() : '';
+  state.tournamentAuthorityTag = known ? String(rawTag || '') : '';
+  state.tournamentAuthorityUpdatedAt = known ? (Number(updatedAt) || 0) : 0;
+  state.tournamentAuthorityKnown = !!known;
+}
+
+async function fetchTournamentStateRowsFromSupabase() {
+  if (!supabaseClient) return [];
+  const { data, error } = await supabaseClient
+    .from('players')
+    .select('id,tag,updated_at')
+    .eq('name', TOURNAMENT_STATE_ROW_NAME)
+    .limit(8);
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
 }
 
 function serializePlayerGroupsTag(groups, primaryGroup = '') {
@@ -2207,6 +2264,11 @@ const state = {
     : SHARED_SYNC_LOCAL_ONLY,
   tournamentSyncError: '',
   lastTournamentSyncAt: 0,
+  tournamentAuthorityRevision: 0,
+  tournamentAuthorityRowId: '',
+  tournamentAuthorityTag: '',
+  tournamentAuthorityUpdatedAt: 0,
+  tournamentAuthorityKnown: false,
   operatorActions: []
 };
 
@@ -2284,6 +2346,9 @@ function getTournamentSharedModeLabel() {
   if (!supabaseClient || !SUPABASE_AUTHORITATIVE) return 'Local-only tournament mode.';
   if (!PLAYERS_SCHEMA_DETECTED) return 'Detecting tournament sync schema...';
   if (!HAS_TAG) return 'Tournament cloud sync unavailable (players.tag required).';
+  if (state.tournamentAuthorityKnown) {
+    return `Tournament cloud sync is canonical (rev r${normalizeTournamentRevision(state.tournamentAuthorityRevision)}).`;
+  }
   return 'Tournament cloud sync is canonical.';
 }
 
@@ -2432,20 +2497,24 @@ async function runOperatorActionUndo(actionId) {
   if (undoType === 'tournament-store') {
     TournamentManager.replaceStore(entry.undo.storeSnapshot || { activeTournamentId: '', tournaments: [] });
     if (SUPABASE_AUTHORITATIVE && supabaseClient) {
-      const synced = await syncTournamentStoreToSupabase();
-      if (!synced) {
+      const syncResult = await syncTournamentStoreToSupabase({ contextLabel: 'operator-undo-tournament' });
+      if (!syncResult.ok) {
         await reconcileTournamentToSupabaseAuthority('operator-undo-tournament');
         setTournamentNotice(
-          'Undo failed to sync. Restored latest shared tournament state.',
+          syncResult.conflict
+            ? 'Undo blocked by a newer tournament update on another device. Latest shared state was restored.'
+            : 'Undo failed to sync. Restored latest shared tournament state.',
           TOURNAMENT_NOTICE_ERROR
         );
         recordOperatorAction({
           scope: 'tournament',
-          action: 'undo-failed',
+          action: syncResult.conflict ? 'undo-conflict' : 'undo-failed',
           entityType: entry.entityType || 'tournament',
           entityId: entry.entityId || '',
-          title: 'Undo failed: restored shared tournament state instead.',
-          detail: entry.title,
+          title: syncResult.conflict
+            ? 'Undo blocked by newer shared tournament revision.'
+            : 'Undo failed: restored shared tournament state instead.',
+          detail: syncResult.message || entry.title,
           tone: 'error'
         });
         render();
@@ -2516,33 +2585,92 @@ function applyTournamentStoreFromAuthority(storeSnapshot) {
   return before !== after;
 }
 
-async function syncTournamentStoreToSupabase() {
+async function syncTournamentStoreToSupabase(options = {}) {
+  const contextLabel = String(options && options.contextLabel || 'tournament-write').trim() || 'tournament-write';
+  const buildConflictResult = (message, remoteRevision = null) => ({
+    ok: false,
+    conflict: true,
+    contextLabel,
+    expectedRevision: normalizeTournamentRevision(state.tournamentAuthorityRevision),
+    remoteRevision: Number.isFinite(Number(remoteRevision)) ? normalizeTournamentRevision(remoteRevision) : null,
+    message: String(message || '').trim() || 'Concurrent tournament update detected.'
+  });
+  const buildFailureResult = (message) => ({
+    ok: false,
+    conflict: false,
+    contextLabel,
+    message: String(message || '').trim() || 'Tournament write failed.'
+  });
+
   if (!supabaseClient || !SUPABASE_AUTHORITATIVE) {
     setTournamentSyncState(SHARED_SYNC_LOCAL_ONLY, 'Supabase unavailable for tournament sync.');
-    return false;
+    return buildFailureResult('Supabase unavailable for tournament sync.');
   }
   if (!PLAYERS_SCHEMA_DETECTED) {
     await detectPlayersSchema();
   }
   if (!HAS_TAG) {
     setTournamentSyncState(SHARED_SYNC_FALLBACK, 'Tournament sync requires players.tag support.');
-    return false;
+    return buildFailureResult('Tournament sync requires players.tag support.');
+  }
+  if (!state.tournamentAuthorityKnown) {
+    const msg = 'Tournament authority baseline is not established yet. Refresh shared state first.';
+    setTournamentSyncState(SHARED_SYNC_FALLBACK, msg);
+    return buildConflictResult(msg, null);
   }
 
   const snapshot = TournamentManager.getStoreSnapshot();
-  const encodedTag = serializeTournamentStoreTag(snapshot);
+  const expectedRevision = normalizeTournamentRevision(state.tournamentAuthorityRevision);
+  const expectedRowId = String(state.tournamentAuthorityRowId || '').trim();
+  const expectedTag = String(state.tournamentAuthorityTag || '');
+  const nextRevision = expectedRevision + 1;
+  const encodedTag = serializeTournamentStoreTag(snapshot, nextRevision);
   if (!encodedTag) {
     setTournamentSyncState(SHARED_SYNC_FALLBACK, 'Tournament sync payload encoding failed.');
-    return false;
+    return buildFailureResult('Tournament sync payload encoding failed.');
   }
 
   setTournamentSyncState(SHARED_SYNC_PENDING);
   try {
-    const { data: rows, error: listError } = await supabaseClient
-      .from('players')
-      .select('id')
-      .eq('name', TOURNAMENT_STATE_ROW_NAME);
-    if (listError) throw listError;
+    const rows = await fetchTournamentStateRowsFromSupabase();
+    const parsedRows = [];
+    let invalidPayloadFound = false;
+    for (const row of rows) {
+      const parsed = parseTournamentStateRow(row);
+      if (parsed) parsedRows.push(parsed);
+      else invalidPayloadFound = true;
+    }
+    const sortedRows = sortTournamentStateRows(parsedRows);
+    const remoteLatest = sortedRows.length ? sortedRows[0] : null;
+    const remoteRevision = remoteLatest ? normalizeTournamentRevision(remoteLatest.revision) : 0;
+
+    if (!remoteLatest && invalidPayloadFound) {
+      const msg = 'Tournament cloud payload is invalid. Write blocked until shared state is repaired.';
+      setTournamentSyncState(SHARED_SYNC_FALLBACK, msg);
+      return buildFailureResult(msg);
+    }
+
+    if (remoteLatest) {
+      if (remoteRevision !== expectedRevision) {
+        const msg = `Write blocked by newer shared tournament revision (expected r${expectedRevision}, found r${remoteRevision}).`;
+        setTournamentSyncState(SHARED_SYNC_FALLBACK, msg);
+        return buildConflictResult(msg, remoteRevision);
+      }
+      if (expectedRowId && remoteLatest.rowId && expectedRowId !== remoteLatest.rowId) {
+        const msg = 'Write blocked because the shared tournament state row changed.';
+        setTournamentSyncState(SHARED_SYNC_FALLBACK, msg);
+        return buildConflictResult(msg, remoteRevision);
+      }
+      if (expectedTag && remoteLatest.rawTag && expectedTag !== remoteLatest.rawTag) {
+        const msg = `Write blocked by concurrent tournament update (shared revision r${remoteRevision}).`;
+        setTournamentSyncState(SHARED_SYNC_FALLBACK, msg);
+        return buildConflictResult(msg, remoteRevision);
+      }
+    } else if (expectedRevision !== 0 || expectedRowId || expectedTag) {
+      const msg = 'Write blocked because shared tournament baseline changed (state row missing).';
+      setTournamentSyncState(SHARED_SYNC_FALLBACK, msg);
+      return buildConflictResult(msg, 0);
+    }
 
     const payload = {
       name: TOURNAMENT_STATE_ROW_NAME,
@@ -2552,18 +2680,34 @@ async function syncTournamentStoreToSupabase() {
     };
     if (HAS_GROUP) payload.group = '';
 
-    const existingRows = Array.isArray(rows) ? rows : [];
-    if (existingRows.length) {
-      const primary = existingRows[0];
-      const { error: updateError } = await supabaseClient
+    let committedRow = null;
+    if (remoteLatest) {
+      const { data: updatedRows, error: updateError } = await supabaseClient
         .from('players')
         .update(payload)
-        .eq('id', primary.id);
+        .eq('id', remoteLatest.rowId)
+        .eq('tag', remoteLatest.rawTag)
+        .select('id,tag,updated_at')
+        .limit(1);
       if (updateError) throw updateError;
+      if (!Array.isArray(updatedRows) || !updatedRows.length) {
+        const latestAfterRows = await fetchTournamentStateRowsFromSupabase().catch(() => []);
+        const parsedAfter = sortTournamentStateRows(
+          latestAfterRows
+            .map((row) => parseTournamentStateRow(row))
+            .filter(Boolean)
+        );
+        const latestAfter = parsedAfter.length ? parsedAfter[0] : null;
+        const latestAfterRevision = latestAfter ? latestAfter.revision : remoteRevision;
+        const msg = `Write blocked by concurrent tournament update during commit (expected r${expectedRevision}, found r${normalizeTournamentRevision(latestAfterRevision)}).`;
+        setTournamentSyncState(SHARED_SYNC_FALLBACK, msg);
+        return buildConflictResult(msg, latestAfterRevision);
+      }
+      committedRow = updatedRows[0];
 
-      for (const duplicate of existingRows.slice(1)) {
+      for (const duplicate of rows) {
         const duplicateId = String(duplicate && duplicate.id || '').trim();
-        if (!duplicateId) continue;
+        if (!duplicateId || duplicateId === String(committedRow && committedRow.id || '')) continue;
         const { error: deleteError } = await supabaseClient
           .from('players')
           .delete()
@@ -2573,19 +2717,49 @@ async function syncTournamentStoreToSupabase() {
         }
       }
     } else {
-      const { error: insertError } = await supabaseClient
+      const { data: insertedRows, error: insertError } = await supabaseClient
         .from('players')
-        .insert([payload]);
+        .insert([payload])
+        .select('id,tag,updated_at')
+        .limit(1);
       if (insertError) throw insertError;
+      committedRow = Array.isArray(insertedRows) && insertedRows.length ? insertedRows[0] : null;
+      if (!committedRow) {
+        throw new Error('Tournament state insert returned no row.');
+      }
+    }
+
+    const parsedCommitted = parseTournamentStateRow(committedRow);
+    if (parsedCommitted) {
+      setTournamentAuthorityCursor({
+        revision: parsedCommitted.revision,
+        rowId: parsedCommitted.rowId,
+        rawTag: parsedCommitted.rawTag,
+        updatedAt: parsedCommitted.updatedAt,
+        known: true
+      });
+    } else {
+      setTournamentAuthorityCursor({
+        revision: nextRevision,
+        rowId: String(committedRow && committedRow.id || ''),
+        rawTag: encodedTag,
+        updatedAt: Date.now(),
+        known: true
+      });
     }
 
     setTournamentSyncState(SHARED_SYNC_LIVE);
     queueSupabaseRefresh(0);
-    return true;
+    return {
+      ok: true,
+      conflict: false,
+      contextLabel,
+      revision: normalizeTournamentRevision(state.tournamentAuthorityRevision)
+    };
   } catch (err) {
     console.error('Supabase tournament sync error', err);
     setTournamentSyncState(SHARED_SYNC_FALLBACK, 'Tournament write failed. Showing local fallback.');
-    return false;
+    return buildFailureResult('Tournament write failed. Showing local fallback.');
   }
 }
 
@@ -3155,13 +3329,9 @@ async function syncFromSupabase() {
     let invalidTournamentPayloadFound = false;
     data.forEach((p) => {
       if (isTournamentStateRow(p)) {
-        const envelope = parseTournamentStoreTagEnvelope(p && p.tag);
-        if (envelope && envelope.store && typeof envelope.store === 'object') {
-          const rowUpdatedAt = Number(new Date(p && p.updated_at).getTime()) || 0;
-          remoteTournamentEnvelopes.push({
-            updatedAt: Math.max(Number(envelope.updatedAt) || 0, rowUpdatedAt),
-            store: envelope.store
-          });
+        const parsedRow = parseTournamentStateRow(p);
+        if (parsedRow) {
+          remoteTournamentEnvelopes.push(parsedRow);
         } else {
           invalidTournamentPayloadFound = true;
         }
@@ -3201,19 +3371,33 @@ async function syncFromSupabase() {
           SHARED_SYNC_FALLBACK,
           'Tournament sync unavailable in this schema (players.tag required).'
         );
+        setTournamentAuthorityCursor({ known: false });
       } else {
-        remoteTournamentEnvelopes.sort((a, b) => b.updatedAt - a.updatedAt);
+        const sortedTournamentEnvelopes = sortTournamentStateRows(remoteTournamentEnvelopes);
         const hasValidTournamentStore = remoteTournamentEnvelopes.length > 0;
         if (!hasValidTournamentStore && invalidTournamentPayloadFound) {
           setTournamentSyncState(
             SHARED_SYNC_FALLBACK,
             'Tournament cloud payload is invalid. Using local fallback.'
           );
+          setTournamentAuthorityCursor({ known: false });
         } else {
-          const latestStore = hasValidTournamentStore
-            ? remoteTournamentEnvelopes[0].store
+          const latestEnvelope = hasValidTournamentStore ? sortedTournamentEnvelopes[0] : null;
+          const latestStore = latestEnvelope
+            ? latestEnvelope.store
             : { activeTournamentId: '', tournaments: [] };
           applyTournamentStoreFromAuthority(latestStore);
+          setTournamentAuthorityCursor(
+            latestEnvelope
+              ? {
+                revision: latestEnvelope.revision,
+                rowId: latestEnvelope.rowId,
+                rawTag: latestEnvelope.rawTag,
+                updatedAt: latestEnvelope.updatedAt,
+                known: true
+              }
+              : { revision: 0, rowId: '', rawTag: '', updatedAt: Date.now(), known: true }
+          );
           setTournamentSyncState(SHARED_SYNC_LIVE);
         }
       }
@@ -3581,7 +3765,8 @@ async function forceSaveAllToSupabase() {
     failed: 0,
     catalogSynced: false,
     membershipsBackfilled: false,
-    tournamentSynced: false
+    tournamentSynced: false,
+    tournamentSyncConflict: false
   };
 
   const { data: existingRows, error: existingError } = await supabaseClient
@@ -3662,7 +3847,9 @@ async function forceSaveAllToSupabase() {
 
   summary.catalogSynced = await backfillGroupCatalogToSupabase();
   summary.membershipsBackfilled = await backfillPlayerMembershipsToSupabase();
-  summary.tournamentSynced = await syncTournamentStoreToSupabase();
+  const tournamentSyncResult = await syncTournamentStoreToSupabase({ contextLabel: 'force-save-all' });
+  summary.tournamentSynced = !!tournamentSyncResult.ok;
+  summary.tournamentSyncConflict = !!tournamentSyncResult.conflict;
 
   const synced = await syncFromSupabase();
   if (synced) saveLocal();
@@ -5031,11 +5218,13 @@ async function commitTournamentMutation(result, {
   const baseEntityId = String(resolveMetaValue(meta?.entityId, '') || '').trim();
   const baseDetail = String(resolveMetaValue(meta?.detail, '') || '').trim();
 
-  const recordFailure = (title, detailOverride = '') => {
+  const recordFailure = (title, detailOverride = '', actionSuffix = 'failed') => {
     if (!meta) return;
+    const suffix = String(actionSuffix || 'failed').trim() || 'failed';
+    const actionName = suffix === 'failed' ? `${baseAction}-failed` : `${baseAction}-${suffix}`;
     recordOperatorAction({
       scope: baseScope,
-      action: `${baseAction}-failed`,
+      action: actionName,
       entityType: baseEntityType,
       entityId: baseEntityId,
       title: String(title || '').trim() || 'Tournament action failed.',
@@ -5053,17 +5242,29 @@ async function commitTournamentMutation(result, {
   }
 
   if (SUPABASE_AUTHORITATIVE && supabaseClient) {
-    const synced = await syncTournamentStoreToSupabase();
-    if (!synced) {
+    const syncResult = await syncTournamentStoreToSupabase({ contextLabel });
+    if (!syncResult.ok) {
       await reconcileTournamentToSupabaseAuthority(contextLabel || 'tournament-write');
-      setTournamentNotice(
-        'Tournament change was not saved to Supabase. Restored latest shared state.',
-        TOURNAMENT_NOTICE_ERROR
-      );
-      recordFailure(
-        'Tournament write failed. Restored latest shared state.',
-        `Change was reverted during reconcile (${contextLabel || 'tournament-write'}).`
-      );
+      if (syncResult.conflict) {
+        setTournamentNotice(
+          'Tournament change blocked by a newer shared update. Latest shared state was loaded. Review and retry if needed.',
+          TOURNAMENT_NOTICE_ERROR
+        );
+        recordFailure(
+          'Tournament change blocked by newer shared revision.',
+          syncResult.message || `Conflict detected during ${contextLabel || 'tournament-write'}.`,
+          'conflict'
+        );
+      } else {
+        setTournamentNotice(
+          'Tournament change was not saved to Supabase. Restored latest shared state.',
+          TOURNAMENT_NOTICE_ERROR
+        );
+        recordFailure(
+          'Tournament write failed. Restored latest shared state.',
+          `Change was reverted during reconcile (${contextLabel || 'tournament-write'}).`
+        );
+      }
       initTournamentView();
       return false;
     }
@@ -6635,6 +6836,7 @@ if (saveSupabaseBtn) {
       if (summary.matchedByName) pieces.push(`Matched ${summary.matchedByName} by name`);
       if (summary.failed) pieces.push(`Failed ${summary.failed}`);
       if (summary.tournamentSynced) pieces.push('Tournament synced');
+      if (summary.tournamentSyncConflict) pieces.push('Tournament conflict detected (reloaded shared state)');
       alert(`Saved to Supabase. ${pieces.join(' | ')}`);
     } catch (err) {
       console.error('Manual save to Supabase error', err);
@@ -6957,11 +7159,9 @@ if (saveSupabaseBtn) {
   if (resetBtn) {
     resetBtn.addEventListener('click', async () => {
       const previouslyCheckedIn = normalizeCheckedInEntries(state.checkedIn || []);
-      const confirmed = confirmDangerousActionOrAbort({
-        title: `Reset all check-ins (${previouslyCheckedIn.length} currently checked in)?`,
-        detail: 'This will check everyone out and sync that state to Supabase.',
-        confirmText: 'RESET'
-      });
+      const confirmed = window.confirm(
+        `Reset all check-ins (${previouslyCheckedIn.length} currently checked in)?\n\nThis will check everyone out and sync that state to Supabase.`
+      );
       if (!confirmed) return;
 
       state.checkedIn = [];
