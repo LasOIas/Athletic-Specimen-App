@@ -24,6 +24,7 @@ const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
 const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
+const LS_MASTER_ADMIN_AUTH_KEY = 'athletic_specimen_master_admin_auth';
 const UNGROUPED_FILTER_VALUE = '__ungrouped__';
 const UNGROUPED_FILTER_LABEL = 'Ungrouped (No Groups)';
 const GROUP_CATALOG_NAME_PREFIX = '__as_group__:';
@@ -2253,6 +2254,7 @@ const state = {
   activeGroup: 'All',
   selectedIds: [], // player.id[] currently selected (admin bulk)
   limitedGroup: null, // when set, admin is locked to this group
+  masterAdminAuthenticated: false, // true only for MASTER_ADMIN_CODE session
   adminCodeMap: {},   // live copy used by the UI
   sharedSyncState: (SUPABASE_AUTHORITATIVE && supabaseClient)
     ? SHARED_SYNC_PENDING
@@ -2396,6 +2398,10 @@ function formatOperatorActionTimeLabel(ts) {
   }
 }
 
+function canAccessOperatorSafetyControls() {
+  return !!(state.isAdmin && state.masterAdminAuthenticated && !state.limitedGroup);
+}
+
 function recordOperatorAction({
   scope = 'general',
   action = '',
@@ -2437,6 +2443,7 @@ function markOperatorActionUndoUsed(actionId) {
 }
 
 function renderOperatorActionsLogHTML() {
+  if (!canAccessOperatorSafetyControls()) return '';
   const items = Array.isArray(state.operatorActions) ? state.operatorActions.slice(0, 10) : [];
   if (!items.length) return '<p class="small">No recent admin actions.</p>';
   return `
@@ -2488,6 +2495,7 @@ async function syncCheckedInStateToSupabase() {
 }
 
 async function runOperatorActionUndo(actionId) {
+  if (!canAccessOperatorSafetyControls()) return;
   const target = String(actionId || '').trim();
   if (!target) return;
   const entry = (state.operatorActions || []).find((item) => item && item.id === target);
@@ -3085,6 +3093,8 @@ function loadLocal() {
     state.limitedGroup = lim;
     state.activeGroup = lim;
   }
+  const masterAdminFlag = sessionStorage.getItem(LS_MASTER_ADMIN_AUTH_KEY);
+  state.masterAdminAuthenticated = state.isAdmin && masterAdminFlag === 'true' && !state.limitedGroup;
 
   const beforeCanonicalGroups = JSON.stringify(state.groups || []);
   const beforeCanonicalActive = normalizeActiveGroupSelection(state.activeGroup || 'All');
@@ -7326,10 +7336,12 @@ function render() {
           <button id="btn-logout">Logout</button>
         </div>
       </div>
+      ${canAccessOperatorSafetyControls() ? `
       <div class="card">
         <h3>Recent Actions</h3>
         ${renderOperatorActionsLogHTML()}
       </div>
+      ` : ''}
      <div class="card card-generate-teams">
   <div class="card-collapsible-head">
     <h3>Generate Teams</h3>
@@ -8202,9 +8214,11 @@ if (loginBtn) {
     // Master admin: full access
     if (code === MASTER_ADMIN_CODE) {
       state.isAdmin = true;
+      state.masterAdminAuthenticated = true;
       state.limitedGroup = null;                 // clear tenant lock
       state.activeGroup = 'All';                 // show everyone
       sessionStorage.setItem(LS_ADMIN_KEY, 'true');
+      sessionStorage.setItem(LS_MASTER_ADMIN_AUTH_KEY, 'true');
       sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
       try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
       const synced = await syncFromSupabase();   // re-fetch full dataset
@@ -8224,12 +8238,14 @@ if (loginBtn) {
     const group = ADMIN_CODE_MAP[code];
     if (group) {
       state.isAdmin = true;
+      state.masterAdminAuthenticated = false;
       state.limitedGroup = group;
       if (!state.groups.includes(group)) {
         state.groups = Array.from(new Set([...state.groups, group]));
       }
       state.activeGroup = group;                 // force filter to tenant group
       sessionStorage.setItem(LS_ADMIN_KEY, 'true');
+      sessionStorage.removeItem(LS_MASTER_ADMIN_AUTH_KEY);
       sessionStorage.setItem(LS_LIMITED_GROUP_KEY, group);
       try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, group); } catch {}
       const synced = await syncFromSupabase();   // re-fetch only that group
@@ -8251,12 +8267,14 @@ if (loginBtn) {
 
 // Admin logout
 const logoutBtn = document.getElementById('btn-logout');
-if (logoutBtn) {
+  if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
     state.isAdmin = false;
+    state.masterAdminAuthenticated = false;
     state.limitedGroup = null;                   // clear tenant lock
     state.activeGroup = 'All';                   // reset view
     sessionStorage.removeItem(LS_ADMIN_KEY);
+    sessionStorage.removeItem(LS_MASTER_ADMIN_AUTH_KEY);
     sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
     try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
     const synced = await syncFromSupabase();     // load public view dataset
@@ -8654,18 +8672,20 @@ if (saveSupabaseBtn) {
     });
   }
 
-  document.querySelectorAll('[data-role="undo-operator-action"]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const actionId = String(btn.getAttribute('data-action-id') || '').trim();
-      if (!actionId) return;
-      btn.disabled = true;
-      try {
-        await runOperatorActionUndo(actionId);
-      } finally {
-        btn.disabled = false;
-      }
+  if (canAccessOperatorSafetyControls()) {
+    document.querySelectorAll('[data-role="undo-operator-action"]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const actionId = String(btn.getAttribute('data-action-id') || '').trim();
+        if (!actionId) return;
+        btn.disabled = true;
+        try {
+          await runOperatorActionUndo(actionId);
+        } finally {
+          btn.disabled = false;
+        }
+      });
     });
-  });
+  }
 
   // --- Team generator controls ---
   const groupCountInput = document.getElementById('group-count');
