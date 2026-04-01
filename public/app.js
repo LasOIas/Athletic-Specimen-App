@@ -3890,7 +3890,8 @@ const tournamentViewState = {
   noticeTone: TOURNAMENT_NOTICE_INFO,
   section: 'overview',
   playerSearch: '',
-  runtimeTrace: []
+  runtimeTrace: [],
+  teamExpandedById: {}
 };
 
 function setTournamentNotice(text, tone = TOURNAMENT_NOTICE_INFO) {
@@ -3900,6 +3901,37 @@ function setTournamentNotice(text, tone = TOURNAMENT_NOTICE_INFO) {
 
 function clearTournamentNotice() {
   setTournamentNotice('', TOURNAMENT_NOTICE_INFO);
+}
+
+function getTournamentExpandedTeamMap() {
+  const raw = tournamentViewState.teamExpandedById;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return raw;
+}
+
+function pruneTournamentTeamExpansionState(teamIds = []) {
+  const existing = getTournamentExpandedTeamMap();
+  const keep = new Set((Array.isArray(teamIds) ? teamIds : []).map((id) => String(id || '').trim()).filter(Boolean));
+  const next = {};
+  Object.keys(existing).forEach((id) => {
+    if (keep.has(id) && existing[id]) next[id] = true;
+  });
+  tournamentViewState.teamExpandedById = next;
+}
+
+function isTournamentTeamExpanded(teamId) {
+  const id = String(teamId || '').trim();
+  if (!id) return false;
+  return !!getTournamentExpandedTeamMap()[id];
+}
+
+function setTournamentTeamExpanded(teamId, expanded) {
+  const id = String(teamId || '').trim();
+  if (!id) return;
+  const next = { ...getTournamentExpandedTeamMap() };
+  if (expanded) next[id] = true;
+  else delete next[id];
+  tournamentViewState.teamExpandedById = next;
 }
 
 function formatTournamentRuntimeTraceTime(timestamp) {
@@ -5586,6 +5618,7 @@ function renderTournamentAdminCardHTML(tournament) {
   const teams = Array.isArray(tournament.teams)
     ? tournament.teams.slice().sort((a, b) => (Number(a.seed) || 0) - (Number(b.seed) || 0))
     : [];
+  pruneTournamentTeamExpansionState(teams.map((team) => String(team?.id || '').trim()));
   const matches = TournamentSubApp.sortMatches(tournament.matches || []);
   const playerLookup = getTournamentPlayerLookup(tournament);
   const teamLookup = getTournamentTeamLookup(tournament);
@@ -5700,7 +5733,12 @@ function renderTournamentAdminCardHTML(tournament) {
 
     const teamCards = teams.length
       ? teams.map((team) => {
+          const teamId = String(team.id || '').trim();
           const members = (team.memberKeys || []).map((memberId) => playerLookup.get(memberId)).filter(Boolean);
+          const memberCount = members.length;
+          const memberCountLabel = `${memberCount} player${memberCount === 1 ? '' : 's'}`;
+          const expanded = isTournamentTeamExpanded(teamId);
+          const toggleLabel = expanded ? 'Hide Players' : 'Show Players';
           const membersHTML = members.length
             ? members.map((member) => `
                 <li>
@@ -5714,10 +5752,12 @@ function renderTournamentAdminCardHTML(tournament) {
               <div class="row tournament-team-row">
                 <input type="text" data-tr-team-name-id="${escapeHTMLText(team.id)}" value="${escapeHTMLText(team.name)}" />
                 <input type="number" min="1" step="1" data-tr-team-seed-id="${escapeHTMLText(team.id)}" value="${Number(team.seed) || 1}" />
+                <button type="button" class="secondary" data-tr-action="toggle-team-members" data-team-id="${escapeHTMLText(team.id)}">${escapeHTMLText(toggleLabel)}</button>
                 <button type="button" class="secondary" data-tr-action="save-team" data-team-id="${escapeHTMLText(team.id)}">Save</button>
                 <button type="button" class="danger" data-tr-action="delete-team" data-team-id="${escapeHTMLText(team.id)}">Delete</button>
               </div>
-              <ul class="tournament-team-members">${membersHTML}</ul>
+              <p class="small" style="margin:0.35rem 0 0.2rem;"><strong>Roster:</strong> ${escapeHTMLText(memberCountLabel)}</p>
+              ${expanded ? `<ul class="tournament-team-members">${membersHTML}</ul>` : ''}
             </article>
           `;
         }).join('')
@@ -6515,6 +6555,20 @@ async function handleTournamentAdminAction(action, trigger, activeTournament) {
         undoSnapshot: beforeStoreSnapshot
       }
     });
+    return;
+  }
+
+  if (action === 'toggle-team-members') {
+    const teamId = String(trigger?.getAttribute('data-team-id') || '').trim();
+    if (!teamId) return;
+    const exists = (activeTournament.teams || []).some((team) => String(team.id || '').trim() === teamId);
+    if (!exists) {
+      setTournamentNotice('Team not found for roster toggle.', TOURNAMENT_NOTICE_ERROR);
+      initTournamentView();
+      return;
+    }
+    setTournamentTeamExpanded(teamId, !isTournamentTeamExpanded(teamId));
+    initTournamentView();
     return;
   }
 
