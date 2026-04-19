@@ -229,7 +229,14 @@
       ul.innerHTML = '';
       const q = query.toLowerCase();
       const matches = query
-        ? roster.filter((p) => p.name.toLowerCase().split(' ').some((w) => w.startsWith(q))).slice(0, 8)
+        ? roster
+            .filter((p) => p.name.toLowerCase().split(' ').some((w) => w.startsWith(q)))
+            .sort((a, b) => {
+              const aFirst = a.name.split(' ')[0].toLowerCase();
+              const bFirst = b.name.split(' ')[0].toLowerCase();
+              return aFirst < bFirst ? -1 : aFirst > bFirst ? 1 : 0;
+            })
+            .slice(0, 8)
         : [];
       matches.forEach((p) => {
         const li = document.createElement('li');
