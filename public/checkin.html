@@ -229,7 +229,7 @@
       ul.innerHTML = '';
       const q = query.toLowerCase();
       const matches = query
-        ? roster.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 8)
+        ? roster.filter((p) => p.name.toLowerCase().split(' ').some((w) => w.startsWith(q))).slice(0, 8)
         : [];
       matches.forEach((p) => {
         const li = document.createElement('li');
