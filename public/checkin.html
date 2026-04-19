@@ -167,7 +167,7 @@
         spellcheck="false"
       />
       <ul id="suggestions"></ul>
-      <div id="noMatch" class="no-match" hidden>
+      <div id="noMatch" class="no-match">
         <p>Don't see your name?</p>
         <button id="newPlayerBtn" class="btn btn-secondary">I'm new — register me</button>
       </div>
@@ -227,18 +227,17 @@
       const ul = $('suggestions');
       const noMatch = $('noMatch');
       ul.innerHTML = '';
-      if (!query) { noMatch.hidden = true; return; }
       const q = query.toLowerCase();
-      const matches = roster
-        .filter((p) => p.name.toLowerCase().includes(q))
-        .slice(0, 8);
+      const matches = query
+        ? roster.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 8)
+        : [];
       matches.forEach((p) => {
         const li = document.createElement('li');
         li.textContent = p.name;
         li.addEventListener('click', () => checkInExisting(p));
         ul.appendChild(li);
       });
-      noMatch.hidden = !(query.trim().length >= 2 && matches.length === 0);
+      noMatch.hidden = matches.length > 0;
     }
 
     async function checkInExisting(player) {
@@ -302,7 +301,7 @@
       $('firstName').value = '';
       $('lastName').value = '';
       $('suggestions').innerHTML = '';
-      $('noMatch').hidden = true;
+      $('noMatch').hidden = false;
       $('registerForm').hidden = true;
       $('registerError').hidden = true;
       $('nameInput').focus();
