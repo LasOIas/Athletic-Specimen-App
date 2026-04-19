@@ -265,30 +265,27 @@
         if (confirmed) await checkInExisting(existing);
         return;
       }
-      try {
-        const { data, error } = await sb
-          .from('players')
-          .insert([{ name: fullName, group: GROUP_NAME, checked_in: true, skill: null }])
-          .select();
-        if (error) {
-          if (/null value in column "skill"|violates not-null/i.test(error.message)) {
-            const retry = await sb
-              .from('players')
-              .insert([{ name: fullName, group: GROUP_NAME, checked_in: true, skill: 0 }])
-              .select();
-            if (retry.error) throw retry.error;
-            showSuccess(fullName);
-            return;
-          }
-          throw error;
-        }
-        showSuccess(fullName);
-      } catch (err) {
-        console.error('Register error:', err);
-        const errEl = $('registerError');
-        errEl.textContent = 'Could not register you. Please ask the organizer to add you.';
-        errEl.hidden = false;
+      const errEl = $('registerError');
+      errEl.hidden = true;
+
+      // Try inserting with progressively simpler payloads to handle schema variations
+      const attempts = [
+        { name: fullName, group: GROUP_NAME, checked_in: true, skill: 0 },
+        { name: fullName, group: GROUP_NAME, checked_in: true },
+        { name: fullName, checked_in: true, skill: 0 },
+        { name: fullName, checked_in: true },
+      ];
+
+      let lastErr = null;
+      for (const payload of attempts) {
+        const { error } = await sb.from('players').insert([payload]).select();
+        if (!error) { showSuccess(fullName); return; }
+        lastErr = error;
+        console.warn('Register attempt failed:', payload, error);
       }
+
+      errEl.textContent = `Could not register you: ${lastErr?.message || 'unknown error'}`;
+      errEl.hidden = false;
     }
 
     function showSuccess(name) {
