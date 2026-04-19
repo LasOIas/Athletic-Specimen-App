@@ -228,16 +228,22 @@
       const noMatch = $('noMatch');
       ul.innerHTML = '';
       const q = query.toLowerCase();
-      const matches = query
-        ? roster
-            .filter((p) => p.name.toLowerCase().split(' ').some((w) => w.startsWith(q)))
-            .sort((a, b) => {
-              const aFirst = a.name.split(' ')[0].toLowerCase();
-              const bFirst = b.name.split(' ')[0].toLowerCase();
-              return aFirst < bFirst ? -1 : aFirst > bFirst ? 1 : 0;
-            })
-            .slice(0, 8)
-        : [];
+      const matches = (() => {
+        if (!query) return [];
+        const firstNameMatches = [];
+        const lastNameMatches = [];
+        for (const p of roster) {
+          const words = p.name.toLowerCase().split(' ');
+          if (words[0].startsWith(q)) firstNameMatches.push(p);
+          else if (words.slice(1).some((w) => w.startsWith(q))) lastNameMatches.push(p);
+        }
+        const sort = (arr) => arr.sort((a, b) => {
+          const af = a.name.split(' ')[0].toLowerCase();
+          const bf = b.name.split(' ')[0].toLowerCase();
+          return af < bf ? -1 : af > bf ? 1 : 0;
+        });
+        return [...sort(firstNameMatches), ...sort(lastNameMatches)].slice(0, 8);
+      })();
       matches.forEach((p) => {
         const li = document.createElement('li');
         li.textContent = p.name;
