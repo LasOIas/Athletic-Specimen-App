@@ -7384,6 +7384,7 @@ function render() {
             <option value="">Menu</option>
             <option value="checkin">Check In</option>
             <option value="add-player">Add/Update Player</option>
+            <option value="show-qr">Show QR Code</option>
           </select>
           <button id="btn-save-supabase" class="primary">Save to Supabase</button>
           <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
@@ -8024,9 +8025,63 @@ if (adminQuickOpen) {
     const value = String(adminQuickOpen.value || '').trim();
     if (value === 'checkin') openPopup('admin-checkin-modal');
     if (value === 'add-player') openPopup('admin-add-player-modal');
+    if (value === 'show-qr') openQrModal();
     adminQuickOpen.value = '';
   });
 }
+
+function openQrModal() {
+  const modal = document.getElementById('qrModal');
+  const container = document.getElementById('qrCodeContainer');
+  if (!modal || !container) return;
+  container.innerHTML = '';
+  new QRCode(container, {
+    text: 'https://athletic-specimen-app.vercel.app/checkin.html',
+    width: 340,
+    height: 340,
+    colorDark: '#000000',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.H
+  });
+  modal.hidden = false;
+  document.body.style.overflow = 'hidden';
+}
+
+function closeQrModal() {
+  const modal = document.getElementById('qrModal');
+  if (!modal) return;
+  modal.hidden = true;
+  document.body.style.overflow = '';
+}
+
+(function wireQrModal() {
+  const closeBtn = document.getElementById('qrModalClose');
+  const closeBottomBtn = document.getElementById('qrCloseBottomBtn');
+  const backdrop = document.querySelector('.qr-modal-backdrop');
+  const copyBtn = document.getElementById('qrCopyBtn');
+
+  if (closeBtn) closeBtn.addEventListener('click', closeQrModal);
+  if (closeBottomBtn) closeBottomBtn.addEventListener('click', closeQrModal);
+  if (backdrop) backdrop.addEventListener('click', closeQrModal);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeQrModal();
+  });
+
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async () => {
+      const url = 'https://athletic-specimen-app.vercel.app/checkin.html';
+      try {
+        await navigator.clipboard.writeText(url);
+        const orig = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = orig; }, 1500);
+      } catch (err) {
+        alert('Could not copy. URL: ' + url);
+      }
+    });
+  }
+}());
 
 document.querySelectorAll('[data-role="close-popup"]').forEach((btn) => {
   btn.addEventListener('click', () => {

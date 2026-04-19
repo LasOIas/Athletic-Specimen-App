@@ -1299,3 +1299,114 @@ body {
     width: 100%;
   }
 }
+
+/* ---- QR Code Modal ---- */
+.qr-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.qr-modal[hidden] { display: none; }
+
+.qr-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  cursor: pointer;
+}
+
+.qr-modal-card {
+  position: relative;
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 36px 32px 28px;
+  max-width: 440px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  animation: qrFadeIn 0.2s ease-out;
+}
+
+@keyframes qrFadeIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.qr-modal-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  font-size: 28px;
+  line-height: 1;
+  color: #6b7280;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+.qr-modal-close:hover { background: #f3f4f6; color: #111827; }
+
+.qr-modal-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 6px 0;
+  color: #111827;
+}
+
+.qr-modal-subtitle {
+  color: #6b7280;
+  font-size: 15px;
+  margin: 0 0 24px 0;
+}
+
+.qr-code-container {
+  display: flex;
+  justify-content: center;
+  margin: 0 auto 20px;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  width: fit-content;
+}
+.qr-code-container img,
+.qr-code-container canvas { display: block; }
+
+.qr-modal-url {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: #374151;
+  background: #f3f4f6;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin: 0 0 20px 0;
+  word-break: break-all;
+}
+
+.qr-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.qr-modal-actions .btn {
+  flex: 1;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+}
+.qr-modal-actions .btn-primary { background: #2563eb; color: #ffffff; }
+.qr-modal-actions .btn-primary:hover { background: #1d4ed8; }
+.qr-modal-actions .btn-secondary { background: #f3f4f6; color: #111827; border: 1px solid #e5e7eb; }
+.qr-modal-actions .btn-secondary:hover { background: #e5e7eb; }

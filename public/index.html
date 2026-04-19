@@ -72,6 +72,22 @@
     </div>
   </div>
 
+  <!-- QR Code Modal -->
+  <div id="qrModal" class="qr-modal" hidden>
+    <div class="qr-modal-backdrop"></div>
+    <div class="qr-modal-card">
+      <button type="button" class="qr-modal-close" id="qrModalClose" aria-label="Close">×</button>
+      <h2 class="qr-modal-title">Scan to Check In</h2>
+      <p class="qr-modal-subtitle">Point your phone camera at the code below</p>
+      <div id="qrCodeContainer" class="qr-code-container"></div>
+      <div class="qr-modal-url" id="qrModalUrl">https://athletic-specimen-app.vercel.app/checkin.html</div>
+      <div class="qr-modal-actions">
+        <button type="button" class="btn btn-secondary" id="qrCopyBtn">Copy URL</button>
+        <button type="button" class="btn btn-primary" id="qrCloseBottomBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
   <noscript>
     <div style="padding:2rem;text-align:center;font-family:sans-serif;color:#fff;">
       This app requires JavaScript to run.
@@ -97,6 +113,8 @@
     }, true);
   </script>
 
+  <!-- QR Code -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.5/dist/umd/supabase.min.js"></script>
   <!-- Main App (contains showTournamentView + initTournamentView) -->
