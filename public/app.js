@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.17';
+const APP_VERSION = '2026.04.25.18';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2413,6 +2413,7 @@ const state = {
     ? SHARED_SYNC_PENDING
     : SHARED_SYNC_LOCAL_ONLY,
   sharedSyncError: '',
+  currentSession: null, // { date, time, location } or null
   lastSharedSyncAt: 0,
   tournamentSyncState: (SUPABASE_AUTHORITATIVE && supabaseClient)
     ? SHARED_SYNC_PENDING
@@ -3604,6 +3605,36 @@ async function syncFromSupabase() {
       setSharedSyncState(SHARED_SYNC_FALLBACK, fallbackDetail);
       setTournamentSyncState(SHARED_SYNC_FALLBACK, fallbackDetail);
     }
+    return false;
+  }
+}
+
+async function loadSession() {
+  if (!supabaseClient) return;
+  try {
+    const { data, error } = await supabaseClient
+      .from('sessions')
+      .select('date, time, location')
+      .eq('id', 1)
+      .maybeSingle();
+    if (error) throw error;
+    state.currentSession = data || null;
+  } catch (err) {
+    console.warn('loadSession error', err);
+  }
+}
+
+async function saveSession(date, time, location) {
+  if (!supabaseClient) return false;
+  try {
+    const { error } = await supabaseClient
+      .from('sessions')
+      .upsert({ id: 1, date, time, location, updated_at: new Date().toISOString() });
+    if (error) throw error;
+    state.currentSession = { date, time, location };
+    return true;
+  } catch (err) {
+    console.warn('saveSession error', err);
     return false;
   }
 }
@@ -9385,6 +9416,7 @@ function init() {
         })();
       }
       render();
+      loadSession().then(() => { if (state.currentSession) render(); });
 
       if (!crossDeviceRefreshInterval) {
         // Keep multiple devices converged without requiring a full page refresh.
