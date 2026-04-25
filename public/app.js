@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.8';
+const APP_VERSION = '2026.04.25.9';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7196,8 +7196,8 @@ function bindSelectionHandlers() {
 function render() {
   const root = document.getElementById('root');
   if (!root) return;
-  const existingContent = document.getElementById('app-content');
-  const savedScrollY = existingContent ? existingContent.scrollTop : window.scrollY;
+  const existingPanel = document.getElementById('tab-' + activeMainTab);
+  const savedScrollY = existingPanel ? existingPanel.scrollTop : 0;
   const interactionSnapshot = captureTransientInteractionState();
 
   // Helper to escape text for safe insertion into HTML
@@ -7341,11 +7341,8 @@ function render() {
   const adminTeamsHTML = state.isAdmin ? `<div class="card card-generate-teams">
   <div class="card-collapsible-head">
     <h3>Generate Teams</h3>
-    <div class="card-collapsible-head-actions">
-      ${renderCardCollapseToggle('admin-generate-teams', 'card-body-admin-generate-teams')}
-    </div>
   </div>
-  <div id="card-body-admin-generate-teams" class="card-collapse-body ${isCardCollapsed('admin-generate-teams') ? 'is-collapsed' : ''}">
+  <div id="card-body-admin-generate-teams">
   <div class="team-size-chips">
     <div class="team-size-chip">
       <strong>${Math.floor(state.checkedIn.length / 6)}</strong>
@@ -7377,9 +7374,9 @@ function render() {
     <div>
       <div class="admin-toolbar">
         <select id="admin-quick-open" aria-label="Menu">
-          <option value="">+ Actions</option>
-          <option value="checkin">Check In Player</option>
-          <option value="add-player">Add / Update Player</option>
+          <option value="">Menu</option>
+          <option value="checkin">Check In</option>
+          <option value="add-player">Add/Update Player</option>
           <option value="show-qr">Show QR Code</option>
         </select>
         <div class="admin-toolbar-actions">
@@ -7399,11 +7396,9 @@ function render() {
     <h3>Players${normalizedActiveGroup !== 'All' ? ` <span class="small" style="font-weight:500;">(${escapeHTML(activeGroupLabel)} Roster)</span>` : ''}</h3>
     <div class="card-collapsible-head-actions">
       <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
-      ${renderCardCollapseToggle('admin-players', 'card-body-admin-players')}
     </div>
   </div>
-  <div id="card-body-admin-players" class="card-collapse-body ${isCardCollapsed('admin-players') ? 'is-collapsed' : ''}">
-  <!-- Collapsible body: put ALL your filter controls INSIDE this div -->
+  <div id="card-body-admin-players">
   <div id="filtersBody">
     <h4 style="margin-bottom: 0.5rem;">Filters</h4>
 
@@ -7961,8 +7956,8 @@ if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'tournamen
 activateMainTab(activeMainTab);
 restoreTransientInteractionState(interactionSnapshot);
 void root.offsetHeight;
-const restoredContent = document.getElementById('app-content');
-if (savedScrollY > 0 && restoredContent) restoredContent.scrollTop = savedScrollY;
+const restoredPanel = document.getElementById('tab-' + activeMainTab);
+if (savedScrollY > 0 && restoredPanel) restoredPanel.scrollTop = savedScrollY;
 }
 
 // Attach event listeners to the current DOM. This function should be

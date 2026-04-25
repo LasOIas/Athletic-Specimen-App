@@ -1464,7 +1464,7 @@ body {
   margin-bottom: 8px;
 }
 .checkin-stat-num {
-  font-size: 2.5rem;
+  font-size: 1.6rem;
   font-weight: 700;
   line-height: 1;
   color: #1e40af;
@@ -1591,11 +1591,17 @@ body {
 #app-content {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  overflow: hidden;
+  position: relative;
+}
+.tab-panel {
+  display: none;
+  position: absolute;
+  inset: 0;
+  overflow-y: scroll;
   overflow-x: hidden;
   overscroll-behavior-y: contain;
 }
-.tab-panel { display: none; }
 .tab-panel.active { display: block; }
 #bottom-nav {
   flex-shrink: 0;
@@ -1627,6 +1633,3 @@ body {
 .nav-btn svg { width: 22px; height: 22px; }
 .nav-btn.active { color: #2563eb; font-weight: 600; }
 .nav-btn:hover:not(.active) { color: #475569; }
-@media (max-width: 768px) {
-  .players { max-height: calc(100dvh - 260px); overflow-y: auto; }
-}
