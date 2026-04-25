@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.16';
+const APP_VERSION = '2026.04.25.17';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -114,6 +114,15 @@ function loadAdminCodes() {
   state.adminCodeMap = { ...ADMIN_CODE_MAP };
 }
 
+
+function closePlayerEditPopup() {
+  const modal = document.getElementById('player-edit-modal');
+  if (!modal) return;
+  modal.style.display = 'none';
+  modal.setAttribute('aria-hidden', 'true');
+  const body = document.getElementById('player-edit-modal-body');
+  if (body) body.innerHTML = '';
+}
 
 function openPlayerEditPopup(playerKey) {
   const modal = document.getElementById('player-edit-modal');
@@ -542,6 +551,7 @@ function restoreTransientInteractionState(snapshot) {
       e.stopPropagation();
       const buttonPlayerKey = String(cancelBtn.getAttribute('data-player-key') || '').trim();
       const row = cancelBtn.closest('.edit-row') || findInlineEditRowByPlayerKey(buttonPlayerKey);
+      closePlayerEditPopup();
       if (row) {
         closeInlineEditRow(row);
         row.querySelectorAll('.group-select.open').forEach((select) => select.classList.remove('open'));
@@ -600,6 +610,7 @@ function restoreTransientInteractionState(snapshot) {
 
     // Persist local and render immediately for responsive inline edits.
     saveLocal();
+    closePlayerEditPopup();
     closeInlineEditRow(row);
     render();
 
