@@ -137,7 +137,7 @@ function openInlineEditRow(row) {
   if (card) card.classList.add('is-editing');
   const nameInput = row.querySelector('.edit-name');
   if (nameInput) {
-    nameInput.focus();
+    nameInput.focus({ preventScroll: true });
     if (typeof nameInput.select === 'function') nameInput.select();
   }
 }
@@ -241,7 +241,7 @@ function restoreTransientInteractionState(snapshot) {
   if (snapshot.searchFocused) {
     const searchInput = document.getElementById('player-search');
     if (searchInput) {
-      searchInput.focus();
+      searchInput.focus({ preventScroll: true });
       if (
         typeof snapshot.searchSelectionStart === 'number' &&
         typeof snapshot.searchSelectionEnd === 'number' &&
@@ -7158,6 +7158,7 @@ function bindSelectionHandlers() {
 function render() {
   const root = document.getElementById('root');
   if (!root) return;
+  const savedScrollY = window.scrollY;
   const interactionSnapshot = captureTransientInteractionState();
 
   // Helper to escape text for safe insertion into HTML
@@ -7604,12 +7605,7 @@ ${state.isAdmin && !state.limitedGroup ? `
 
   // Strip any trailing stray ']' that might have slipped into the template
 const sanitized = html.replace(/\n?\]\s*$/, '');
-const savedScrollY = window.scrollY;
 root.innerHTML = sanitized;
-// Force a synchronous layout reflow so the browser knows the new page height
-// before we restore scroll — without this, scrollTo gets clamped to 0.
-void root.offsetHeight;
-if (savedScrollY > 0) window.scrollTo(0, savedScrollY);
 
 // ---- dropdown menu CSS (keep ONLY this block) ----
 let menuStyle = document.getElementById('menu-css');
@@ -7893,6 +7889,10 @@ bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
 restoreTransientInteractionState(interactionSnapshot);
+// Restore scroll AFTER focus calls in restoreTransientInteractionState,
+// which would otherwise scroll the page to the focused element.
+void root.offsetHeight;
+if (savedScrollY > 0) window.scrollTo(0, savedScrollY);
 }
 
 // Attach event listeners to the current DOM. This function should be
