@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.7';
+const APP_VERSION = '2026.04.25.8';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -810,29 +810,22 @@ function buildCheckinStatsHTML() {
   const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE
     ? UNGROUPED_FILTER_LABEL
     : (normalizedActiveGroup || 'All');
+  const groups = state.isAdmin && !state.limitedGroup ? computeCheckedInByGroup() : [];
   return `
-<p class="small" style="text-align:center; margin-bottom:0.25rem;">
-  Checked In: <strong>${state.checkedIn.length}</strong>
-  ${state.isAdmin && !state.limitedGroup ? ` &bull; Group: <strong>${escapeHTMLText(activeGroupLabel)}</strong>` : ''}
-</p>
-${state.isAdmin && !state.limitedGroup ? `
-  <div style="text-align:center; font-size:0.9rem; margin-top:0.25rem;">
-    <table style="margin:0 auto; border-collapse:collapse; font-size:inherit;">
-      <thead><tr>
-        <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Group</th>
-        <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Checked In</th>
-        <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Total Players</th>
-      </tr></thead>
-      <tbody>
-        ${computeCheckedInByGroup().map((row) => `
-          <tr>
-            <td style="padding:2px 8px;">${escapeHTMLText(row.groupLabel)}</td>
-            <td style="padding:2px 8px;">${row.in}</td>
-            <td style="padding:2px 8px;">${row.total}</td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
-  </div>` : ''}`;
+<div class="checkin-stats-card">
+  <div class="checkin-stat-hero">
+    <span class="checkin-stat-num">${state.checkedIn.length}</span>
+    <span class="checkin-stat-label">Checked In</span>
+  </div>
+  ${groups.length ? `
+  <div class="checkin-group-breakdown">
+    ${groups.map((row) => `
+    <div class="checkin-group-row">
+      <span class="checkin-group-name">${escapeHTMLText(row.groupLabel)}</span>
+      <span class="checkin-group-fraction">${row.in}<span class="checkin-group-sep">/</span>${row.total}</span>
+    </div>`).join('')}
+  </div>` : state.isAdmin && state.limitedGroup ? `<p class="checkin-stats-group-label">${escapeHTMLText(activeGroupLabel)}</p>` : ''}
+</div>`;
 }
 
 function partialRender() {
@@ -7353,11 +7346,20 @@ function render() {
     </div>
   </div>
   <div id="card-body-admin-generate-teams" class="card-collapse-body ${isCardCollapsed('admin-generate-teams') ? 'is-collapsed' : ''}">
-  <p class="small generate-teams-summary">
-    Teams of 6: <strong>${Math.floor(state.checkedIn.length / 6)}</strong> |
-    Teams of 4: <strong>${Math.floor(state.checkedIn.length / 4)}</strong> |
-    Teams of 2: <strong>${Math.floor(state.checkedIn.length / 2)}</strong>
-  </p>
+  <div class="team-size-chips">
+    <div class="team-size-chip">
+      <strong>${Math.floor(state.checkedIn.length / 6)}</strong>
+      <span>teams of 6</span>
+    </div>
+    <div class="team-size-chip">
+      <strong>${Math.floor(state.checkedIn.length / 4)}</strong>
+      <span>teams of 4</span>
+    </div>
+    <div class="team-size-chip">
+      <strong>${Math.floor(state.checkedIn.length / 2)}</strong>
+      <span>teams of 2</span>
+    </div>
+  </div>
   <div class="row generate-teams-controls">
     <label class="generate-teams-count">
       Teams:
@@ -7375,14 +7377,16 @@ function render() {
     <div>
       <div class="admin-toolbar">
         <select id="admin-quick-open" aria-label="Menu">
-          <option value="">Menu</option>
-          <option value="checkin">Check In</option>
-          <option value="add-player">Add/Update Player</option>
+          <option value="">+ Actions</option>
+          <option value="checkin">Check In Player</option>
+          <option value="add-player">Add / Update Player</option>
           <option value="show-qr">Show QR Code</option>
         </select>
-        <button id="btn-save-supabase" class="secondary">Save</button>
-        <button id="btn-reset-checkins" class="danger">Reset</button>
-        <button id="btn-logout" class="secondary">Logout</button>
+        <div class="admin-toolbar-actions">
+          <button id="btn-save-supabase" class="secondary">Save</button>
+          <button id="btn-reset-checkins" class="danger">Reset</button>
+          <button id="btn-logout" class="secondary">Logout</button>
+        </div>
       </div>
       ${canAccessOperatorSafetyControls() ? `
       <div class="card" style="margin-top:0.75rem;">
@@ -7619,9 +7623,18 @@ function render() {
   <div id="app-content">
     <div id="tab-session" class="tab-panel">
       <div class="container">
-        <div class="card" style="text-align:center;padding:2.5rem 1rem;">
-          <h2 style="margin:0 0 0.5rem;">Sessions</h2>
-          <p style="color:#64748b;margin:0;">Session management coming soon.</p>
+        <div class="session-empty-state">
+          <div class="session-empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2"/>
+              <line x1="16" y1="2" x2="16" y2="6"/>
+              <line x1="8" y1="2" x2="8" y2="6"/>
+              <line x1="3" y1="10" x2="21" y2="10"/>
+              <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>
+            </svg>
+          </div>
+          <h2 class="session-empty-title">Session Center</h2>
+          <p class="session-empty-desc">Create a session, share a QR link for RSVP, and track who is coming. Coming soon.</p>
         </div>
       </div>
     </div>
