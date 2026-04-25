@@ -293,6 +293,70 @@ select:focus {
 }
 .tab-panel.active { display: block; }
 
+/* ── Players tab: filters stay fixed, only the list scrolls ── */
+#tab-players {
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+}
+#tab-players.active {
+  display: flex;
+}
+#tab-players > .container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-top: 12px;
+}
+#js-checkin-stats {
+  flex-shrink: 0;
+}
+#admin-players-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#admin-players-shell .admin-toolbar {
+  flex-shrink: 0;
+}
+#admin-players-shell .card:not(.card-players) {
+  flex-shrink: 0;
+}
+.card-players {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.card-players .card-collapsible-head {
+  flex-shrink: 0;
+}
+#card-body-admin-players {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#filtersBody {
+  flex-shrink: 0;
+}
+#bulkBar {
+  flex-shrink: 0;
+}
+.card-players .players {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding-right: 2px;
+}
+
 #bottom-nav {
   flex-shrink: 0;
   display: flex;
