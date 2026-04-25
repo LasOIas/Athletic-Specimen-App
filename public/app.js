@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.18';
+const APP_VERSION = '2026.04.25.19';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -976,6 +976,13 @@ function updateBulkBarVisibility() {
 // Utility to normalise player names for case insensitive comparison
 function normalize(str) {
   return String(str || '').trim().toLowerCase();
+}
+
+function formatSessionDate(dateStr) {
+  if (!dateStr) return '';
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  return dt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 }
 
 function escapeHTMLText(value) {
@@ -7809,19 +7816,75 @@ function render() {
   <div id="app-content">
     <div id="tab-session" class="tab-panel">
       <div class="container">
-        <div class="session-empty-state">
-          <div class="session-empty-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="4" width="18" height="18" rx="2"/>
-              <line x1="16" y1="2" x2="16" y2="6"/>
-              <line x1="8" y1="2" x2="8" y2="6"/>
-              <line x1="3" y1="10" x2="21" y2="10"/>
-              <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>
-            </svg>
+        ${state.isAdmin ? `
+          <div class="card session-admin-card">
+            <h3 style="margin:0 0 12px;">Current Session</h3>
+            <div class="session-form">
+              <label class="session-label" for="session-date">Date</label>
+              <input type="date" id="session-date" class="session-input"
+                value="${state.currentSession?.date || ''}" />
+              <label class="session-label" for="session-time">Time</label>
+              <input type="text" id="session-time" class="session-input"
+                placeholder="e.g. 10:00 AM"
+                value="${escapeHTML(state.currentSession?.time || '')}" />
+              <label class="session-label" for="session-location">Location</label>
+              <input type="text" id="session-location" class="session-input"
+                placeholder="e.g. Gym A, 123 Main St"
+                value="${escapeHTML(state.currentSession?.location || '')}" />
+              <div class="session-form-actions">
+                <button id="btn-save-session" class="primary">Save Session</button>
+                <button id="btn-share-session" class="secondary">Share QR / Link</button>
+              </div>
+              <div id="session-save-msg" style="display:none; margin-top:8px; font-size:13px; color:var(--success);"></div>
+            </div>
           </div>
-          <h2 class="session-empty-title">Session Center</h2>
-          <p class="session-empty-desc">Create a session, share a QR link for RSVP, and track who is coming. Coming soon.</p>
-        </div>
+          ${state.currentSession ? `
+          <div class="card session-info-card">
+            <p class="session-info-label">What players will see</p>
+            <div class="session-detail-row">
+              <span class="session-detail-icon">📅</span>
+              <span>${escapeHTML(formatSessionDate(state.currentSession.date))}</span>
+            </div>
+            <div class="session-detail-row">
+              <span class="session-detail-icon">🕙</span>
+              <span>${escapeHTML(state.currentSession.time || '')}</span>
+            </div>
+            <div class="session-detail-row">
+              <span class="session-detail-icon">📍</span>
+              <span>${escapeHTML(state.currentSession.location || '')}</span>
+            </div>
+          </div>` : ''}
+        ` : state.currentSession ? `
+          <div class="card session-info-card">
+            <h3 style="margin:0 0 12px;">Next Session</h3>
+            <div class="session-detail-row">
+              <span class="session-detail-icon">📅</span>
+              <span>${escapeHTML(formatSessionDate(state.currentSession.date))}</span>
+            </div>
+            <div class="session-detail-row">
+              <span class="session-detail-icon">🕙</span>
+              <span>${escapeHTML(state.currentSession.time || '')}</span>
+            </div>
+            <div class="session-detail-row">
+              <span class="session-detail-icon">📍</span>
+              <span>${escapeHTML(state.currentSession.location || '')}</span>
+            </div>
+          </div>
+        ` : `
+          <div class="session-empty-state">
+            <div class="session-empty-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2"/>
+                <line x1="16" y1="2" x2="16" y2="6"/>
+                <line x1="8" y1="2" x2="8" y2="6"/>
+                <line x1="3" y1="10" x2="21" y2="10"/>
+                <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>
+              </svg>
+            </div>
+            <h2 class="session-empty-title">No Session Scheduled</h2>
+            <p class="session-empty-desc">Check back soon for the next session details.</p>
+          </div>
+        `}
       </div>
     </div>
     <div id="tab-players" class="tab-panel">
