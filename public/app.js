@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.1';
+const APP_VERSION = '2026.04.25.2';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -804,6 +804,57 @@ function escapeHTMLText(value) {
   }[char]));
 }
 
+function buildCheckinStatsHTML() {
+  const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
+  const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE
+    ? UNGROUPED_FILTER_LABEL
+    : (normalizedActiveGroup || 'All');
+  return `
+<p class="small" style="text-align:center; margin-bottom:0.25rem;">
+  Checked In: <strong>${state.checkedIn.length}</strong>
+  ${state.isAdmin && !state.limitedGroup ? ` &bull; Group: <strong>${escapeHTMLText(activeGroupLabel)}</strong>` : ''}
+</p>
+${state.isAdmin && !state.limitedGroup ? `
+  <div style="text-align:center; font-size:0.9rem; margin-top:0.25rem;">
+    <table style="margin:0 auto; border-collapse:collapse; font-size:inherit;">
+      <thead><tr>
+        <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Group</th>
+        <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Checked In</th>
+        <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Total Players</th>
+      </tr></thead>
+      <tbody>
+        ${computeCheckedInByGroup().map((row) => `
+          <tr>
+            <td style="padding:2px 8px;">${escapeHTMLText(row.groupLabel)}</td>
+            <td style="padding:2px 8px;">${row.in}</td>
+            <td style="padding:2px 8px;">${row.total}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>` : ''}`;
+}
+
+function partialRender() {
+  const root = document.getElementById('root');
+  if (!root || !root.hasChildNodes()) { render(); return; }
+
+  const syncNoticeEl = document.getElementById('js-sync-notice');
+  const statsEl = document.getElementById('js-checkin-stats');
+  const playersEl = document.querySelector('.players');
+
+  if (!syncNoticeEl || !statsEl || !playersEl) { render(); return; }
+
+  syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+  statsEl.innerHTML = buildCheckinStatsHTML();
+
+  const snapshot = captureTransientInteractionState();
+  playersEl.innerHTML = renderFilteredPlayers();
+  bindPlayerRowHandlers();
+  bindSelectionHandlers();
+  updateBulkBarVisibility();
+  restoreTransientInteractionState(snapshot);
+}
+
 function normalizeGroupName(value) {
   return String(value || '').trim();
 }
@@ -1447,10 +1498,12 @@ function ensureAuthorityRefreshHooks() {
       if (state.tournamentSyncState !== SHARED_SYNC_LOCAL_ONLY) {
         setTournamentSyncState(SHARED_SYNC_PENDING);
       }
-      render();
+      const syncNoticeEl = document.getElementById('js-sync-notice');
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      else render();
     }
     ensureSupabaseLiveSync();
-    queueSupabaseRefresh(0);
+    queueSupabaseRefresh(800);
   };
 
   document.addEventListener('visibilitychange', () => {
@@ -1490,12 +1543,12 @@ async function runQueuedSupabaseRefresh() {
     const synced = await syncFromSupabase();
     if (!synced) {
       if (prevSyncState !== state.sharedSyncState || prevSyncError !== state.sharedSyncError) {
-        render();
+        partialRender();
       }
       return;
     }
     saveLocal();
-    render();
+    partialRender();
   } catch (err) {
     console.error('Background Supabase refresh error:', err);
   } finally {
@@ -7547,37 +7600,8 @@ function render() {
   const html = `
     <div class="container">
 <h1 class="title">${state.limitedGroup ? state.limitedGroup : 'Athletic Specimen'} <span class="app-version-inline">v${APP_VERSION}</span></h1>
-${sharedSyncNoticeHTML}
-
-<p class="small" style="text-align:center; margin-bottom:0.25rem;">
-  Checked In: <strong>${state.checkedIn.length}</strong>
-  ${state.isAdmin && !state.limitedGroup ? ` • Group: <strong>${activeGroupLabel}</strong>` : ''}
-</p>
-
-${state.isAdmin && !state.limitedGroup ? `
-  <div style="text-align:center; font-size:0.9rem; margin-top:0.25rem;">
-    <table style="margin:0 auto; border-collapse:collapse; font-size:inherit;">
-      <thead>
-        <tr>
-          <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Group</th>
-          <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Checked In</th>
-          <th style="padding:2px 8px; border-bottom:1px solid #ccc;">Total Players</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${computeCheckedInByGroup().map((row) => {
-          return `
-          <tr>
-            <td style="padding:2px 8px;">${escapeHTML(row.groupLabel)}</td>
-            <td style="padding:2px 8px;">${row.in}</td>
-            <td style="padding:2px 8px;">${row.total}</td>
-          </tr>
-        `;
-        }).join('')}
-      </tbody>
-    </table>
-  </div>
-` : ''}
+<div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
+<div id="js-checkin-stats">${buildCheckinStatsHTML()}</div>
       ${adminLoginHTML}
       ${state.isAdmin ? adminHTML : ''}
   ${!state.isAdmin ? `
@@ -9155,7 +9179,7 @@ function init() {
         // Keep multiple devices converged without requiring a full page refresh.
         crossDeviceRefreshInterval = setInterval(() => {
           if (document.hidden) return;
-          queueSupabaseRefresh(0);
+          queueSupabaseRefresh(800);
         }, 15000);
       }
     })();
