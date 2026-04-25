@@ -1413,6 +1413,28 @@ body {
 .qr-modal-actions .btn-secondary { background: #f3f4f6; color: #111827; border: 1px solid #e5e7eb; }
 .qr-modal-actions .btn-secondary:hover { background: #e5e7eb; }
 
+/* ---- Admin toolbar (replaces old Admin Dashboard card) ---- */
+.admin-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.75rem 0 0.25rem;
+  flex-wrap: wrap;
+}
+.admin-toolbar select {
+  flex: 1 1 140px;
+  min-width: 140px;
+  height: 38px;
+  padding: 0 10px;
+}
+.admin-toolbar button {
+  white-space: nowrap;
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
 /* ---- App Shell: fixed header + bottom nav layout ---- */
 #app-shell {
   display: flex;

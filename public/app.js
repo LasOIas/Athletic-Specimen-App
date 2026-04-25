@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.4';
+const APP_VERSION = '2026.04.25.5';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7373,23 +7373,20 @@ function render() {
 
   const adminPlayersHTML = state.isAdmin ? `
     <div>
-      <div class="card admin-header">
-        <h2>Admin Dashboard</h2>
-        <div class="admin-header-actions">
-          <select id="admin-quick-open" aria-label="Menu">
-            <option value="">Menu</option>
-            <option value="checkin">Check In</option>
-            <option value="add-player">Add/Update Player</option>
-            <option value="show-qr">Show QR Code</option>
-          </select>
-          <button id="btn-save-supabase" class="primary">Save to Supabase</button>
-          <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
-          <button id="btn-logout">Logout</button>
-        </div>
+      <div class="admin-toolbar">
+        <select id="admin-quick-open" aria-label="Menu">
+          <option value="">Menu</option>
+          <option value="checkin">Check In</option>
+          <option value="add-player">Add/Update Player</option>
+          <option value="show-qr">Show QR Code</option>
+        </select>
+        <button id="btn-save-supabase" class="secondary">Save</button>
+        <button id="btn-reset-checkins" class="danger">Reset</button>
+        <button id="btn-logout" class="secondary">Logout</button>
       </div>
       ${canAccessOperatorSafetyControls() ? `
-      <div class="card">
-        <h3>Recent Actions</h3>
+      <div class="card" style="margin-top:0.75rem;">
+        <h3 style="margin:0 0 0.5rem;">Recent Actions</h3>
         ${renderOperatorActionsLogHTML()}
       </div>
       ` : ''}
@@ -7649,8 +7646,9 @@ function render() {
     </button>
     <button class="nav-btn" data-nav-tab="players">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      <span>Players</span>
+      <span>${state.isAdmin ? 'Players' : 'Check-in'}</span>
     </button>
+    ${state.isAdmin ? `
     <button class="nav-btn" data-nav-tab="teams">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       <span>Teams</span>
@@ -7658,7 +7656,7 @@ function render() {
     <button class="nav-btn" data-nav-tab="tournament">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
       <span>Tournament</span>
-    </button>
+    </button>` : ''}
   </nav>
 </div>
   `;
@@ -7947,6 +7945,7 @@ bindTournamentTab();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
+if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'tournament')) activeMainTab = 'players';
 activateMainTab(activeMainTab);
 restoreTransientInteractionState(interactionSnapshot);
 void root.offsetHeight;
