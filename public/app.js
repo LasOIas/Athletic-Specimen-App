@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.14';
+const APP_VERSION = '2026.04.25.15';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7567,21 +7567,24 @@ function render() {
       </div>
     ` : ''}
 
-    <!-- Search -->
-    <div id="player-search-container" style="position:relative; display:inline-block; width:100%; max-width:400px; margin:0.5rem 0;">
+  </div> <!-- /#filtersBody -->
+
+  <!-- Sticky search bar -->
+  <div class="sticky-search-bar">
+    <div id="player-search-container">
       <input
         type="text"
         id="player-search"
-        placeholder="Search name or tag"
+        placeholder="Search players…"
         value="${escapeHTML(state.searchTerm || '')}"
-        style="padding: 0.5rem 2rem 0.5rem 0.5rem; width: 100%;"
       />
       <span
         id="player-search-clear"
-        style="position:absolute; right:8px; top:50%; transform:translateY(-50%); cursor:pointer; user-select:none; ${state.searchTerm ? '' : 'display:none;'}"
+        style="${state.searchTerm ? '' : 'display:none;'}"
+        aria-label="Clear search"
       >✕</span>
     </div>
-  </div> <!-- /#filtersBody -->
+  </div>
 
   <!-- Sticky Bulk Bar (shows only when you select players) -->
   <div id="bulkBar" class="card" style="display:none; position:sticky; bottom:0; z-index:5;">
@@ -9354,16 +9357,31 @@ function init() {
   }
 }
 
+function initBackToTop() {
+  const btn = document.getElementById('back-to-top');
+  if (!btn) return;
+  const tabPlayers = document.getElementById('tab-players');
+  if (!tabPlayers) return;
+  tabPlayers.addEventListener('scroll', () => {
+    btn.classList.toggle('visible', tabPlayers.scrollTop > 200);
+  }, { passive: true });
+  btn.addEventListener('click', () => {
+    tabPlayers.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+}
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     init();
     initTournamentView();
     bindTournamentTab();
+    initBackToTop();
   });
 } else {
   init();
   initTournamentView();
   bindTournamentTab();
+  initBackToTop();
 }
 
 

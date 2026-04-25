@@ -293,16 +293,64 @@ select:focus {
 }
 .tab-panel.active { display: block; }
 
-/* ── Players tab: filter bar sticks as you scroll through 150+ players ── */
-#filtersBody {
+/* ── Players tab: sticky search + back-to-top ── */
+.sticky-search-bar {
   position: sticky;
   top: 0;
   z-index: 20;
   background: var(--surface);
-  padding-bottom: 10px;
-  margin: -14px -14px 10px;
-  padding: 10px 14px 10px;
+  margin: 6px -14px 8px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
+}
+#player-search-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+#player-search {
+  width: 100%;
+  padding: 8px 36px 8px 12px !important;
+  border-radius: var(--r-md);
+}
+#player-search-clear {
+  position: absolute;
+  right: 10px;
+  font-size: 16px;
+  color: var(--text-3);
+  cursor: pointer;
+  line-height: 1;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Back to top button */
+#back-to-top {
+  display: none;
+  position: fixed;
+  bottom: 80px;
+  right: 16px;
+  z-index: 900;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: #fff;
+  border: none;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  align-items: center;
+  justify-content: center;
+  transition: opacity .2s, transform .2s;
+  opacity: 0;
+  transform: translateY(8px);
+}
+#back-to-top.visible {
+  display: flex;
+  opacity: 1;
+  transform: translateY(0);
 }
 
 #bottom-nav {
