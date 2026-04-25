@@ -619,6 +619,15 @@ button.danger:hover {
   margin-top: 0.25rem;
 }
 
+.player-select {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: #2563eb;
+  touch-action: manipulation;
+}
+
 .skill,
 .status {
   display: block;

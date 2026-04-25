@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.10';
+const APP_VERSION = '2026.04.25.11';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7309,25 +7309,6 @@ function bindSelectionHandlers() {
     updateBulkBarVisibility();
   });
 
-  document.addEventListener('click', (e) => {
-    const target = e.target;
-    if (!(target instanceof Element)) return;
-
-    const card = target.closest('.players .player-card');
-    if (!card) return;
-    if (card.classList.contains('is-editing')) return;
-    if (target.closest(nonToggleSelector)) return;
-
-    const selectedText = typeof window.getSelection === 'function'
-      ? String(window.getSelection() || '').trim()
-      : '';
-    if (selectedText) return;
-
-    const checkbox = card.querySelector('.player-select');
-    if (!checkbox) return;
-    checkbox.checked = !checkbox.checked;
-    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-  });
 })();
 // Render the entire application into the root element. Each call replaces
 // existing content to reflect the current state. Event handlers are
