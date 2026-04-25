@@ -1422,7 +1422,7 @@ function ensureSupabaseLiveSync() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'players' },
         () => {
-          queueSupabaseRefresh(0);
+          queueSupabaseRefresh(800);
         }
       )
       .subscribe();
@@ -7606,7 +7606,10 @@ ${state.isAdmin && !state.limitedGroup ? `
 const sanitized = html.replace(/\n?\]\s*$/, '');
 const savedScrollY = window.scrollY;
 root.innerHTML = sanitized;
-window.scrollTo(0, savedScrollY);
+// Force a synchronous layout reflow so the browser knows the new page height
+// before we restore scroll — without this, scrollTo gets clamped to 0.
+void root.offsetHeight;
+if (savedScrollY > 0) window.scrollTo(0, savedScrollY);
 
 // ---- dropdown menu CSS (keep ONLY this block) ----
 let menuStyle = document.getElementById('menu-css');
