@@ -500,9 +500,7 @@ select:focus {
   font-weight: 700;
   color: var(--text);
   display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-word;
 }
 
 .player-meta {
@@ -584,6 +582,11 @@ select:focus {
   background: var(--surface-3);
   color: var(--text-2);
   border: 1px solid var(--border);
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
 }
 .player-group-badge.is-primary {
   background: #dbeafe;
@@ -780,6 +783,56 @@ select:focus {
 }
 .popup-header h3 { margin: 0; }
 .popup-body { display: block; }
+
+/* ── Player edit popup form ── */
+.popup-edit-row {
+  display: flex !important;
+  flex-direction: column;
+  gap: 6px;
+}
+.popup-edit-label {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-top: 6px;
+}
+.popup-edit-input {
+  width: 100%;
+  padding: 10px 12px !important;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px !important;
+  box-sizing: border-box;
+}
+.popup-edit-row .group-select { width: 100%; margin-top: 2px; }
+.popup-edit-row .group-btn {
+  width: 100%;
+  height: 42px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  padding: 0 12px;
+  font-size: 15px;
+  cursor: pointer;
+}
+.popup-edit-row .group-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  margin-top: 4px;
+  display: none;
+}
+.popup-edit-row .group-select.open .group-list { display: block; }
+.popup-edit-row .group-chips { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.popup-edit-row .btn-save-edit,
+.popup-edit-row .btn-cancel-edit { flex: 1; min-height: 44px; font-size: 15px !important; }
+.popup-edit-row .edit-actions { display: flex; gap: 8px; }
 
 /* ── Checkin (public view) ── */
 .card-checkin h2  { margin: 0 0 10px; }

@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.15';
+const APP_VERSION = '2026.04.25.16';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -114,6 +114,57 @@ function loadAdminCodes() {
   state.adminCodeMap = { ...ADMIN_CODE_MAP };
 }
 
+
+function openPlayerEditPopup(playerKey) {
+  const modal = document.getElementById('player-edit-modal');
+  const body  = document.getElementById('player-edit-modal-body');
+  if (!modal || !body) return;
+
+  const player = state.players.find(p => playerIdentityKey(p) === playerKey);
+  if (!player) return;
+
+  const playerGroup  = (player.groups && player.groups[0]) || player.group || '';
+  const playerGroups = Array.isArray(player.groups) ? player.groups : (playerGroup ? [playerGroup] : []);
+  const groupsValue  = escapeHTMLText(JSON.stringify(playerGroups));
+  const playerId     = escapeHTMLText(String(player.id || ''));
+  const keyAttr      = escapeHTMLText(playerKey);
+
+  body.innerHTML = `
+    <div class="edit-row show popup-edit-row" data-player-key="${keyAttr}">
+      <label class="popup-edit-label">Name</label>
+      <input type="text" class="edit-name popup-edit-input" placeholder="Name" value="${escapeHTMLText(player.name)}" />
+      <label class="popup-edit-label">Skill (0–10)</label>
+      <input type="number" class="edit-skill popup-edit-input" placeholder="Skill" step="0.1" min="0" max="10" value="${player.skill}" />
+      <label class="popup-edit-label">Group</label>
+      <div class="group-select" data-player-key="${keyAttr}">
+        <input type="hidden" class="edit-group"  value="${escapeHTMLText(playerGroup)}" />
+        <input type="hidden" class="edit-groups" value="${groupsValue}" />
+        <button type="button" class="group-btn">${escapeHTMLText(playerGroup || 'Choose group…')}</button>
+        <div class="group-list" role="menu" aria-hidden="true">
+          ${getAvailableGroups().map((g) => {
+            const gn = normalizeGroupName(g);
+            const mi = playerGroups.indexOf(gn);
+            const isMember  = mi !== -1;
+            const isPrimary = mi === 0;
+            const lbl = `${gn}${isPrimary ? ' (Primary)' : isMember ? ' (Member)' : ''}`;
+            return `<button type="button" class="group-item ${isMember ? 'is-member' : ''} ${isPrimary ? 'is-primary' : ''}" data-value="${escapeHTMLText(gn)}">${escapeHTMLText(lbl)}</button>`;
+          }).join('')}
+        </div>
+        <div class="group-chips">${renderEditGroupChipsMarkup(playerGroups)}</div>
+      </div>
+      <div class="edit-actions" style="margin-top:12px;">
+        <button type="button" class="btn-save-edit success" data-player-key="${keyAttr}" data-id="${playerId}">Save</button>
+        <button type="button" class="btn-cancel-edit secondary" data-player-key="${keyAttr}">Cancel</button>
+      </div>
+    </div>
+  `;
+
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+
+  const nameInput = body.querySelector('.edit-name');
+  if (nameInput) { nameInput.focus(); if (typeof nameInput.select === 'function') nameInput.select(); }
+}
 
 function closeInlineEditRow(row) {
   if (!row) return;
@@ -388,20 +439,14 @@ function restoreTransientInteractionState(snapshot) {
       e.stopPropagation();
       e.preventDefault();
       const playerKey = String(editBtn.getAttribute('data-player-key') || '').trim();
-      const row = findInlineEditRowByPlayerKey(playerKey)
-        || editBtn.closest('.player-card')?.querySelector('.edit-row');
-      if (row) {
-        const wasOpen = row.classList.contains('show');
-        closeAllInlineEditRows();
-        if (!wasOpen) openInlineEditRow(row);
-      }
-      // close menu
+      // close menu first
       const wrap = editBtn.closest('.menu-wrap');
       if (wrap) {
         wrap.classList.remove('menu-open');
         const button = wrap.querySelector('.btn-actions');
         if (button) button.setAttribute('aria-expanded', 'false');
       }
+      openPlayerEditPopup(playerKey);
       return;
     }
 
@@ -2324,32 +2369,6 @@ function renderFilteredPlayers() {
           </div>
         </div>
 
-        ${state.isAdmin ? `
-          <div class="edit-row" data-player-key="${playerKeyValue}">
-        <input type="text" class="edit-name" placeholder="Name" value="${player.name}" />
-        <input type="number" class="edit-skill" placeholder="Skill" step="0.1" value="${player.skill}" />
-        <div class="group-select" data-player-key="${playerKeyValue}">
-          <input type="hidden" class="edit-group" value="${playerGroup || ''}" />
-          <input type="hidden" class="edit-groups" value="${playerGroupsValue}" />
-          <button type="button" class="group-btn">${playerGroup || 'Group'}</button>
-          <div class="group-list" role="menu" aria-hidden="true">
-            ${getAvailableGroups().map((g) => {
-              const groupName = normalizeGroupName(g);
-              const memberIndex = playerGroups.indexOf(groupName);
-              const isMember = memberIndex !== -1;
-              const isPrimary = memberIndex === 0;
-              const label = `${groupName}${isPrimary ? ' (Primary)' : (isMember ? ' (Member)' : '')}`;
-              return `<button type="button" class="group-item ${isMember ? 'is-member' : ''} ${isPrimary ? 'is-primary' : ''}" data-value="${escapeHTMLText(groupName)}">${escapeHTMLText(label)}</button>`;
-            }).join('')}
-          </div>
-          <div class="group-chips">${renderEditGroupChipsMarkup(playerGroups)}</div>
-        </div>
-        <div class="edit-actions">
-          <button type="button" class="btn-save-edit success" data-player-key="${playerKeyValue}" data-id="${player.id}">Save</button>
-          <button type="button" class="btn-cancel-edit secondary" data-player-key="${playerKeyValue}">Cancel</button>
-        </div>
-      </div>
-        ` : ''}
       </div>
     `;
   }).join('');
@@ -7610,6 +7629,16 @@ function render() {
   <div class="players">
     ${renderFilteredPlayers()}
   </div>
+  </div>
+</div>
+
+<div id="player-edit-modal" class="popup-overlay" style="display:none;" aria-hidden="true">
+  <div class="popup-card card" role="dialog" aria-modal="true" aria-labelledby="player-edit-modal-title">
+    <div class="popup-header">
+      <h3 id="player-edit-modal-title">Edit Player</h3>
+      <button type="button" class="secondary" data-role="close-popup" data-target="player-edit-modal">Cancel</button>
+    </div>
+    <div class="popup-body" id="player-edit-modal-body"></div>
   </div>
 </div>
 
