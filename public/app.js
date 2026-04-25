@@ -19,8 +19,9 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.2';
+const APP_VERSION = '2026.04.25.3';
 const LS_TAB_KEY = 'athletic_specimen_tab';
+let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
 const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
@@ -7211,7 +7212,8 @@ function bindSelectionHandlers() {
 function render() {
   const root = document.getElementById('root');
   if (!root) return;
-  const savedScrollY = window.scrollY;
+  const existingContent = document.getElementById('app-content');
+  const savedScrollY = existingContent ? existingContent.scrollTop : window.scrollY;
   const interactionSnapshot = captureTransientInteractionState();
 
   // Helper to escape text for safe insertion into HTML
@@ -7351,30 +7353,8 @@ function render() {
   }
 
   // Admin panel HTML, only visible when state.isAdmin is true.
-  // Layout: logout at top, admin controls, then player list at the bottom.
-  const adminHTML = state.isAdmin ? `
-    <div>
-      <div class="card admin-header">
-        <h2>Admin Dashboard</h2>
-        <div class="admin-header-actions">
-          <select id="admin-quick-open" aria-label="Menu">
-            <option value="">Menu</option>
-            <option value="checkin">Check In</option>
-            <option value="add-player">Add/Update Player</option>
-            <option value="show-qr">Show QR Code</option>
-          </select>
-          <button id="btn-save-supabase" class="primary">Save to Supabase</button>
-          <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
-          <button id="btn-logout">Logout</button>
-        </div>
-      </div>
-      ${canAccessOperatorSafetyControls() ? `
-      <div class="card">
-        <h3>Recent Actions</h3>
-        ${renderOperatorActionsLogHTML()}
-      </div>
-      ` : ''}
-     <div class="card card-generate-teams">
+  // Teams card is separated into adminTeamsHTML so it lives in its own tab.
+  const adminTeamsHTML = state.isAdmin ? `<div class="card card-generate-teams">
   <div class="card-collapsible-head">
     <h3>Generate Teams</h3>
     <div class="card-collapsible-head-actions">
@@ -7398,7 +7378,30 @@ function render() {
   ${liveMatchupsHTML}
   ${teamsHTML}
   </div>
-</div>
+</div>` : '';
+
+  const adminPlayersHTML = state.isAdmin ? `
+    <div>
+      <div class="card admin-header">
+        <h2>Admin Dashboard</h2>
+        <div class="admin-header-actions">
+          <select id="admin-quick-open" aria-label="Menu">
+            <option value="">Menu</option>
+            <option value="checkin">Check In</option>
+            <option value="add-player">Add/Update Player</option>
+            <option value="show-qr">Show QR Code</option>
+          </select>
+          <button id="btn-save-supabase" class="primary">Save to Supabase</button>
+          <button id="btn-reset-checkins" class="danger">Reset Check‑ins</button>
+          <button id="btn-logout">Logout</button>
+        </div>
+      </div>
+      ${canAccessOperatorSafetyControls() ? `
+      <div class="card">
+        <h3>Recent Actions</h3>
+        ${renderOperatorActionsLogHTML()}
+      </div>
+      ` : ''}
 <div class="card card-players">
   <div class="card-collapsible-head">
     <h3>Players${normalizedActiveGroup !== 'All' ? ` <span class="small" style="font-weight:500;">(${escapeHTML(activeGroupLabel)} Roster)</span>` : ''}</h3>
@@ -7583,9 +7586,9 @@ function render() {
   </div>
 </div>
 </div>
+    </div>
   ` : '';
 
-  // Build the final page markup
   const adminLoginHTML = !state.isAdmin ? `
     <div class="card">
       <h2>Admin Login <span class="app-version-pill">v${APP_VERSION}</span></h2>
@@ -7596,15 +7599,7 @@ function render() {
     </div>
   ` : '';
 
-  // Build final page markup. Hide full players list on public side. The list is only shown in admin panel.
-  const html = `
-    <div class="container">
-<h1 class="title">${state.limitedGroup ? state.limitedGroup : 'Athletic Specimen'} <span class="app-version-inline">v${APP_VERSION}</span></h1>
-<div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
-<div id="js-checkin-stats">${buildCheckinStatsHTML()}</div>
-      ${adminLoginHTML}
-      ${state.isAdmin ? adminHTML : ''}
-  ${!state.isAdmin ? `
+  const publicCheckinHTML = !state.isAdmin ? `
   <div class="grid-2">
   <div class="card card-checkin">
     <h2>Check In</h2>
@@ -7623,13 +7618,62 @@ function render() {
     ${regMsg}
   </div>
   </div>
-  ` : ``}
+  ` : '';
+
+  const html = `
+<div id="app-shell">
+  <header id="app-header">
+    <div class="app-header-brand">
+      ${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'}
+      <span class="app-version-inline">v${APP_VERSION}</span>
     </div>
+    <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
+  </header>
+  <div id="app-content">
+    <div id="tab-session" class="tab-panel">
+      <div class="container">
+        <div class="card" style="text-align:center;padding:2.5rem 1rem;">
+          <h2 style="margin:0 0 0.5rem;">Sessions</h2>
+          <p style="color:#64748b;margin:0;">Session management coming soon.</p>
+        </div>
+      </div>
+    </div>
+    <div id="tab-players" class="tab-panel">
+      <div class="container">
+        <div id="js-checkin-stats">${buildCheckinStatsHTML()}</div>
+        ${adminLoginHTML}
+        ${state.isAdmin ? adminPlayersHTML : publicCheckinHTML}
+      </div>
+    </div>
+    <div id="tab-teams" class="tab-panel">
+      <div class="container">
+        ${state.isAdmin ? adminTeamsHTML : '<div class="card" style="text-align:center;padding:2rem;"><p style="color:#64748b;margin:0;">Log in as admin to use team generation.</p></div>'}
+      </div>
+    </div>
+  </div>
+  <nav id="bottom-nav">
+    <button class="nav-btn" data-nav-tab="session">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      <span>Session</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="players">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span>Players</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="teams">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <span>Teams</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="tournament">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+      <span>Tournament</span>
+    </button>
+  </nav>
+</div>
   `;
 
-  // Strip any trailing stray ']' that might have slipped into the template
-const sanitized = html.replace(/\n?\]\s*$/, '');
-root.innerHTML = sanitized;
+  const sanitized = html.replace(/\n?\]\s*$/, '');
+  root.innerHTML = sanitized;
 
 // ---- dropdown menu CSS (keep ONLY this block) ----
 let menuStyle = document.getElementById('menu-css');
@@ -7912,16 +7956,36 @@ bindTournamentTab();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
+activateMainTab(activeMainTab);
 restoreTransientInteractionState(interactionSnapshot);
-// Restore scroll AFTER focus calls in restoreTransientInteractionState,
-// which would otherwise scroll the page to the focused element.
 void root.offsetHeight;
-if (savedScrollY > 0) window.scrollTo(0, savedScrollY);
+const restoredContent = document.getElementById('app-content');
+if (savedScrollY > 0 && restoredContent) restoredContent.scrollTop = savedScrollY;
 }
 
 // Attach event listeners to the current DOM. This function should be
 // called after each call to render().
+function activateMainTab(tab) {
+  if (tab === 'tournament') {
+    showTournamentView(true);
+    initTournamentView();
+    return;
+  }
+  activeMainTab = tab;
+  sessionStorage.setItem('as_main_tab', tab);
+  document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
+  document.querySelectorAll('#bottom-nav .nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.navTab === tab));
+}
+
 function attachHandlers() {
+  // --- Bottom nav ---
+  const bottomNav = document.getElementById('bottom-nav');
+  if (bottomNav) {
+    bottomNav.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-nav-tab]');
+      if (btn) activateMainTab(btn.dataset.navTab);
+    });
+  }
   // --- Group controls (Admin Players) ---
 const groupSelect = document.getElementById('group-filter-select');
 if (groupSelect) {
