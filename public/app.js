@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.9';
+const APP_VERSION = '2026.04.25.10';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -719,6 +719,133 @@ function resetGeneratedTeamDragState() {
       resetGeneratedTeamDragState();
     }
   });
+})();
+
+// Touch drag-and-drop for generated teams (mobile support)
+(function ensureGeneratedTeamTouchDnDBound() {
+  if (window.__generatedTeamTouchDnDBound) return;
+  window.__generatedTeamTouchDnDBound = true;
+
+  const DRAG_THRESHOLD = 8;
+  let touchDrag = null;
+  let touchGhost = null;
+
+  function elAt(cx, cy) {
+    if (touchGhost) touchGhost.style.display = 'none';
+    const el = document.elementFromPoint(cx, cy);
+    if (touchGhost) touchGhost.style.display = '';
+    return el;
+  }
+
+  function createGhost(card) {
+    const rect = card.getBoundingClientRect();
+    const g = card.cloneNode(true);
+    Object.assign(g.style, {
+      position: 'fixed',
+      left: rect.left + 'px',
+      top: rect.top + 'px',
+      width: rect.width + 'px',
+      margin: '0',
+      zIndex: '99999',
+      opacity: '0.88',
+      pointerEvents: 'none',
+      boxShadow: '0 10px 32px rgba(0,0,0,0.35)',
+      transform: 'scale(1.06) rotate(2deg)',
+      transition: 'none',
+      borderRadius: '8px',
+      background: '#e0e7ff',
+    });
+    document.body.appendChild(g);
+    return g;
+  }
+
+  function moveGhost(cx, cy) {
+    if (!touchGhost) return;
+    const w = touchGhost.offsetWidth;
+    const h = touchGhost.offsetHeight;
+    touchGhost.style.left = (cx - w / 2) + 'px';
+    touchGhost.style.top = (cy - h / 2) + 'px';
+  }
+
+  function cleanup() {
+    if (touchGhost) { touchGhost.remove(); touchGhost = null; }
+    touchDrag = null;
+    clearGeneratedTeamDragVisuals();
+  }
+
+  document.addEventListener('touchstart', (e) => {
+    const card = e.target.closest('.team-player-card');
+    if (!card) return;
+    const fromTeamIndex = Number(card.getAttribute('data-team-index'));
+    const playerKey = String(card.getAttribute('data-player-key') || '');
+    if (!playerKey || isNaN(fromTeamIndex)) return;
+    const t = e.touches[0];
+    touchDrag = { fromTeamIndex, playerKey, card, startX: t.clientX, startY: t.clientY, started: false, targetTeamEl: null, targetCardEl: null };
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!touchDrag) return;
+    const t = e.touches[0];
+
+    if (!touchDrag.started) {
+      if (Math.hypot(t.clientX - touchDrag.startX, t.clientY - touchDrag.startY) < DRAG_THRESHOLD) return;
+      touchDrag.started = true;
+      touchGhost = createGhost(touchDrag.card);
+      touchDrag.card.classList.add('is-dragging');
+      document.body.classList.add('generated-team-dragging');
+      document.querySelectorAll('.generated-team[data-team-index]').forEach((el) => {
+        if (Number(el.getAttribute('data-team-index')) !== touchDrag.fromTeamIndex) el.classList.add('is-drop-enabled');
+      });
+    }
+
+    e.preventDefault();
+    moveGhost(t.clientX, t.clientY);
+
+    const below = elAt(t.clientX, t.clientY);
+    const teamEl = below ? below.closest('.generated-team[data-team-index]') : null;
+    const cardEl = below ? below.closest('.team-player-card') : null;
+
+    document.querySelectorAll('.generated-team.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+    document.querySelectorAll('.team-player-card.is-swap-target').forEach((el) => el.classList.remove('is-swap-target'));
+
+    touchDrag.targetTeamEl = null;
+    touchDrag.targetCardEl = null;
+
+    if (teamEl && Number(teamEl.getAttribute('data-team-index')) !== touchDrag.fromTeamIndex) {
+      teamEl.classList.add('is-drop-target');
+      touchDrag.targetTeamEl = teamEl;
+      if (cardEl && cardEl !== touchDrag.card) {
+        const tk = String(cardEl.getAttribute('data-player-key') || '');
+        if (tk && tk !== touchDrag.playerKey) {
+          cardEl.classList.add('is-swap-target');
+          touchDrag.targetCardEl = cardEl;
+        }
+      }
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchend', () => {
+    if (!touchDrag || !touchDrag.started) { cleanup(); return; }
+
+    const teamEl = touchDrag.targetTeamEl;
+    const cardEl = touchDrag.targetCardEl;
+    const { fromTeamIndex, playerKey } = touchDrag;
+
+    cleanup();
+
+    if (!teamEl) return;
+    const toTeamIndex = Number(teamEl.getAttribute('data-team-index'));
+    if (isNaN(toTeamIndex) || toTeamIndex === fromTeamIndex) return;
+
+    const swapWithKey = cardEl ? String(cardEl.getAttribute('data-player-key') || '') : '';
+    const result = moveGeneratedPlayerBetweenTeams(fromTeamIndex, toTeamIndex, playerKey, swapWithKey);
+    if (!result.changed) return;
+
+    saveLocal();
+    render();
+  });
+
+  document.addEventListener('touchcancel', cleanup);
 })();
 
 // -- One delegated handler for Check In and Check Out buttons (capture phase) --
@@ -2071,7 +2198,7 @@ function moveGeneratedPlayerBetweenTeams(fromTeamIndex, toTeamIndex, playerKey, 
     }
   }
 
-  // Simple move is allowed only when it won't make size imbalance worse.
+  // Simple move when fromTeam is larger — won't worsen balance.
   if (fromTeam.length > toTeam.length) {
     const [dragged] = fromTeam.splice(fromIdx, 1);
     toTeam.push(dragged);
@@ -2080,7 +2207,20 @@ function moveGeneratedPlayerBetweenTeams(fromTeamIndex, toTeamIndex, playerKey, 
     return { changed: true, mode: 'move' };
   }
 
-  return { changed: false, reason: 'swap-required' };
+  // Equal sizes: auto-swap with the closest-skill player in the target team.
+  const draggedSkill = Number(fromTeam[fromIdx].skill) || 0;
+  let bestIdx = 0;
+  let bestDiff = Infinity;
+  toTeam.forEach((p, idx) => {
+    const diff = Math.abs((Number(p.skill) || 0) - draggedSkill);
+    if (diff < bestDiff) { bestDiff = diff; bestIdx = idx; }
+  });
+  const dragged = fromTeam[fromIdx];
+  fromTeam[fromIdx] = toTeam[bestIdx];
+  toTeam[bestIdx] = dragged;
+  state.generatedTeams = teams;
+  updateGeneratedTeamsSummaryFromCurrent(teams);
+  return { changed: true, mode: 'auto-swap' };
 }
 
 function showTeamMoveToast(message) {
