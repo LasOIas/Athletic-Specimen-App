@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.3';
+const APP_VERSION = '2026.04.25.4';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4837,7 +4837,7 @@ const TournamentManager = (() => {
 })();
 
 function ensureTournamentTabClickable() {
-  const btn = document.getElementById('tab-tournament');
+  const btn = document.querySelector('#bottom-nav [data-nav-tab="tournament"]');
   if (!btn) return;
   btn.style.pointerEvents = 'auto';
   btn.style.opacity = '';
@@ -7112,15 +7112,6 @@ function ensureTournamentOverlayBindings() {
 function bindTournamentTab() {
   ensureTournamentTabClickable();
   ensureTournamentOverlayBindings();
-
-  const byId = document.getElementById('tab-tournament');
-  if (byId) {
-    byId.onclick = (event) => {
-      if (event) event.preventDefault();
-      showTournamentView(true);
-      initTournamentView();
-    };
-  }
 
   if (!bindTournamentTab._delegated) {
     document.addEventListener('click', (event) => {
