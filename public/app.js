@@ -979,7 +979,7 @@ function normalize(str) {
 }
 
 function formatSessionDate(dateStr) {
-  if (!dateStr) return '';
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return '';
   const [y, m, d] = dateStr.split('-').map(Number);
   const dt = new Date(y, m - 1, d);
   return dt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
@@ -7822,7 +7822,7 @@ function render() {
             <div class="session-form">
               <label class="session-label" for="session-date">Date</label>
               <input type="date" id="session-date" class="session-input"
-                value="${state.currentSession?.date || ''}" />
+                value="${escapeHTML(state.currentSession?.date || '')}" />
               <label class="session-label" for="session-time">Time</label>
               <input type="text" id="session-time" class="session-input"
                 placeholder="e.g. 10:00 AM"
