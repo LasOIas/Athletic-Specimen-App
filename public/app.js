@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.11';
+const APP_VERSION = '2026.04.25.12';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2296,35 +2296,32 @@ function renderFilteredPlayers() {
 
     return `
       <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-player-key="${playerKeyValue}">
-        ${state.isAdmin ? `
-  <div class="menu-wrap">
-    <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
-            data-id="${player.id}" data-player-key="${playerKeyValue}" title="More actions">⋮</button>
-    <div class="card-menu" role="menu">
-      <button type="button" class="menu-item" data-role="menu-edit" data-player-key="${playerKeyValue}">Edit</button>
-      <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
-    </div>
-  </div>
-` : ''}
-
-        <div class="row" style="align-items:center; gap:8px;">
-          <input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />
-          <div>
-            <strong>${player.name}</strong>
-            <div class="meta">
-              Skill: ${player.skill === 0 ? 'Unset' : player.skill}
-              • <span class="status ${checked ? 'in' : 'out'}">${checked ? 'Checked In' : 'Not Checked In'}</span>
+        <div class="player-card-main">
+          ${state.isAdmin ? `<input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />` : ''}
+          <div class="player-card-info">
+            <span class="player-name">${player.name}</span>
+            <div class="player-meta">
+              <span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span>
+              <span class="status-pill ${checked ? 'in' : 'out'}">${checked ? 'In' : 'Out'}</span>
+              ${groupsDisplayHTML}
             </div>
-            <div class="player-groups-inline">${groupsDisplayHTML}</div>
           </div>
-        </div>
-
-        <div class="card-actions">
-          ${checked
-            ? `<button class="btn-checkout primary" data-id="${player.id}">Check Out</button>`
-            : `<button class="btn-checkin primary" data-id="${player.id}">Check In</button>`
-          }
-          <span class="spacer"></span>
+          <div class="player-card-side">
+            ${checked
+              ? `<button class="btn-checkout" data-id="${player.id}">Check Out</button>`
+              : `<button class="btn-checkin" data-id="${player.id}">Check In</button>`
+            }
+            ${state.isAdmin ? `
+              <div class="menu-wrap">
+                <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
+                        data-id="${player.id}" data-player-key="${playerKeyValue}" title="More actions">⋮</button>
+                <div class="card-menu" role="menu">
+                  <button type="button" class="menu-item" data-role="menu-edit" data-player-key="${playerKeyValue}">Edit</button>
+                  <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
+                </div>
+              </div>
+            ` : ''}
+          </div>
         </div>
 
         ${state.isAdmin ? `
@@ -7521,7 +7518,6 @@ function render() {
   </div>
   <div id="card-body-admin-players">
   <div id="filtersBody">
-    <h4 style="margin-bottom: 0.5rem;">Filters</h4>
 
     <!-- Filter select (All / In / Out / Skill / Unset) -->
     <div class="row">
@@ -7797,19 +7793,9 @@ let menuStyle = document.getElementById('menu-css');
 const cssText = `
 /* ---------------- Player card menu styling ---------------- */
 
-.player-card {
-  position: relative;
-  overflow: visible;
-  padding-top: 36px; /* space for the menu */
-  border-radius: 8px;
-  background: #f9fafb;
-}
-
 .player-card .menu-wrap {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 50;
+  position: relative;
+  flex-shrink: 0;
 }
 
 .btn-actions {
@@ -7839,7 +7825,7 @@ const cssText = `
   display: none;
   position: absolute;
   right: 0;
-  top: 38px;
+  top: calc(100% + 4px);
   min-width: 150px;
   background: #ffffff;
   border: 1px solid rgba(0,0,0,0.12);
