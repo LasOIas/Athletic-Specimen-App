@@ -7604,7 +7604,9 @@ ${state.isAdmin && !state.limitedGroup ? `
 
   // Strip any trailing stray ']' that might have slipped into the template
 const sanitized = html.replace(/\n?\]\s*$/, '');
+const savedScrollY = window.scrollY;
 root.innerHTML = sanitized;
+window.scrollTo(0, savedScrollY);
 
 // ---- dropdown menu CSS (keep ONLY this block) ----
 let menuStyle = document.getElementById('menu-css');
