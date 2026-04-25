@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.19';
+const APP_VERSION = '2026.04.25.20';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -9429,6 +9429,38 @@ if (removeBtn) {
     render();
   });
 }
+
+  // --- Session tab handlers ---
+  const btnSaveSession = document.getElementById('btn-save-session');
+  if (btnSaveSession) {
+    btnSaveSession.addEventListener('click', async () => {
+      const date     = (document.getElementById('session-date')?.value     || '').trim();
+      const time     = (document.getElementById('session-time')?.value     || '').trim();
+      const location = (document.getElementById('session-location')?.value || '').trim();
+      if (!date || !time || !location) {
+        const msg = document.getElementById('session-save-msg');
+        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'Please fill in all three fields.'; msg.style.display = 'block'; }
+        return;
+      }
+      btnSaveSession.disabled = true;
+      btnSaveSession.textContent = 'Saving…';
+      const ok = await saveSession(date, time, location);
+      btnSaveSession.disabled = false;
+      btnSaveSession.textContent = 'Save Session';
+      const msg = document.getElementById('session-save-msg');
+      if (msg) {
+        msg.style.color = ok ? 'var(--success)' : 'var(--danger)';
+        msg.textContent  = ok ? '✓ Session saved' : '✗ Save failed — check connection';
+        msg.style.display = 'block';
+        if (ok) { setTimeout(() => { msg.style.display = 'none'; }, 2500); render(); }
+      }
+    });
+  }
+
+  const btnShareSession = document.getElementById('btn-share-session');
+  if (btnShareSession) {
+    btnShareSession.addEventListener('click', () => openQrModal());
+  }
 }
 
 // Initialise the app. Called once on page load. It loads stored data,
