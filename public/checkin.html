@@ -151,6 +151,18 @@
   </style>
 </head>
 <body>
+  <div id="session-banner" hidden style="
+    background: #1c2129;
+    border: 1px solid #262d38;
+    border-radius: 14px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+  ">
+    <div style="font-size:11px; letter-spacing:2px; text-transform:uppercase; color:#8b95a3; margin-bottom:8px;">Next Session</div>
+    <div id="session-date-el"  style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #262d38; font-size:16px;"><span>📅</span><span></span></div>
+    <div id="session-time-el"  style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #262d38; font-size:16px;"><span>🕙</span><span></span></div>
+    <div id="session-loc-el"   style="display:flex; align-items:center; gap:8px; padding:6px 0; font-size:16px;"><span>📍</span><span></span></div>
+  </div>
   <div id="app">
     <div id="main">
       <div class="header">
@@ -205,6 +217,29 @@
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     const $ = (id) => document.getElementById(id);
     let roster = [];
+
+    async function loadSessionBanner() {
+      try {
+        const { data, error } = await sb
+          .from('sessions')
+          .select('date, time, location')
+          .eq('id', 1)
+          .maybeSingle();
+        if (error || !data) return;
+        const banner = document.getElementById('session-banner');
+        if (!banner) return;
+        const [y, m, d] = data.date.split('-').map(Number);
+        const dateStr = new Date(y, m - 1, d).toLocaleDateString('en-US', {
+          weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
+        });
+        document.querySelector('#session-date-el span:last-child').textContent = dateStr;
+        document.querySelector('#session-time-el span:last-child').textContent = data.time || '';
+        document.querySelector('#session-loc-el  span:last-child').textContent = data.location || '';
+        banner.hidden = false;
+      } catch (err) {
+        console.warn('session banner error', err);
+      }
+    }
 
     async function loadRoster() {
       try {
@@ -352,6 +387,7 @@
     $('anotherBtn').addEventListener('click', resetForAnother);
 
     loadRoster();
+    loadSessionBanner();
   </script>
 </body>
 </html>
