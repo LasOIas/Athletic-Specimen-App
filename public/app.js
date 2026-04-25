@@ -113,12 +113,6 @@ function loadAdminCodes() {
   state.adminCodeMap = { ...ADMIN_CODE_MAP };
 }
 
-function saveAdminCodes() {
-  try {
-    localStorage.setItem(LS_CODEMAP_KEY, JSON.stringify(ADMIN_CODE_MAP));
-  } catch {}
-  state.adminCodeMap = { ...ADMIN_CODE_MAP };
-}
 
 function closeInlineEditRow(row) {
   if (!row) return;
@@ -367,7 +361,7 @@ function restoreTransientInteractionState(snapshot) {
           state.groups = [...(state.groups || []), val];
           saveLocal();
         }
-      } catch (err) {}
+      } catch {}
 
       select.classList.remove('open');
       return;
@@ -978,10 +972,6 @@ function parseRemotePlayerGroupDetails(row) {
   };
 }
 
-function parseRemotePlayerGroups(row) {
-  return parseRemotePlayerGroupDetails(row).groups;
-}
-
 function mergeRemoteGroupCatalogIntoState(groupNames) {
   const normalized = normalizeGroupList(groupNames);
   if (!normalized.length) return;
@@ -1383,11 +1373,6 @@ function normalizeCheckedInEntries(entries) {
   return out;
 }
 
-function isPlayerCheckedIn(player) {
-  const key = playerIdentityKey(player);
-  return !!key && (state.checkedIn || []).includes(key);
-}
-
 function checkInPlayer(player) {
   const key = playerIdentityKey(player);
   if (!key) return false;
@@ -1407,34 +1392,6 @@ function checkOutPlayer(player) {
 
 let saveTimeout;
 let forceSaveRunning = false;
-function queueSaveToSupabase() {
-  if (!supabaseClient) return;
-  if (SUPABASE_AUTHORITATIVE) return;
-  clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(async () => {
-    try {
-      if (!HAS_GROUP && !HAS_TAG) {
-        await detectPlayersSchema();
-      }
-
-      const rows = state.players.map(p => {
-        const base = { id: p.id || undefined, name: p.name, skill: p.skill };
-        const grp = getPlayerPrimaryGroup(p);
-        if (HAS_GROUP) {
-          const row = { ...base, group: grp };
-          if (HAS_TAG) row.tag = serializePlayerGroupsTag(getPlayerGroups(p), grp);
-          return row;
-        }
-        if (HAS_TAG)        return { ...base, tag: grp };
-        return base; // no group-like column in table
-      });
-
-      await supabaseClient.from('players').upsert(rows, { onConflict: 'id' });
-    } catch (err) {
-      console.error('Auto-save error:', err);
-    }
-  }, 800);
-}
 
 let refreshTimeout;
 let refreshQueued = false;
@@ -1479,7 +1436,7 @@ function ensureAuthorityRefreshHooks() {
   if (authorityRefreshHooksBound || !supabaseClient) return;
   authorityRefreshHooksBound = true;
 
-  const triggerRefresh = (reason) => {
+  const triggerRefresh = (_reason) => {
     if (!supabaseClient) return;
     if (
       SUPABASE_AUTHORITATIVE &&
@@ -1617,24 +1574,6 @@ function summarizeTeamFairness(teams) {
   const score = skillSpread + countSpread * 0.75 + skillStdev * 0.25;
 
   return { skillSpread, countSpread, skillStdev, score };
-}
-
-function deriveLiveTeamMatchups(teams) {
-  const safeTeams = Array.isArray(teams) ? teams : [];
-  const matchups = [];
-  const waitingTeams = [];
-
-  for (let i = 0; i < safeTeams.length; i += 2) {
-    const teamA = i + 1;
-    const teamB = i + 2;
-    if (teamB <= safeTeams.length) {
-      matchups.push({ teamA, teamB });
-    } else {
-      waitingTeams.push(teamA);
-    }
-  }
-
-  return { matchups, waitingTeams };
 }
 
 function defaultLiveCourtOrder(teamCount) {
@@ -2973,7 +2912,7 @@ function loadGeneratedTeamsFromLocal() {
     if (JSON.stringify(normalizedSnapshots) !== JSON.stringify(storedSnapshots || {})) {
       shouldPersistMigration = true;
     }
-  } catch (err) {
+  } catch {
     state.generatedTeams = [];
     state.generatedTeamsSummary = null;
     state.liveCourtOrder = [];
@@ -3479,7 +3418,6 @@ async function reconcileToSupabaseAuthority(contextLabel = '') {
 
 let HAS_GROUP = false;
 let HAS_TAG = false;
-let PREFER_TAG_COLUMN = false;
 let PLAYERS_SCHEMA_DETECTED = false;
 
 async function detectPlayersSchema() {
@@ -3497,8 +3435,6 @@ async function detectPlayersSchema() {
     HAS_TAG = !error;
   } catch {}
 
-  // prefer tag only if tag exists and group does not
-  PREFER_TAG_COLUMN = HAS_TAG && !HAS_GROUP;
   PLAYERS_SCHEMA_DETECTED = true;
 
   if (!HAS_GROUP && !HAS_TAG) {
@@ -5100,7 +5036,6 @@ const TournamentSubApp = (() => {
       });
     }
 
-    const playerById = new Map(players.map((player) => [player.id, player]));
     const teamById = new Map(teams.map((team) => [team.id, team]));
     teams.forEach((team) => { team.memberKeys = []; });
     players.forEach((player) => {
@@ -7151,11 +7086,6 @@ function bindTournamentTab() {
 }
 // -----------------------------------------------------------------------------
 // UI Helpers
-// Keep exactly ONE copy of this
-function closeAllMenus() {
-  document.querySelectorAll('.menu-wrap').forEach(w => w.classList.remove('menu-open'));
-  document.querySelectorAll('.btn-actions').forEach(b => b.setAttribute('aria-expanded', 'false'));
-}
 
 function bindPlayerRowHandlers() {
   // Intentionally a no-op.
@@ -7256,13 +7186,6 @@ function render() {
   // Build registration and check‑in messages
   const regMsg = messages.registration ? `<p class="msg">${escapeHTML(messages.registration)}</p>` : '';
   const checkMsg = messages.checkIn ? `<p class="msg">${escapeHTML(messages.checkIn)}</p>` : '';
-
-  // Build player list HTML. Include delete buttons for admin users only.
-  let playersHTML = '';
-  if (state.players.length === 0) {
-    playersHTML = '<p>No players yet.</p>';
-  } else {
-  }
 
   // Build generated teams HTML
   let teamsHTML = '';
@@ -8076,7 +7999,7 @@ function closeQrModal() {
         const orig = copyBtn.textContent;
         copyBtn.textContent = 'Copied!';
         setTimeout(() => { copyBtn.textContent = orig; }, 1500);
-      } catch (err) {
+      } catch {
         alert('Could not copy. URL: ' + url);
       }
     });
