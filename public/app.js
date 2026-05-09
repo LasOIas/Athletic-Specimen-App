@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.05.09.4';
+const APP_VERSION = '2026.05.09.5';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -967,6 +967,88 @@ function updateBulkBarVisibility() {
   }
 }
 
+// -- A–Z jump strip: tap or drag a letter to scroll to that section --
+function refreshAzStripAvailability() {
+  const strip = document.querySelector('.players-az-strip');
+  if (!strip) return;
+  const letters = new Set();
+  document.querySelectorAll('.players .player-card .player-name').forEach((el) => {
+    const ch = (el.textContent || '').trim().charAt(0).toUpperCase();
+    if (ch) letters.add(ch);
+  });
+  strip.querySelectorAll('.az-letter').forEach((btn) => {
+    btn.classList.toggle('is-empty', !letters.has(btn.dataset.letter));
+  });
+}
+
+(function ensureAzStripBound() {
+  if (window.__azStripBound) return;
+  window.__azStripBound = true;
+
+  function jumpToLetter(letter) {
+    if (!letter) return false;
+    const target = String(letter).toUpperCase();
+    const cards = document.querySelectorAll('.players .player-card');
+    for (const card of cards) {
+      const name = (card.querySelector('.player-name')?.textContent || '').trim();
+      if (name && name.charAt(0).toUpperCase() === target) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function letterAtPoint(x, y) {
+    const el = document.elementFromPoint(x, y);
+    if (!el || !el.closest) return null;
+    const btn = el.closest('.az-letter');
+    if (!btn || btn.classList.contains('is-empty')) return null;
+    return btn.dataset.letter || null;
+  }
+
+  function setActive(letter) {
+    document.querySelectorAll('.az-letter.is-active').forEach((b) => b.classList.remove('is-active'));
+    if (!letter) return;
+    document.querySelectorAll(`.az-letter[data-letter="${letter}"]`).forEach((b) => b.classList.add('is-active'));
+  }
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('.az-letter');
+    if (!btn || btn.classList.contains('is-empty')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const letter = btn.dataset.letter;
+    jumpToLetter(letter);
+    setActive(letter);
+    setTimeout(() => setActive(null), 600);
+  }, true);
+
+  let scrubbing = false;
+  document.addEventListener('touchstart', (e) => {
+    if (!(e.target.closest && e.target.closest('.players-az-strip'))) return;
+    scrubbing = true;
+    const t = e.touches[0];
+    if (!t) return;
+    const letter = letterAtPoint(t.clientX, t.clientY);
+    if (letter) { jumpToLetter(letter); setActive(letter); }
+  }, { passive: true });
+
+  document.addEventListener('touchmove', (e) => {
+    if (!scrubbing) return;
+    const t = e.touches[0];
+    if (!t) return;
+    const letter = letterAtPoint(t.clientX, t.clientY);
+    if (letter) { jumpToLetter(letter); setActive(letter); }
+  }, { passive: true });
+
+  document.addEventListener('touchend', () => {
+    if (!scrubbing) return;
+    scrubbing = false;
+    setTimeout(() => setActive(null), 400);
+  });
+})();
+
 // Create Supabase client if credentials are provided. The global `supabase`
 // object is exported by vendor/supabase.js. When both values are falsy
 // (empty strings), supabaseClient will be null and no network calls will be
@@ -1037,6 +1119,7 @@ function partialRender() {
   bindSelectionHandlers();
   updateBulkBarVisibility();
   restoreTransientInteractionState(snapshot);
+  refreshAzStripAvailability();
 }
 
 function normalizeGroupName(value) {
@@ -2338,8 +2421,8 @@ function renderFilteredPlayers() {
     });
   }
 
-  // sort by skill desc
-  filtered.sort((a, b) => (b.skill - a.skill) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  // sort alphabetically by name (A–Z jump strip relies on this)
+  filtered.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
   if (!filtered.length) return '<p>No players found.</p>';
 
@@ -7675,6 +7758,13 @@ function render() {
     ${renderFilteredPlayers()}
   </div>
   </div>
+
+  <!-- A–Z jump strip (iOS Contacts style) — pinned to right edge of Players tab -->
+  <div class="players-az-strip" role="navigation" aria-label="Jump to letter">
+    ${'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(L =>
+      `<button type="button" class="az-letter" data-letter="${L}" aria-label="Jump to ${L}">${L}</button>`
+    ).join('')}
+  </div>
 </div>
 
 <div id="player-edit-modal" class="popup-overlay" style="display:none;" aria-hidden="true">
@@ -8193,6 +8283,7 @@ updateBulkBarVisibility();
 if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'tournament')) activeMainTab = 'players';
 activateMainTab(activeMainTab);
 restoreTransientInteractionState(interactionSnapshot);
+refreshAzStripAvailability();
 void root.offsetHeight;
 const restoredPanel = document.getElementById('tab-' + activeMainTab);
 if (savedScrollY > 0 && restoredPanel) restoredPanel.scrollTop = savedScrollY;
@@ -9190,6 +9281,7 @@ if (saveSupabaseBtn) {
       }
       updateBulkBarVisibility();
       restoreTransientInteractionState(snapshot);
+      refreshAzStripAvailability();
     };
 
     const toggleClear = () => {
@@ -9216,6 +9308,7 @@ if (saveSupabaseBtn) {
       }
       updateBulkBarVisibility();
       restoreTransientInteractionState(snapshot);
+      refreshAzStripAvailability();
       clearBtn.style.display = 'none';
     });
   }
