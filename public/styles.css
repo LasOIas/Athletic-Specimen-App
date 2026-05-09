@@ -320,6 +320,9 @@ select:focus {
   overscroll-behavior-y: contain;
 }
 .tab-panel.active { display: block; }
+/* Players tab: leave horizontal room on the right edge for the A–Z jump strip
+   so every row (search, filters, cards, etc.) is consistently narrower. */
+#tab-players { padding-right: 22px; }
 
 /* ── Players tab: sticky search + back-to-top ── */
 .sticky-search-bar {
@@ -486,7 +489,6 @@ select:focus {
 .players {
   display: flex;
   flex-direction: column;
-  padding-right: 22px; /* leave horizontal room for the iOS-style A–Z jump strip */
 }
 
 /* ── A–Z jump strip (iOS Contacts style) ── */
