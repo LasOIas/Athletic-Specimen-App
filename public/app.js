@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.05.09.8';
+const APP_VERSION = '2026.05.09.9';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -967,6 +967,39 @@ function updateBulkBarVisibility() {
   }
 }
 
+// -- iOS status-bar (clock) tap → scroll active tab to top --
+// iOS scrolls the document body to 0 when the status bar is tapped. Our app
+// keeps body overflow at 1px (see styles.css), pre-scrolls past 0, and watches
+// for the scroll event so we can forward it to the actually-scrolling tab panel.
+(function ensureClockTapHandler() {
+  if (window.__clockTapBound) return;
+  window.__clockTapBound = true;
+
+  function pinBody() {
+    if (window.scrollY === 0) {
+      window.scrollTo(0, 1);
+    }
+  }
+  setTimeout(pinBody, 0);
+  window.addEventListener('load', pinBody);
+  window.addEventListener('resize', pinBody);
+
+  let pending = false;
+  window.addEventListener('scroll', () => {
+    if (pending) return;
+    if (window.scrollY > 0) return;
+    pending = true;
+    const activePanel = document.querySelector('.tab-panel.active');
+    if (activePanel && activePanel.scrollTop > 0) {
+      activePanel.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    setTimeout(() => {
+      window.scrollTo(0, 1);
+      pending = false;
+    }, 250);
+  }, { passive: true });
+})();
+
 // -- A–Z jump strip: tap or drag a letter to scroll to that section --
 function refreshAzStripAvailability() {
   const strip = document.querySelector('.players-az-strip');
@@ -985,14 +1018,14 @@ function refreshAzStripAvailability() {
   if (window.__azStripBound) return;
   window.__azStripBound = true;
 
-  function jumpToLetter(letter) {
+  function jumpToLetter(letter, smooth) {
     if (!letter) return false;
     const target = String(letter).toUpperCase();
     const cards = document.querySelectorAll('.players .player-card');
     for (const card of cards) {
       const name = (card.querySelector('.player-name')?.textContent || '').trim();
       if (name && name.charAt(0).toUpperCase() === target) {
-        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        card.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
         return true;
       }
     }
@@ -1013,39 +1046,62 @@ function refreshAzStripAvailability() {
     document.querySelectorAll(`.az-letter[data-letter="${letter}"]`).forEach((b) => b.classList.add('is-active'));
   }
 
+  let scrubbing = false;
+  let lastJumpedLetter = null;
+
+  // Tap (no drag) → smooth scroll to first matching player
   document.addEventListener('click', (e) => {
+    if (scrubbing) return; // a drag just ended; the touchend handler already settled position
     const btn = e.target.closest && e.target.closest('.az-letter');
     if (!btn || btn.classList.contains('is-empty')) return;
     e.preventDefault();
     e.stopPropagation();
     const letter = btn.dataset.letter;
-    jumpToLetter(letter);
+    jumpToLetter(letter, true);
     setActive(letter);
     setTimeout(() => setActive(null), 600);
   }, true);
 
-  let scrubbing = false;
+  // Touch start on the strip → start scrubbing (instant scroll while finger is down)
   document.addEventListener('touchstart', (e) => {
     if (!(e.target.closest && e.target.closest('.players-az-strip'))) return;
     scrubbing = true;
+    lastJumpedLetter = null;
     const t = e.touches[0];
     if (!t) return;
     const letter = letterAtPoint(t.clientX, t.clientY);
-    if (letter) { jumpToLetter(letter); setActive(letter); }
-  }, { passive: true });
+    if (letter && letter !== lastJumpedLetter) {
+      jumpToLetter(letter, false);
+      setActive(letter);
+      lastJumpedLetter = letter;
+    }
+  }, { passive: false });
 
   document.addEventListener('touchmove', (e) => {
     if (!scrubbing) return;
+    e.preventDefault(); // stop the page from scrolling while finger is on the strip
     const t = e.touches[0];
     if (!t) return;
     const letter = letterAtPoint(t.clientX, t.clientY);
-    if (letter) { jumpToLetter(letter); setActive(letter); }
-  }, { passive: true });
+    if (letter && letter !== lastJumpedLetter) {
+      jumpToLetter(letter, false);
+      setActive(letter);
+      lastJumpedLetter = letter;
+    }
+  }, { passive: false });
 
   document.addEventListener('touchend', () => {
     if (!scrubbing) return;
+    setTimeout(() => {
+      scrubbing = false;
+      lastJumpedLetter = null;
+      setActive(null);
+    }, 200);
+  });
+  document.addEventListener('touchcancel', () => {
     scrubbing = false;
-    setTimeout(() => setActive(null), 400);
+    lastJumpedLetter = null;
+    setActive(null);
   });
 })();
 
