@@ -258,7 +258,11 @@ select:focus {
   color: #fff;
   white-space: nowrap;
   line-height: 1.2;
+  cursor: pointer;
+  -webkit-tap-highlight-color: rgba(255,255,255,.18);
+  user-select: none;
 }
+.app-header-brand:active { opacity: .75; }
 
 .app-header-version {
   font-size: .72rem;
@@ -322,7 +326,10 @@ select:focus {
 .tab-panel.active { display: block; }
 /* Players tab: leave horizontal room on the right edge for the A–Z jump strip
    so every row (search, filters, cards, etc.) is consistently narrower. */
-#tab-players { padding-right: 22px; }
+#tab-players { padding-right: 30px; }
+/* Override the global sticky-search-bar's negative right margin within the
+   Players tab so it stops at the container edge like every other row. */
+#tab-players .sticky-search-bar { margin-right: 0; }
 
 /* ── Players tab: sticky search + back-to-top ── */
 .sticky-search-bar {
@@ -494,7 +501,7 @@ select:focus {
 /* ── A–Z jump strip (iOS Contacts style) ── */
 .players-az-strip {
   position: fixed;
-  right: 1px;
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
@@ -505,7 +512,7 @@ select:focus {
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;
-  padding: 4px 1px;
+  padding: 4px 6px; /* wider horizontal padding = bigger touch target than the visual letter */
 }
 .az-letter {
   font-size: 10px !important;
@@ -514,13 +521,18 @@ select:focus {
   color: var(--brand);
   background: transparent;
   border: 0;
-  padding: 0 4px !important;
+  padding: 0 !important;
   margin: 0;
   min-width: 0;
   min-height: 0;
-  height: 13px;
+  width: 16px;
+  height: 14px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .az-letter.is-empty {
   color: var(--text-4);

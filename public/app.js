@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.05.09.12';
+const APP_VERSION = '2026.05.09.14';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -967,6 +967,18 @@ function updateBulkBarVisibility() {
   }
 }
 
+// -- Tap the "Athletic Specimen" title in the header → scroll active tab to top --
+(function ensureHeaderTapToTop() {
+  if (window.__headerTapBound) return;
+  window.__headerTapBound = true;
+  document.addEventListener('click', (e) => {
+    const brand = e.target.closest && e.target.closest('.app-header-brand');
+    if (!brand) return;
+    const activePanel = document.querySelector('.tab-panel.active');
+    if (activePanel) activePanel.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+})();
+
 // -- iOS status-bar (clock) tap → scroll active tab to top --
 // iOS scrolls the document body to 0 when the status bar is tapped. Our app
 // keeps body overflow at 1px (see styles.css), pre-scrolls past 0, and watches
@@ -1033,11 +1045,33 @@ function refreshAzStripAvailability() {
   }
 
   function letterAtPoint(x, y) {
+    // Direct hit — touch landed exactly on a letter button
     const el = document.elementFromPoint(x, y);
-    if (!el || !el.closest) return null;
-    const btn = el.closest('.az-letter');
-    if (!btn || btn.classList.contains('is-empty')) return null;
-    return btn.dataset.letter || null;
+    if (el && el.closest) {
+      const btn = el.closest('.az-letter');
+      if (btn && !btn.classList.contains('is-empty')) return btn.dataset.letter || null;
+    }
+    // Fallback — touch is within the strip's vertical range but possibly between letters
+    // (or in the small horizontal margin around it). Compute letter from Y position.
+    const strip = document.querySelector('.players-az-strip');
+    if (!strip) return null;
+    const sRect = strip.getBoundingClientRect();
+    if (x < sRect.left - 12 || x > sRect.right + 12) return null;
+    if (y < sRect.top || y > sRect.bottom) return null;
+    const letters = strip.querySelectorAll('.az-letter');
+    if (!letters.length) return null;
+    const ratio = (y - sRect.top) / sRect.height;
+    let idx = Math.floor(ratio * letters.length);
+    idx = Math.max(0, Math.min(letters.length - 1, idx));
+    if (!letters[idx].classList.contains('is-empty')) return letters[idx].dataset.letter;
+    // Snap to nearest non-empty letter
+    for (let off = 1; off < letters.length; off++) {
+      const above = letters[idx - off];
+      const below = letters[idx + off];
+      if (above && !above.classList.contains('is-empty')) return above.dataset.letter;
+      if (below && !below.classList.contains('is-empty')) return below.dataset.letter;
+    }
+    return null;
   }
 
   function setActive(letter) {
