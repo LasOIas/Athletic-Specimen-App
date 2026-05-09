@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.04.25.22';
+const APP_VERSION = '2026.05.09.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2359,34 +2359,31 @@ function renderFilteredPlayers() {
 
     return `
       <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-player-key="${playerKeyValue}">
+        <span class="status-pill ${checked ? 'in' : 'out'} player-status-corner">${checked ? 'In' : 'Out'}</span>
         <div class="player-card-main">
           ${state.isAdmin ? `<input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />` : ''}
           <div class="player-card-info">
             <span class="player-name">${player.name}</span>
-            <div class="player-meta">
-              <span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span>
-              <span class="status-pill ${checked ? 'in' : 'out'}">${checked ? 'In' : 'Out'}</span>
-              ${groupsDisplayHTML}
-            </div>
-          </div>
-          <div class="player-card-side">
-            ${checked
-              ? `<button class="btn-checkout" data-id="${player.id}">Check Out</button>`
-              : `<button class="btn-checkin" data-id="${player.id}">Check In</button>`
-            }
-            ${state.isAdmin ? `
-              <div class="menu-wrap">
-                <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
-                        data-id="${player.id}" data-player-key="${playerKeyValue}" title="More actions">⋮</button>
-                <div class="card-menu" role="menu">
-                  <button type="button" class="menu-item" data-role="menu-edit" data-player-key="${playerKeyValue}">Edit</button>
-                  <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
-                </div>
-              </div>
-            ` : ''}
+            <span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span>
+            <div class="player-groups-row">${groupsDisplayHTML}</div>
           </div>
         </div>
-
+        <div class="player-card-actions">
+          ${checked
+            ? `<button class="btn-checkout" data-id="${player.id}">Check Out</button>`
+            : `<button class="btn-checkin" data-id="${player.id}">Check In</button>`
+          }
+          ${state.isAdmin ? `
+            <div class="menu-wrap">
+              <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
+                      data-id="${player.id}" data-player-key="${playerKeyValue}" title="More actions">⋮</button>
+              <div class="card-menu" role="menu">
+                <button type="button" class="menu-item" data-role="menu-edit" data-player-key="${playerKeyValue}">Edit</button>
+                <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
+              </div>
+            </div>
+          ` : ''}
+        </div>
       </div>
     `;
   }).join('');

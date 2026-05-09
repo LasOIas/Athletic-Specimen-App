@@ -461,10 +461,11 @@ select:focus {
 }
 
 .player-card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  padding: 11px 12px;
+  padding: 11px 12px 10px;
   margin-bottom: 8px;
   box-shadow: var(--shadow-sm);
   transition: box-shadow .15s;
@@ -477,8 +478,9 @@ select:focus {
 
 .player-card-main {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
+  padding-right: 56px; /* leave room for status pill in top-right corner */
 }
 
 .player-select {
@@ -488,38 +490,46 @@ select:focus {
   cursor: pointer;
   accent-color: var(--brand);
   touch-action: manipulation;
+  margin-top: 2px;
 }
 
 .player-card-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
 }
 
 .player-name {
-  font-size: .95rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--text);
   display: block;
-  word-break: break-word;
-}
-
-.player-meta {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 3px;
-  flex-wrap: wrap;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .skill-pill {
-  font-size: .73rem;
+  font-size: .78rem;
   background: var(--surface-3);
   color: var(--text-3);
-  padding: 1px 7px;
+  padding: 2px 9px;
   border-radius: 999px;
   font-weight: 500;
   border: 1px solid var(--border);
   white-space: nowrap;
+  align-self: flex-start;
+}
+
+.player-groups-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: 100%;
 }
 
 .status-pill {
@@ -538,6 +548,23 @@ select:focus {
   background: var(--surface-3);
   color: var(--text-4);
   border: 1px solid var(--border);
+}
+
+.player-status-corner {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font-size: .75rem;
+  padding: 2px 10px;
+  z-index: 1;
+}
+
+.player-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .player-card-side {
@@ -575,16 +602,13 @@ select:focus {
 }
 .player-group-badge {
   display: inline-block;
-  padding: 1px 7px;
+  padding: 1px 8px;
   border-radius: 999px;
-  font-size: .7rem;
+  font-size: .72rem;
   font-weight: 500;
   background: var(--surface-3);
   color: var(--text-2);
   border: 1px solid var(--border);
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: middle;
 }
