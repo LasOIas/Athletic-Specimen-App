@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.05.09.7';
+const APP_VERSION = '2026.05.09.8';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7893,9 +7893,11 @@ function render() {
   const html = `
 <div id="app-shell">
   <header id="app-header">
-    <div class="app-header-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'}</div>
+    <div class="app-header-top-row">
+      <div class="app-header-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'}</div>
+      <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
+    </div>
     <div class="app-header-version">v${APP_VERSION}</div>
-    <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
   </header>
   <div id="app-content">
     <div id="tab-session" class="tab-panel">
