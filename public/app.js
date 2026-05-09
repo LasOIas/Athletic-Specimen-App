@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.05.09.5';
+const APP_VERSION = '2026.05.09.7';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2436,37 +2436,37 @@ function renderFilteredPlayers() {
     const playerGroupsValue = escapeHTMLText(JSON.stringify(playerGroups));
     const groupsDisplayHTML = playerGroups.length
       ? playerGroups.map((groupName, groupIndex) =>
-        `<span class="badge player-group-badge ${groupIndex === 0 ? 'is-primary' : ''}">${escapeHTMLText(groupName)}${groupIndex === 0 ? ' (Primary)' : ''}</span>`
+        `<span class="badge player-group-badge ${groupIndex === 0 ? 'is-primary' : ''}">${escapeHTMLText(groupName)}</span>`
       ).join('')
       : '<span class="small player-group-none">Ungrouped</span>';
 
     return `
       <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-player-key="${playerKeyValue}">
+        <span class="status-pill ${checked ? 'in' : 'out'} player-status-corner">${checked ? 'In' : 'Out'}</span>
         <div class="player-card-main">
           ${state.isAdmin ? `<input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />` : ''}
           <div class="player-card-info">
             <span class="player-name">${player.name}</span>
-            <span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span>
-            <div class="player-groups-row">${groupsDisplayHTML}</div>
+            <div class="player-meta-row">
+              <span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span>
+              ${groupsDisplayHTML}
+            </div>
           </div>
           <div class="player-card-actions">
-            <span class="status-pill ${checked ? 'in' : 'out'}">${checked ? 'In' : 'Out'}</span>
-            <div class="player-card-action-buttons">
-              ${checked
-                ? `<button class="btn-checkout" data-id="${player.id}">Check Out</button>`
-                : `<button class="btn-checkin" data-id="${player.id}">Check In</button>`
-              }
-              ${state.isAdmin ? `
-                <div class="menu-wrap">
-                  <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
-                          data-id="${player.id}" data-player-key="${playerKeyValue}" title="More actions">⋮</button>
-                  <div class="card-menu" role="menu">
-                    <button type="button" class="menu-item" data-role="menu-edit" data-player-key="${playerKeyValue}">Edit</button>
-                    <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
-                  </div>
+            ${checked
+              ? `<button class="btn-checkout" data-id="${player.id}">Check Out</button>`
+              : `<button class="btn-checkin" data-id="${player.id}">Check In</button>`
+            }
+            ${state.isAdmin ? `
+              <div class="menu-wrap">
+                <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
+                        data-id="${player.id}" data-player-key="${playerKeyValue}" title="More actions">⋮</button>
+                <div class="card-menu" role="menu">
+                  <button type="button" class="menu-item" data-role="menu-edit" data-player-key="${playerKeyValue}">Edit</button>
+                  <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
                 </div>
-              ` : ''}
-            </div>
+              </div>
+            ` : ''}
           </div>
         </div>
       </div>
@@ -8023,15 +8023,18 @@ const cssText = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   line-height: 1;
   color: #2563eb;
   background: #e0e7ff;
   border: none;
   border-radius: 8px;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0;
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0,0,0,0.08);
   transition: background 0.2s ease, transform 0.1s ease;
@@ -8088,12 +8091,13 @@ const cssText = `
   color: #b91c1c;
 }
 
-/* Make sure dropdown appears above everything */
-.menu-wrap, .card-menu, .btn-actions {
+/* Dropdown only jumps above the rest of the UI when it's actually open */
+.menu-wrap.menu-open,
+.menu-wrap.menu-open .card-menu,
+.menu-wrap.menu-open .btn-actions {
   z-index: 10000;
 }
-  /* ensure clicks land on the menu */
-.card-menu, .menu-item, .btn-actions { pointer-events: auto; z-index: 10000; }
+.card-menu, .menu-item { pointer-events: auto; }
 /* prevent any ancestor overlay from eating clicks */
 .player-card .menu-wrap { pointer-events: auto; }
 

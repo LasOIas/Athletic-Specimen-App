@@ -515,11 +515,12 @@ select:focus {
 }
 
 .player-card {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  padding: 10px 12px;
-  margin-bottom: 8px;
+  padding: 6px 12px;
+  margin-bottom: 6px;
   box-shadow: var(--shadow-sm);
   transition: box-shadow .15s;
 }
@@ -556,7 +557,16 @@ select:focus {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  gap: 2px;
+  padding-right: 44px; /* clear room for top-right status pill */
+}
+
+.player-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
 }
 
 .player-name {
@@ -609,17 +619,20 @@ select:focus {
 
 .player-card-actions {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  justify-content: center;
+  align-items: center;
+  justify-content: flex-end;
   gap: 6px;
   flex-shrink: 0;
+  align-self: flex-end; /* sit at bottom-right so the top-right status pill has clear space */
 }
 
-.player-card-action-buttons {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.player-status-corner {
+  position: absolute;
+  top: 5px;
+  right: 10px;
+  font-size: .68rem;
+  padding: 1px 7px;
+  z-index: 1;
 }
 
 .player-card-side {
@@ -632,13 +645,14 @@ select:focus {
 /* Check in / out buttons inside cards */
 .btn-checkin,
 .btn-checkout {
-  padding: 6px 11px;
+  padding: 4px 11px;
   font-size: 13px !important;
   font-weight: 600;
   border-radius: 8px;
   white-space: nowrap;
-  min-height: 34px;
-  min-width: 78px;
+  min-height: 28px;
+  min-width: 72px;
+  height: 28px;
 }
 .btn-checkin { background: var(--brand); color: #fff; border-color: transparent; }
 .btn-checkin:hover { background: var(--brand-dark); }
