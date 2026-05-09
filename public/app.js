@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.05.09.1';
+const APP_VERSION = '2026.05.09.2';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2475,23 +2475,20 @@ function getSharedGroupSyncModeLabel() {
 
 function buildSharedSyncNoticeHTML() {
   if (!SUPABASE_AUTHORITATIVE || !supabaseClient) return '';
-  const modeLabel = getSharedGroupSyncModeLabel();
 
   if (state.sharedSyncState === SHARED_SYNC_PENDING) {
-    return `<p class="small shared-sync-notice is-pending">Syncing shared data from Supabase...${escapeHTMLText(modeLabel)}</p>`;
+    return `<p class="small shared-sync-notice is-pending">Syncing…</p>`;
   }
   if (state.sharedSyncState === SHARED_SYNC_FALLBACK) {
-    const detail = state.sharedSyncError ? ` ${escapeHTMLText(state.sharedSyncError)}` : '';
-    return `<p class="small shared-sync-notice is-fallback">Using local fallback cache.${detail}${escapeHTMLText(modeLabel)}</p>`;
+    return `<p class="small shared-sync-notice is-fallback">Local fallback</p>`;
   }
   if (state.sharedSyncState === SHARED_SYNC_LIVE) {
     const at = formatLastSharedSyncLabel();
-    return `<p class="small shared-sync-notice is-live">Supabase authoritative sync${at ? ` | Updated ${escapeHTMLText(at)}` : ''}.${escapeHTMLText(modeLabel)}</p>`;
+    return `<p class="small shared-sync-notice is-live">${at ? `Updated ${escapeHTMLText(at)}` : 'Live'}</p>`;
   }
   if (state.sharedSyncState === SHARED_SYNC_CONFLICT_RESOLVED) {
-    const detail = state.sharedSyncError ? ` ${escapeHTMLText(state.sharedSyncError)}` : '';
     const at = formatLastSharedSyncLabel();
-    return `<p class="small shared-sync-notice is-live">Supabase conflict resolved.${detail}${at ? ` | Updated ${escapeHTMLText(at)}` : ''}.${escapeHTMLText(modeLabel)}</p>`;
+    return `<p class="small shared-sync-notice is-live">${at ? `Updated ${escapeHTMLText(at)}` : 'Live'}</p>`;
   }
   return '';
 }
@@ -7804,10 +7801,8 @@ function render() {
   const html = `
 <div id="app-shell">
   <header id="app-header">
-    <div class="app-header-brand">
-      ${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'}
-      <span class="app-version-inline">v${APP_VERSION}</span>
-    </div>
+    <div class="app-header-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'}</div>
+    <div class="app-header-version">v${APP_VERSION}</div>
     <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
   </header>
   <div id="app-content">
