@@ -228,8 +228,8 @@ select:focus {
 #app-shell {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
-  height: 100vh;
+  height: 100vh; /* fallback */
+  height: 100dvh; /* dvh = the VISIBLE viewport on iOS so the bottom nav isn't pushed off-screen */
   overflow: hidden;
 }
 
@@ -239,9 +239,7 @@ select:focus {
   flex-direction: column;
   align-items: stretch;
   gap: 1px;
-  /* env() activates once index.html has viewport-fit=cover so the header
-     clears the iPhone status bar / notch in standalone PWA mode */
-  padding: max(8px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left));
+  padding: 8px 16px;
   background: var(--brand);
   min-height: 0;
 }
@@ -399,7 +397,7 @@ select:focus {
   background: var(--surface);
   border-top: 1px solid var(--border);
   min-height: 60px;
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 .nav-btn {
