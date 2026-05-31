@@ -1251,6 +1251,29 @@ select:focus {
 .card-generate-teams .live-matchups-empty   { margin: 0; color: var(--text-3); }
 .card-generate-teams .live-matchups-waiting { margin: 4px 0 0; color: var(--text-3); font-size: .85rem; }
 
+/* Collapsible Live Nets — slim header card, tap to expand (keeps team rosters prominent) */
+.live-nets-collapsible { margin: 8px 0; }
+.live-nets-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  min-height: 48px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 15px !important;
+}
+.live-nets-toggle:hover { background: var(--surface-3); }
+.live-nets-caret { font-weight: 600; color: var(--brand); font-size: 13px !important; }
+.live-nets-body.is-collapsed { display: none; }
+.live-nets-collapsible .live-matchups-board { margin-top: 8px; }
+.live-nets-collapsible .live-matchups-board h4 { display: none; } /* the toggle is the header now */
+
 /* ── Player filter tabs ── */
 .player-tabs, .skill-subtabs {
   display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px;

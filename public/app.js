@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.05.31.3';
+const APP_VERSION = '2026.05.31.4';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7741,8 +7741,16 @@ function render() {
     <button id="btn-generate-teams">Generate</button>
   </div>
   ${teamsFairnessHTML}
-  ${liveMatchupsHTML}
   ${teamsHTML}
+  ${liveMatchupsHTML ? `<div class="live-nets-collapsible">
+    <button type="button" class="live-nets-toggle" data-role="toggle-live-nets" aria-expanded="${state.liveNetsCollapsed === false ? 'true' : 'false'}">
+      <span>Live Nets</span>
+      <span class="live-nets-caret">${state.liveNetsCollapsed === false ? '▾ Hide' : '▸ Show'}</span>
+    </button>
+    <div class="live-nets-body${state.liveNetsCollapsed === false ? '' : ' is-collapsed'}">
+      ${liveMatchupsHTML}
+    </div>
+  </div>` : ''}
   </div>
 </div>` : '';
 
@@ -9312,6 +9320,22 @@ if (saveSupabaseBtn) {
       render();
     });
   });
+
+  // Live Nets collapse/expand toggle (default collapsed so the team rosters stay prominent)
+  const liveNetsToggle = document.querySelector('[data-role="toggle-live-nets"]');
+  if (liveNetsToggle) {
+    liveNetsToggle.addEventListener('click', () => {
+      const body = liveNetsToggle.parentElement.querySelector('.live-nets-body');
+      if (!body) return;
+      const nowCollapsed = !body.classList.contains('is-collapsed');
+      body.classList.toggle('is-collapsed', nowCollapsed);
+      state.liveNetsCollapsed = nowCollapsed;
+      const caret = liveNetsToggle.querySelector('.live-nets-caret');
+      if (caret) caret.textContent = nowCollapsed ? '▸ Show' : '▾ Hide';
+      liveNetsToggle.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
+      saveLocal();
+    });
+  }
 
   document.querySelectorAll('[data-role="report-live-match-result"]').forEach((btn) => {
     btn.addEventListener('click', () => {
