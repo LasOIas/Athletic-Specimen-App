@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0d10" />
   <title>Athletic Specimen · Check In</title>
   <style>
@@ -29,7 +29,7 @@
       overscroll-behavior-y: none;
     }
     body {
-      padding: 24px 20px 40px;
+      padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
       max-width: 520px;
       margin: 0 auto;
     }
@@ -179,6 +179,7 @@
         spellcheck="false"
       />
       <ul id="suggestions"></ul>
+      <div id="checkinError" class="error" hidden></div>
       <div id="noMatch" class="no-match">
         <p>Don't see your name?</p>
         <button id="newPlayerBtn" class="btn btn-secondary">I'm new — register me</button>
@@ -282,13 +283,27 @@
       matches.forEach((p) => {
         const li = document.createElement('li');
         li.textContent = p.name;
-        li.addEventListener('click', () => checkInExisting(p));
+        li.addEventListener('click', () => {
+          if (li.dataset.busy) return;
+          li.dataset.busy = '1';
+          li.style.opacity = '0.55';
+          li.textContent = 'Checking in ' + p.name + '…';
+          ul.style.pointerEvents = 'none';
+          checkInExisting(p, () => {
+            li.dataset.busy = '';
+            li.style.opacity = '';
+            li.textContent = p.name;
+            ul.style.pointerEvents = '';
+          });
+        });
         ul.appendChild(li);
       });
       noMatch.hidden = matches.length > 0;
     }
 
-    async function checkInExisting(player) {
+    async function checkInExisting(player, onError) {
+      const errEl = $('checkinError');
+      if (errEl) errEl.hidden = true;
       try {
         const { error } = await sb
           .from('players')
@@ -298,7 +313,13 @@
         showSuccess(player.name);
       } catch (err) {
         console.error('Check-in error:', err);
-        alert('Something went wrong checking you in. Please try again or tell the organizer.');
+        if (typeof onError === 'function') onError();
+        if (errEl) {
+          errEl.textContent = 'Something went wrong checking you in. Try again, or tell the organizer.';
+          errEl.hidden = false;
+        } else {
+          alert('Something went wrong checking you in. Please try again or tell the organizer.');
+        }
       }
     }
 

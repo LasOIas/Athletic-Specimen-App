@@ -239,7 +239,9 @@ select:focus {
   flex-direction: column;
   align-items: stretch;
   gap: 1px;
-  padding: 8px 16px;
+  /* env() activates once index.html has viewport-fit=cover so the header
+     clears the iPhone status bar / notch in standalone PWA mode */
+  padding: max(8px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 8px max(16px, env(safe-area-inset-left));
   background: var(--brand);
   min-height: 0;
 }
@@ -329,7 +331,7 @@ select:focus {
 #tab-players { padding-right: 30px; }
 /* Override the global sticky-search-bar's negative right margin within the
    Players tab so it stops at the container edge like every other row. */
-#tab-players .sticky-search-bar { margin-right: 0; }
+#tab-players .sticky-search-bar { margin-right: 0; margin-left: 0; }
 
 /* ── Players tab: sticky search + back-to-top ── */
 .sticky-search-bar {
@@ -452,7 +454,7 @@ select:focus {
 }
 .admin-toolbar button {
   white-space: nowrap;
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 12px;
   font-size: 13px !important;
   flex-shrink: 0;
@@ -525,8 +527,8 @@ select:focus {
   margin: 0;
   min-width: 0;
   min-height: 0;
-  width: 16px;
-  height: 14px;
+  width: 22px;
+  height: 18px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   text-align: center;
@@ -568,9 +570,9 @@ select:focus {
 }
 
 .player-select {
-  flex: 0 0 22px;
-  width: 22px;
-  height: 22px;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   margin: 2px 0 0;
   border: 1px solid var(--border);
@@ -676,14 +678,14 @@ select:focus {
 /* Check in / out buttons inside cards */
 .btn-checkin,
 .btn-checkout {
-  padding: 4px 11px;
-  font-size: 13px !important;
+  padding: 6px 12px;
+  font-size: 14px !important;
   font-weight: 600;
   border-radius: 8px;
   white-space: nowrap;
-  min-height: 28px;
+  min-height: 40px;
   min-width: 72px;
-  height: 28px;
+  height: 40px;
 }
 .btn-checkin { background: var(--brand); color: #fff; border-color: transparent; }
 .btn-checkin:hover { background: var(--brand-dark); }
@@ -876,6 +878,9 @@ select:focus {
   border-radius: 0 0 var(--r-md) var(--r-md);
   box-shadow: 0 -2px 8px rgba(0,0,0,.06);
 }
+#bulkBar button,
+#bulkBar select { min-height: 44px; }
+#bulkBar select:disabled { opacity: .6; cursor: not-allowed; }
 
 /* ── Popups / Modals ── */
 .popup-overlay {
@@ -893,6 +898,7 @@ select:focus {
 .popup-card {
   width: min(640px, calc(100vw - 1.5rem));
   max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - 2rem); /* dvh wins where supported so Save/Cancel never clip under the iOS toolbar */
   overflow: auto;
   margin: 0;
 }
@@ -1110,6 +1116,8 @@ select:focus {
   cursor: grab;
   -webkit-user-select: none;
   user-select: none;
+  touch-action: none; /* stop iOS claiming the gesture as vertical scroll before the drag threshold trips */
+  min-height: 44px;
   transition: box-shadow .12s;
 }
 .team-player-card:active { cursor: grabbing; }
@@ -1215,10 +1223,10 @@ select:focus {
 .card-generate-teams .live-net-divider::after { content: ''; width: 24px; border-top: 2px solid #93c5fd; }
 
 .card-generate-teams .live-matchup-actions {
-  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; justify-content: center;
+  display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; justify-content: center;
 }
 .card-generate-teams .live-matchup-result-btn {
-  padding: 4px 10px; min-height: 30px; font-size: 13px !important; min-width: 88px;
+  padding: 8px 14px; min-height: 44px; font-size: 14px !important; min-width: 120px; flex: 1 1 120px;
   border: 1px solid var(--border-2); border-radius: 999px;
   background: var(--surface); color: var(--text-2);
 }
@@ -1228,7 +1236,7 @@ select:focus {
   color: var(--success); font-weight: 600;
 }
 .card-generate-teams .live-matchup-clear-btn {
-  padding: 4px 10px; min-height: 30px; font-size: 13px !important;
+  padding: 8px 14px; min-height: 44px; font-size: 14px !important;
   border: 1px solid #fecaca; border-radius: 999px;
   background: var(--danger-light); color: #9f1239;
 }
@@ -1374,7 +1382,7 @@ select:focus {
   .row.admin-player-form-row > .admin-player-save-btn { width: 100%; }
   .row.admin-player-form-row > #admin-player-skill    { max-width: none; }
   .popup-overlay { padding: 8px; }
-  .popup-card    { width: calc(100vw - 1rem); max-height: calc(100vh - 1rem); }
+  .popup-card    { width: calc(100vw - 1rem); max-height: calc(100vh - 1rem); max-height: calc(100dvh - 1rem); }
   .player-card   { padding: 10px; margin-bottom: 6px; }
   .player-card .edit-row { display: block !important; }
   .edit-row input { margin-bottom: 8px; }
@@ -1394,7 +1402,10 @@ select:focus {
 }
 
 @media (max-width: 480px) {
-  .card-generate-teams .live-nets-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+  /* one full-width net per row on phones so the two "Won" buttons sit
+     side-by-side with a comfortable gap instead of 30px tall, 6px apart */
+  .card-generate-teams .live-nets-grid { grid-template-columns: 1fr; }
+  .card-generate-teams .live-net-card  { min-height: 0; }
 }
 
 @media (min-width: 769px)  { .card-generate-teams .live-nets-grid { grid-template-columns: repeat(3, minmax(170px, 1fr)); } }

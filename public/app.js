@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.05.09.14';
+const APP_VERSION = '2026.05.31.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -120,6 +120,7 @@ function closePlayerEditPopup() {
   if (!modal) return;
   modal.style.display = 'none';
   modal.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
   const body = document.getElementById('player-edit-modal-body');
   if (body) body.innerHTML = '';
 }
@@ -170,6 +171,7 @@ function openPlayerEditPopup(playerKey) {
 
   modal.style.display = 'flex';
   modal.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden'; // lock background scroll on iOS so the page doesn't scroll under the modal
 
   const nameInput = body.querySelector('.edit-name');
   if (nameInput) { nameInput.focus(); if (typeof nameInput.select === 'function') nameInput.select(); }
@@ -857,6 +859,16 @@ function resetGeneratedTeamDragState() {
     e.preventDefault();
     moveGhost(t.clientX, t.clientY);
 
+    // Edge autoscroll: if the finger nears the top/bottom of the scroll panel,
+    // nudge it so off-screen teams become reachable mid-drag.
+    const scrollPanel = document.querySelector('.tab-panel.active');
+    if (scrollPanel) {
+      const pr = scrollPanel.getBoundingClientRect();
+      const EDGE = 64, STEP = 16;
+      if (t.clientY < pr.top + EDGE) scrollPanel.scrollTop -= STEP;
+      else if (t.clientY > pr.bottom - EDGE) scrollPanel.scrollTop += STEP;
+    }
+
     const below = elAt(t.clientX, t.clientY);
     const teamEl = below ? below.closest('.generated-team[data-team-index]') : null;
     const cardEl = below ? below.closest('.team-player-card') : null;
@@ -1086,11 +1098,19 @@ function refreshAzStripAvailability() {
   // Tap (no drag) → smooth scroll to first matching player
   document.addEventListener('click', (e) => {
     if (scrubbing) return; // a drag just ended; the touchend handler already settled position
+    let letter = null;
     const btn = e.target.closest && e.target.closest('.az-letter');
-    if (!btn || btn.classList.contains('is-empty')) return;
+    if (btn) {
+      if (btn.classList.contains('is-empty')) return;
+      letter = btn.dataset.letter;
+    } else {
+      // near-miss tap (between letters or just off the strip): snap to the nearest
+      // non-empty letter by Y position — same forgiving logic as the scrub path
+      letter = letterAtPoint(e.clientX, e.clientY);
+      if (!letter) return;
+    }
     e.preventDefault();
     e.stopPropagation();
-    const letter = btn.dataset.letter;
     jumpToLetter(letter, true);
     setActive(letter);
     setTimeout(() => setActive(null), 600);
@@ -1880,7 +1900,11 @@ function ensureAuthorityRefreshHooks() {
     if (!SUPABASE_AUTHORITATIVE) return;
     setSharedSyncState(SHARED_SYNC_FALLBACK, 'Offline. Showing local cache.');
     setTournamentSyncState(SHARED_SYNC_FALLBACK, 'Offline. Showing local cache.');
-    render();
+    // Surgical update so a connectivity drop mid-scroll doesn't rebuild #root
+    // and jump the roster on mobile (use partialRender, not full render()).
+    const syncNoticeEl = document.getElementById('js-sync-notice');
+    if (syncNoticeEl) { syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML(); partialRender(); }
+    else render();
   });
 
   window.addEventListener('pageshow', (event) => {
@@ -8122,10 +8146,10 @@ const cssText = `
   background: #e0e7ff;
   border: none;
   border-radius: 8px;
-  width: 28px;
-  height: 28px;
-  min-height: 28px;
-  min-width: 28px;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  min-width: 40px;
   padding: 0;
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0,0,0,0.08);
@@ -8449,12 +8473,14 @@ const openPopup = (popupId) => {
   if (!popup) return;
   popup.style.display = 'flex';
   popup.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden'; // lock background scroll so the page doesn't scroll under the modal on iOS
 };
 const closePopup = (popupId) => {
   const popup = document.getElementById(popupId);
   if (!popup) return;
   popup.style.display = 'none';
   popup.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
 };
 
 const adminQuickOpen = document.getElementById('admin-quick-open');
@@ -8577,12 +8603,16 @@ function gmPopulate() {
 }
 
 if (gmOpen && gmRoot) {
+  const closeGroupManager = () => { gmRoot.style.display = 'none'; document.body.style.overflow = ''; };
   gmOpen.addEventListener('click', () => {
     gmPopulate();
     gmRoot.style.display = 'block';
+    document.body.style.overflow = 'hidden'; // lock background scroll on iOS
   });
   const gmClose = gmRoot.querySelector('#btn-close-group-manager');
-  if (gmClose) gmClose.addEventListener('click', () => gmRoot.style.display = 'none');
+  if (gmClose) gmClose.addEventListener('click', closeGroupManager);
+  // Tap the dark backdrop (the overlay itself) to close, matching the other modals
+  gmRoot.addEventListener('click', (e) => { if (e.target === gmRoot) closeGroupManager(); });
 
   // Add
   const gmAdd = gmRoot.querySelector('#gm-add');
@@ -8752,6 +8782,12 @@ if (gmOpen && gmRoot) {
   // --- Admin login/logout ---
 // Admin login
 const loginBtn = document.getElementById('btn-admin-login');
+const adminCodeInputForEnter = document.getElementById('admin-code');
+if (adminCodeInputForEnter && loginBtn) {
+  adminCodeInputForEnter.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); loginBtn.click(); }
+  });
+}
 if (loginBtn) {
   loginBtn.addEventListener('click', async () => {
     const codeInput = document.getElementById('admin-code');
