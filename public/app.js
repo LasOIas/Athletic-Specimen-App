@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.05.31.1';
+const APP_VERSION = '2026.05.31.2';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7722,19 +7722,16 @@ function render() {
     <h3>Generate Teams</h3>
   </div>
   <div id="card-body-admin-generate-teams">
+  <div class="team-size-label">Team size — tap to build teams of that size</div>
   <div class="team-size-chips">
-    <div class="team-size-chip">
-      <strong>${Math.floor(state.checkedIn.length / 6)}</strong>
-      <span>teams of 6</span>
-    </div>
-    <div class="team-size-chip">
-      <strong>${Math.floor(state.checkedIn.length / 4)}</strong>
-      <span>teams of 4</span>
-    </div>
-    <div class="team-size-chip">
-      <strong>${Math.floor(state.checkedIn.length / 2)}</strong>
-      <span>teams of 2</span>
-    </div>
+    ${[2, 3, 4, 6].map((sz) => {
+      const n = Math.floor(state.checkedIn.length / sz);
+      const active = state.lastTeamSize === sz ? ' is-active' : '';
+      return `<button type="button" class="team-size-chip${active}" data-team-size="${sz}">
+        <strong>${sz}s</strong>
+        <span>${n} ${n === 1 ? 'team' : 'teams'}</span>
+      </button>`;
+    }).join('')}
   </div>
   <div class="row generate-teams-controls">
     <label class="generate-teams-count">
@@ -7975,7 +7972,7 @@ function render() {
 
   const adminLoginHTML = !state.isAdmin ? `
     <div class="card">
-      <h2>Admin Login <span class="app-version-pill">v${APP_VERSION}</span></h2>
+      <h2>Admin Login</h2>
       <div class="row">
         <input type="password" id="admin-code" placeholder="Enter admin code" />
         <button id="btn-admin-login">Login</button>
@@ -8499,10 +8496,12 @@ function openQrModal() {
   const container = document.getElementById('qrCodeContainer');
   if (!modal || !container) return;
   container.innerHTML = '';
+  // Size the QR to fit the phone so it doesn't overflow the modal off-screen to the right
+  const qrSize = Math.max(220, Math.min(340, window.innerWidth - 96));
   new QRCode(container, {
     text: 'https://athletic-specimen-app.vercel.app/checkin.html',
-    width: 340,
-    height: 340,
+    width: qrSize,
+    height: qrSize,
     colorDark: '#000000',
     colorLight: '#ffffff',
     correctLevel: QRCode.CorrectLevel.H
@@ -9282,6 +9281,7 @@ if (saveSupabaseBtn) {
   const generateBtn = document.getElementById('btn-generate-teams');
   if (generateBtn) {
     generateBtn.addEventListener('click', () => {
+      state.lastTeamSize = null; // manual "Teams: N" = Auto / as-equal mode
       const generated = generateBalancedGroups(state.players, state.checkedIn, state.groupCount);
       state.generatedTeams = generated.teams;
       state.generatedTeamsSummary = generated.summary;
@@ -9292,6 +9292,26 @@ if (saveSupabaseBtn) {
       render();
     });
   }
+
+  // Team-SIZE buttons (2s/3s/4s/6s): teams of the chosen size, count = floor(checkedIn/size).
+  // Remainder players ride along (the balancer spreads them +1 per team) so everyone plays.
+  document.querySelectorAll('[data-team-size]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const size = Number(btn.getAttribute('data-team-size'));
+      if (!size) return;
+      const numTeams = Math.max(2, Math.floor(state.checkedIn.length / size));
+      state.groupCount = numTeams;
+      state.lastTeamSize = size;
+      const generated = generateBalancedGroups(state.players, state.checkedIn, numTeams);
+      state.generatedTeams = generated.teams;
+      state.generatedTeamsSummary = generated.summary;
+      state.liveCourtOrder = defaultLiveCourtOrder(generated.teams.length);
+      state.liveMatchResults = {};
+      state.liveMatchSkillSnapshots = {};
+      saveLocal();
+      render();
+    });
+  });
 
   document.querySelectorAll('[data-role="report-live-match-result"]').forEach((btn) => {
     btn.addEventListener('click', () => {
