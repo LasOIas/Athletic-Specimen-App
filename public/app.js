@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.17.1';
+const APP_VERSION = '2026.06.17.2';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2634,6 +2634,9 @@ const state = {
   tournaments: [],            // [{id,name,status,match_cap,pool_count,net_count,created_at}]
   activeTournamentId: null,   // selected tournament id (admin)
   tournamentTeams: [],        // teams for the active tournament
+  tournamentPools: [],        // pools for the active tournament
+  tournamentMatches: [],      // matches for the active tournament
+  tournamentPickedTeamId: null, // self-serve: the team this phone picked
   tournamentTabLoading: false,
   tournamentTabError: ''
 };
@@ -2716,12 +2719,159 @@ async function tdbDeleteTeam(teamId) {
   if (error) { console.error('tdbDeleteTeam', error); throw error; }
 }
 
-// Reload tournament list (+ active tournament's teams) into state. No render.
+async function tdbListPools(tournamentId) {
+  if (!supabaseClient || !tournamentId) return [];
+  const { data, error } = await supabaseClient
+    .from('pools').select('*').eq('tournament_id', tournamentId)
+    .order('display_order', { ascending: true });
+  if (error) { console.error('tdbListPools', error); return []; }
+  return data || [];
+}
+
+async function tdbListMatches(tournamentId, phase) {
+  if (!supabaseClient || !tournamentId) return [];
+  let q = supabaseClient.from('matches').select('*').eq('tournament_id', tournamentId);
+  if (phase) q = q.eq('phase', phase);
+  const { data, error } = await q.order('queue_order', { ascending: true });
+  if (error) { console.error('tdbListMatches', error); return []; }
+  return data || [];
+}
+
+async function tdbMoveTeamToPool(teamId, poolId) {
+  if (!supabaseClient || !teamId) return;
+  const { error } = await supabaseClient.from('teams').update({ pool_id: poolId || null }).eq('id', teamId);
+  if (error) { console.error('tdbMoveTeamToPool', error); throw error; }
+}
+
+// Randomly draw pools: clears existing pools (cascades matches; sets teams.pool_id null),
+// creates pool_count pools (A,B,...), shuffles teams, round-robin-assigns them to pools.
+async function tdbDrawPools(tournament) {
+  if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  const teams = await tdbListTeams(tournament.id);
+  if (teams.length < 2) throw new Error('Add at least 2 teams first.');
+  for (const p of await tdbListPools(tournament.id)) {
+    await supabaseClient.from('pools').delete().eq('id', p.id);
+  }
+  const poolCount = Math.max(1, Math.min(Number(tournament.pool_count) || 1, teams.length));
+  const poolRows = [];
+  for (let i = 0; i < poolCount; i++) {
+    const { data, error } = await supabaseClient.from('pools')
+      .insert([{ tournament_id: tournament.id, label: String.fromCharCode(65 + i), display_order: i }])
+      .select().single();
+    if (error) throw error;
+    poolRows.push(data);
+  }
+  const shuffled = teams.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = shuffled[i]; shuffled[i] = shuffled[j]; shuffled[j] = tmp;
+  }
+  for (let i = 0; i < shuffled.length; i++) {
+    const pool = poolRows[i % poolCount];
+    const { error } = await supabaseClient.from('teams').update({ pool_id: pool.id }).eq('id', shuffled[i].id);
+    if (error) throw error;
+  }
+}
+
+// Generate round-robin pool matches, assign nets + per-net queue order, set status='pools'.
+async function tdbStartPoolPlay(tournament) {
+  if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  const pools = await tdbListPools(tournament.id);
+  if (!pools.length) throw new Error('Draw pools first.');
+  const teams = await tdbListTeams(tournament.id);
+  await supabaseClient.from('matches').delete().eq('tournament_id', tournament.id).eq('phase', 'pool');
+  const netCount = Math.max(1, Number(tournament.net_count) || 1);
+  const rows = [];
+  const queuePerNet = {};
+  let k = 0;
+  for (const pool of pools) {
+    const ids = teams.filter((t) => t.pool_id === pool.id).map((t) => t.id);
+    for (const pair of generateRoundRobin(ids)) {
+      const net = (k % netCount) + 1;
+      queuePerNet[net] = (queuePerNet[net] || 0) + 1;
+      rows.push({
+        tournament_id: tournament.id, phase: 'pool', pool_id: pool.id,
+        team_a_id: pair[0], team_b_id: pair[1], status: 'scheduled',
+        net, queue_order: queuePerNet[net], version: 0
+      });
+      k++;
+    }
+  }
+  if (rows.length) {
+    const { error } = await supabaseClient.from('matches').insert(rows);
+    if (error) throw error;
+  }
+  await supabaseClient.from('tournaments')
+    .update({ status: 'pools', updated_at: new Date().toISOString() }).eq('id', tournament.id);
+}
+
+// Submit a match result with optimistic concurrency (CAS on version). Returns the
+// updated row, or throws a "another device updated this" message on a version conflict.
+async function tdbSubmitResult(match, scoreA, scoreB) {
+  if (!supabaseClient || !match) throw new Error('No match.');
+  const winnerSide = decideWinner(scoreA, scoreB);
+  if (!winnerSide) throw new Error('Enter both scores; ties are not allowed.');
+  const winnerId = winnerSide === 'A' ? match.team_a_id : match.team_b_id;
+  const loserId = winnerSide === 'A' ? match.team_b_id : match.team_a_id;
+  const { data, error } = await supabaseClient.from('matches')
+    .update({
+      score_a: Number(scoreA), score_b: Number(scoreB),
+      winner_team_id: winnerId, loser_team_id: loserId, status: 'final',
+      version: (match.version || 0) + 1, updated_at: new Date().toISOString()
+    })
+    .eq('id', match.id).eq('version', match.version || 0).select();
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Another device just updated this match — refreshing.');
+  return data[0];
+}
+
+async function tdbClearResult(match) {
+  if (!supabaseClient || !match) return;
+  const { data, error } = await supabaseClient.from('matches')
+    .update({
+      score_a: null, score_b: null, winner_team_id: null, loser_team_id: null,
+      status: 'scheduled', version: (match.version || 0) + 1, updated_at: new Date().toISOString()
+    })
+    .eq('id', match.id).eq('version', match.version || 0).select();
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Another device just updated this match — refreshing.');
+  return data[0];
+}
+
+// Reload tournament list (+ active tournament's teams/pools/matches) into state. No render.
 async function tdbRefreshTournaments() {
   state.tournaments = await tdbListTournaments();
-  state.tournamentTeams = state.activeTournamentId
-    ? await tdbListTeams(state.activeTournamentId)
-    : [];
+  // Public viewers auto-follow the live tournament so they can self-report results.
+  if (!state.isAdmin && !state.activeTournamentId && state.tournaments.length) {
+    const live = state.tournaments.find((t) => t.status === 'pools') || state.tournaments[0];
+    state.activeTournamentId = live ? live.id : null;
+  }
+  if (state.activeTournamentId) {
+    state.tournamentTeams = await tdbListTeams(state.activeTournamentId);
+    state.tournamentPools = await tdbListPools(state.activeTournamentId);
+    state.tournamentMatches = await tdbListMatches(state.activeTournamentId);
+  } else {
+    state.tournamentTeams = [];
+    state.tournamentPools = [];
+    state.tournamentMatches = [];
+  }
+}
+
+// Surgically re-render only the tournament tab body (preserves other tabs' state).
+function partialRenderTournament() {
+  const c = document.querySelector('#tab-tournament .container');
+  if (c) c.innerHTML = buildTournamentTabHTML();
+}
+
+// Background freshness: reload tournament data + surgically re-render the tab so a
+// second phone's submission shows up — but NEVER while the operator is mid-entry
+// (a focused input/select in the tab would be clobbered).
+async function refreshTournamentLive() {
+  if (activeMainTab !== 'tournament') return;
+  const ae = document.activeElement;
+  if (ae && ae.closest && ae.closest('#tab-tournament') && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;
+  await tdbRefreshTournaments();
+  if (activeMainTab === 'tournament') partialRenderTournament();
 }
 
 // Top-level builders can't see render()'s local escapeHTML; alias to the global escaper.
@@ -2729,6 +2879,73 @@ function escapeHTML(s) { return escapeHTMLText(s); }
 
 function tournamentStatusLabel(status) {
   return ({ setup: 'Setup', pools: 'Pool play', bracket: 'Bracket', completed: 'Completed' })[status] || 'Setup';
+}
+
+// ---------------------------------------------------------------------------
+// Tournament pure logic (deterministic, no DOM/DB) — Phase 2+.
+// ---------------------------------------------------------------------------
+
+// Round-robin via the circle method: every unordered pair exactly once.
+// Odd team counts get a rotating bye (no match generated for it).
+function generateRoundRobin(ids) {
+  const list = (ids || []).slice();
+  if (list.length < 2) return [];
+  if (list.length % 2 === 1) list.push(null); // bye slot
+  const n = list.length;
+  const half = n / 2;
+  const pairs = [];
+  let arr = list.slice();
+  for (let r = 0; r < n - 1; r++) {
+    for (let i = 0; i < half; i++) {
+      const a = arr[i];
+      const b = arr[n - 1 - i];
+      if (a !== null && b !== null) pairs.push([a, b]);
+    }
+    // rotate all but the first element
+    arr = [arr[0], arr[n - 1]].concat(arr.slice(1, n - 1));
+  }
+  return pairs;
+}
+
+// Higher score wins; blank/equal/non-numeric -> null (no winner yet).
+// Note: Number('') === 0, so blank fields must be rejected BEFORE coercion.
+function decideWinner(scoreA, scoreB) {
+  const norm = (s) => {
+    if (s === null || s === undefined) return NaN;
+    if (typeof s === 'string' && s.trim() === '') return NaN;
+    return Number(s);
+  };
+  const a = norm(scoreA);
+  const b = norm(scoreB);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  if (a > b) return 'A';
+  if (b > a) return 'B';
+  return null;
+}
+
+// Standings from FINAL pool matches: wins, point differential, ranked.
+function computeStandings(teams, matches) {
+  const stats = {};
+  (teams || []).forEach((t) => {
+    stats[t.id] = { teamId: t.id, name: t.name || '', wins: 0, losses: 0, pointsFor: 0, pointsAgainst: 0, pointDiff: 0 };
+  });
+  (matches || []).forEach((m) => {
+    if (m.phase !== 'pool' || m.status !== 'final') return;
+    const a = stats[m.team_a_id];
+    const b = stats[m.team_b_id];
+    if (!a || !b) return;
+    const sa = Number(m.score_a) || 0;
+    const sb = Number(m.score_b) || 0;
+    a.pointsFor += sa; a.pointsAgainst += sb;
+    b.pointsFor += sb; b.pointsAgainst += sa;
+    if (m.winner_team_id === a.teamId) { a.wins++; b.losses++; }
+    else if (m.winner_team_id === b.teamId) { b.wins++; a.losses++; }
+  });
+  const rows = Object.keys(stats).map((k) => stats[k]);
+  rows.forEach((r) => { r.pointDiff = r.pointsFor - r.pointsAgainst; });
+  rows.sort((x, y) => (y.wins - x.wins) || (y.pointDiff - x.pointDiff) || x.name.localeCompare(y.name));
+  rows.forEach((r, i) => { r.rank = i + 1; });
+  return rows;
 }
 
 function buildTeamListHTML(teams, isAdmin) {
@@ -2740,6 +2957,79 @@ function buildTeamListHTML(teams, isAdmin) {
       <span style="flex:1;">${escapeHTML(String(i + 1))}. ${escapeHTML(tm.name || '')}</span>
       ${isAdmin ? `<button type="button" class="danger" data-role="tv2-delete-team" data-id="${escapeHTML(tm.id)}">Remove</button>` : ''}
     </div>`).join('');
+}
+
+function teamNameById(teams, id) {
+  const t = (teams || []).find((x) => x.id === id);
+  return t ? (t.name || '') : '—';
+}
+
+function buildStandingsTableHTML(poolTeams, poolMatches) {
+  const rows = computeStandings(poolTeams, poolMatches);
+  if (!rows.length) return '';
+  return `<table class="table" style="margin:6px 0;font-size:14px;">
+    <thead><tr><th>#</th><th>Team</th><th>W-L</th><th>Diff</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr>
+      <td>${r.rank}</td>
+      <td>${escapeHTML(r.name)}</td>
+      <td>${r.wins}-${r.losses}</td>
+      <td style="color:${r.pointDiff > 0 ? 'var(--success)' : r.pointDiff < 0 ? 'var(--danger)' : 'inherit'};">${r.pointDiff > 0 ? '+' : ''}${r.pointDiff}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+function buildMatchRowHTML(m, teams, isAdmin) {
+  const an = escapeHTML(teamNameById(teams, m.team_a_id));
+  const bn = escapeHTML(teamNameById(teams, m.team_b_id));
+  if (m.status === 'final') {
+    const aWin = m.winner_team_id === m.team_a_id;
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
+      <div class="small" style="color:#64748b;">Net ${escapeHTML(String(m.net || '-'))} · Final</div>
+      <div class="row" style="justify-content:space-between;gap:8px;align-items:center;">
+        <span style="flex:1;font-weight:${aWin ? '700' : '400'};color:${aWin ? 'var(--success)' : 'inherit'};">${an}</span>
+        <span style="flex:0 0 auto;font-weight:700;">${escapeHTML(String(m.score_a))} - ${escapeHTML(String(m.score_b))}</span>
+        <span style="flex:1;text-align:right;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--success)' : 'inherit'};">${bn}</span>
+      </div>
+      ${isAdmin ? `<button type="button" class="secondary" data-role="tv2-clear-result" data-id="${escapeHTML(m.id)}" style="margin-top:4px;font-size:12px;padding:4px 8px;">Clear</button>` : ''}
+    </div>`;
+  }
+  return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
+    <div class="small" style="color:#64748b;">Net ${escapeHTML(String(m.net || '-'))}</div>
+    <div class="row" style="align-items:center;gap:6px;flex-wrap:nowrap;">
+      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${an}</span>
+      <input type="number" inputmode="numeric" id="sc-a-${escapeHTML(m.id)}" style="flex:0 0 50px;width:50px;" placeholder="0" />
+      <span style="flex:0 0 auto;">-</span>
+      <input type="number" inputmode="numeric" id="sc-b-${escapeHTML(m.id)}" style="flex:0 0 50px;width:50px;" placeholder="0" />
+      <span style="flex:1;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${bn}</span>
+    </div>
+    <button type="button" class="primary" data-role="tv2-submit-result" data-id="${escapeHTML(m.id)}" style="margin-top:6px;width:100%;">Submit Result</button>
+  </div>`;
+}
+
+function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTeamId) {
+  const picked = pickedTeamId ? teams.find((t) => t.id === pickedTeamId) : null;
+  const visiblePools = (picked && picked.pool_id) ? pools.filter((p) => p.id === picked.pool_id) : pools;
+  const picker = `<div class="card">
+    <label class="small" style="color:#475569;display:block;margin-bottom:4px;">Your team (filters to just your pool)</label>
+    <select data-role="tv2-pick-team" style="width:100%;">
+      <option value="">All pools</option>
+      ${teams.map((t) => `<option value="${escapeHTML(t.id)}" ${t.id === pickedTeamId ? 'selected' : ''}>${escapeHTML(t.name)}</option>`).join('')}
+    </select>
+  </div>`;
+  const poolCards = visiblePools.map((pool) => {
+    const poolTeams = teams.filter((t) => t.pool_id === pool.id);
+    const poolMatches = matches.filter((m) => m.pool_id === pool.id);
+    const played = poolMatches.filter((m) => m.status === 'final').length;
+    return `<div class="card">
+      <h3 style="margin:0 0 2px;">Pool ${escapeHTML(pool.label)}</h3>
+      <div class="small" style="color:#64748b;margin:0 0 4px;">${played}/${poolMatches.length} games played</div>
+      ${buildStandingsTableHTML(poolTeams, poolMatches)}
+      <div style="margin-top:4px;">
+        ${poolMatches.length ? poolMatches.map((m) => buildMatchRowHTML(m, teams, isAdmin)).join('') : '<p class="small" style="color:#64748b;margin:0;">No matches.</p>'}
+      </div>
+    </div>`;
+  }).join('');
+  return picker + poolCards;
 }
 
 // Builds the Tournament tab body (admin create/manage, or public read-only).
@@ -2758,6 +3048,12 @@ function buildTournamentTabHTML() {
       </div>`;
     }
     const teams = (active ? state.tournamentTeams : []) || [];
+    if (active && show.status === 'pools') {
+      return `<div class="card">
+        <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
+        <p class="small" style="color:#64748b;margin:0;">Pool play — submit your game results below.</p>
+      </div>` + buildPoolPlayHTML(active, state.tournamentPools || [], teams, state.tournamentMatches || [], false, state.tournamentPickedTeamId);
+    }
     return `<div class="card">
       <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
       <p class="small" style="color:#64748b;margin:0 0 12px;">${escapeHTML(tournamentStatusLabel(show.status))}</p>
@@ -2803,10 +3099,11 @@ function buildTournamentTabHTML() {
     </div>`;
   }
 
-  // Admin, active tournament → header + add team + team list.
+  // Admin, active tournament.
   const teams = state.tournamentTeams || [];
-  return `${err}
-  <div class="card">
+  const pools = state.tournamentPools || [];
+  const matches = state.tournamentMatches || [];
+  const headerCard = `<div class="card">
     <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
       <div style="flex:1;min-width:0;">
         <h3 style="margin:0;">${escapeHTML(active.name || '')}</h3>
@@ -2814,7 +3111,48 @@ function buildTournamentTabHTML() {
       </div>
       <button type="button" class="secondary" data-role="tv2-back">All</button>
     </div>
-  </div>
+  </div>`;
+
+  // Pool-play stage: standings + matches + override.
+  if (active.status === 'pools') {
+    return `${err}${headerCard}
+      ${buildPoolPlayHTML(active, pools, teams, matches, true, state.tournamentPickedTeamId)}
+      <div class="card">
+        <button type="button" class="danger" data-role="tv2-reset-pools" style="width:100%;">Reset Pools (clear results)</button>
+      </div>`;
+  }
+
+  // Setup stage: add teams + draw/start pools.
+  let poolSetup = '';
+  if (teams.length >= 2) {
+    if (!pools.length) {
+      poolSetup = `<div class="card">
+        <h3 style="margin:0 0 8px;">Pools</h3>
+        <p class="small" style="color:#64748b;margin:0 0 8px;">Randomly draw ${escapeHTML(String(active.pool_count))} pools from your ${teams.length} teams.</p>
+        <button type="button" class="primary" data-role="tv2-draw-pools" style="width:100%;">Draw Pools</button>
+      </div>`;
+    } else {
+      const poolBlocks = pools.map((p) => {
+        const pt = teams.filter((t) => t.pool_id === p.id);
+        const rows = pt.map((t) => `<div class="row" style="align-items:center;gap:8px;padding:4px 0;">
+          <span style="flex:1;min-width:0;">${escapeHTML(t.name)}</span>
+          <select data-role="tv2-move-team" data-id="${escapeHTML(t.id)}" style="width:auto;flex:0 0 auto;">
+            ${pools.map((pp) => `<option value="${escapeHTML(pp.id)}" ${pp.id === t.pool_id ? 'selected' : ''}>Pool ${escapeHTML(pp.label)}</option>`).join('')}
+          </select>
+        </div>`).join('');
+        return `<div style="margin-bottom:10px;"><strong>Pool ${escapeHTML(p.label)}</strong>${rows || '<p class="small" style="color:#64748b;margin:0;">empty</p>'}</div>`;
+      }).join('');
+      const unassigned = teams.filter((t) => !t.pool_id).length;
+      poolSetup = `<div class="card">
+        <h3 style="margin:0 0 8px;">Pools (drawn)</h3>
+        ${poolBlocks}
+        ${unassigned ? `<p class="small" style="color:var(--danger);margin:0 0 8px;">${unassigned} team(s) unassigned</p>` : ''}
+        <button type="button" class="secondary" data-role="tv2-draw-pools" style="width:100%;margin-bottom:8px;">Re-draw randomly</button>
+        <button type="button" class="primary" data-role="tv2-start-pools" style="width:100%;">Start Pool Play</button>
+      </div>`;
+    }
+  }
+  return `${err}${headerCard}
   <div class="card">
     <h3 style="margin:0 0 8px;">Add Team</h3>
     <div class="row" style="gap:8px;">
@@ -2825,7 +3163,8 @@ function buildTournamentTabHTML() {
   <div class="card">
     <h3 style="margin:0 0 8px;">Teams (${teams.length})</h3>
     ${buildTeamListHTML(teams, true)}
-  </div>`;
+  </div>
+  ${poolSetup}`;
 }
 
 function formatLastSharedSyncLabel() {
@@ -8304,7 +8643,8 @@ function render() {
     <button class="nav-btn" data-nav-tab="teams">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       <span>Teams</span>
-    </button>
+    </button>` : ''}
+    ${(state.isAdmin || (state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket')) ? `
     <button class="nav-btn" data-nav-tab="tournament">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
       <span>Tournament</span>
@@ -8592,7 +8932,7 @@ bindTournamentTabV2();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
-if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'tournament')) activeMainTab = 'players';
+if (!state.isAdmin && activeMainTab === 'teams') activeMainTab = 'players';
 activateMainTab(activeMainTab);
 restoreTransientInteractionState(interactionSnapshot);
 refreshAzStripAvailability();
@@ -8646,6 +8986,57 @@ function bindTournamentTabV2() {
       } else if (role === 'tv2-delete-team') {
         await tdbDeleteTeam(id);
         await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-draw-pools') {
+        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
+        await tdbDrawPools(t);
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-start-pools') {
+        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
+        await tdbStartPoolPlay(t);
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-reset-pools') {
+        if (!window.confirm('Reset pools and clear all pool results?')) return;
+        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
+        await tdbDrawPools(t);
+        await supabaseClient.from('tournaments')
+          .update({ status: 'setup', updated_at: new Date().toISOString() }).eq('id', t.id);
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-submit-result') {
+        const m = (state.tournamentMatches || []).find((x) => x.id === id);
+        const sa = (document.getElementById('sc-a-' + id) || {}).value;
+        const sb = (document.getElementById('sc-b-' + id) || {}).value;
+        await tdbSubmitResult(m, sa, sb);
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-clear-result') {
+        const m = (state.tournamentMatches || []).find((x) => x.id === id);
+        await tdbClearResult(m);
+        await tdbRefreshTournaments();
+        render();
+      }
+    } catch (err) {
+      state.tournamentTabError = (err && err.message) ? err.message : 'Something went wrong.';
+      render();
+    }
+  });
+
+  // Selects fire 'change', not 'click' — handle team-move + team-pick here.
+  document.addEventListener('change', async (e) => {
+    const el = e.target.closest('[data-role="tv2-move-team"], [data-role="tv2-pick-team"]');
+    if (!el) return;
+    const role = el.getAttribute('data-role');
+    try {
+      state.tournamentTabError = '';
+      if (role === 'tv2-move-team') {
+        await tdbMoveTeamToPool(el.getAttribute('data-id'), el.value);
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-pick-team') {
+        state.tournamentPickedTeamId = el.value || null;
         render();
       }
     } catch (err) {
@@ -10016,6 +10407,7 @@ function init() {
         crossDeviceRefreshInterval = setInterval(() => {
           if (document.hidden) return;
           queueSupabaseRefresh(800);
+          void refreshTournamentLive();
         }, 15000);
       }
     })();
