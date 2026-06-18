@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.18.3';
+const APP_VERSION = '2026.06.18.4';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -603,6 +603,9 @@ function restoreTransientInteractionState(snapshot) {
 
     const prev = state.players[idx];
     const next = { ...prev, name, skill, group, groups };
+    // If this row was never saved (no id yet), mark it pending so a racing
+    // authoritative sync doesn't drop it before the insert lands (mergePlayersAfterSync).
+    if (!next.id) next.pending = true;
 
     // Optimistic local update
     const copy = state.players.slice();
@@ -615,17 +618,15 @@ function restoreTransientInteractionState(snapshot) {
     closeInlineEditRow(row);
     render();
 
-    try {
-      const toast = document.createElement('div');
-      toast.textContent = 'Saved';
-      toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
-      document.body.appendChild(toast);
-      setTimeout(() => toast.remove(), 1100);
-    } catch {}
+    // Honest save status: neutral "Saving…" now, settled to Saved / failed after the
+    // write resolves (offline = saved locally). See reliability check 2026-06-18.
+    const editToast = makeSaveToast(supabaseClient ? 'Saving…' : 'Saved');
+    if (!supabaseClient && editToast) setTimeout(() => { try { editToast.remove(); } catch {} }, 1100);
 
     // Remote sync runs in background to keep UI snappy on slower connections.
     if (supabaseClient) {
       (async () => {
+        let ok = false;
         try {
           let remoteOK = false;
           if (next.id) {
@@ -636,27 +637,35 @@ function restoreTransientInteractionState(snapshot) {
               const insertRow = HAS_TAG
                 ? { name, skill, group, tag: encodedGroupsTag }
                 : { name, skill, group };
-              const { error } = await supabaseClient.from('players').insert([insertRow]).select();
+              const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
               if (error) throw error;
+              // Capture the inserted id so a later re-Save updates this row instead of
+              // inserting a duplicate. See reliability check 2026-06-18.
+              if (Array.isArray(data) && data.length > 0) next.id = data[0].id;
             } catch {
               try {
-                const { error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+                const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
                 if (error) throw error;
+                if (Array.isArray(data) && data.length > 0) next.id = data[0].id;
               } catch {
-                const { error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
                 if (error) throw error;
+                if (Array.isArray(data) && data.length > 0) next.id = data[0].id;
               }
             }
             remoteOK = true;
           }
 
           await ensureGroupCatalogEntriesSupabase(groups);
-          if (remoteOK) queueSupabaseRefresh();
+          next.pending = false;
+          if (remoteOK) { ok = true; queueSupabaseRefresh(); }
           else await reconcileToSupabaseAuthority('inline-edit-save');
         } catch (err) {
           console.error('Supabase save error', err);
+          next.pending = false;
           await reconcileToSupabaseAuthority('inline-edit-save');
         }
+        settleSaveToast(editToast, ok, 'Saved');
       })();
     }
   }, true);
@@ -945,7 +954,10 @@ function resetGeneratedTeamDragState() {
     if (!changed) return;
 
     saveLocal();
-    render();
+    // A check-in/out toggle only changes the player's status + the stats card —
+    // exactly partialRender's scope. Full render() here rebuilt all ~213 cards on
+    // every tap (janky + dropped in-progress taps/typing). See reliability check 2026-06-18.
+    partialRender();
 
     if (supabaseClient && player.id) {
       (async () => {
@@ -2900,9 +2912,15 @@ async function tdbRefreshTournaments() {
     }
   }
   if (state.activeTournamentId) {
-    state.tournamentTeams = await tdbListTeams(state.activeTournamentId);
-    state.tournamentPools = await tdbListPools(state.activeTournamentId);
-    state.tournamentMatches = await tdbListMatches(state.activeTournamentId);
+    // Three independent reads — run concurrently (was 3 serial round-trips per refresh).
+    const [tTeams, tPools, tMatches] = await Promise.all([
+      tdbListTeams(state.activeTournamentId),
+      tdbListPools(state.activeTournamentId),
+      tdbListMatches(state.activeTournamentId),
+    ]);
+    state.tournamentTeams = tTeams;
+    state.tournamentPools = tPools;
+    state.tournamentMatches = tMatches;
   } else {
     state.tournamentTeams = [];
     state.tournamentPools = [];
@@ -4061,13 +4079,41 @@ function saveGeneratedTeamsToLocal() {
   }
 }
 
+// Lightweight floating toast whose text reflects the real async-save outcome
+// (honest status) — created with a neutral "Saving…" then settled to a result.
+function makeSaveToast(text) {
+  try {
+    const t = document.createElement('div');
+    t.textContent = text;
+    t.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
+    document.body.appendChild(t);
+    return t;
+  } catch { return null; }
+}
+function settleSaveToast(t, ok, okText) {
+  if (!t) return;
+  try {
+    t.textContent = ok ? (okText || 'Saved') : 'Could not save — check your connection';
+    setTimeout(() => { try { t.remove(); } catch {} }, ok ? 1200 : 2600);
+  } catch {}
+}
+
 // Load players and checked-in attendance keys from localStorage into state. Called
 // during initialization.
 function loadLocal() {
   let shouldPersistMigration = false;
   try {
     const storedPlayers = JSON.parse(localStorage.getItem(LS_PLAYERS_KEY) || '[]');
-    if (Array.isArray(storedPlayers)) state.players = storedPlayers;
+    // Strip stale `pending` flags: a row persisted in a prior session is no longer
+    // an in-flight write. If it never saved, mergePlayersAfterSync's remote-name
+    // filter drops it; if it did, sync returns it with an id. Prevents permanent
+    // "Registering…" ghost cards. See reliability check 2026-06-18.
+    if (Array.isArray(storedPlayers)) {
+      state.players = storedPlayers.map((p) => {
+        if (p && p.pending) { const { pending, ...rest } = p; return rest; }
+        return p;
+      });
+    }
     if (normalizePlayerGroupsInState()) shouldPersistMigration = true;
     if (ensurePlayerIdentityKeys()) shouldPersistMigration = true;
 
@@ -4301,7 +4347,12 @@ async function syncFromSupabase() {
     }
 
     // when tenant-limited, only fetch that group to reduce data exposure and payload size
-    let query = supabaseClient.from('players').select('*');
+    // Explicit columns (not select('*')) to trim payload + avoid pulling unused/future cols.
+    // Schema-aware: only request group/tag when the probe confirmed they exist.
+    const playerCols = ['id', 'name', 'skill', 'checked_in'];
+    if (HAS_GROUP) playerCols.push('group');
+    if (HAS_TAG) playerCols.push('tag');
+    let query = supabaseClient.from('players').select(playerCols.join(','));
 
     if (state.limitedGroup) {
       if (HAS_GROUP) {
@@ -4914,7 +4965,7 @@ function render() {
   const interactionSnapshot = captureTransientInteractionState();
 
   // Helper to escape text for safe insertion into HTML
-  const escapeHTML = (str) => str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const escapeHTML = (str) => String(str == null ? '' : str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
   const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE ? UNGROUPED_FILTER_LABEL : (normalizedActiveGroup || 'All');
   const isActiveGroupValue = (value) => normalizeActiveGroupSelection(value || 'All') === normalizedActiveGroup;
@@ -6408,6 +6459,11 @@ if (saveSupabaseBtn) {
       const idx = state.players.findIndex((p) => normalize(p.name) === normalize(name));
       const isNew = idx === -1;
 
+      // Honest save status (created before the branch, settled when the write resolves).
+      const addOkText = isNew ? 'Player added' : 'Player updated';
+      const addToast = makeSaveToast(supabaseClient ? 'Saving…' : addOkText);
+      if (!supabaseClient && addToast) setTimeout(() => { try { addToast.remove(); } catch {} }, 1200);
+
       if (idx !== -1) {
         // update existing
         const updated = state.players.slice();
@@ -6421,6 +6477,7 @@ if (saveSupabaseBtn) {
 
         if (supabaseClient) {
           (async () => {
+            let ok = false;
             try {
               let remoteOK = false;
               if (updated[idx].id) {
@@ -6455,12 +6512,13 @@ if (saveSupabaseBtn) {
                 }
               }
               await ensureGroupCatalogEntriesSupabase(nextGroups);
-              if (remoteOK) queueSupabaseRefresh();
+              if (remoteOK) { ok = true; queueSupabaseRefresh(); }
               else await reconcileToSupabaseAuthority('admin-save-player-update');
             } catch (err) {
               console.error('Supabase update error', err);
               await reconcileToSupabaseAuthority('admin-save-player-update');
             }
+            settleSaveToast(addToast, ok, addOkText);
           })();
         }
       } else {
@@ -6478,6 +6536,7 @@ if (saveSupabaseBtn) {
 
         if (supabaseClient) {
           (async () => {
+            let ok = false;
             try {
               let remoteOK = false;
               const encodedGroupsTag = serializePlayerGroupsTag(groups, group);
@@ -6505,14 +6564,19 @@ if (saveSupabaseBtn) {
               }
               await ensureGroupCatalogEntriesSupabase(groups);
               inserted.pending = false;
-              if (remoteOK) queueSupabaseRefresh();
+              if (remoteOK) { ok = true; queueSupabaseRefresh(); }
               else await reconcileToSupabaseAuthority('admin-save-player-insert');
             } catch (err) {
               console.error('Supabase insert error', err);
               inserted.pending = false;
               await reconcileToSupabaseAuthority('admin-save-player-insert');
             }
+            settleSaveToast(addToast, ok, 'Player added');
           })();
+        } else {
+          // Offline: no client to clear pending in the async path — clear it here so the
+          // row isn't a permanent "pending" ghost. See reliability check 2026-06-18.
+          inserted.pending = false;
         }
       }
 
@@ -6520,15 +6584,8 @@ if (saveSupabaseBtn) {
       if (skillInput) skillInput.value = '';
       if (groupsInput) groupsInput.value = '';
       saveLocal();
-      // Small floating toast like public registration
-      try {
-        const toast = document.createElement('div');
-        toast.textContent = isNew ? 'Player added' : 'Player updated';
-        toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 1200);
-      } catch {}
-
+      // Save-status toast is created before the insert/update branch (addToast) and
+      // settled honestly when the write resolves — no more premature "added/updated".
       render();
     });
   }
