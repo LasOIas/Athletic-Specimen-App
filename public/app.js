@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.18.2';
+const APP_VERSION = '2026.06.18.3';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4192,9 +4192,23 @@ function mergePlayersAfterSync(remotePlayers) {
   );
 
   if (SUPABASE_AUTHORITATIVE) {
+    // Carry forward in-flight local rows (pending writes) so a background sync that
+    // races an insert can't wipe a just-registered/added player before the server has
+    // it yet. Each pending row is dropped automatically once its name appears remotely.
+    const remoteNamesAuth = new Set(
+      cleanedRemotePlayers.map((p) => normalize(p && p.name)).filter(Boolean)
+    );
+    const prevCheckedAuth = new Set(state.checkedIn || []);
+    const pendingLocal = (Array.isArray(state.players) ? state.players : []).filter((p) =>
+      p && !p.id && p.pending && normalize(p.name) && !remoteNamesAuth.has(normalize(p.name)) &&
+      (!state.limitedGroup || getPlayerPrimaryGroup(p) === state.limitedGroup)
+    );
+    const pendingChecked = pendingLocal
+      .map((p) => playerIdentityKey(p))
+      .filter((k) => k && prevCheckedAuth.has(k));
     return {
-      players: cleanedRemotePlayers,
-      checkedIn: [...remoteChecked]
+      players: [...cleanedRemotePlayers, ...pendingLocal],
+      checkedIn: [...remoteChecked, ...pendingChecked]
     };
   }
 
@@ -6458,7 +6472,8 @@ if (saveSupabaseBtn) {
         const groups = applyTopFormGroupRules(requestedGroups, defaultPrimary);
         const group = groups[0] || '';
         const newPlayer = { name, skill, group, groups };
-        const inserted = { ...newPlayer };
+        // pending:true survives a racing sync until the insert lands (mergePlayersAfterSync).
+        const inserted = { ...newPlayer, pending: true };
         state.players = [...state.players, inserted];
 
         if (supabaseClient) {
@@ -6489,10 +6504,12 @@ if (saveSupabaseBtn) {
                 }
               }
               await ensureGroupCatalogEntriesSupabase(groups);
+              inserted.pending = false;
               if (remoteOK) queueSupabaseRefresh();
               else await reconcileToSupabaseAuthority('admin-save-player-insert');
             } catch (err) {
               console.error('Supabase insert error', err);
+              inserted.pending = false;
               await reconcileToSupabaseAuthority('admin-save-player-insert');
             }
           })();
@@ -6620,8 +6637,15 @@ if (saveSupabaseBtn) {
         const groups = group ? [group] : [];
         const skill = 0.0;
         const newPlayer = { name, skill, group, groups };
-        const inserted = { ...newPlayer };
+        // pending:true keeps this in-flight row alive through a racing sync until the
+        // insert resolves (see mergePlayersAfterSync) — fixes "registered player vanishes".
+        const inserted = { ...newPlayer, pending: true };
         state.players = [...state.players, inserted];
+
+        if (input) input.value = '';
+        messages.registration = supabaseClient ? 'Registering…' : 'Registered';
+        saveLocal();
+        render();
 
         if (supabaseClient) {
           (async () => {
@@ -6650,20 +6674,26 @@ if (saveSupabaseBtn) {
                 }
               }
               await ensureGroupCatalogEntriesSupabase(group ? [group] : []);
-              if (remoteOK) queueSupabaseRefresh();
-              else await reconcileToSupabaseAuthority('public-register');
+              inserted.pending = false;
+              if (remoteOK) {
+                messages.registration = 'Registered';
+                queueSupabaseRefresh();
+              } else {
+                messages.registration = 'Could not save — check your connection and try again.';
+                await reconcileToSupabaseAuthority('public-register');
+              }
             } catch (err) {
               console.error('Supabase insert error', err);
+              inserted.pending = false;
+              messages.registration = 'Could not save — check your connection and try again.';
               await reconcileToSupabaseAuthority('public-register');
             }
+            render();
+            setTimeout(() => { messages.registration = ''; render(); }, 2500);
           })();
+        } else {
+          setTimeout(() => { messages.registration = ''; render(); }, 2500);
         }
-
-        messages.registration = 'Registered';
-        setTimeout(() => { messages.registration = ''; render(); }, 2500);
-        if (input) input.value = '';
-        saveLocal();
-        render();
       });
     }
 
