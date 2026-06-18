@@ -31,7 +31,6 @@ const UNGROUPED_FILTER_LABEL = 'Ungrouped (No Groups)';
 const GROUP_CATALOG_NAME_PREFIX = '__as_group__:';
 const GROUPS_TAG_PREFIX = '__as_groups__:';
 const TOURNAMENT_STATE_ROW_NAME = '__as_tournament_state__';
-const TOURNAMENT_STATE_TAG_PREFIX = '__as_tournament_store__:';
 const SUPABASE_AUTHORITATIVE = true;
 const SHARED_SYNC_PENDING = 'pending';
 const SHARED_SYNC_LIVE = 'live';
@@ -3832,6 +3831,19 @@ async function runOperatorActionUndo(actionId) {
   }
 }
 
+function normalizeCollapsedCardsState(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const out = {};
+  Object.keys(value).forEach((key) => {
+    if (value[key]) out[String(key)] = true;
+  });
+  return out;
+}
+
+function getAvailableGroups() {
+  // Canonical group list for UI selection comes from state.groups.
+  return normalizeGroupList((state.groups || []).filter((groupName) => groupName && groupName !== 'All'));
+}
 
 // Message state used for transient user feedback; messages auto clear
 const messages = {
