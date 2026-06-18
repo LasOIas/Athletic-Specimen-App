@@ -20,14 +20,19 @@ const CODES: Record<string, { email: string; role: string; group: string | null 
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, content-type, apikey",
+  "Access-Control-Allow-Headers": "authorization, content-type, apikey, x-client-info, x-supabase-api-version",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "content-type": "application/json" } });
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (req.method === "OPTIONS") {
+    // Echo whatever headers the browser preflight asks for (supabase-js adds x-client-info etc.),
+    // so functions.invoke() from the browser is never blocked by a missing Allow-Headers entry.
+    const reqHeaders = req.headers.get("access-control-request-headers");
+    return new Response("ok", { headers: reqHeaders ? { ...cors, "Access-Control-Allow-Headers": reqHeaders } : cors });
+  }
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
   let code = "";

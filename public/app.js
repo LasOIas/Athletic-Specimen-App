@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.18.5';
+const APP_VERSION = '2026.06.18.6';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6325,11 +6325,40 @@ if (adminCodeInputForEnter && loginBtn) {
     if (e.key === 'Enter') { e.preventDefault(); loginBtn.click(); }
   });
 }
+
+// C21 — server-verified admin login. POSTs only the code to the admin_login Edge Function,
+// which checks it against a server-only map (NOT in this bundle) and returns a real Supabase
+// session whose JWT carries role/group in app_metadata (for RLS). On success the session is
+// set on supabaseClient so every later admin request carries the JWT. Returns {role, group}
+// or null; on null the caller falls back to the legacy client-side code compare (no session,
+// which still works while RLS is open). Codes are identical to the client's, so the UI-flag
+// blocks below set the same state whether the server door or the legacy fallback is taken.
+async function adminLoginWithCode(code) {
+  if (!supabaseClient || !code) return null;
+  try {
+    const { data, error } = await supabaseClient.functions.invoke('admin_login', { body: { code } });
+    if (error || !data || !data.access_token || !data.refresh_token) return null;
+    const setRes = await supabaseClient.auth.setSession({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+    });
+    if (setRes.error) return null;
+    return { role: data.role, group: data.group || null };
+  } catch {
+    return null;
+  }
+}
+
 if (loginBtn) {
   loginBtn.addEventListener('click', async () => {
     const codeInput = document.getElementById('admin-code');
     const code = codeInput ? codeInput.value.trim() : '';
     if (!code) return;
+
+    // C21: take the server-verified door first (sets a real session for RLS). Either way the
+    // code blocks below set the UI flags — they match the server's role/group because the codes
+    // are identical — so login still works (over open RLS) if the function is unreachable.
+    await adminLoginWithCode(code);
 
     // Master admin: full access
     if (code === MASTER_ADMIN_CODE) {
@@ -6397,6 +6426,8 @@ const logoutBtn = document.getElementById('btn-logout');
     sessionStorage.removeItem(LS_MASTER_ADMIN_AUTH_KEY);
     sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
     try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
+    // C21: drop the real Supabase session too, so the JWT does not linger on a shared device.
+    if (supabaseClient) { try { await supabaseClient.auth.signOut(); } catch {} }
     const synced = await syncFromSupabase();     // load public view dataset
     if (synced) saveLocal();
     render();
