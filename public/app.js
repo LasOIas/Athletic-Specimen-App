@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.17.2';
+const APP_VERSION = '2026.06.17.3';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2838,6 +2838,67 @@ async function tdbClearResult(match) {
   return data[0];
 }
 
+// Seed from pool standings + generate + persist a double-elimination bracket.
+async function tdbGenerateBracket(tournament) {
+  if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  const teams = await tdbListTeams(tournament.id);
+  const poolMatches = await tdbListMatches(tournament.id, 'pool');
+  if (!poolMatches.length) throw new Error('No pool play to seed from.');
+  if (!poolMatches.every((m) => m.status === 'final')) throw new Error('Finish all pool games first.');
+
+  const seeding = computeSeeding(teams, poolMatches); // ordered seed 1..N
+  const N = seeding.length;
+  if (N < 2) throw new Error('Need at least 2 teams.');
+  const seedToTeam = {};
+  seeding.forEach((r) => { seedToTeam[r.seed] = r.teamId; });
+  for (const r of seeding) {
+    await supabaseClient.from('teams').update({ seed: r.seed }).eq('id', r.teamId);
+  }
+
+  const gen = generateDoubleElim(N, !!tournament.grand_final_reset);
+  const real = gen.realMatches;
+  const labelOf = (key) => {
+    const m = real.find((x) => x.key === key);
+    if (!m) return key;
+    if (m.side === 'grand_final') return m.isReset ? 'Grand Final (reset)' : 'Grand Final';
+    return `${m.side === 'winners' ? 'WB' : 'LB'} R${m.round} M${m.slot + 1}`;
+  };
+  const srcLabel = (s) => {
+    if (!s || s.seed) return null;
+    return (s.type === 'winner' ? 'Winner of ' : 'Loser of ') + labelOf(s.of);
+  };
+
+  await supabaseClient.from('matches').delete().eq('tournament_id', tournament.id).eq('phase', 'main');
+
+  const rows = real.map((m) => ({
+    tournament_id: tournament.id, phase: 'main', side: m.side, round: m.round, slot: m.slot,
+    round_label: labelOf(m.key),
+    team_a_id: (m.aSource && m.aSource.seed) ? seedToTeam[m.aSource.seed] : null,
+    team_b_id: (m.bSource && m.bSource.seed) ? seedToTeam[m.bSource.seed] : null,
+    source_a: srcLabel(m.aSource), source_b: srcLabel(m.bSource),
+    status: 'scheduled', version: 0
+  }));
+  const { data: inserted, error: insErr } = await supabaseClient.from('matches').insert(rows).select();
+  if (insErr) throw insErr;
+
+  const idByPos = {};
+  inserted.forEach((r) => { idByPos[`${r.side}|${r.round}|${r.slot}`] = r.id; });
+  const idOfKey = (key) => {
+    const m = real.find((x) => x.key === key);
+    return m ? idByPos[`${m.side}|${m.round}|${m.slot}`] : null;
+  };
+  const slotNum = (s) => (s === 'a' ? 0 : 1);
+  for (const m of real) {
+    const upd = {};
+    if (m.winnerNext) { upd.winner_next_match_id = idOfKey(m.winnerNext.key); upd.winner_next_slot = slotNum(m.winnerNext.slot); }
+    if (m.loserNext) { upd.loser_next_match_id = idOfKey(m.loserNext.key); upd.loser_next_slot = slotNum(m.loserNext.slot); }
+    if (Object.keys(upd).length) await supabaseClient.from('matches').update(upd).eq('id', idOfKey(m.key));
+  }
+
+  await supabaseClient.from('tournaments')
+    .update({ status: 'bracket', updated_at: new Date().toISOString() }).eq('id', tournament.id);
+}
+
 // Reload tournament list (+ active tournament's teams/pools/matches) into state. No render.
 async function tdbRefreshTournaments() {
   state.tournaments = await tdbListTournaments();
@@ -2948,6 +3009,184 @@ function computeStandings(teams, matches) {
   return rows;
 }
 
+function nextPow2(n) {
+  let p = 1;
+  while (p < n) p *= 2;
+  return Math.max(1, p);
+}
+
+// Standard single-elim seed slot order for a bracket of size B (power of 2).
+// seedOrder(8) -> [1,8,4,5,2,7,3,6]; seeds 1 and 2 can only meet in the final.
+function seedOrder(B) {
+  let order = [1];
+  while (order.length < B) {
+    const n = order.length * 2;
+    const next = [];
+    for (const e of order) { next.push(e); next.push(n + 1 - e); }
+    order = next;
+  }
+  return order;
+}
+
+// Global seeding across all pools: rank every team by win% then point-diff then name.
+// win% (not raw wins) so unequal pool sizes compare fairly.
+function computeSeeding(teams, matches) {
+  const stats = {};
+  (teams || []).forEach((t) => { stats[t.id] = { teamId: t.id, name: t.name || '', wins: 0, losses: 0, pf: 0, pa: 0 }; });
+  (matches || []).forEach((m) => {
+    if (m.phase !== 'pool' || m.status !== 'final') return;
+    const a = stats[m.team_a_id]; const b = stats[m.team_b_id];
+    if (!a || !b) return;
+    const sa = Number(m.score_a) || 0; const sb = Number(m.score_b) || 0;
+    a.pf += sa; a.pa += sb; b.pf += sb; b.pa += sa;
+    if (m.winner_team_id === a.teamId) { a.wins++; b.losses++; }
+    else if (m.winner_team_id === b.teamId) { b.wins++; a.losses++; }
+  });
+  const rows = Object.keys(stats).map((k) => stats[k]);
+  rows.forEach((r) => { r.games = r.wins + r.losses; r.winPct = r.games ? r.wins / r.games : 0; r.pointDiff = r.pf - r.pa; });
+  rows.sort((x, y) => (y.winPct - x.winPct) || (y.pointDiff - x.pointDiff) || x.name.localeCompare(y.name));
+  rows.forEach((r, i) => { r.seed = i + 1; });
+  return rows;
+}
+
+// Generate a complete double-elimination bracket for N seeded teams.
+// Returns { realMatches } where byes (seeds > N) are pre-resolved away, each match
+// has aSource/bSource ({seed:n} | {type:'winner'|'loser', of:key}) and winnerNext/
+// loserNext ({key,slot} into another real match, or null = champion/eliminated).
+function generateDoubleElim(N, resetEnabled) {
+  if (N < 2) return { realMatches: [] };
+  const B = nextPow2(N);
+  const K = Math.round(Math.log2(B));
+  const byKey = {};
+  const all = [];
+  const add = (m) => { m.winnerTo = m.winnerTo || null; m.loserTo = m.loserTo || null; byKey[m.key] = m; all.push(m); return m; };
+
+  // ---- Winners bracket ----
+  const order = seedOrder(B);
+  const wb = [];
+  wb[1] = [];
+  for (let i = 0; i < B / 2; i++) {
+    add({ key: `W1-${i}`, side: 'winners', round: 1, slot: i, a: `seed:${order[2 * i]}`, b: `seed:${order[2 * i + 1]}` });
+    wb[1].push(`W1-${i}`);
+  }
+  for (let w = 2; w <= K; w++) {
+    wb[w] = [];
+    for (let i = 0; i < B / Math.pow(2, w); i++) {
+      const key = `W${w}-${i}`;
+      add({ key, side: 'winners', round: w, slot: i, a: `W:${wb[w - 1][2 * i]}`, b: `W:${wb[w - 1][2 * i + 1]}` });
+      byKey[wb[w - 1][2 * i]].winnerTo = { key, slot: 'a' };
+      byKey[wb[w - 1][2 * i + 1]].winnerTo = { key, slot: 'b' };
+      wb[w].push(key);
+    }
+  }
+  const wbFinal = wb[K][0];
+
+  // ---- Losers bracket (only when B >= 4) ----
+  let lbFinal = null;
+  if (K >= 2) {
+    let lbRound = 0;
+    let prev = [];
+    for (let w = 1; w <= K; w++) {
+      if (w === 1) {
+        lbRound++;
+        const cur = [];
+        for (let i = 0; i < wb[1].length / 2; i++) {
+          const key = `L${lbRound}-${i}`;
+          add({ key, side: 'losers', round: lbRound, slot: i, a: `L:${wb[1][2 * i]}`, b: `L:${wb[1][2 * i + 1]}` });
+          byKey[wb[1][2 * i]].loserTo = { key, slot: 'a' };
+          byKey[wb[1][2 * i + 1]].loserTo = { key, slot: 'b' };
+          cur.push(key);
+        }
+        prev = cur;
+      } else {
+        lbRound++;
+        const cur = [];
+        for (let i = 0; i < wb[w].length; i++) {
+          const key = `L${lbRound}-${i}`;
+          const wbLoser = wb[w][wb[w].length - 1 - i]; // reverse crossing delays rematches
+          add({ key, side: 'losers', round: lbRound, slot: i, a: `W:${prev[i]}`, b: `L:${wbLoser}` });
+          byKey[prev[i]].winnerTo = { key, slot: 'a' };
+          byKey[wbLoser].loserTo = { key, slot: 'b' };
+          cur.push(key);
+        }
+        prev = cur;
+        if (w < K) {
+          lbRound++;
+          const minor = [];
+          for (let i = 0; i < cur.length / 2; i++) {
+            const key = `L${lbRound}-${i}`;
+            add({ key, side: 'losers', round: lbRound, slot: i, a: `W:${cur[2 * i]}`, b: `W:${cur[2 * i + 1]}` });
+            byKey[cur[2 * i]].winnerTo = { key, slot: 'a' };
+            byKey[cur[2 * i + 1]].winnerTo = { key, slot: 'b' };
+            minor.push(key);
+          }
+          prev = minor;
+        }
+      }
+    }
+    lbFinal = prev[0];
+  }
+
+  // ---- Grand final (+ optional reset) ----
+  add({ key: 'GF', side: 'grand_final', round: 1, slot: 0, a: `W:${wbFinal}`, b: lbFinal ? `W:${lbFinal}` : `L:${wbFinal}` });
+  byKey[wbFinal].winnerTo = { key: 'GF', slot: 'a' };
+  if (lbFinal) byKey[lbFinal].winnerTo = { key: 'GF', slot: 'b' };
+  else byKey[wbFinal].loserTo = { key: 'GF', slot: 'b' };
+  if (resetEnabled) {
+    add({ key: 'GF2', side: 'grand_final', round: 2, slot: 0, a: `W:GF`, b: `L:GF`, isReset: true });
+    byKey['GF'].winnerTo = { key: 'GF2', slot: 'a' };
+    byKey['GF'].loserTo = { key: 'GF2', slot: 'b' };
+  }
+
+  // ---- Bye resolution (processed in add order; sources reference earlier matches) ----
+  const isByeSrc = (src) => {
+    if (src.startsWith('seed:')) return Number(src.slice(5)) > N;
+    if (src.startsWith('W:')) return byKey[src.slice(2)].winnerIsBye;
+    if (src.startsWith('L:')) return byKey[src.slice(2)].loserIsBye;
+    return false;
+  };
+  for (const m of all) {
+    const ba = isByeSrc(m.a);
+    const bb = isByeSrc(m.b);
+    m.type = (ba && bb) ? 'dead' : (ba || bb) ? 'bye' : 'real';
+    m.winnerIsBye = (m.type === 'dead');
+    m.loserIsBye = (m.type !== 'real');
+    m.autoWinnerSide = ba ? 'b' : (bb ? 'a' : null);
+  }
+
+  // ---- Resolve sources + next-pointers through byes, keep only REAL matches ----
+  const resolveSrc = (src) => {
+    if (src.startsWith('seed:')) {
+      const s = Number(src.slice(5));
+      return s <= N ? { seed: s } : null;
+    }
+    const k = src.slice(2);
+    const m = byKey[k];
+    if (src.startsWith('W:')) {
+      if (m.type === 'real') return { type: 'winner', of: k };
+      if (m.type === 'bye') return resolveSrc(m[m.autoWinnerSide]);
+      return null;
+    }
+    if (m.type === 'real') return { type: 'loser', of: k };
+    return null;
+  };
+  const followToReal = (target) => {
+    if (!target) return null;
+    const m = byKey[target.key];
+    if (!m) return null;
+    if (m.type === 'real') return { key: target.key, slot: target.slot };
+    return followToReal(m.winnerTo);
+  };
+
+  const realMatches = all.filter((m) => m.type === 'real').map((m) => ({
+    key: m.key, side: m.side, round: m.round, slot: m.slot, isReset: !!m.isReset,
+    aSource: resolveSrc(m.a), bSource: resolveSrc(m.b),
+    winnerNext: followToReal(m.winnerTo), loserNext: followToReal(m.loserTo)
+  }));
+
+  return { realMatches, B, K, seedCount: N };
+}
+
 function buildTeamListHTML(teams, isAdmin) {
   if (!teams || !teams.length) {
     return '<p class="small" style="color:#64748b;margin:0;">No teams yet.</p>';
@@ -3032,6 +3271,37 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
   return picker + poolCards;
 }
 
+// Interim bracket view (a simple grouped list). Phase 4 replaces this with the
+// single-round-focus (phone) / tree (wide) renderer Mike picked.
+function buildBracketMatchHTML(m, teams) {
+  const nameOf = (id, src) => id
+    ? `<span>${escapeHTML(teamNameById(teams, id))}</span>`
+    : `<span style="color:#94a3b8;">${escapeHTML(src || 'TBD')}</span>`;
+  const aWin = m.status === 'final' && m.winner_team_id === m.team_a_id;
+  const bWin = m.status === 'final' && m.winner_team_id === m.team_b_id;
+  return `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
+    <div class="small" style="color:#64748b;">${escapeHTML(m.round_label || '')}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>
+    <div class="row" style="justify-content:space-between;gap:8px;align-items:center;">
+      <span style="flex:1;min-width:0;font-weight:${aWin ? '700' : '400'};color:${aWin ? 'var(--success)' : 'inherit'};">${nameOf(m.team_a_id, m.source_a)}</span>
+      <span style="flex:0 0 auto;">${m.status === 'final' ? escapeHTML(String(m.score_a)) + ' - ' + escapeHTML(String(m.score_b)) : 'vs'}</span>
+      <span style="flex:1;min-width:0;text-align:right;font-weight:${bWin ? '700' : '400'};color:${bWin ? 'var(--success)' : 'inherit'};">${nameOf(m.team_b_id, m.source_b)}</span>
+    </div>
+  </div>`;
+}
+
+function buildBracketListHTML(matches, teams) {
+  const main = (matches || []).filter((m) => m.phase === 'main');
+  const labels = { winners: 'Winners', losers: 'Losers', grand_final: 'Grand Final' };
+  return ['winners', 'losers', 'grand_final'].map((side) => {
+    const sm = main.filter((m) => m.side === side).sort((x, y) => (x.round - y.round) || (x.slot - y.slot));
+    if (!sm.length) return '';
+    return `<div class="card">
+      <h3 style="margin:0 0 6px;">${labels[side]}</h3>
+      ${sm.map((m) => buildBracketMatchHTML(m, teams)).join('')}
+    </div>`;
+  }).join('');
+}
+
 // Builds the Tournament tab body (admin create/manage, or public read-only).
 function buildTournamentTabHTML() {
   const list = state.tournaments || [];
@@ -3053,6 +3323,12 @@ function buildTournamentTabHTML() {
         <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
         <p class="small" style="color:#64748b;margin:0;">Pool play — submit your game results below.</p>
       </div>` + buildPoolPlayHTML(active, state.tournamentPools || [], teams, state.tournamentMatches || [], false, state.tournamentPickedTeamId);
+    }
+    if (active && show.status === 'bracket') {
+      return `<div class="card">
+        <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
+        <p class="small" style="color:#64748b;margin:0;">Bracket</p>
+      </div>` + buildBracketListHTML(state.tournamentMatches || [], teams);
     }
     return `<div class="card">
       <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
@@ -3113,11 +3389,21 @@ function buildTournamentTabHTML() {
     </div>
   </div>`;
 
-  // Pool-play stage: standings + matches + override.
+  // Bracket stage (interim grouped list; Phase 4 = the real single-round/tree rendering).
+  if (active.status === 'bracket') {
+    return `${err}${headerCard}${buildBracketListHTML(matches, teams)}`;
+  }
+
+  // Pool-play stage: standings + matches + override + generate bracket when done.
   if (active.status === 'pools') {
+    const poolMatches = matches.filter((m) => m.phase === 'pool');
+    const allDone = poolMatches.length > 0 && poolMatches.every((m) => m.status === 'final');
     return `${err}${headerCard}
       ${buildPoolPlayHTML(active, pools, teams, matches, true, state.tournamentPickedTeamId)}
       <div class="card">
+        ${allDone
+          ? '<button type="button" class="primary" data-role="tv2-generate-bracket" style="width:100%;margin-bottom:8px;">Generate Bracket</button>'
+          : '<p class="small" style="color:#64748b;margin:0 0 8px;">Finish all pool games to generate the bracket.</p>'}
         <button type="button" class="danger" data-role="tv2-reset-pools" style="width:100%;">Reset Pools (clear results)</button>
       </div>`;
   }
@@ -9003,6 +9289,12 @@ function bindTournamentTabV2() {
         await tdbDrawPools(t);
         await supabaseClient.from('tournaments')
           .update({ status: 'setup', updated_at: new Date().toISOString() }).eq('id', t.id);
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-generate-bracket') {
+        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
+        await tdbGenerateBracket(t);
+        state.tournamentPickedTeamId = null;
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-submit-result') {
