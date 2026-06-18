@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.17.6';
+const APP_VERSION = '2026.06.17.8';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2884,35 +2884,23 @@ async function tdbGenerateBracket(tournament) {
     return (s.type === 'winner' ? 'Winner of ' : 'Loser of ') + labelOf(s.of);
   };
 
-  await supabaseClient.from('matches').delete().eq('tournament_id', tournament.id).eq('phase', 'main');
-
+  // Build the full match graph + advancement pointers (referenced by side/round/slot), then
+  // persist ATOMICALLY in one transactional RPC — no partially-wired bracket on a mid-failure.
+  const keyToPos = {};
+  real.forEach((m) => { keyToPos[m.key] = { side: m.side, round: m.round, slot: m.slot }; });
+  const slotNum = (s) => (s === 'a' ? 0 : 1);
   const rows = real.map((m) => ({
-    tournament_id: tournament.id, phase: 'main', side: m.side, round: m.round, slot: m.slot,
-    round_label: labelOf(m.key),
+    side: m.side, round: m.round, slot: m.slot, round_label: labelOf(m.key),
     team_a_id: (m.aSource && m.aSource.seed) ? seedToTeam[m.aSource.seed] : null,
     team_b_id: (m.bSource && m.bSource.seed) ? seedToTeam[m.bSource.seed] : null,
     source_a: srcLabel(m.aSource), source_b: srcLabel(m.bSource),
-    status: 'scheduled', version: 0
+    winner_next: m.winnerNext ? keyToPos[m.winnerNext.key] : null,
+    winner_next_slot: m.winnerNext ? slotNum(m.winnerNext.slot) : null,
+    loser_next: m.loserNext ? keyToPos[m.loserNext.key] : null,
+    loser_next_slot: m.loserNext ? slotNum(m.loserNext.slot) : null
   }));
-  const { data: inserted, error: insErr } = await supabaseClient.from('matches').insert(rows).select();
-  if (insErr) throw insErr;
-
-  const idByPos = {};
-  inserted.forEach((r) => { idByPos[`${r.side}|${r.round}|${r.slot}`] = r.id; });
-  const idOfKey = (key) => {
-    const m = real.find((x) => x.key === key);
-    return m ? idByPos[`${m.side}|${m.round}|${m.slot}`] : null;
-  };
-  const slotNum = (s) => (s === 'a' ? 0 : 1);
-  for (const m of real) {
-    const upd = {};
-    if (m.winnerNext) { upd.winner_next_match_id = idOfKey(m.winnerNext.key); upd.winner_next_slot = slotNum(m.winnerNext.slot); }
-    if (m.loserNext) { upd.loser_next_match_id = idOfKey(m.loserNext.key); upd.loser_next_slot = slotNum(m.loserNext.slot); }
-    if (Object.keys(upd).length) await supabaseClient.from('matches').update(upd).eq('id', idOfKey(m.key));
-  }
-
-  await supabaseClient.from('tournaments')
-    .update({ status: 'bracket', updated_at: new Date().toISOString() }).eq('id', tournament.id);
+  const { error: rpcErr } = await supabaseClient.rpc('generate_bracket_atomic', { p_tournament_id: tournament.id, p_matches: rows });
+  if (rpcErr) throw rpcErr;
 }
 
 // Submit a bracket result (tap-to-win default; scores optional). CAS-finals the match,
@@ -2967,29 +2955,42 @@ async function tdbSubmitBracketResult(match, winnerSide, scoreA, scoreB) {
   return data[0];
 }
 
-// Clear a finalized bracket result (admin): reset this match to scheduled and pull the
-// team it pushed into the next match's slot back out (only if that downstream match hasn't
-// been played yet), and re-open the tournament if it had completed. CAS-guarded.
+// Clear a finalized bracket result (admin), CASCADING: reset this match + every downstream
+// match that depended on it (recursively), pull the advanced teams back out of the next
+// slots, and re-open the tournament if it had completed. Handles deep mistakes, not just
+// the most recent tap.
 async function tdbClearBracketResult(match) {
   if (!supabaseClient || !match) return;
-  const { data, error } = await supabaseClient.from('matches')
-    .update({
-      score_a: null, score_b: null, winner_team_id: null, loser_team_id: null,
-      status: 'scheduled', version: (match.version || 0) + 1, updated_at: new Date().toISOString()
-    })
-    .eq('id', match.id).eq('version', match.version || 0).select();
-  if (error) throw error;
-  if (!data || data.length === 0) throw new Error('Another device just updated this match — refreshing.');
-  // pull the advanced team back out of the immediate next slots (only if still scheduled)
-  if (match.winner_next_match_id) {
-    const col = match.winner_next_slot === 1 ? 'team_b_id' : 'team_a_id';
-    await supabaseClient.from('matches').update({ [col]: null })
-      .eq('id', match.winner_next_match_id).eq('status', 'scheduled');
+  const all = await tdbListMatches(match.tournament_id, 'main');
+  const byId = {};
+  all.forEach((m) => { byId[m.id] = m; });
+  const toReset = [];
+  const seen = new Set();
+  const visit = (m) => {
+    if (!m || seen.has(m.id)) return;
+    seen.add(m.id);
+    toReset.push(m);
+    [m.winner_next_match_id, m.loser_next_match_id].forEach((nid) => {
+      if (nid && byId[nid] && byId[nid].status !== 'scheduled') visit(byId[nid]);
+    });
+  };
+  visit(byId[match.id] || match);
+  // reset every collected match to scheduled (their team slots stay; downstream slots are nulled below)
+  for (const m of toReset) {
+    await supabaseClient.from('matches').update({
+      score_a: null, score_b: null, winner_team_id: null, loser_team_id: null, status: 'scheduled'
+    }).eq('id', m.id);
   }
-  if (match.loser_next_match_id) {
-    const col = match.loser_next_slot === 1 ? 'team_b_id' : 'team_a_id';
-    await supabaseClient.from('matches').update({ [col]: null })
-      .eq('id', match.loser_next_match_id).eq('status', 'scheduled');
+  // null the team slots fed by any reset match (those teams came from a now-undone result)
+  for (const m of toReset) {
+    if (m.winner_next_match_id) {
+      const col = m.winner_next_slot === 1 ? 'team_b_id' : 'team_a_id';
+      await supabaseClient.from('matches').update({ [col]: null }).eq('id', m.winner_next_match_id);
+    }
+    if (m.loser_next_match_id) {
+      const col = m.loser_next_slot === 1 ? 'team_b_id' : 'team_a_id';
+      await supabaseClient.from('matches').update({ [col]: null }).eq('id', m.loser_next_match_id);
+    }
   }
   await supabaseClient.from('tournaments')
     .update({ status: 'bracket', updated_at: new Date().toISOString() })
@@ -3053,6 +3054,17 @@ async function refreshTournamentLive() {
     state.tournaments = await tdbListTournaments();
     if (tournamentNavVisible() !== prevNav) render();
   }
+}
+
+// Realtime: push instant updates when tournament data changes on any device (vs the 15s poll).
+let tournamentLiveSyncChannel = null;
+function ensureTournamentLiveSync() {
+  if (!supabaseClient || tournamentLiveSyncChannel) return;
+  tournamentLiveSyncChannel = supabaseClient
+    .channel('athletic-specimen-tournament-sync')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => { void refreshTournamentLive(); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tournaments' }, () => { void refreshTournamentLive(); })
+    .subscribe();
 }
 
 // Top-level builders can't see render()'s local escapeHTML; alias to the global escaper.
@@ -3124,9 +3136,22 @@ function computeStandings(teams, matches) {
   });
   const rows = Object.keys(stats).map((k) => stats[k]);
   rows.forEach((r) => { r.pointDiff = r.pointsFor - r.pointsAgainst; });
-  rows.sort((x, y) => (y.wins - x.wins) || (y.pointDiff - x.pointDiff) || x.name.localeCompare(y.name));
+  const h2h = headToHead(matches);
+  rows.sort((x, y) => (y.wins - x.wins) || (y.pointDiff - x.pointDiff) || h2h(x.teamId, y.teamId) || String(x.teamId).localeCompare(String(y.teamId)));
   rows.forEach((r, i) => { r.rank = i + 1; });
   return rows;
+}
+
+// Returns a comparator helper: -1 if a beat b head-to-head (a ranks higher), 1 if b beat a, else 0.
+function headToHead(matches) {
+  return (aId, bId) => {
+    const m = (matches || []).find((mm) => mm.phase === 'pool' && mm.status === 'final' &&
+      ((mm.team_a_id === aId && mm.team_b_id === bId) || (mm.team_a_id === bId && mm.team_b_id === aId)));
+    if (!m) return 0;
+    if (m.winner_team_id === aId) return -1;
+    if (m.winner_team_id === bId) return 1;
+    return 0;
+  };
 }
 
 function nextPow2(n) {
@@ -3164,7 +3189,8 @@ function computeSeeding(teams, matches) {
   });
   const rows = Object.keys(stats).map((k) => stats[k]);
   rows.forEach((r) => { r.games = r.wins + r.losses; r.winPct = r.games ? r.wins / r.games : 0; r.pointDiff = r.pf - r.pa; });
-  rows.sort((x, y) => (y.winPct - x.winPct) || (y.pointDiff - x.pointDiff) || x.name.localeCompare(y.name));
+  const h2h = headToHead(matches);
+  rows.sort((x, y) => (y.winPct - x.winPct) || (y.pointDiff - x.pointDiff) || h2h(x.teamId, y.teamId) || String(x.teamId).localeCompare(String(y.teamId)));
   rows.forEach((r, i) => { r.seed = i + 1; });
   return rows;
 }
@@ -3350,7 +3376,7 @@ function buildStandingsTableHTML(poolTeams, poolMatches) {
   </table>`;
 }
 
-function buildMatchRowHTML(m, teams, isAdmin) {
+function buildMatchRowHTML(m, teams, isAdmin, canSubmit) {
   const an = escapeHTML(teamNameById(teams, m.team_a_id));
   const bn = escapeHTML(teamNameById(teams, m.team_b_id));
   if (m.status === 'final') {
@@ -3363,6 +3389,16 @@ function buildMatchRowHTML(m, teams, isAdmin) {
         <span style="flex:1;text-align:right;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--success)' : 'inherit'};">${bn}</span>
       </div>
       ${isAdmin ? `<button type="button" class="secondary" data-role="tv2-clear-result" data-id="${escapeHTML(m.id)}" style="margin-top:4px;font-size:12px;padding:4px 8px;">Clear</button>` : ''}
+    </div>`;
+  }
+  if (!canSubmit) {
+    return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
+      <div class="small" style="color:#64748b;">Net ${escapeHTML(String(m.net || '-'))}</div>
+      <div class="row" style="justify-content:space-between;gap:8px;">
+        <span style="flex:1;min-width:0;">${an}</span>
+        <span style="flex:0 0 auto;color:#94a3b8;">vs</span>
+        <span style="flex:1;min-width:0;text-align:right;">${bn}</span>
+      </div>
     </div>`;
   }
   return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
@@ -3378,15 +3414,35 @@ function buildMatchRowHTML(m, teams, isAdmin) {
   </div>`;
 }
 
+// "Up next by net" board — the next unplayed match on each net + queue depth.
+function buildNetBoardHTML(matches, teams) {
+  const live = (matches || []).filter((m) => m.phase === 'pool' && m.status !== 'final' && m.net);
+  if (!live.length) return '';
+  const byNet = {};
+  live.forEach((m) => { (byNet[m.net] = byNet[m.net] || []).push(m); });
+  const nets = Object.keys(byNet).map(Number).sort((a, b) => a - b);
+  const rows = nets.map((net) => {
+    const q = byNet[net].slice().sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
+    const up = q[0];
+    const upTxt = `${escapeHTML(teamNameById(teams, up.team_a_id))} vs ${escapeHTML(teamNameById(teams, up.team_b_id))}`;
+    return `<div class="row" style="justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);">
+      <span style="flex:0 0 auto;font-weight:600;">Net ${net}</span>
+      <span style="flex:1;min-width:0;text-align:right;">${upTxt}${q.length > 1 ? ` <span class="small" style="color:#94a3b8;">+${q.length - 1} queued</span>` : ''}</span>
+    </div>`;
+  }).join('');
+  return `<div class="card"><h3 style="margin:0 0 4px;">Up next by net</h3>${rows}</div>`;
+}
+
 function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTeamId) {
   const picked = pickedTeamId ? teams.find((t) => t.id === pickedTeamId) : null;
   const visiblePools = (picked && picked.pool_id) ? pools.filter((p) => p.id === picked.pool_id) : pools;
   const picker = `<div class="card">
-    <label class="small" style="color:#475569;display:block;margin-bottom:4px;">Your team (filters to just your pool)</label>
+    <label class="small" style="color:#475569;display:block;margin-bottom:4px;">Your team (pick it to enter your scores)</label>
     <select data-role="tv2-pick-team" style="width:100%;">
       <option value="">All pools</option>
       ${teams.map((t) => `<option value="${escapeHTML(t.id)}" ${t.id === pickedTeamId ? 'selected' : ''}>${escapeHTML(t.name)}</option>`).join('')}
     </select>
+    ${(!isAdmin && !pickedTeamId) ? '<p class="small" style="color:#94a3b8;margin:6px 0 0;">Pick your team above to enter your match scores.</p>' : ''}
   </div>`;
   const poolCards = visiblePools.map((pool) => {
     const poolTeams = teams.filter((t) => t.pool_id === pool.id);
@@ -3397,11 +3453,11 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
       <div class="small" style="color:#64748b;margin:0 0 4px;">${played}/${poolMatches.length} games played</div>
       ${buildStandingsTableHTML(poolTeams, poolMatches)}
       <div style="margin-top:4px;">
-        ${poolMatches.length ? poolMatches.map((m) => buildMatchRowHTML(m, teams, isAdmin)).join('') : '<p class="small" style="color:#64748b;margin:0;">No matches.</p>'}
+        ${poolMatches.length ? poolMatches.map((m) => buildMatchRowHTML(m, teams, isAdmin, isAdmin || (!!pickedTeamId && (m.team_a_id === pickedTeamId || m.team_b_id === pickedTeamId)))).join('') : '<p class="small" style="color:#64748b;margin:0;">No matches.</p>'}
       </div>
     </div>`;
   }).join('');
-  return picker + poolCards;
+  return picker + buildNetBoardHTML(matches, teams) + poolCards;
 }
 
 // ---- Bracket renderer: single-round-focus (the design Mike picked, mockup #1) ----
@@ -3466,6 +3522,22 @@ function buildBracketHTML(tournament, matches, teams) {
   const sideTabs = `<div class="row" style="gap:6px;margin-bottom:8px;">
     ${sideDefs.map(([s, lbl]) => `<button type="button" data-role="tv2-bracket-side" data-side="${s}" class="${s === side ? 'primary' : 'secondary'}" style="flex:1;">${lbl}</button>`).join('')}
   </div>`;
+
+  // Wide screens (>=700px): the classic column-per-round tree (mockup #3). Phones keep the
+  // single-round-focus view below. Switched by viewport width (re-renders on resize).
+  if (typeof window !== 'undefined' && window.innerWidth >= 700) {
+    const wMatches = main.filter((m) => m.side === side);
+    const wRounds = Array.from(new Set(wMatches.map((m) => m.round))).sort((a, b) => a - b);
+    const labelFor = (r) => { const s = wMatches.find((m) => m.round === r); return s ? (s.round_label || ('R' + r)).replace(/ M\d+$/, '') : ('R' + r); };
+    const columns = wRounds.map((r) => {
+      const rm = wMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
+      return `<div style="flex:0 0 250px;display:flex;flex-direction:column;justify-content:space-around;gap:8px;">
+        <div class="small" style="text-align:center;font-weight:600;color:#475569;">${escapeHTML(labelFor(r))}</div>
+        ${rm.map((m) => buildBracketCardHTML(m, main, teams)).join('')}
+      </div>`;
+    }).join('');
+    return `${champBanner}${sideTabs}<div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch;">${columns}</div>`;
+  }
 
   const sideMatches = main.filter((m) => m.side === side);
   const rounds = Array.from(new Set(sideMatches.map((m) => m.round))).sort((a, b) => a - b);
@@ -9398,7 +9470,6 @@ if (editStyle.textContent !== editCss) {
 
 // at the end of render()
 attachHandlers();
-bindTournamentTab();
 bindTournamentTabV2();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
@@ -9542,6 +9613,13 @@ function bindTournamentTabV2() {
       state.tournamentTabError = (err && err.message) ? err.message : 'Something went wrong.';
       render();
     }
+  });
+
+  // Re-render the bracket when crossing the wide/narrow (700px) breakpoint (tree <-> single-round).
+  let lastWide = typeof window !== 'undefined' && window.innerWidth >= 700;
+  window.addEventListener('resize', () => {
+    const wide = window.innerWidth >= 700;
+    if (wide !== lastWide) { lastWide = wide; if (activeMainTab === 'tournament') render(); }
   });
 }
 
@@ -10890,6 +10968,7 @@ function init() {
       const synced = await syncFromSupabase();
       if (synced) saveLocal();
       ensureSupabaseLiveSync();
+      ensureTournamentLiveSync();
       if (synced && canRunAdminSharedBackfill()) {
         (async () => {
           const catalogSynced = await backfillGroupCatalogToSupabase();
@@ -10929,14 +11008,10 @@ function initBackToTop() {
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     init();
-    initTournamentView();
-    bindTournamentTab();
     initBackToTop();
   });
 } else {
   init();
-  initTournamentView();
-  bindTournamentTab();
   initBackToTop();
 }
 

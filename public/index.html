@@ -17,47 +17,12 @@
     .table thead th { text-align:left; font-weight:600; border-bottom:1px solid #333; padding:6px 8px; }
     .table tbody td { border-bottom:1px solid #222; padding:6px 8px; }
     .badge { display:inline-block; padding:2px 8px; border-radius:999px; background:#333; color:#ddd; font-size:12px; }
-
-    /* Fullscreen overlay sheet for Tournament center */
-    #view-tournament{
-      display:none; position:fixed; inset:0; overflow:auto;
-      background:rgba(0,0,0,.65); z-index:10000;
-    }
-    .tournament-sheet{
-      max-width:1100px; margin:40px auto; background:#111; color:#eee;
-      border-radius:12px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,0.4);
-    }
-    .tournament-header{
-      display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px;
-    }
-    .tournament-header h2{ margin:0; font-size:20px; }
-    .tournament-actions{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-    .full-width{ width:100%; }
   </style>
 </head>
 <body>
   <div id="root">
     <div class="loading-message">
       Loading app, please wait...
-    </div>
-  </div>
-
-  <!-- Tournament overlay -->
-  <div id="view-tournament" aria-hidden="true">
-    <div class="tournament-sheet">
-      <div class="tournament-header">
-        <h2>Tournament Center</h2>
-        <div class="tournament-actions mb-8">
-          <label for="tournamentSelect">Tournament</label>
-          <select id="tournamentSelect" class="min-w-220"></select>
-          <button id="closeTournamentBtn">Close</button>
-        </div>
-      </div>
-
-      <div id="tournamentGlobalNotice" class="small mb-8"></div>
-      <div id="tournamentHeaderCard" class="card mb-12"></div>
-      <div id="adminTournament" class="card mb-12"></div>
-      <div id="publicTournamentView" class="card mb-12"></div>
     </div>
   </div>
 
