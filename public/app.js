@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.17.9';
+const APP_VERSION = '2026.06.18.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2867,9 +2867,7 @@ async function tdbGenerateBracket(tournament) {
   if (N < 2) throw new Error('Need at least 2 teams.');
   const seedToTeam = {};
   seeding.forEach((r) => { seedToTeam[r.seed] = r.teamId; });
-  for (const r of seeding) {
-    await supabaseClient.from('teams').update({ seed: r.seed }).eq('id', r.teamId);
-  }
+  const seeds = seeding.map((r) => ({ team_id: r.teamId, seed: r.seed }));
 
   const gen = generateDoubleElim(N, !!tournament.grand_final_reset);
   const real = gen.realMatches;
@@ -2899,7 +2897,7 @@ async function tdbGenerateBracket(tournament) {
     loser_next: m.loserNext ? keyToPos[m.loserNext.key] : null,
     loser_next_slot: m.loserNext ? slotNum(m.loserNext.slot) : null
   }));
-  const { error: rpcErr } = await supabaseClient.rpc('generate_bracket_atomic', { p_tournament_id: tournament.id, p_matches: rows });
+  const { error: rpcErr } = await supabaseClient.rpc('generate_bracket_atomic', { p_tournament_id: tournament.id, p_matches: rows, p_seeds: seeds });
   if (rpcErr) throw rpcErr;
 }
 
@@ -3146,22 +3144,38 @@ function computeStandings(teams, matches) {
   });
   const rows = Object.keys(stats).map((k) => stats[k]);
   rows.forEach((r) => { r.pointDiff = r.pointsFor - r.pointsAgainst; });
-  const h2h = headToHead(matches);
-  rows.sort((x, y) => (y.wins - x.wins) || (y.pointDiff - x.pointDiff) || h2h(x.teamId, y.teamId) || String(x.teamId).localeCompare(String(y.teamId)));
-  rows.forEach((r, i) => { r.rank = i + 1; });
-  return rows;
+  rows.sort((x, y) => (y.wins - x.wins) || (y.pointDiff - x.pointDiff) || String(x.teamId).localeCompare(String(y.teamId)));
+  const ranked = applyHeadToHeadGroups(rows, matches, (r) => r.wins);
+  ranked.forEach((r, i) => { r.rank = i + 1; });
+  return ranked;
 }
 
-// Returns a comparator helper: -1 if a beat b head-to-head (a ranks higher), 1 if b beat a, else 0.
-function headToHead(matches) {
-  return (aId, bId) => {
-    const m = (matches || []).find((mm) => mm.phase === 'pool' && mm.status === 'final' &&
-      ((mm.team_a_id === aId && mm.team_b_id === bId) || (mm.team_a_id === bId && mm.team_b_id === aId)));
-    if (!m) return 0;
-    if (m.winner_team_id === aId) return -1;
-    if (m.winner_team_id === bId) return 1;
-    return 0;
-  };
+// Re-rank tied groups (same primary key AND same point-diff) by head-to-head record
+// WITHIN the tied set, then point-diff, then deterministic team id. Group resolution
+// (vs a pairwise comparator) stays consistent even in a 3-cycle (A>B>C>A).
+function applyHeadToHeadGroups(rows, matches, keyFn) {
+  const out = [];
+  let i = 0;
+  while (i < rows.length) {
+    let j = i + 1;
+    while (j < rows.length && keyFn(rows[j]) === keyFn(rows[i]) && rows[j].pointDiff === rows[i].pointDiff) j++;
+    const group = rows.slice(i, j);
+    if (group.length > 1) {
+      const ids = new Set(group.map((r) => r.teamId));
+      const h2hWins = {};
+      group.forEach((r) => { h2hWins[r.teamId] = 0; });
+      (matches || []).forEach((m) => {
+        if (m.phase !== 'pool' || m.status !== 'final' || !m.winner_team_id) return;
+        if (ids.has(m.team_a_id) && ids.has(m.team_b_id) && h2hWins[m.winner_team_id] != null) {
+          h2hWins[m.winner_team_id]++;
+        }
+      });
+      group.sort((x, y) => (h2hWins[y.teamId] - h2hWins[x.teamId]) || (y.pointDiff - x.pointDiff) || String(x.teamId).localeCompare(String(y.teamId)));
+    }
+    out.push(...group);
+    i = j;
+  }
+  return out;
 }
 
 function nextPow2(n) {
@@ -3199,10 +3213,10 @@ function computeSeeding(teams, matches) {
   });
   const rows = Object.keys(stats).map((k) => stats[k]);
   rows.forEach((r) => { r.games = r.wins + r.losses; r.winPct = r.games ? r.wins / r.games : 0; r.pointDiff = r.pf - r.pa; });
-  const h2h = headToHead(matches);
-  rows.sort((x, y) => (y.winPct - x.winPct) || (y.pointDiff - x.pointDiff) || h2h(x.teamId, y.teamId) || String(x.teamId).localeCompare(String(y.teamId)));
-  rows.forEach((r, i) => { r.seed = i + 1; });
-  return rows;
+  rows.sort((x, y) => (y.winPct - x.winPct) || (y.pointDiff - x.pointDiff) || String(x.teamId).localeCompare(String(y.teamId)));
+  const ranked = applyHeadToHeadGroups(rows, matches, (r) => r.winPct);
+  ranked.forEach((r, i) => { r.seed = i + 1; });
+  return ranked;
 }
 
 // The bracket champion, or null. GF2 (reset) decides if it was played; otherwise the
