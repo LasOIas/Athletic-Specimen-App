@@ -1,0 +1,7 @@
+# AI tooling scratch / mockups — not part of the app
+.superpowers/
+.playwright-mcp/
+
+# OS / editor
+.DS_Store
+Thumbs.db
