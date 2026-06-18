@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.18.4';
+const APP_VERSION = '2026.06.18.5';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5837,6 +5837,7 @@ function bindTournamentTabV2() {
         state.tournamentTeams = [];
         render();
       } else if (role === 'tv2-delete-tournament') {
+        if (!state.isAdmin) return; // defense-in-depth re-check (real server gate = C21)
         if (!window.confirm('Delete this tournament and everything in it?')) return;
         await tdbDeleteTournament(id);
         if (state.activeTournamentId === id) state.activeTournamentId = null;
@@ -5864,6 +5865,7 @@ function bindTournamentTabV2() {
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-reset-pools') {
+        if (!state.isAdmin) return; // defense-in-depth re-check (real server gate = C21)
         if (!window.confirm('Reset pools and clear all pool results?')) return;
         const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
         await tdbDrawPools(t);
@@ -6765,6 +6767,7 @@ if (saveSupabaseBtn) {
   const resetBtn = document.getElementById('btn-reset-checkins');
   if (resetBtn) {
     resetBtn.addEventListener('click', async () => {
+      if (!canAccessOperatorSafetyControls()) return; // master-admin only; real server gate = C21
       const previouslyCheckedIn = normalizeCheckedInEntries(state.checkedIn || []);
       const confirmed = window.confirm(
         `Reset all check-ins (${previouslyCheckedIn.length} currently checked in)?\n\nThis will check everyone out and sync that state to Supabase.`
@@ -7086,6 +7089,14 @@ const runBulkAttendanceAction = (shouldCheckIn) => {
   const targets = state.players.filter((player) => idSet.has(String(player.id)));
   if (!targets.length) return;
 
+  // Check-OUT is destructive (this is the 44->0 footgun class): confirm with a count + snapshot
+  // the prior checked-in set so it can be undone. Check-IN is non-destructive — no confirm.
+  let priorCheckedIn = null;
+  if (!shouldCheckIn) {
+    if (!window.confirm(`Check out ${targets.length} selected player${targets.length === 1 ? '' : 's'}?`)) return;
+    priorCheckedIn = normalizeCheckedInEntries(state.checkedIn || []);
+  }
+
   const remoteIds = new Set();
   targets.forEach((player) => {
     if (shouldCheckIn) checkInPlayer(player);
@@ -7094,7 +7105,24 @@ const runBulkAttendanceAction = (shouldCheckIn) => {
   });
 
   saveLocal();
-  render();
+  if (!shouldCheckIn && priorCheckedIn) {
+    // Record an undo (same kind:'checkins' payload reset-checkins uses) then full render() so the
+    // Undo entry appears in the operator-actions log (partialRender doesn't re-render that log).
+    recordOperatorAction({
+      scope: 'players',
+      action: 'bulk-check-out',
+      entityType: 'checkins',
+      entityId: '',
+      title: `Checked out ${targets.length} player${targets.length === 1 ? '' : 's'}.`,
+      detail: 'Bulk check-out. Undo restores the prior checked-in set.',
+      tone: 'warning',
+      undo: { kind: 'checkins', checkedIn: priorCheckedIn }
+    });
+    render();
+  } else {
+    // Check-IN: non-destructive, no undo needed -> partialRender (no full 213-card rebuild).
+    partialRender();
+  }
 
   if (supabaseClient && remoteIds.size) {
     (async () => {

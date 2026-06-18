@@ -2,6 +2,13 @@
 .superpowers/
 .playwright-mcp/
 
+# Dependencies (should never have been committed under public/)
+node_modules/
+
+# Editor/scratch backups — these leaked the admin code; never track them
+*.bak
+*.backup
+
 # OS / editor
 .DS_Store
 Thumbs.db
