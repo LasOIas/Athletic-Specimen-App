@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.17.8';
+const APP_VERSION = '2026.06.17.9';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3056,14 +3056,24 @@ async function refreshTournamentLive() {
   }
 }
 
+// Coalesce bursts of tournament refreshes (realtime can fire many rows at once) into one.
+let _tournamentRefreshTimer = null;
+function queueTournamentRefresh(delay = 800) {
+  if (_tournamentRefreshTimer) clearTimeout(_tournamentRefreshTimer);
+  _tournamentRefreshTimer = setTimeout(() => { _tournamentRefreshTimer = null; void refreshTournamentLive(); }, delay);
+}
+
 // Realtime: push instant updates when tournament data changes on any device (vs the 15s poll).
 let tournamentLiveSyncChannel = null;
 function ensureTournamentLiveSync() {
   if (!supabaseClient || tournamentLiveSyncChannel) return;
+  const ping = () => queueTournamentRefresh(800);
   tournamentLiveSyncChannel = supabaseClient
     .channel('athletic-specimen-tournament-sync')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, () => { void refreshTournamentLive(); })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'tournaments' }, () => { void refreshTournamentLive(); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, ping)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tournaments' }, ping)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, ping)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'pools' }, ping)
     .subscribe();
 }
 
@@ -3466,7 +3476,7 @@ function bracketLabelById(matches, id) {
   return m ? (m.round_label || '') : '';
 }
 
-function buildBracketCardHTML(m, matches, teams) {
+function buildBracketCardHTML(m, matches, teams, canSubmit) {
   const aKnown = !!m.team_a_id, bKnown = !!m.team_b_id;
   const aName = aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : `<span style="color:#94a3b8;">${escapeHTML(m.source_a || 'TBD')}</span>`;
   const bName = bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : `<span style="color:#94a3b8;">${escapeHTML(m.source_b || 'TBD')}</span>`;
@@ -3488,18 +3498,20 @@ function buildBracketCardHTML(m, matches, teams) {
       </div>
       ${scoreTxt ? `<div class="small" style="color:#64748b;margin-top:2px;">${scoreTxt}</div>` : ''}
       ${state.isAdmin ? `<button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}" style="margin-top:4px;font-size:12px;padding:4px 8px;">Clear</button>` : ''}`;
-  } else if (aKnown && bKnown) {
+  } else if (aKnown && bKnown && canSubmit) {
     body = `
       <div class="row" style="align-items:center;gap:6px;">
         <span style="flex:1;min-width:0;">${aName}</span>
-        <input type="number" inputmode="numeric" id="bsc-a-${escapeHTML(m.id)}" style="flex:0 0 42px;width:42px;" placeholder="–" />
+        <input type="number" inputmode="numeric" min="0" id="bsc-a-${escapeHTML(m.id)}" style="flex:0 0 42px;width:42px;" placeholder="–" />
         <button type="button" class="primary" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="a" style="flex:0 0 auto;padding:6px 12px;">Win</button>
       </div>
       <div class="row" style="align-items:center;gap:6px;margin-top:4px;">
         <span style="flex:1;min-width:0;">${bName}</span>
-        <input type="number" inputmode="numeric" id="bsc-b-${escapeHTML(m.id)}" style="flex:0 0 42px;width:42px;" placeholder="–" />
+        <input type="number" inputmode="numeric" min="0" id="bsc-b-${escapeHTML(m.id)}" style="flex:0 0 42px;width:42px;" placeholder="–" />
         <button type="button" class="primary" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="b" style="flex:0 0 auto;padding:6px 12px;">Win</button>
       </div>`;
+  } else if (aKnown && bKnown) {
+    body = `<div class="row" style="justify-content:space-between;gap:8px;"><span style="flex:1;min-width:0;">${aName}</span><span style="flex:0 0 auto;color:#94a3b8;">vs</span><span style="flex:1;min-width:0;text-align:right;">${bName}</span></div>`;
   } else {
     body = `<div style="color:#94a3b8;">${aName}</div><div style="color:#94a3b8;margin-top:2px;">${bName}</div>`;
   }
@@ -3515,6 +3527,17 @@ function buildBracketHTML(tournament, matches, teams) {
     <div class="small" style="color:#16a34a;letter-spacing:.04em;">CHAMPION</div>
     <h2 style="margin:4px 0 0;color:#15803d;">${escapeHTML(champ.name)}</h2>
   </div>` : '';
+
+  // Who can enter a bracket result: admin, or the picked team if it's IN this match.
+  const pid = state.tournamentPickedTeamId;
+  const canSubmit = (m) => state.isAdmin || (!!pid && (m.team_a_id === pid || m.team_b_id === pid));
+  const picker = state.isAdmin ? '' : `<div class="card">
+    <label class="small" style="color:#475569;display:block;margin-bottom:4px;">Your team (pick it to enter your scores)</label>
+    <select data-role="tv2-pick-team" style="width:100%;">
+      <option value="">View only</option>
+      ${(teams || []).map((t) => `<option value="${escapeHTML(t.id)}" ${t.id === pid ? 'selected' : ''}>${escapeHTML(t.name)}</option>`).join('')}
+    </select>
+  </div>`;
 
   const sideDefs = [['winners', 'Winners'], ['losers', 'Losers'], ['grand_final', 'Final']].filter(([s]) => main.some((m) => m.side === s));
   let side = state.bracketSide;
@@ -3533,10 +3556,10 @@ function buildBracketHTML(tournament, matches, teams) {
       const rm = wMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
       return `<div style="flex:0 0 250px;display:flex;flex-direction:column;justify-content:space-around;gap:8px;">
         <div class="small" style="text-align:center;font-weight:600;color:#475569;">${escapeHTML(labelFor(r))}</div>
-        ${rm.map((m) => buildBracketCardHTML(m, main, teams)).join('')}
+        ${rm.map((m) => buildBracketCardHTML(m, main, teams, canSubmit(m))).join('')}
       </div>`;
     }).join('');
-    return `${champBanner}${sideTabs}<div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch;">${columns}</div>`;
+    return `${champBanner}${sideTabs}${picker}<div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch;">${columns}</div>`;
   }
 
   const sideMatches = main.filter((m) => m.side === side);
@@ -3554,9 +3577,9 @@ function buildBracketHTML(tournament, matches, teams) {
   </div>` : '';
 
   const roundMatches = sideMatches.filter((m) => m.round === round).sort((a, b) => a.slot - b.slot);
-  const cards = roundMatches.map((m) => buildBracketCardHTML(m, main, teams)).join('');
+  const cards = roundMatches.map((m) => buildBracketCardHTML(m, main, teams, canSubmit(m))).join('');
 
-  return `${champBanner}${sideTabs}${roundPills}${cards}`;
+  return `${champBanner}${sideTabs}${picker}${roundPills}${cards}`;
 }
 
 // Builds the Tournament tab body (admin create/manage, or public read-only).
@@ -8465,8 +8488,7 @@ function ensureTournamentOverlayBindings() {
   if (ensureTournamentOverlayBindings._bound) return;
   const tournamentRoot = document.getElementById('view-tournament');
   if (!tournamentRoot) {
-    pushTournamentRuntimeTrace('binding delayed: #view-tournament not found.', TOURNAMENT_NOTICE_ERROR);
-    return;
+    return; // legacy overlay removed (C14) — nothing to bind, no trace
   }
   const toEventElement = (rawTarget) => {
     if (rawTarget instanceof Element) return rawTarget;
@@ -9565,6 +9587,10 @@ function bindTournamentTabV2() {
         partialRenderTournament();
       } else if (role === 'tv2-bracket-win') {
         const m = (state.tournamentMatches || []).find((x) => x.id === id);
+        const pid = state.tournamentPickedTeamId;
+        if (!(state.isAdmin || (m && pid && (m.team_a_id === pid || m.team_b_id === pid)))) {
+          throw new Error('Pick your team to enter this result.');
+        }
         const sa = (document.getElementById('bsc-a-' + id) || {}).value;
         const sb = (document.getElementById('bsc-b-' + id) || {}).value;
         await tdbSubmitBracketResult(m, el.getAttribute('data-winner'), sa, sb);
@@ -10985,7 +11011,7 @@ function init() {
         crossDeviceRefreshInterval = setInterval(() => {
           if (document.hidden) return;
           queueSupabaseRefresh(800);
-          void refreshTournamentLive();
+          queueTournamentRefresh(800);
         }, 15000);
       }
     })();
