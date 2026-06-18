@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.18.6';
+const APP_VERSION = '2026.06.18.7';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -962,10 +962,10 @@ function resetGeneratedTeamDragState() {
     if (supabaseClient && player.id) {
       (async () => {
         try {
+          // C21: route through the SECURITY DEFINER RPCs (the only anon write door under locked
+          // RLS); works for authenticated admins too. Same single-row effect as the prior update.
           const { error } = await supabaseClient
-            .from('players')
-            .update({ checked_in: !!inBtn })
-            .eq('id', player.id);
+            .rpc(inBtn ? 'check_in' : 'check_out', { p_id: player.id });
           if (error) throw error;
           queueSupabaseRefresh();
         } catch (err) {
@@ -2726,18 +2726,13 @@ async function tdbSubmitResult(match, scoreA, scoreB) {
   const { sa, sb } = validateScores(scoreA, scoreB);
   const winnerSide = decideWinner(sa, sb);
   if (!winnerSide) throw new Error('Enter both scores; ties are not allowed.');
-  const winnerId = winnerSide === 'A' ? match.team_a_id : match.team_b_id;
-  const loserId = winnerSide === 'A' ? match.team_b_id : match.team_a_id;
-  const { data, error } = await supabaseClient.from('matches')
-    .update({
-      score_a: sa, score_b: sb,
-      winner_team_id: winnerId, loser_team_id: loserId, status: 'final',
-      version: (match.version || 0) + 1, updated_at: new Date().toISOString()
-    })
-    .eq('id', match.id).eq('version', match.version || 0).select();
+  // C21: route the write through submit_match_score (the only anon write door under locked RLS).
+  // The RPC does the same CAS-final and derives the winner from the scores.
+  const { data, error } = await supabaseClient.rpc('submit_match_score', {
+    p_match: match.id, p_version: match.version || 0, p_score_a: sa, p_score_b: sb
+  });
   if (error) throw error;
-  if (!data || data.length === 0) throw new Error('Another device just updated this match — refreshing.');
-  return data[0];
+  return Array.isArray(data) ? data[0] : data;
 }
 
 async function tdbClearResult(match) {
@@ -2818,38 +2813,17 @@ async function tdbSubmitBracketResult(match, winnerSide, scoreA, scoreB) {
     const w = decideWinner(sa, sb);
     if (!w || w.toLowerCase() !== side) throw new Error('The winner you tapped does not match the scores you entered.');
   }
-  const winnerId = side === 'a' ? match.team_a_id : match.team_b_id;
-  const loserId = side === 'a' ? match.team_b_id : match.team_a_id;
-  const upd = {
-    winner_team_id: winnerId, loser_team_id: loserId, status: 'final',
-    version: (match.version || 0) + 1, updated_at: new Date().toISOString()
-  };
-  if (hasScores) { upd.score_a = sa; upd.score_b = sb; }
-  const { data, error } = await supabaseClient.from('matches')
-    .update(upd).eq('id', match.id).eq('version', match.version || 0).select();
+  // C21: route the entire write — CAS-final, guarded winner/loser advancement, grand-final
+  // special-case, and tournament completion — through submit_match_score (a faithful server-side
+  // port). The only anon write door under locked RLS. p_winner_side carries the tap; any entered
+  // scores are passed too (the RPC re-checks they agree with the tap).
+  const { data, error } = await supabaseClient.rpc('submit_match_score', {
+    p_match: match.id, p_version: match.version || 0,
+    p_score_a: hasScores ? sa : null, p_score_b: hasScores ? sb : null,
+    p_winner_side: side
+  });
   if (error) throw error;
-  if (!data || data.length === 0) throw new Error('Another device just updated this match — refreshing.');
-
-  const isGF = match.side === 'grand_final' && match.round === 1;
-  const wbWonGF = isGF && side === 'a'; // slot a = winners-bracket finalist -> champion, no reset
-  // Advancement writes are GUARDED: only fill a downstream slot that's still empty + scheduled,
-  // so a stale resubmit / two-device race can't stomp a team that already advanced or played.
-  if (match.winner_next_match_id && !wbWonGF) {
-    const col = match.winner_next_slot === 1 ? 'team_b_id' : 'team_a_id';
-    await supabaseClient.from('matches').update({ [col]: winnerId })
-      .eq('id', match.winner_next_match_id).is(col, null).eq('status', 'scheduled');
-  }
-  if (match.loser_next_match_id && !wbWonGF) {
-    const col = match.loser_next_slot === 1 ? 'team_b_id' : 'team_a_id';
-    await supabaseClient.from('matches').update({ [col]: loserId })
-      .eq('id', match.loser_next_match_id).is(col, null).eq('status', 'scheduled');
-  }
-  const decisive = !match.winner_next_match_id || wbWonGF;
-  if (decisive) {
-    await supabaseClient.from('tournaments')
-      .update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', match.tournament_id);
-  }
-  return data[0];
+  return Array.isArray(data) ? data[0] : data;
 }
 
 // Clear a finalized bracket result (admin), CASCADING: reset this match + every downstream
@@ -6638,7 +6612,7 @@ if (saveSupabaseBtn) {
           if (supabaseClient && player.id) {
             (async () => {
               try {
-                const { error } = await supabaseClient.from('players').update({ checked_in: true }).eq('id', player.id);
+                const { error } = await supabaseClient.rpc('check_in', { p_id: player.id });
                 if (error) throw error;
                 queueSupabaseRefresh();
               } catch (err) {
@@ -6675,7 +6649,7 @@ if (saveSupabaseBtn) {
           if (supabaseClient && player.id) {
             (async () => {
               try {
-                const { error } = await supabaseClient.from('players').update({ checked_in: false }).eq('id', player.id);
+                const { error } = await supabaseClient.rpc('check_out', { p_id: player.id });
                 if (error) throw error;
                 queueSupabaseRefresh();
               } catch (err) {
@@ -6741,27 +6715,16 @@ if (saveSupabaseBtn) {
           (async () => {
             try {
               let remoteOK = false;
-              const encodedGroupsTag = serializePlayerGroupsTag(groups, group);
-              try {
-                const insertRow = HAS_TAG
-                  ? { name, skill, group, tag: encodedGroupsTag }
-                  : { name, skill, group };
-                const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
+              // C21: register through the SECURITY DEFINER RPC (the only anon write door under
+              // locked RLS). Idempotent server-side; returns the row so we adopt its id. No
+              // p_checked_in -> false: public register leaves the player checked OUT (the separate
+              // Check In step still applies), matching prior behavior.
+              {
+                const { data, error } = await supabaseClient.rpc('register_player', { p_name: name, p_group: group });
                 if (error) throw error;
                 remoteOK = true;
-                if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
-              } catch {
-                try {
-                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-                  if (error) throw error;
-                  remoteOK = true;
-                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
-                } catch {
-                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-                  if (error) throw error;
-                  remoteOK = true;
-                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
-                }
+                const row = Array.isArray(data) ? data[0] : data;
+                if (row && row.id) inserted.id = row.id;
               }
               await ensureGroupCatalogEntriesSupabase(group ? [group] : []);
               inserted.pending = false;

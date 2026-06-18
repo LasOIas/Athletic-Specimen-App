@@ -305,10 +305,8 @@
       const errEl = $('checkinError');
       if (errEl) errEl.hidden = true;
       try {
-        const { error } = await sb
-          .from('players')
-          .update({ checked_in: true })
-          .eq('id', player.id);
+        // C21: route through the SECURITY DEFINER RPC (the only anon write door under locked RLS).
+        const { error } = await sb.rpc('check_in', { p_id: player.id });
         if (error) throw error;
         showSuccess(player.name);
       } catch (err) {
@@ -336,23 +334,13 @@
       const errEl = $('registerError');
       errEl.hidden = true;
 
-      // Try inserting with progressively simpler payloads to handle schema variations
-      const attempts = [
-        { name: fullName, group: GROUP_NAME, checked_in: true, skill: 0 },
-        { name: fullName, group: GROUP_NAME, checked_in: true },
-        { name: fullName, checked_in: true, skill: 0 },
-        { name: fullName, checked_in: true },
-      ];
-
-      let lastErr = null;
-      for (const payload of attempts) {
-        const { error } = await sb.from('players').insert([payload]).select();
-        if (!error) { showSuccess(fullName); return; }
-        lastErr = error;
-        console.warn('Register attempt failed:', payload, error);
-      }
-
-      errEl.textContent = `Could not register you: ${lastErr?.message || 'unknown error'}`;
+      // C21: register through the SECURITY DEFINER RPC (the only anon write door under locked
+      // RLS). p_checked_in=true -> the kiosk registers AND checks the player in ("Register &
+      // check in"). Idempotent server-side.
+      const { error } = await sb.rpc('register_player', { p_name: fullName, p_group: GROUP_NAME, p_checked_in: true });
+      if (!error) { showSuccess(fullName); return; }
+      console.error('Register error:', error);
+      errEl.textContent = `Could not register you: ${error?.message || 'unknown error'}`;
       errEl.hidden = false;
     }
 
