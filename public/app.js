@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.17.3';
+const APP_VERSION = '2026.06.17.4';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2637,6 +2637,8 @@ const state = {
   tournamentPools: [],        // pools for the active tournament
   tournamentMatches: [],      // matches for the active tournament
   tournamentPickedTeamId: null, // self-serve: the team this phone picked
+  bracketSide: null,          // bracket nav: 'winners' | 'losers' | 'grand_final'
+  bracketRound: null,         // bracket nav: which round is shown
   tournamentTabLoading: false,
   tournamentTabError: ''
 };
@@ -2899,6 +2901,48 @@ async function tdbGenerateBracket(tournament) {
     .update({ status: 'bracket', updated_at: new Date().toISOString() }).eq('id', tournament.id);
 }
 
+// Submit a bracket result (tap-to-win default; scores optional). CAS-finals the match,
+// advances the winner into winner_next + drops the loser into loser_next, special-cases
+// the grand final (reset only if the losers-bracket team wins), and completes the
+// tournament when the result is decisive.
+async function tdbSubmitBracketResult(match, winnerSide, scoreA, scoreB) {
+  if (!supabaseClient || !match) throw new Error('No match.');
+  if (!match.team_a_id || !match.team_b_id) throw new Error('Both teams are not set yet.');
+  let side = (winnerSide === 'a' || winnerSide === 'b') ? winnerSide : null;
+  if (!side) { const w = decideWinner(scoreA, scoreB); side = w ? w.toLowerCase() : null; }
+  if (!side) throw new Error('Pick a winner.');
+  const winnerId = side === 'a' ? match.team_a_id : match.team_b_id;
+  const loserId = side === 'a' ? match.team_b_id : match.team_a_id;
+  const upd = {
+    winner_team_id: winnerId, loser_team_id: loserId, status: 'final',
+    version: (match.version || 0) + 1, updated_at: new Date().toISOString()
+  };
+  const hasScores = scoreA !== '' && scoreA != null && scoreB !== '' && scoreB != null
+    && Number.isFinite(Number(scoreA)) && Number.isFinite(Number(scoreB));
+  if (hasScores) { upd.score_a = Number(scoreA); upd.score_b = Number(scoreB); }
+  const { data, error } = await supabaseClient.from('matches')
+    .update(upd).eq('id', match.id).eq('version', match.version || 0).select();
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Another device just updated this match — refreshing.');
+
+  const isGF = match.side === 'grand_final' && match.round === 1;
+  const wbWonGF = isGF && side === 'a'; // slot a = winners-bracket finalist -> champion, no reset
+  if (match.winner_next_match_id && !wbWonGF) {
+    const col = match.winner_next_slot === 1 ? 'team_b_id' : 'team_a_id';
+    await supabaseClient.from('matches').update({ [col]: winnerId }).eq('id', match.winner_next_match_id);
+  }
+  if (match.loser_next_match_id && !wbWonGF) {
+    const col = match.loser_next_slot === 1 ? 'team_b_id' : 'team_a_id';
+    await supabaseClient.from('matches').update({ [col]: loserId }).eq('id', match.loser_next_match_id);
+  }
+  const decisive = !match.winner_next_match_id || wbWonGF;
+  if (decisive) {
+    await supabaseClient.from('tournaments')
+      .update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', match.tournament_id);
+  }
+  return data[0];
+}
+
 // Reload tournament list (+ active tournament's teams/pools/matches) into state. No render.
 async function tdbRefreshTournaments() {
   state.tournaments = await tdbListTournaments();
@@ -3047,6 +3091,19 @@ function computeSeeding(teams, matches) {
   rows.sort((x, y) => (y.winPct - x.winPct) || (y.pointDiff - x.pointDiff) || x.name.localeCompare(y.name));
   rows.forEach((r, i) => { r.seed = i + 1; });
   return rows;
+}
+
+// The bracket champion, or null. GF2 (reset) decides if it was played; otherwise the
+// GF winner — but only when no reset was needed (the winners-bracket team, slot a, won).
+function computeChampion(mainMatches, teams) {
+  const gf2 = (mainMatches || []).find((m) => m.side === 'grand_final' && m.round === 2);
+  const gf = (mainMatches || []).find((m) => m.side === 'grand_final' && m.round === 1);
+  let champId = null;
+  if (gf2 && gf2.status === 'final') champId = gf2.winner_team_id;
+  else if (gf && gf.status === 'final' && (!gf2 || gf.winner_team_id === gf.team_a_id)) champId = gf.winner_team_id;
+  if (!champId) return null;
+  const t = (teams || []).find((x) => x.id === champId);
+  return { teamId: champId, name: t ? (t.name || '') : '' };
 }
 
 // Generate a complete double-elimination bracket for N seeded teams.
@@ -3271,35 +3328,86 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
   return picker + poolCards;
 }
 
-// Interim bracket view (a simple grouped list). Phase 4 replaces this with the
-// single-round-focus (phone) / tree (wide) renderer Mike picked.
-function buildBracketMatchHTML(m, teams) {
-  const nameOf = (id, src) => id
-    ? `<span>${escapeHTML(teamNameById(teams, id))}</span>`
-    : `<span style="color:#94a3b8;">${escapeHTML(src || 'TBD')}</span>`;
-  const aWin = m.status === 'final' && m.winner_team_id === m.team_a_id;
-  const bWin = m.status === 'final' && m.winner_team_id === m.team_b_id;
-  return `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
-    <div class="small" style="color:#64748b;">${escapeHTML(m.round_label || '')}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>
-    <div class="row" style="justify-content:space-between;gap:8px;align-items:center;">
-      <span style="flex:1;min-width:0;font-weight:${aWin ? '700' : '400'};color:${aWin ? 'var(--success)' : 'inherit'};">${nameOf(m.team_a_id, m.source_a)}</span>
-      <span style="flex:0 0 auto;">${m.status === 'final' ? escapeHTML(String(m.score_a)) + ' - ' + escapeHTML(String(m.score_b)) : 'vs'}</span>
-      <span style="flex:1;min-width:0;text-align:right;font-weight:${bWin ? '700' : '400'};color:${bWin ? 'var(--success)' : 'inherit'};">${nameOf(m.team_b_id, m.source_b)}</span>
-    </div>
-  </div>`;
+// ---- Bracket renderer: single-round-focus (the design Mike picked, mockup #1) ----
+function bracketLabelById(matches, id) {
+  const m = (matches || []).find((x) => x.id === id);
+  return m ? (m.round_label || '') : '';
 }
 
-function buildBracketListHTML(matches, teams) {
+function buildBracketCardHTML(m, matches, teams) {
+  const aKnown = !!m.team_a_id, bKnown = !!m.team_b_id;
+  const aName = aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : `<span style="color:#94a3b8;">${escapeHTML(m.source_a || 'TBD')}</span>`;
+  const bName = bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : `<span style="color:#94a3b8;">${escapeHTML(m.source_b || 'TBD')}</span>`;
+  const winLbl = m.winner_next_match_id ? escapeHTML(bracketLabelById(matches, m.winner_next_match_id)) : 'Champion';
+  const loseLbl = m.loser_next_match_id ? ` &nbsp;·&nbsp; Loser → ${escapeHTML(bracketLabelById(matches, m.loser_next_match_id))}` : '';
+  const header = `<div class="small" style="color:#64748b;">${escapeHTML(m.round_label || '')}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
+  const progression = `<div class="small" style="color:#94a3b8;margin-top:6px;">Winner → ${winLbl}${loseLbl}</div>`;
+
+  let body;
+  if (m.status === 'final') {
+    const aWin = m.winner_team_id === m.team_a_id;
+    const scoreTxt = (m.score_a != null && m.score_b != null) ? `${escapeHTML(String(m.score_a))} - ${escapeHTML(String(m.score_b))}` : '';
+    body = `
+      <div class="row" style="justify-content:space-between;gap:8px;font-weight:${aWin ? '700' : '400'};color:${aWin ? 'var(--success)' : 'inherit'};">
+        <span style="flex:1;min-width:0;">${aName}</span><span style="flex:0 0 auto;">${aWin ? 'Won' : ''}</span>
+      </div>
+      <div class="row" style="justify-content:space-between;gap:8px;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--success)' : 'inherit'};">
+        <span style="flex:1;min-width:0;">${bName}</span><span style="flex:0 0 auto;">${!aWin ? 'Won' : ''}</span>
+      </div>
+      ${scoreTxt ? `<div class="small" style="color:#64748b;margin-top:2px;">${scoreTxt}</div>` : ''}`;
+  } else if (aKnown && bKnown) {
+    body = `
+      <div class="row" style="align-items:center;gap:6px;">
+        <span style="flex:1;min-width:0;">${aName}</span>
+        <input type="number" inputmode="numeric" id="bsc-a-${escapeHTML(m.id)}" style="flex:0 0 42px;width:42px;" placeholder="–" />
+        <button type="button" class="primary" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="a" style="flex:0 0 auto;padding:6px 12px;">Win</button>
+      </div>
+      <div class="row" style="align-items:center;gap:6px;margin-top:4px;">
+        <span style="flex:1;min-width:0;">${bName}</span>
+        <input type="number" inputmode="numeric" id="bsc-b-${escapeHTML(m.id)}" style="flex:0 0 42px;width:42px;" placeholder="–" />
+        <button type="button" class="primary" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="b" style="flex:0 0 auto;padding:6px 12px;">Win</button>
+      </div>`;
+  } else {
+    body = `<div style="color:#94a3b8;">${aName}</div><div style="color:#94a3b8;margin-top:2px;">${bName}</div>`;
+  }
+  return `<div class="card" style="margin-bottom:8px;">${header}${body}${progression}</div>`;
+}
+
+function buildBracketHTML(tournament, matches, teams) {
   const main = (matches || []).filter((m) => m.phase === 'main');
-  const labels = { winners: 'Winners', losers: 'Losers', grand_final: 'Grand Final' };
-  return ['winners', 'losers', 'grand_final'].map((side) => {
-    const sm = main.filter((m) => m.side === side).sort((x, y) => (x.round - y.round) || (x.slot - y.slot));
-    if (!sm.length) return '';
-    return `<div class="card">
-      <h3 style="margin:0 0 6px;">${labels[side]}</h3>
-      ${sm.map((m) => buildBracketMatchHTML(m, teams)).join('')}
-    </div>`;
-  }).join('');
+  if (!main.length) return '<div class="card"><p class="small" style="color:#64748b;margin:0;">No bracket yet.</p></div>';
+
+  const champ = computeChampion(main, teams);
+  const champBanner = champ ? `<div class="card" style="text-align:center;border:2px solid var(--success);background:#f0fdf4;">
+    <div class="small" style="color:#16a34a;letter-spacing:.04em;">CHAMPION</div>
+    <h2 style="margin:4px 0 0;color:#15803d;">${escapeHTML(champ.name)}</h2>
+  </div>` : '';
+
+  const sideDefs = [['winners', 'Winners'], ['losers', 'Losers'], ['grand_final', 'Final']].filter(([s]) => main.some((m) => m.side === s));
+  let side = state.bracketSide;
+  if (!sideDefs.some(([s]) => s === side)) side = sideDefs[0][0];
+  const sideTabs = `<div class="row" style="gap:6px;margin-bottom:8px;">
+    ${sideDefs.map(([s, lbl]) => `<button type="button" data-role="tv2-bracket-side" data-side="${s}" class="${s === side ? 'primary' : 'secondary'}" style="flex:1;">${lbl}</button>`).join('')}
+  </div>`;
+
+  const sideMatches = main.filter((m) => m.side === side);
+  const rounds = Array.from(new Set(sideMatches.map((m) => m.round))).sort((a, b) => a - b);
+  let round = state.bracketRound;
+  if (!rounds.includes(round)) {
+    round = rounds.find((r) => sideMatches.some((m) => m.round === r && m.status !== 'final')) || rounds[0];
+  }
+  const roundLabelFor = (r) => {
+    const sample = sideMatches.find((m) => m.round === r);
+    return sample ? (sample.round_label || ('R' + r)).replace(/ M\d+$/, '') : ('R' + r);
+  };
+  const roundPills = rounds.length > 1 ? `<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:8px;-webkit-overflow-scrolling:touch;">
+    ${rounds.map((r) => `<button type="button" data-role="tv2-bracket-round" data-round="${r}" class="${r === round ? 'primary' : 'secondary'}" style="flex:0 0 auto;white-space:nowrap;font-size:13px;padding:6px 10px;">${escapeHTML(roundLabelFor(r))}</button>`).join('')}
+  </div>` : '';
+
+  const roundMatches = sideMatches.filter((m) => m.round === round).sort((a, b) => a.slot - b.slot);
+  const cards = roundMatches.map((m) => buildBracketCardHTML(m, main, teams)).join('');
+
+  return `${champBanner}${sideTabs}${roundPills}${cards}`;
 }
 
 // Builds the Tournament tab body (admin create/manage, or public read-only).
@@ -3324,11 +3432,11 @@ function buildTournamentTabHTML() {
         <p class="small" style="color:#64748b;margin:0;">Pool play — submit your game results below.</p>
       </div>` + buildPoolPlayHTML(active, state.tournamentPools || [], teams, state.tournamentMatches || [], false, state.tournamentPickedTeamId);
     }
-    if (active && show.status === 'bracket') {
+    if (active && (show.status === 'bracket' || show.status === 'completed')) {
       return `<div class="card">
         <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
         <p class="small" style="color:#64748b;margin:0;">Bracket</p>
-      </div>` + buildBracketListHTML(state.tournamentMatches || [], teams);
+      </div>` + buildBracketHTML(active, state.tournamentMatches || [], teams);
     }
     return `<div class="card">
       <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
@@ -3389,9 +3497,9 @@ function buildTournamentTabHTML() {
     </div>
   </div>`;
 
-  // Bracket stage (interim grouped list; Phase 4 = the real single-round/tree rendering).
-  if (active.status === 'bracket') {
-    return `${err}${headerCard}${buildBracketListHTML(matches, teams)}`;
+  // Bracket stage: single-round-focus renderer (mockup #1).
+  if (active.status === 'bracket' || active.status === 'completed') {
+    return `${err}${headerCard}${buildBracketHTML(active, matches, teams)}`;
   }
 
   // Pool-play stage: standings + matches + override + generate bracket when done.
@@ -8930,7 +9038,7 @@ function render() {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       <span>Teams</span>
     </button>` : ''}
-    ${(state.isAdmin || (state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket')) ? `
+    ${(state.isAdmin || (state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket' || t.status === 'completed')) ? `
     <button class="nav-btn" data-nav-tab="tournament">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
       <span>Tournament</span>
@@ -9295,6 +9403,21 @@ function bindTournamentTabV2() {
         const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
         await tdbGenerateBracket(t);
         state.tournamentPickedTeamId = null;
+        state.bracketSide = null; state.bracketRound = null;
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-bracket-side') {
+        state.bracketSide = el.getAttribute('data-side');
+        state.bracketRound = null;
+        partialRenderTournament();
+      } else if (role === 'tv2-bracket-round') {
+        state.bracketRound = Number(el.getAttribute('data-round'));
+        partialRenderTournament();
+      } else if (role === 'tv2-bracket-win') {
+        const m = (state.tournamentMatches || []).find((x) => x.id === id);
+        const sa = (document.getElementById('bsc-a-' + id) || {}).value;
+        const sb = (document.getElementById('bsc-b-' + id) || {}).value;
+        await tdbSubmitBracketResult(m, el.getAttribute('data-winner'), sa, sb);
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-submit-result') {
