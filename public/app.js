@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.05.31.4';
+const APP_VERSION = '2026.06.17.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1068,6 +1068,7 @@ function refreshAzStripAvailability() {
     const strip = document.querySelector('.players-az-strip');
     if (!strip) return null;
     const sRect = strip.getBoundingClientRect();
+    if (!(sRect.height > 0)) return null; // strip not visible (another tab active) — avoids NaN idx
     if (x < sRect.left - 12 || x > sRect.right + 12) return null;
     if (y < sRect.top || y > sRect.bottom) return null;
     const letters = strip.querySelectorAll('.az-letter');
@@ -2628,7 +2629,13 @@ const state = {
   tournamentAuthorityTag: '',
   tournamentAuthorityUpdatedAt: 0,
   tournamentAuthorityKnown: false,
-  operatorActions: []
+  operatorActions: [],
+  // Tournament v2 (real Supabase tables — Phase 1+)
+  tournaments: [],            // [{id,name,status,match_cap,pool_count,net_count,created_at}]
+  activeTournamentId: null,   // selected tournament id (admin)
+  tournamentTeams: [],        // teams for the active tournament
+  tournamentTabLoading: false,
+  tournamentTabError: ''
 };
 
 function setSharedSyncState(nextState, errorMessage = '') {
@@ -2645,6 +2652,180 @@ function setTournamentSyncState(nextState, errorMessage = '') {
   if (nextState === SHARED_SYNC_LIVE || nextState === SHARED_SYNC_CONFLICT_RESOLVED) {
     state.lastTournamentSyncAt = Date.now();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Tournament v2 data-access layer (real Supabase tables — Phase 1+).
+// Additive; all guarded on supabaseClient. Reads return [] on error; writes
+// throw so the calling handler can surface the message to the operator.
+// ---------------------------------------------------------------------------
+async function tdbListTournaments() {
+  if (!supabaseClient) return [];
+  const { data, error } = await supabaseClient
+    .from('tournaments')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) { console.error('tdbListTournaments', error); return []; }
+  return data || [];
+}
+
+async function tdbCreateTournament({ name, match_cap, pool_count, net_count }) {
+  if (!supabaseClient) throw new Error('No database connection.');
+  const row = {
+    name: String(name || '').trim() || 'Untitled Tournament',
+    match_cap: Number(match_cap) || 25,
+    pool_count: Number(pool_count) || 4,
+    net_count: Number(net_count) || 10
+  };
+  const { data, error } = await supabaseClient
+    .from('tournaments').insert([row]).select().single();
+  if (error) { console.error('tdbCreateTournament', error); throw error; }
+  return data;
+}
+
+async function tdbDeleteTournament(id) {
+  if (!supabaseClient || !id) return;
+  const { error } = await supabaseClient.from('tournaments').delete().eq('id', id);
+  if (error) { console.error('tdbDeleteTournament', error); throw error; }
+}
+
+async function tdbListTeams(tournamentId) {
+  if (!supabaseClient || !tournamentId) return [];
+  const { data, error } = await supabaseClient
+    .from('teams').select('*')
+    .eq('tournament_id', tournamentId)
+    .order('created_at', { ascending: true });
+  if (error) { console.error('tdbListTeams', error); return []; }
+  return data || [];
+}
+
+async function tdbAddTeam(tournamentId, name) {
+  if (!supabaseClient) throw new Error('No database connection.');
+  if (!tournamentId) throw new Error('No tournament selected.');
+  const row = { tournament_id: tournamentId, name: String(name || '').trim() };
+  if (!row.name) throw new Error('Team name required.');
+  const { data, error } = await supabaseClient
+    .from('teams').insert([row]).select().single();
+  if (error) { console.error('tdbAddTeam', error); throw error; }
+  return data;
+}
+
+async function tdbDeleteTeam(teamId) {
+  if (!supabaseClient || !teamId) return;
+  const { error } = await supabaseClient.from('teams').delete().eq('id', teamId);
+  if (error) { console.error('tdbDeleteTeam', error); throw error; }
+}
+
+// Reload tournament list (+ active tournament's teams) into state. No render.
+async function tdbRefreshTournaments() {
+  state.tournaments = await tdbListTournaments();
+  state.tournamentTeams = state.activeTournamentId
+    ? await tdbListTeams(state.activeTournamentId)
+    : [];
+}
+
+// Top-level builders can't see render()'s local escapeHTML; alias to the global escaper.
+function escapeHTML(s) { return escapeHTMLText(s); }
+
+function tournamentStatusLabel(status) {
+  return ({ setup: 'Setup', pools: 'Pool play', bracket: 'Bracket', completed: 'Completed' })[status] || 'Setup';
+}
+
+function buildTeamListHTML(teams, isAdmin) {
+  if (!teams || !teams.length) {
+    return '<p class="small" style="color:#64748b;margin:0;">No teams yet.</p>';
+  }
+  return teams.map((tm, i) => `
+    <div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
+      <span style="flex:1;">${escapeHTML(String(i + 1))}. ${escapeHTML(tm.name || '')}</span>
+      ${isAdmin ? `<button type="button" class="danger" data-role="tv2-delete-team" data-id="${escapeHTML(tm.id)}">Remove</button>` : ''}
+    </div>`).join('');
+}
+
+// Builds the Tournament tab body (admin create/manage, or public read-only).
+function buildTournamentTabHTML() {
+  const list = state.tournaments || [];
+  const active = state.activeTournamentId
+    ? list.find((x) => x.id === state.activeTournamentId)
+    : null;
+
+  // Public (non-admin) read-only view.
+  if (!state.isAdmin) {
+    const show = active || list[0];
+    if (!show) {
+      return `<div class="card" style="text-align:center;padding:2rem;">
+        <p style="color:#64748b;margin:0;">No tournament yet. Check back soon.</p>
+      </div>`;
+    }
+    const teams = (active ? state.tournamentTeams : []) || [];
+    return `<div class="card">
+      <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
+      <p class="small" style="color:#64748b;margin:0 0 12px;">${escapeHTML(tournamentStatusLabel(show.status))}</p>
+      ${active ? buildTeamListHTML(teams, false) : '<p class="small" style="color:#64748b;margin:0;">Tap a tournament when the admin opens it.</p>'}
+    </div>`;
+  }
+
+  const err = state.tournamentTabError
+    ? `<div class="card" style="border-left:4px solid var(--danger);color:var(--danger);">${escapeHTML(state.tournamentTabError)}</div>`
+    : '';
+
+  // Admin, no active tournament → create form + tournament list.
+  if (!active) {
+    const listHTML = list.length
+      ? list.map((x) => `
+        <div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
+          <button type="button" data-role="tv2-select-tournament" data-id="${escapeHTML(x.id)}" style="background:none;border:none;text-align:left;flex:1;font-size:16px;color:var(--brand);cursor:pointer;padding:4px 0;">
+            ${escapeHTML(x.name || '')} <span class="small" style="color:#64748b;">· ${escapeHTML(tournamentStatusLabel(x.status))}</span>
+          </button>
+          <button type="button" class="danger" data-role="tv2-delete-tournament" data-id="${escapeHTML(x.id)}">Delete</button>
+        </div>`).join('')
+      : '<p class="small" style="color:#64748b;margin:0;">No tournaments yet — create your first one above.</p>';
+    return `${err}
+    <div class="card">
+      <h3 style="margin:0 0 8px;">New Tournament</h3>
+      <input type="text" id="tv2-name" placeholder="Tournament name (e.g. Summer Slam 6s)" />
+      <div class="row" style="gap:8px;margin-top:8px;">
+        <label style="flex:1;font-size:13px;color:#475569;">Game to
+          <input type="number" id="tv2-cap" value="25" min="1" inputmode="numeric" />
+        </label>
+        <label style="flex:1;font-size:13px;color:#475569;">Pools
+          <input type="number" id="tv2-pools" value="4" min="1" inputmode="numeric" />
+        </label>
+        <label style="flex:1;font-size:13px;color:#475569;">Nets
+          <input type="number" id="tv2-nets" value="10" min="1" inputmode="numeric" />
+        </label>
+      </div>
+      <button type="button" class="primary" data-role="tv2-create-tournament" style="margin-top:12px;width:100%;">Create Tournament</button>
+    </div>
+    <div class="card">
+      <h3 style="margin:0 0 8px;">Tournaments</h3>
+      ${listHTML}
+    </div>`;
+  }
+
+  // Admin, active tournament → header + add team + team list.
+  const teams = state.tournamentTeams || [];
+  return `${err}
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
+      <div style="flex:1;min-width:0;">
+        <h3 style="margin:0;">${escapeHTML(active.name || '')}</h3>
+        <p class="small" style="color:#64748b;margin:2px 0 0;">${escapeHTML(tournamentStatusLabel(active.status))} · ${teams.length} ${teams.length === 1 ? 'team' : 'teams'} · to ${escapeHTML(String(active.match_cap))} · ${escapeHTML(String(active.pool_count))} pools · ${escapeHTML(String(active.net_count))} nets</p>
+      </div>
+      <button type="button" class="secondary" data-role="tv2-back">All</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 8px;">Add Team</h3>
+    <div class="row" style="gap:8px;">
+      <input type="text" id="tv2-team-name" placeholder="Team name" style="flex:1;" />
+      <button type="button" class="primary" data-role="tv2-add-team">Add</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3 style="margin:0 0 8px;">Teams (${teams.length})</h3>
+    ${buildTeamListHTML(teams, true)}
+  </div>`;
 }
 
 function formatLastSharedSyncLabel() {
@@ -8104,6 +8285,11 @@ function render() {
         ${state.isAdmin ? adminTeamsHTML : '<div class="card" style="text-align:center;padding:2rem;"><p style="color:#64748b;margin:0;">Log in as admin to use team generation.</p></div>'}
       </div>
     </div>
+    <div id="tab-tournament" class="tab-panel">
+      <div class="container">
+        ${buildTournamentTabHTML()}
+      </div>
+    </div>
   </div>
   <nav id="bottom-nav">
     <button class="nav-btn" data-nav-tab="session">
@@ -8402,6 +8588,7 @@ if (editStyle.textContent !== editCss) {
 // at the end of render()
 attachHandlers();
 bindTournamentTab();
+bindTournamentTabV2();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
@@ -8416,12 +8603,59 @@ if (savedScrollY > 0 && restoredPanel) restoredPanel.scrollTop = savedScrollY;
 
 // Attach event listeners to the current DOM. This function should be
 // called after each call to render().
+// Tournament v2 tab — delegated, once-bound click handler for tv2-* actions.
+let _tv2Bound = false;
+function bindTournamentTabV2() {
+  if (_tv2Bound) return;
+  _tv2Bound = true;
+  document.addEventListener('click', async (e) => {
+    const el = e.target.closest('[data-role^="tv2-"]');
+    if (!el) return;
+    const role = el.getAttribute('data-role');
+    const id = el.getAttribute('data-id') || '';
+    try {
+      state.tournamentTabError = '';
+      if (role === 'tv2-create-tournament') {
+        const val = (sel) => (document.getElementById(sel) || {}).value || '';
+        const created = await tdbCreateTournament({
+          name: val('tv2-name'), match_cap: val('tv2-cap'),
+          pool_count: val('tv2-pools'), net_count: val('tv2-nets')
+        });
+        state.activeTournamentId = created.id;
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-select-tournament') {
+        state.activeTournamentId = id;
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-back') {
+        state.activeTournamentId = null;
+        state.tournamentTeams = [];
+        render();
+      } else if (role === 'tv2-delete-tournament') {
+        if (!window.confirm('Delete this tournament and everything in it?')) return;
+        await tdbDeleteTournament(id);
+        if (state.activeTournamentId === id) state.activeTournamentId = null;
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-add-team') {
+        const nameEl = document.getElementById('tv2-team-name');
+        await tdbAddTeam(state.activeTournamentId, (nameEl || {}).value || '');
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-delete-team') {
+        await tdbDeleteTeam(id);
+        await tdbRefreshTournaments();
+        render();
+      }
+    } catch (err) {
+      state.tournamentTabError = (err && err.message) ? err.message : 'Something went wrong.';
+      render();
+    }
+  });
+}
+
 function activateMainTab(tab) {
-  if (tab === 'tournament') {
-    showTournamentView(true);
-    initTournamentView();
-    return;
-  }
   activeMainTab = tab;
   sessionStorage.setItem('as_main_tab', tab);
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
@@ -9775,6 +10009,7 @@ function init() {
       }
       render();
       loadSession().then(() => { if (state.currentSession) render(); });
+      tdbRefreshTournaments().then(() => render()).catch(() => {});
 
       if (!crossDeviceRefreshInterval) {
         // Keep multiple devices converged without requiring a full page refresh.
