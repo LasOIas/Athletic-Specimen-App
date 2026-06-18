@@ -19,7 +19,7 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.17.4';
+const APP_VERSION = '2026.06.17.6';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2749,12 +2749,15 @@ async function tdbMoveTeamToPool(teamId, poolId) {
 // creates pool_count pools (A,B,...), shuffles teams, round-robin-assigns them to pools.
 async function tdbDrawPools(tournament) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  const cur = (await supabaseClient.from('tournaments').select('status').eq('id', tournament.id).single()).data;
+  if (cur && cur.status !== 'setup') throw new Error('Pool play already started — Reset Pools first.');
   const teams = await tdbListTeams(tournament.id);
   if (teams.length < 2) throw new Error('Add at least 2 teams first.');
   for (const p of await tdbListPools(tournament.id)) {
     await supabaseClient.from('pools').delete().eq('id', p.id);
   }
-  const poolCount = Math.max(1, Math.min(Number(tournament.pool_count) || 1, teams.length));
+  // Clamp pools so every pool gets at least 2 teams (no 1-team / 0-match pools).
+  const poolCount = Math.max(1, Math.min(Number(tournament.pool_count) || 1, Math.floor(teams.length / 2)));
   const poolRows = [];
   for (let i = 0; i < poolCount; i++) {
     const { data, error } = await supabaseClient.from('pools')
@@ -2778,6 +2781,8 @@ async function tdbDrawPools(tournament) {
 // Generate round-robin pool matches, assign nets + per-net queue order, set status='pools'.
 async function tdbStartPoolPlay(tournament) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  const cur = (await supabaseClient.from('tournaments').select('status').eq('id', tournament.id).single()).data;
+  if (cur && cur.status !== 'setup') throw new Error('Pool play already started — Reset Pools first.');
   const pools = await tdbListPools(tournament.id);
   if (!pools.length) throw new Error('Draw pools first.');
   const teams = await tdbListTeams(tournament.id);
@@ -2799,25 +2804,34 @@ async function tdbStartPoolPlay(tournament) {
       k++;
     }
   }
-  if (rows.length) {
-    const { error } = await supabaseClient.from('matches').insert(rows);
-    if (error) throw error;
-  }
+  if (!rows.length) throw new Error('No pool games to schedule — each pool needs at least 2 teams.');
+  const { error } = await supabaseClient.from('matches').insert(rows);
+  if (error) throw error;
   await supabaseClient.from('tournaments')
     .update({ status: 'pools', updated_at: new Date().toISOString() }).eq('id', tournament.id);
 }
 
 // Submit a match result with optimistic concurrency (CAS on version). Returns the
 // updated row, or throws a "another device updated this" message on a version conflict.
+// Validate a score pair: whole numbers, 0 or more. Throws a friendly message.
+function validateScores(scoreA, scoreB) {
+  const sa = Number(scoreA), sb = Number(scoreB);
+  if (!Number.isInteger(sa) || !Number.isInteger(sb) || sa < 0 || sb < 0) {
+    throw new Error('Scores must be whole numbers (0 or more).');
+  }
+  return { sa, sb };
+}
+
 async function tdbSubmitResult(match, scoreA, scoreB) {
   if (!supabaseClient || !match) throw new Error('No match.');
-  const winnerSide = decideWinner(scoreA, scoreB);
+  const { sa, sb } = validateScores(scoreA, scoreB);
+  const winnerSide = decideWinner(sa, sb);
   if (!winnerSide) throw new Error('Enter both scores; ties are not allowed.');
   const winnerId = winnerSide === 'A' ? match.team_a_id : match.team_b_id;
   const loserId = winnerSide === 'A' ? match.team_b_id : match.team_a_id;
   const { data, error } = await supabaseClient.from('matches')
     .update({
-      score_a: Number(scoreA), score_b: Number(scoreB),
+      score_a: sa, score_b: sb,
       winner_team_id: winnerId, loser_team_id: loserId, status: 'final',
       version: (match.version || 0) + 1, updated_at: new Date().toISOString()
     })
@@ -2846,7 +2860,7 @@ async function tdbGenerateBracket(tournament) {
   const teams = await tdbListTeams(tournament.id);
   const poolMatches = await tdbListMatches(tournament.id, 'pool');
   if (!poolMatches.length) throw new Error('No pool play to seed from.');
-  if (!poolMatches.every((m) => m.status === 'final')) throw new Error('Finish all pool games first.');
+  if (!poolMatches.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id)) throw new Error('Finish all pool games first.');
 
   const seeding = computeSeeding(teams, poolMatches); // ordered seed 1..N
   const N = seeding.length;
@@ -2908,18 +2922,24 @@ async function tdbGenerateBracket(tournament) {
 async function tdbSubmitBracketResult(match, winnerSide, scoreA, scoreB) {
   if (!supabaseClient || !match) throw new Error('No match.');
   if (!match.team_a_id || !match.team_b_id) throw new Error('Both teams are not set yet.');
+  const hasScores = scoreA !== '' && scoreA != null && scoreB !== '' && scoreB != null;
+  let sa = null, sb = null;
+  if (hasScores) { const v = validateScores(scoreA, scoreB); sa = v.sa; sb = v.sb; }
   let side = (winnerSide === 'a' || winnerSide === 'b') ? winnerSide : null;
-  if (!side) { const w = decideWinner(scoreA, scoreB); side = w ? w.toLowerCase() : null; }
+  if (!side && hasScores) { const w = decideWinner(sa, sb); side = w ? w.toLowerCase() : null; }
   if (!side) throw new Error('Pick a winner.');
+  // The tapped winner and any entered scores must agree.
+  if (hasScores) {
+    const w = decideWinner(sa, sb);
+    if (!w || w.toLowerCase() !== side) throw new Error('The winner you tapped does not match the scores you entered.');
+  }
   const winnerId = side === 'a' ? match.team_a_id : match.team_b_id;
   const loserId = side === 'a' ? match.team_b_id : match.team_a_id;
   const upd = {
     winner_team_id: winnerId, loser_team_id: loserId, status: 'final',
     version: (match.version || 0) + 1, updated_at: new Date().toISOString()
   };
-  const hasScores = scoreA !== '' && scoreA != null && scoreB !== '' && scoreB != null
-    && Number.isFinite(Number(scoreA)) && Number.isFinite(Number(scoreB));
-  if (hasScores) { upd.score_a = Number(scoreA); upd.score_b = Number(scoreB); }
+  if (hasScores) { upd.score_a = sa; upd.score_b = sb; }
   const { data, error } = await supabaseClient.from('matches')
     .update(upd).eq('id', match.id).eq('version', match.version || 0).select();
   if (error) throw error;
@@ -2927,13 +2947,17 @@ async function tdbSubmitBracketResult(match, winnerSide, scoreA, scoreB) {
 
   const isGF = match.side === 'grand_final' && match.round === 1;
   const wbWonGF = isGF && side === 'a'; // slot a = winners-bracket finalist -> champion, no reset
+  // Advancement writes are GUARDED: only fill a downstream slot that's still empty + scheduled,
+  // so a stale resubmit / two-device race can't stomp a team that already advanced or played.
   if (match.winner_next_match_id && !wbWonGF) {
     const col = match.winner_next_slot === 1 ? 'team_b_id' : 'team_a_id';
-    await supabaseClient.from('matches').update({ [col]: winnerId }).eq('id', match.winner_next_match_id);
+    await supabaseClient.from('matches').update({ [col]: winnerId })
+      .eq('id', match.winner_next_match_id).is(col, null).eq('status', 'scheduled');
   }
   if (match.loser_next_match_id && !wbWonGF) {
     const col = match.loser_next_slot === 1 ? 'team_b_id' : 'team_a_id';
-    await supabaseClient.from('matches').update({ [col]: loserId }).eq('id', match.loser_next_match_id);
+    await supabaseClient.from('matches').update({ [col]: loserId })
+      .eq('id', match.loser_next_match_id).is(col, null).eq('status', 'scheduled');
   }
   const decisive = !match.winner_next_match_id || wbWonGF;
   if (decisive) {
@@ -2943,13 +2967,51 @@ async function tdbSubmitBracketResult(match, winnerSide, scoreA, scoreB) {
   return data[0];
 }
 
+// Clear a finalized bracket result (admin): reset this match to scheduled and pull the
+// team it pushed into the next match's slot back out (only if that downstream match hasn't
+// been played yet), and re-open the tournament if it had completed. CAS-guarded.
+async function tdbClearBracketResult(match) {
+  if (!supabaseClient || !match) return;
+  const { data, error } = await supabaseClient.from('matches')
+    .update({
+      score_a: null, score_b: null, winner_team_id: null, loser_team_id: null,
+      status: 'scheduled', version: (match.version || 0) + 1, updated_at: new Date().toISOString()
+    })
+    .eq('id', match.id).eq('version', match.version || 0).select();
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Another device just updated this match — refreshing.');
+  // pull the advanced team back out of the immediate next slots (only if still scheduled)
+  if (match.winner_next_match_id) {
+    const col = match.winner_next_slot === 1 ? 'team_b_id' : 'team_a_id';
+    await supabaseClient.from('matches').update({ [col]: null })
+      .eq('id', match.winner_next_match_id).eq('status', 'scheduled');
+  }
+  if (match.loser_next_match_id) {
+    const col = match.loser_next_slot === 1 ? 'team_b_id' : 'team_a_id';
+    await supabaseClient.from('matches').update({ [col]: null })
+      .eq('id', match.loser_next_match_id).eq('status', 'scheduled');
+  }
+  await supabaseClient.from('tournaments')
+    .update({ status: 'bracket', updated_at: new Date().toISOString() })
+    .eq('id', match.tournament_id).eq('status', 'completed');
+}
+
 // Reload tournament list (+ active tournament's teams/pools/matches) into state. No render.
 async function tdbRefreshTournaments() {
   state.tournaments = await tdbListTournaments();
-  // Public viewers auto-follow the live tournament so they can self-report results.
-  if (!state.isAdmin && !state.activeTournamentId && state.tournaments.length) {
-    const live = state.tournaments.find((t) => t.status === 'pools') || state.tournaments[0];
-    state.activeTournamentId = live ? live.id : null;
+  // Public viewers auto-follow the LIVE/finished tournament (never a fresh 'setup' draft),
+  // and a stale follow (deleted tournament) is re-validated.
+  if (!state.isAdmin) {
+    if (state.activeTournamentId && !state.tournaments.some((t) => t.id === state.activeTournamentId)) {
+      state.activeTournamentId = null;
+      state.tournamentPickedTeamId = null;
+    }
+    if (!state.activeTournamentId && state.tournaments.length) {
+      const live = state.tournaments.find((t) => t.status === 'pools')
+        || state.tournaments.find((t) => t.status === 'bracket')
+        || state.tournaments.find((t) => t.status === 'completed') || null;
+      state.activeTournamentId = live ? live.id : null;
+    }
   }
   if (state.activeTournamentId) {
     state.tournamentTeams = await tdbListTeams(state.activeTournamentId);
@@ -2971,12 +3033,26 @@ function partialRenderTournament() {
 // Background freshness: reload tournament data + surgically re-render the tab so a
 // second phone's submission shows up — but NEVER while the operator is mid-entry
 // (a focused input/select in the tab would be clobbered).
+function tournamentNavVisible() {
+  return state.isAdmin || (state.tournaments || []).some((t) => ['pools', 'bracket', 'completed'].includes(t.status));
+}
+
 async function refreshTournamentLive() {
-  if (activeMainTab !== 'tournament') return;
-  const ae = document.activeElement;
-  if (ae && ae.closest && ae.closest('#tab-tournament') && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;
-  await tdbRefreshTournaments();
-  if (activeMainTab === 'tournament') partialRenderTournament();
+  const prevNav = tournamentNavVisible();
+  if (activeMainTab === 'tournament') {
+    const ae = document.activeElement;
+    if (ae && ae.closest && ae.closest('#tab-tournament') && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;
+    // Don't clobber a half-typed score even after the field blurs.
+    const dirty = Array.prototype.some.call(
+      document.querySelectorAll('#tab-tournament input[type=number]'), (i) => i.value !== '');
+    if (dirty) return;
+    await tdbRefreshTournaments();
+    if (activeMainTab === 'tournament') partialRenderTournament();
+  } else {
+    // Off the tab: keep the list fresh so the Tournament nav appears/disappears as events go live.
+    state.tournaments = await tdbListTournaments();
+    if (tournamentNavVisible() !== prevNav) render();
+  }
 }
 
 // Top-level builders can't see render()'s local escapeHTML; alias to the global escaper.
@@ -3354,7 +3430,8 @@ function buildBracketCardHTML(m, matches, teams) {
       <div class="row" style="justify-content:space-between;gap:8px;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--success)' : 'inherit'};">
         <span style="flex:1;min-width:0;">${bName}</span><span style="flex:0 0 auto;">${!aWin ? 'Won' : ''}</span>
       </div>
-      ${scoreTxt ? `<div class="small" style="color:#64748b;margin-top:2px;">${scoreTxt}</div>` : ''}`;
+      ${scoreTxt ? `<div class="small" style="color:#64748b;margin-top:2px;">${scoreTxt}</div>` : ''}
+      ${state.isAdmin ? `<button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}" style="margin-top:4px;font-size:12px;padding:4px 8px;">Clear</button>` : ''}`;
   } else if (aKnown && bKnown) {
     body = `
       <div class="row" style="align-items:center;gap:6px;">
@@ -3394,7 +3471,7 @@ function buildBracketHTML(tournament, matches, teams) {
   const rounds = Array.from(new Set(sideMatches.map((m) => m.round))).sort((a, b) => a - b);
   let round = state.bracketRound;
   if (!rounds.includes(round)) {
-    round = rounds.find((r) => sideMatches.some((m) => m.round === r && m.status !== 'final')) || rounds[0];
+    round = rounds.find((r) => sideMatches.some((m) => m.round === r && m.status !== 'final')) || rounds[rounds.length - 1];
   }
   const roundLabelFor = (r) => {
     const sample = sideMatches.find((m) => m.round === r);
@@ -3464,15 +3541,15 @@ function buildTournamentTabHTML() {
     <div class="card">
       <h3 style="margin:0 0 8px;">New Tournament</h3>
       <input type="text" id="tv2-name" placeholder="Tournament name (e.g. Summer Slam 6s)" />
-      <div class="row" style="gap:8px;margin-top:8px;">
-        <label style="flex:1;font-size:13px;color:#475569;">Game to
-          <input type="number" id="tv2-cap" value="25" min="1" inputmode="numeric" />
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:#475569;">Game to
+          <input type="number" id="tv2-cap" value="25" min="1" inputmode="numeric" style="width:100%;flex:0 0 auto;" />
         </label>
-        <label style="flex:1;font-size:13px;color:#475569;">Pools
-          <input type="number" id="tv2-pools" value="4" min="1" inputmode="numeric" />
+        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:#475569;">Pools
+          <input type="number" id="tv2-pools" value="4" min="1" inputmode="numeric" style="width:100%;flex:0 0 auto;" />
         </label>
-        <label style="flex:1;font-size:13px;color:#475569;">Nets
-          <input type="number" id="tv2-nets" value="10" min="1" inputmode="numeric" />
+        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:#475569;">Nets
+          <input type="number" id="tv2-nets" value="10" min="1" inputmode="numeric" style="width:100%;flex:0 0 auto;" />
         </label>
       </div>
       <button type="button" class="primary" data-role="tv2-create-tournament" style="margin-top:12px;width:100%;">Create Tournament</button>
@@ -3505,7 +3582,7 @@ function buildTournamentTabHTML() {
   // Pool-play stage: standings + matches + override + generate bracket when done.
   if (active.status === 'pools') {
     const poolMatches = matches.filter((m) => m.phase === 'pool');
-    const allDone = poolMatches.length > 0 && poolMatches.every((m) => m.status === 'final');
+    const allDone = poolMatches.length > 0 && poolMatches.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
     return `${err}${headerCard}
       ${buildPoolPlayHTML(active, pools, teams, matches, true, state.tournamentPickedTeamId)}
       <div class="card">
@@ -9378,6 +9455,8 @@ function bindTournamentTabV2() {
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-delete-team') {
+        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
+        if (t && t.status !== 'setup') throw new Error('Teams are locked once pool play starts.');
         await tdbDeleteTeam(id);
         await tdbRefreshTournaments();
         render();
@@ -9418,6 +9497,11 @@ function bindTournamentTabV2() {
         const sa = (document.getElementById('bsc-a-' + id) || {}).value;
         const sb = (document.getElementById('bsc-b-' + id) || {}).value;
         await tdbSubmitBracketResult(m, el.getAttribute('data-winner'), sa, sb);
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-bracket-clear') {
+        const m = (state.tournamentMatches || []).find((x) => x.id === id);
+        await tdbClearBracketResult(m);
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-submit-result') {
