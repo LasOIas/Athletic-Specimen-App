@@ -180,7 +180,7 @@
       />
       <ul id="suggestions"></ul>
       <div id="checkinError" class="error" hidden></div>
-      <div id="noMatch" class="no-match">
+      <div id="noMatch" class="no-match" hidden>
         <p>Don't see your name?</p>
         <button id="newPlayerBtn" class="btn btn-secondary">I'm new — register me</button>
       </div>
@@ -305,7 +305,10 @@
         });
         ul.appendChild(li);
       });
-      noMatch.hidden = matches.length > 0;
+      // C25 item 6: show the "I'm new — register me" prompt ONLY when the user has typed
+      // a non-empty query that matched nobody. On an empty query (incl. initial load) the
+      // prompt stays hidden (matches=[] would otherwise un-hide it).
+      noMatch.hidden = matches.length > 0 || !query.trim();
     }
 
     async function checkInExisting(player, onError) {
@@ -365,7 +368,7 @@
       $('firstName').value = '';
       $('lastName').value = '';
       $('suggestions').innerHTML = '';
-      $('noMatch').hidden = false;
+      $('noMatch').hidden = true; // C25 item 6: input is cleared on reset → empty query → keep the register prompt hidden
       $('registerForm').hidden = true;
       $('registerError').hidden = true;
       $('nameInput').focus();
