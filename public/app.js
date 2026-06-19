@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.9';
+const APP_VERSION = '2026.06.19.10';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1795,25 +1795,27 @@ function checkOutPlayer(player) {
   return changed;
 }
 
-let saveTimeout;
-let forceSaveRunning = false;
-
-let refreshTimeout;
-let refreshQueued = false;
-let refreshRunning = false;
-let groupCatalogSyncTimeout;
-let groupCatalogSyncQueued = false;
-let groupCatalogSyncRunning = false;
-let lastGroupCatalogSyncSignature = '';
-let crossDeviceRefreshInterval = null;
-let supabaseLiveSyncChannel = null;
-let supabaseSyncRequestSeq = 0;
-let supabaseSyncAppliedSeq = 0;
+// C25 item 2: SyncManager — one home for all sync ENGINE state (refresh/poll/realtime
+// flags, timers, channels, seq counters). Replaces ~18 scattered module globals. The
+// sync functions stay top-level and read/write through this object. The outbox
+// (flushOutbox) and live-state save (queueLiveStateSave) keep their own state — they
+// are already cohesive units. State-only refactor: runtime behavior is identical.
+const SyncManager = {
+  players:      { refreshTimer: null, refreshQueued: false, refreshRunning: false,
+                  requestSeq: 0, appliedSeq: 0, liveChannel: null },
+  groupCatalog: { timer: null, queued: false, running: false, lastSig: '' },
+  tournament:   { refreshTimer: null, liveChannel: null },
+  poll:         { interval: null },
+  rt:           { backoff: { live: 0, tournament: 0 },
+                  resubTimer: { live: null, tournament: null } },
+  forceSaveRunning: false,
+  hooksBound: false,
+};
 function queueSupabaseRefresh(delay = 160) {
   if (!supabaseClient) return;
-  refreshQueued = true;
-  clearTimeout(refreshTimeout);
-  refreshTimeout = setTimeout(() => {
+  SyncManager.players.refreshQueued = true;
+  clearTimeout(SyncManager.players.refreshTimer);
+  SyncManager.players.refreshTimer = setTimeout(() => {
     void runQueuedSupabaseRefresh();
   }, Math.max(0, Number(delay) || 0));
 }
@@ -1821,18 +1823,16 @@ function queueSupabaseRefresh(delay = 160) {
 // C24 item 1: realtime resubscribe with exponential backoff. The subscribe() status callbacks null the
 // channel handle on error/close and reschedule (capped), so a slept/disconnected phone self-heals instead
 // of silently dropping to the 15s poll forever. On (re)subscribe success, one refresh catches missed rows.
-const _rtBackoffAttempt = { live: 0, tournament: 0 };
-const _rtResubTimer = { live: null, tournament: null };
 function _scheduleResubscribe(kind, resubscribeFn) {
-  if (_rtResubTimer[kind]) return; // a resubscribe is already pending
-  const attempt = (_rtBackoffAttempt[kind] = Math.min(_rtBackoffAttempt[kind] + 1, 6));
+  if (SyncManager.rt.resubTimer[kind]) return; // a resubscribe is already pending
+  const attempt = (SyncManager.rt.backoff[kind] = Math.min(SyncManager.rt.backoff[kind] + 1, 6));
   const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000); // 1s,2s,4s,…,cap 30s
-  _rtResubTimer[kind] = setTimeout(() => { _rtResubTimer[kind] = null; resubscribeFn(); }, delay);
+  SyncManager.rt.resubTimer[kind] = setTimeout(() => { SyncManager.rt.resubTimer[kind] = null; resubscribeFn(); }, delay);
 }
 function _handleRealtimeStatus(kind, status, onResubscribed) {
   if (status === 'SUBSCRIBED') {
-    _rtBackoffAttempt[kind] = 0;
-    if (_rtResubTimer[kind]) { clearTimeout(_rtResubTimer[kind]); _rtResubTimer[kind] = null; }
+    SyncManager.rt.backoff[kind] = 0;
+    if (SyncManager.rt.resubTimer[kind]) { clearTimeout(SyncManager.rt.resubTimer[kind]); SyncManager.rt.resubTimer[kind] = null; }
     if (typeof onResubscribed === 'function') onResubscribed(); // catch rows missed while disconnected
     return;
   }
@@ -1840,13 +1840,13 @@ function _handleRealtimeStatus(kind, status, onResubscribed) {
     // Null the handle BEFORE removeChannel: removeChannel synchronously re-fires CLOSED into this same
     // callback, so if the handle were still set it would removeChannel again -> infinite recursion.
     if (kind === 'live') {
-      const ch = supabaseLiveSyncChannel;
-      supabaseLiveSyncChannel = null;
+      const ch = SyncManager.players.liveChannel;
+      SyncManager.players.liveChannel = null;
       try { if (ch) supabaseClient.removeChannel(ch); } catch (_) {}
       _scheduleResubscribe('live', ensureSupabaseLiveSync);
     } else {
-      const ch = tournamentLiveSyncChannel;
-      tournamentLiveSyncChannel = null;
+      const ch = SyncManager.tournament.liveChannel;
+      SyncManager.tournament.liveChannel = null;
       try { if (ch) supabaseClient.removeChannel(ch); } catch (_) {}
       _scheduleResubscribe('tournament', ensureTournamentLiveSync);
     }
@@ -1854,9 +1854,9 @@ function _handleRealtimeStatus(kind, status, onResubscribed) {
 }
 
 function ensureSupabaseLiveSync() {
-  if (!supabaseClient || supabaseLiveSyncChannel) return;
+  if (!supabaseClient || SyncManager.players.liveChannel) return;
   try {
-    supabaseLiveSyncChannel = supabaseClient
+    SyncManager.players.liveChannel = supabaseClient
       .channel('athletic-specimen-live-sync')
       .on(
         'postgres_changes',
@@ -1878,10 +1878,9 @@ function ensureSupabaseLiveSync() {
   }
 }
 
-let authorityRefreshHooksBound = false;
 function ensureAuthorityRefreshHooks() {
-  if (authorityRefreshHooksBound || !supabaseClient) return;
-  authorityRefreshHooksBound = true;
+  if (SyncManager.hooksBound || !supabaseClient) return;
+  SyncManager.hooksBound = true;
 
   const triggerRefresh = (_reason) => {
     if (!supabaseClient) return;
@@ -1931,9 +1930,9 @@ function ensureAuthorityRefreshHooks() {
 }
 
 async function runQueuedSupabaseRefresh() {
-  if (!supabaseClient || refreshRunning || !refreshQueued) return;
-  refreshRunning = true;
-  refreshQueued = false;
+  if (!supabaseClient || SyncManager.players.refreshRunning || !SyncManager.players.refreshQueued) return;
+  SyncManager.players.refreshRunning = true;
+  SyncManager.players.refreshQueued = false;
   try {
     const prevSyncState = state.sharedSyncState;
     const prevSyncError = state.sharedSyncError;
@@ -1950,9 +1949,9 @@ async function runQueuedSupabaseRefresh() {
   } catch (err) {
     console.error('Background Supabase refresh error:', err);
   } finally {
-    refreshRunning = false;
-    if (refreshQueued) {
-      refreshTimeout = setTimeout(() => {
+    SyncManager.players.refreshRunning = false;
+    if (SyncManager.players.refreshQueued) {
+      SyncManager.players.refreshTimer = setTimeout(() => {
         void runQueuedSupabaseRefresh();
       }, 0);
     }
@@ -1969,30 +1968,30 @@ function computeGroupCatalogSyncSignature() {
 
 function queueGroupCatalogSync(delay = 280) {
   if (!canRunAdminSharedBackfill()) return;
-  groupCatalogSyncQueued = true;
-  clearTimeout(groupCatalogSyncTimeout);
-  groupCatalogSyncTimeout = setTimeout(() => {
+  SyncManager.groupCatalog.queued = true;
+  clearTimeout(SyncManager.groupCatalog.timer);
+  SyncManager.groupCatalog.timer = setTimeout(() => {
     void runQueuedGroupCatalogSync();
   }, Math.max(0, Number(delay) || 0));
 }
 
 async function runQueuedGroupCatalogSync() {
-  if (!canRunAdminSharedBackfill() || groupCatalogSyncRunning || !groupCatalogSyncQueued) return;
-  groupCatalogSyncRunning = true;
-  groupCatalogSyncQueued = false;
+  if (!canRunAdminSharedBackfill() || SyncManager.groupCatalog.running || !SyncManager.groupCatalog.queued) return;
+  SyncManager.groupCatalog.running = true;
+  SyncManager.groupCatalog.queued = false;
 
   try {
     const signature = computeGroupCatalogSyncSignature();
-    if (signature && signature === lastGroupCatalogSyncSignature) return;
+    if (signature && signature === SyncManager.groupCatalog.lastSig) return;
     const wroteAny = await backfillGroupCatalogToSupabase();
-    if (signature) lastGroupCatalogSyncSignature = signature;
+    if (signature) SyncManager.groupCatalog.lastSig = signature;
     if (wroteAny) queueSupabaseRefresh();
   } catch (err) {
     console.error('Background group catalog sync error:', err);
   } finally {
-    groupCatalogSyncRunning = false;
-    if (groupCatalogSyncQueued) {
-      groupCatalogSyncTimeout = setTimeout(() => {
+    SyncManager.groupCatalog.running = false;
+    if (SyncManager.groupCatalog.queued) {
+      SyncManager.groupCatalog.timer = setTimeout(() => {
         void runQueuedGroupCatalogSync();
       }, 0);
     }
@@ -2879,18 +2878,16 @@ async function refreshTournamentLive() {
 }
 
 // Coalesce bursts of tournament refreshes (realtime can fire many rows at once) into one.
-let _tournamentRefreshTimer = null;
 function queueTournamentRefresh(delay = 800) {
-  if (_tournamentRefreshTimer) clearTimeout(_tournamentRefreshTimer);
-  _tournamentRefreshTimer = setTimeout(() => { _tournamentRefreshTimer = null; void refreshTournamentLive(); }, delay);
+  if (SyncManager.tournament.refreshTimer) clearTimeout(SyncManager.tournament.refreshTimer);
+  SyncManager.tournament.refreshTimer = setTimeout(() => { SyncManager.tournament.refreshTimer = null; void refreshTournamentLive(); }, delay);
 }
 
 // Realtime: push instant updates when tournament data changes on any device (vs the 15s poll).
-let tournamentLiveSyncChannel = null;
 function ensureTournamentLiveSync() {
-  if (!supabaseClient || tournamentLiveSyncChannel) return;
+  if (!supabaseClient || SyncManager.tournament.liveChannel) return;
   const ping = () => queueTournamentRefresh(800);
-  tournamentLiveSyncChannel = supabaseClient
+  SyncManager.tournament.liveChannel = supabaseClient
     .channel('athletic-specimen-tournament-sync')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, ping)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'tournaments' }, ping)
@@ -4099,7 +4096,7 @@ function mergePlayersAfterSync(remotePlayers) {
 // marked checked_in.
 async function syncFromSupabase() {
   if (!supabaseClient) return false;
-  const requestSeq = ++supabaseSyncRequestSeq;
+  const requestSeq = ++SyncManager.players.requestSeq;
 
   try {
     if (
@@ -4135,7 +4132,7 @@ async function syncFromSupabase() {
     const { data: fetchedData, error } = await query;
     if (error) {
       console.error('Supabase fetch error', error);
-      if (requestSeq < supabaseSyncRequestSeq || requestSeq < supabaseSyncAppliedSeq) {
+      if (requestSeq < SyncManager.players.requestSeq || requestSeq < SyncManager.players.appliedSeq) {
         return false;
       }
       if (SUPABASE_AUTHORITATIVE) {
@@ -4144,7 +4141,7 @@ async function syncFromSupabase() {
       return false;
     }
     if (!Array.isArray(fetchedData)) {
-      if (requestSeq < supabaseSyncRequestSeq || requestSeq < supabaseSyncAppliedSeq) {
+      if (requestSeq < SyncManager.players.requestSeq || requestSeq < SyncManager.players.appliedSeq) {
         return false;
       }
       if (SUPABASE_AUTHORITATIVE) {
@@ -4207,7 +4204,7 @@ async function syncFromSupabase() {
     });
 
     // Ignore stale responses so older reads can't overwrite newer authoritative syncs.
-    if (requestSeq < supabaseSyncRequestSeq || requestSeq < supabaseSyncAppliedSeq) {
+    if (requestSeq < SyncManager.players.requestSeq || requestSeq < SyncManager.players.appliedSeq) {
       return true;
     }
 
@@ -4238,14 +4235,14 @@ async function syncFromSupabase() {
       enforceCanonicalGroupState();
     }
     state.loaded = true;
-    supabaseSyncAppliedSeq = Math.max(supabaseSyncAppliedSeq, requestSeq);
+    SyncManager.players.appliedSeq = Math.max(SyncManager.players.appliedSeq, requestSeq);
     if (SUPABASE_AUTHORITATIVE) {
       setSharedSyncState(SHARED_SYNC_LIVE);
     }
     return true;
   } catch (err) {
     console.error('Error syncing from Supabase', err);
-    if (requestSeq < supabaseSyncRequestSeq || requestSeq < supabaseSyncAppliedSeq) {
+    if (requestSeq < SyncManager.players.requestSeq || requestSeq < SyncManager.players.appliedSeq) {
       return false;
     }
     if (SUPABASE_AUTHORITATIVE) {
@@ -4566,9 +4563,6 @@ async function forceSaveAllToSupabase() {
   if (!HAS_GROUP && !HAS_TAG) {
     await detectPlayersSchema();
   }
-
-  // Cancel any pending delayed save; this path is an explicit immediate sync.
-  clearTimeout(saveTimeout);
 
   normalizePlayerGroupsInState();
   ensurePlayerIdentityKeys();
@@ -6194,13 +6188,13 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
 const saveSupabaseBtn = document.getElementById('btn-save-supabase');
 if (saveSupabaseBtn) {
   saveSupabaseBtn.addEventListener('click', async () => {
-    if (forceSaveRunning) return;
+    if (SyncManager.forceSaveRunning) return;
     if (!supabaseClient) {
       alert('Supabase is not configured for this app.');
       return;
     }
 
-    forceSaveRunning = true;
+    SyncManager.forceSaveRunning = true;
     saveSupabaseBtn.disabled = true;
     saveSupabaseBtn.textContent = 'Saving...';
 
@@ -6217,7 +6211,7 @@ if (saveSupabaseBtn) {
       console.error('Manual save to Supabase error', err);
       alert('Save to Supabase failed. Check connection and try again.');
     } finally {
-      forceSaveRunning = false;
+      SyncManager.forceSaveRunning = false;
       render();
     }
   });
@@ -7141,9 +7135,9 @@ function init() {
       loadSession().then(() => { if (state.currentSession) render(); });
       tdbRefreshTournaments().then(() => render()).catch(() => {});
 
-      if (!crossDeviceRefreshInterval) {
+      if (!SyncManager.poll.interval) {
         // Keep multiple devices converged without requiring a full page refresh.
-        crossDeviceRefreshInterval = setInterval(() => {
+        SyncManager.poll.interval = setInterval(() => {
           if (document.hidden) return;
           void flushOutbox(); // C22 item 3: keep retrying queued offline writes
           queueSupabaseRefresh(800);
