@@ -27,7 +27,7 @@
   --text:         #0f172a;
   --text-2:       #334155;
   --text-3:       #64748b;
-  --text-4:       #94a3b8;
+  --text-4:       #5b6678; /* C24 item 12: was #94a3b8 (2.56:1, fails WCAG AA) -> 5.30:1 on the light surface */
 
   --shadow-sm:    0 1px 2px rgba(0,0,0,.06);
   --shadow-md:    0 1px 3px rgba(0,0,0,.08), 0 3px 10px rgba(0,0,0,.05);
