@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.10';
+const APP_VERSION = '2026.06.19.11';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5715,6 +5715,7 @@ function activateMainTab(tab) {
   sessionStorage.setItem('as_main_tab', tab);
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
   document.querySelectorAll('#bottom-nav .nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.navTab === tab));
+  window.dispatchEvent(new Event('as-tab-changed')); // C25 item 5: refresh back-to-top visibility for the new panel
 }
 
 function attachHandlers() {
@@ -7151,14 +7152,27 @@ function init() {
 function initBackToTop() {
   const btn = document.getElementById('back-to-top');
   if (!btn) return;
-  const tabPlayers = document.getElementById('tab-players');
-  if (!tabPlayers) return;
-  tabPlayers.addEventListener('scroll', () => {
-    btn.classList.toggle('visible', tabPlayers.scrollTop > 200);
-  }, { passive: true });
+  const activePanel = () => document.querySelector('.tab-panel.active');
+  const update = () => {
+    const p = activePanel();
+    btn.classList.toggle('visible', !!p && p.scrollTop > 200);
+  };
+  // C25 item 5: serve whichever tab-panel is active (Players, Teams, Tournament),
+  // not just Players. Scroll events don't bubble, so capture on document — this
+  // catches scroll from the active panel AND survives render() rebuilding the
+  // panels (the old code bound the #tab-players element directly, so it broke
+  // after the first full render() and never worked on Teams/Tournament).
+  document.addEventListener('scroll', (e) => {
+    const t = e.target;
+    if (t && t.classList && t.classList.contains('tab-panel') && t.classList.contains('active')) update();
+  }, true);
   btn.addEventListener('click', () => {
-    tabPlayers.scrollTo({ top: 0, behavior: 'smooth' });
+    const p = activePanel();
+    if (p) p.scrollTo({ top: 0, behavior: 'smooth' });
   });
+  // A freshly-activated tab may be at top or already scrolled — re-evaluate on switch.
+  window.addEventListener('as-tab-changed', update);
+  update();
 }
 
 if (document.readyState === 'loading') {
