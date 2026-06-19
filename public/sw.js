@@ -1,10 +1,14 @@
-const CACHE_NAME = 'athletic-specimen-cache-v5';
+const CACHE_NAME = 'athletic-specimen-cache-v6';
 const ASSETS = [
   '/',
   '/index.html',
   '/styles.css',
   '/manifest.json',
-  '/app.js'
+  '/app.js',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-maskable-512.png',
+  '/apple-touch-icon.png'
 ];
 const NETWORK_FIRST_PATHS = new Set(ASSETS);
 
