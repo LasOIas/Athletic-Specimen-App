@@ -55,12 +55,6 @@
 
   <!-- Small helpers -->
   <script>
-    // Prevent tiny tap targets on iOS zooming
-    document.addEventListener('DOMContentLoaded', () => {
-      document.querySelectorAll('input, textarea, select, button').forEach(el => {
-        el.style.fontSize = '16px';
-      });
-    });
     // Fail-safe loader — show message if a JS file fails to load
     window.addEventListener('error', function (e) {
       if (e.target.tagName === 'SCRIPT') {
@@ -76,6 +70,8 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <!-- Supabase -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.5/dist/umd/supabase.min.js"></script>
+  <!-- Shared Supabase config (URL + anon key) — must load before app.js -->
+  <script src="/supabase-config.js"></script>
   <!-- Pure logic (tournament/balancing/scoring) — shared with the vitest suite; MUST load before app.js -->
   <script src="/pure.js" defer></script>
   <!-- Main App (tournament UI: buildTournamentTabHTML + bindTournamentTabV2) -->

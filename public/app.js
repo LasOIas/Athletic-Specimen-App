@@ -16,8 +16,7 @@
 // To enable cloud sync via Supabase, supply your project URL and anon key
 // below. If left blank the app will continue to function fully offline
 // using browser storage. See https://supabase.io for more information.
-const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
+// SUPABASE_URL + SUPABASE_KEY come from public/supabase-config.js (loaded before app.js) — C25 item 7.
 // C21: persistSession=false — the admin JWT lives in memory only and dies with the tab, so a
 // left-behind session can never grant the next visitor admin on a shared/kiosk device. The quick
 // code re-login (server-verified) is the intended way back in. autoRefreshToken keeps a long
@@ -25,7 +24,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.8';
+const APP_VERSION = '2026.06.19.9';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
