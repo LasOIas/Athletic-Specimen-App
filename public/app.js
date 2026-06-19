@@ -18,8 +18,14 @@
 // using browser storage. See https://supabase.io for more information.
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-const APP_VERSION = '2026.06.18.7';
+// C21: persistSession=false — the admin JWT lives in memory only and dies with the tab, so a
+// left-behind session can never grant the next visitor admin on a shared/kiosk device. The quick
+// code re-login (server-verified) is the intended way back in. autoRefreshToken keeps a long
+// active session alive in-tab.
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: true },
+});
+const APP_VERSION = '2026.06.18.8';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -41,20 +47,12 @@ const SHARED_SYNC_CONFLICT_RESOLVED = 'conflict-resolved';
 const selectedSet = () => new Set(state.selectedIds || []);
 
 // Master admin (full access across all groups)
-const MASTER_ADMIN_CODE = 'nlvb2025';
+// C21: admin codes are NO LONGER in the client bundle. They live ONLY in the admin_login
+// Edge Function (server-side). The client sends a typed code and receives a real Supabase
+// session whose JWT carries role/group; isAdmin/limitedGroup derive from that session.
 
-// Default tenant admin codes (locked to single groups)
-const DEFAULT_ADMIN_CODE_MAP = {
-  'kcvb2025': 'KC Volleyball',
-  'asvb2025': 'Athletic Specimen' // optional mirror, so CO still maps if used as tenant
-};
-
-// Session key for tenant scope
+// Session key for tenant scope (still used to keep the active-group filter coherent in-tab)
 const LS_LIMITED_GROUP_KEY = 'athletic_specimen_limited_group';
-
-// --- Admin code storage (TENANT CODES) ---
-const LS_CODEMAP_KEY = 'athletic_specimen_admin_codes';
-let ADMIN_CODE_MAP = {}; // populated by loadAdminCodes()
 
 function computeCheckedInByGroup() {
   const byGroup = new Map();
@@ -97,21 +95,7 @@ function normalizeActiveGroupSelection(value) {
   return raw;
 }
 
-function loadAdminCodes() {
-  try {
-    const raw = localStorage.getItem(LS_CODEMAP_KEY);
-    if (raw) {
-      ADMIN_CODE_MAP = JSON.parse(raw) || {};
-    } else {
-      // first run seed
-      ADMIN_CODE_MAP = { ...DEFAULT_ADMIN_CODE_MAP };
-      localStorage.setItem(LS_CODEMAP_KEY, JSON.stringify(ADMIN_CODE_MAP));
-    }
-  } catch {
-    ADMIN_CODE_MAP = { ...DEFAULT_ADMIN_CODE_MAP };
-  }
-  state.adminCodeMap = { ...ADMIN_CODE_MAP };
-}
+// C21: loadAdminCodes() removed — there are no client-side admin codes anymore (server-only).
 
 
 function closePlayerEditPopup() {
@@ -2527,8 +2511,7 @@ const state = {
   activeGroup: 'All',
   selectedIds: [], // player.id[] currently selected (admin bulk)
   limitedGroup: null, // when set, admin is locked to this group
-  masterAdminAuthenticated: false, // true only for MASTER_ADMIN_CODE session
-  adminCodeMap: {},   // live copy used by the UI
+  masterAdminAuthenticated: false, // true only for an owner-role server session
   sharedSyncState: (SUPABASE_AUTHORITATIVE && supabaseClient)
     ? SHARED_SYNC_PENDING
     : SHARED_SYNC_LOCAL_ONLY,
@@ -4104,8 +4087,9 @@ function loadLocal() {
       shouldPersistMigration = true;
     }
 
-    const adminFlag = sessionStorage.getItem(LS_ADMIN_KEY);
-    state.isAdmin = adminFlag === 'true';
+    // C21: admin state is NEVER restored from storage — it derives only from a live Supabase
+    // session. With persistSession=false there is none on load, so always start logged-out.
+    state.isAdmin = false;
   } catch (err) {
     console.error('Error loading from localStorage', err);
   }
@@ -4141,15 +4125,9 @@ function loadLocal() {
     if (normalizedActiveGroup !== ag) shouldPersistMigration = true;
   }
 
-  // load codes and tenant scope
-  loadAdminCodes(); // << add this
-  const lim = sessionStorage.getItem(LS_LIMITED_GROUP_KEY); // << add this
-  if (lim) {
-    state.limitedGroup = lim;
-    state.activeGroup = lim;
-  }
-  const masterAdminFlag = sessionStorage.getItem(LS_MASTER_ADMIN_AUTH_KEY);
-  state.masterAdminAuthenticated = state.isAdmin && masterAdminFlag === 'true' && !state.limitedGroup;
+  // C21: no code load + no admin-scope restore from storage. Admin state (isAdmin /
+  // masterAdminAuthenticated / limitedGroup) comes only from a live server session, set on
+  // login and cleared by logout / onAuthStateChange. Start logged-out (defaults already false/null).
 
   const beforeCanonicalGroups = JSON.stringify(state.groups || []);
   const beforeCanonicalActive = normalizeActiveGroupSelection(state.activeGroup || 'All');
@@ -4323,7 +4301,10 @@ async function syncFromSupabase() {
     // when tenant-limited, only fetch that group to reduce data exposure and payload size
     // Explicit columns (not select('*')) to trim payload + avoid pulling unused/future cols.
     // Schema-aware: only request group/tag when the probe confirmed they exist.
-    const playerCols = ['id', 'name', 'skill', 'checked_in'];
+    // C21: skill is ADMIN-ONLY. Only request it when a real admin session exists; anon must
+    // never fetch it (the DB also REVOKEs SELECT(skill) from anon, so requesting it as anon errors).
+    const playerCols = ['id', 'name', 'checked_in'];
+    if (state.isAdmin) playerCols.push('skill');
     if (HAS_GROUP) playerCols.push('group');
     if (HAS_TAG) playerCols.push('tag');
     let query = supabaseClient.from('players').select(playerCols.join(','));
@@ -6300,13 +6281,11 @@ if (adminCodeInputForEnter && loginBtn) {
   });
 }
 
-// C21 — server-verified admin login. POSTs only the code to the admin_login Edge Function,
-// which checks it against a server-only map (NOT in this bundle) and returns a real Supabase
-// session whose JWT carries role/group in app_metadata (for RLS). On success the session is
-// set on supabaseClient so every later admin request carries the JWT. Returns {role, group}
-// or null; on null the caller falls back to the legacy client-side code compare (no session,
-// which still works while RLS is open). Codes are identical to the client's, so the UI-flag
-// blocks below set the same state whether the server door or the legacy fallback is taken.
+// C21 — server-verified admin login (the ONLY login path). POSTs only the code to the admin_login
+// Edge Function, which checks it against a server-only map (NOT in this bundle) and returns a real
+// Supabase session whose JWT carries role/group in app_metadata (for RLS). On success the session
+// is set on supabaseClient (in-memory; persistSession=false) so every later admin request carries
+// the JWT. Returns {role, group}, or null on a wrong code / unreachable function.
 async function adminLoginWithCode(code) {
   if (!supabaseClient || !code) return null;
   try {
@@ -6329,62 +6308,38 @@ if (loginBtn) {
     const code = codeInput ? codeInput.value.trim() : '';
     if (!code) return;
 
-    // C21: take the server-verified door first (sets a real session for RLS). Either way the
-    // code blocks below set the UI flags — they match the server's role/group because the codes
-    // are identical — so login still works (over open RLS) if the function is unreachable.
-    await adminLoginWithCode(code);
+    // C21: the ONLY login path — server-verified. adminLoginWithCode returns {role, group} and
+    // has set a real Supabase session, or null on a wrong code / unreachable function. There is
+    // no client-side code compare and no fallback: the JWT is the source of truth for admin state.
+    const session = await adminLoginWithCode(code);
+    if (!session) { alert('Incorrect admin code'); return; }
+    if (codeInput) codeInput.value = '';
 
-    // Master admin: full access
-    if (code === MASTER_ADMIN_CODE) {
-      state.isAdmin = true;
-      state.masterAdminAuthenticated = true;
-      state.limitedGroup = null;                 // clear tenant lock
-      state.activeGroup = 'All';                 // show everyone
-      sessionStorage.setItem(LS_ADMIN_KEY, 'true');
-      sessionStorage.setItem(LS_MASTER_ADMIN_AUTH_KEY, 'true');
-      sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
-      try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
-      const synced = await syncFromSupabase();   // re-fetch full dataset
-      if (synced) saveLocal();
-      if (synced && canRunAdminSharedBackfill()) {
-        (async () => {
-          const catalogSynced = await backfillGroupCatalogToSupabase();
-          const membershipsSynced = await backfillPlayerMembershipsToSupabase();
-          if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
-        })();
-      }
-      render();
-      return;
+    state.isAdmin = true;
+    state.masterAdminAuthenticated = (session.role === 'owner');
+    state.limitedGroup = (session.role === 'group_admin') ? session.group : null;
+    state.activeGroup = state.limitedGroup || 'All';
+    if (state.limitedGroup && !state.groups.includes(state.limitedGroup)) {
+      state.groups = Array.from(new Set([...state.groups, state.limitedGroup]));
     }
+    // sessionStorage flags are in-tab UI continuity only (NOT trusted on load — see loadFromLocal).
+    sessionStorage.setItem(LS_ADMIN_KEY, 'true');
+    if (state.masterAdminAuthenticated) sessionStorage.setItem(LS_MASTER_ADMIN_AUTH_KEY, 'true');
+    else sessionStorage.removeItem(LS_MASTER_ADMIN_AUTH_KEY);
+    if (state.limitedGroup) sessionStorage.setItem(LS_LIMITED_GROUP_KEY, state.limitedGroup);
+    else sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
+    try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, state.activeGroup); } catch {}
 
-    // Tenant admin: lock to one group
-    const group = ADMIN_CODE_MAP[code];
-    if (group) {
-      state.isAdmin = true;
-      state.masterAdminAuthenticated = false;
-      state.limitedGroup = group;
-      if (!state.groups.includes(group)) {
-        state.groups = Array.from(new Set([...state.groups, group]));
-      }
-      state.activeGroup = group;                 // force filter to tenant group
-      sessionStorage.setItem(LS_ADMIN_KEY, 'true');
-      sessionStorage.removeItem(LS_MASTER_ADMIN_AUTH_KEY);
-      sessionStorage.setItem(LS_LIMITED_GROUP_KEY, group);
-      try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, group); } catch {}
-      const synced = await syncFromSupabase();   // re-fetch only that group
-      if (synced) saveLocal();
-      if (synced && canRunAdminSharedBackfill()) {
-        (async () => {
-          const catalogSynced = await backfillGroupCatalogToSupabase();
-          const membershipsSynced = await backfillPlayerMembershipsToSupabase();
-          if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
-        })();
-      }
-      render();
-      return;
+    const synced = await syncFromSupabase();   // re-fetch as the authenticated admin (incl. skill)
+    if (synced) saveLocal();
+    if (synced && canRunAdminSharedBackfill()) {
+      (async () => {
+        const catalogSynced = await backfillGroupCatalogToSupabase();
+        const membershipsSynced = await backfillPlayerMembershipsToSupabase();
+        if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
+      })();
     }
-
-    alert('Incorrect admin code');
+    render();
   });
 }
 
@@ -6400,11 +6355,25 @@ const logoutBtn = document.getElementById('btn-logout');
     sessionStorage.removeItem(LS_MASTER_ADMIN_AUTH_KEY);
     sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
     try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
-    // C21: drop the real Supabase session too, so the JWT does not linger on a shared device.
-    if (supabaseClient) { try { await supabaseClient.auth.signOut(); } catch {} }
+    // C21: drop the real Supabase session too (local scope), so the JWT does not linger anywhere.
+    if (supabaseClient) { try { await supabaseClient.auth.signOut({ scope: 'local' }); } catch {} }
     const synced = await syncFromSupabase();     // load public view dataset
     if (synced) saveLocal();
     render();
+  });
+}
+
+// C21: follow the real session. If it ever ends while the UI still thinks it's admin — an explicit
+// signOut, or a failed token refresh — drop admin state so the UI can't show admin without a JWT.
+if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthStateChange === 'function') {
+  supabaseClient.auth.onAuthStateChange((event, session) => {
+    if (!session && state.isAdmin) {
+      state.isAdmin = false;
+      state.masterAdminAuthenticated = false;
+      state.limitedGroup = null;
+      state.activeGroup = 'All';
+      try { render(); } catch {}
+    }
   });
 }
 
