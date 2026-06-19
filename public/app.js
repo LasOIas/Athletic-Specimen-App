@@ -25,7 +25,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.4';
+const APP_VERSION = '2026.06.19.5';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -125,7 +125,7 @@ function openPlayerEditPopup(playerKey) {
   body.innerHTML = `
     <div class="edit-row show popup-edit-row" data-player-key="${keyAttr}">
       <label class="popup-edit-label">Name</label>
-      <input type="text" class="edit-name popup-edit-input" placeholder="Name" value="${escapeHTMLText(player.name)}" />
+      <input type="text" class="edit-name popup-edit-input" placeholder="Name" value="${escapeHTMLText(player.name)}" autocapitalize="words" autocomplete="off" spellcheck="false" />
       <label class="popup-edit-label">Skill (0–10)</label>
       <input type="number" class="edit-skill popup-edit-input" placeholder="Skill" step="0.1" min="0" max="10" value="${player.skill}" />
       <label class="popup-edit-label">Group</label>
@@ -1005,10 +1005,23 @@ function updateBulkBarVisibility() {
   window.addEventListener('load', pinBody);
   window.addEventListener('resize', pinBody);
 
+  // C24 item 9: only forward scroll-to-top on a GENUINE status-bar tap (the user taps the iOS clock —
+  // no finger on the page content), NOT on an ordinary rubber-band overscroll (finger dragging the
+  // content briefly hits scrollY=0), which used to yank the active panel to top on every bounce.
   let pending = false;
+  let touching = false;
+  let lastTouchEnd = 0;
+  // iOS fires touchcancel (NOT touchend) when the system takes over a touch (momentum/rubber-band/gesture
+  // handoff) — clear the flag on BOTH so `touching` can't get stuck true and suppress a real status-bar tap.
+  const clearTouch = () => { touching = false; lastTouchEnd = Date.now(); };
+  window.addEventListener('touchstart', () => { touching = true; }, { passive: true });
+  window.addEventListener('touchend', clearTouch, { passive: true });
+  window.addEventListener('touchcancel', clearTouch, { passive: true });
   window.addEventListener('scroll', () => {
     if (pending) return;
     if (window.scrollY > 0) return;
+    // a finger is on (or just left) the content -> this is a rubber-band, not a status-bar tap: re-pin only.
+    if (touching || (Date.now() - lastTouchEnd) < 400) { window.scrollTo(0, 1); return; }
     pending = true;
     const activePanel = document.querySelector('.tab-panel.active');
     if (activePanel && activePanel.scrollTop > 0) {
@@ -5446,7 +5459,7 @@ function render() {
       <button type="button" class="secondary" data-role="close-popup" data-target="admin-checkin-modal">Close</button>
     </div>
     <div class="popup-body">
-      <input type="text" id="check-name" placeholder="First and Last Name" />
+      <input type="text" id="check-name" placeholder="First and Last Name" autocapitalize="words" autocomplete="off" spellcheck="false" />
       <div class="row checkin-actions">
         <button id="btn-check-in">Check In</button>
         <button id="btn-check-out">Check Out</button>
@@ -5464,7 +5477,7 @@ function render() {
     </div>
     <div class="popup-body">
       <div class="row admin-player-form-row">
-        <input type="text" id="admin-player-name" placeholder="Name" />
+        <input type="text" id="admin-player-name" placeholder="Name" autocapitalize="words" autocomplete="off" spellcheck="false" />
         <input type="number" id="admin-player-skill" placeholder="Skill" step="0.1" />
         <div class="admin-player-groups-field">
           <input
@@ -5535,7 +5548,7 @@ function render() {
   <div class="grid-2">
   <div class="card card-checkin">
     <h2>Check In</h2>
-    <input type="text" id="check-name" placeholder="First and Last Name" />
+    <input type="text" id="check-name" placeholder="First and Last Name" autocapitalize="words" autocomplete="off" spellcheck="false" />
     <div class="row checkin-actions">
       <button id="btn-check-in">Check In</button>
       <button id="btn-check-out">Check Out</button>
@@ -5545,7 +5558,7 @@ function render() {
 
   <div class="card card-register">
     <h2>Register Player</h2>
-    <input type="text" id="register-name" placeholder="First and Last Name" />
+    <input type="text" id="register-name" placeholder="First and Last Name" autocapitalize="words" autocomplete="off" spellcheck="false" />
     <button id="btn-register">Register</button>
     ${regMsg}
   </div>

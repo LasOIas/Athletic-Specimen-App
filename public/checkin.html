@@ -244,7 +244,10 @@
       }
     }
 
+    let loadRosterInFlight = false;
     async function loadRoster() {
+      if (loadRosterInFlight) return; // C24 item 7: guard concurrent focus/visibility/interval fetches
+      loadRosterInFlight = true;
       try {
         const { data, error } = await sb
           .from('players')
@@ -258,6 +261,8 @@
         console.error('Load error:', err);
         $('loadingState').hidden = true;
         $('loadError').hidden = false;
+      } finally {
+        loadRosterInFlight = false;
       }
     }
 
@@ -399,6 +404,11 @@
 
     loadRoster();
     loadSessionBanner();
+    // C24 item 7: re-fetch the roster mid-session so a player added on another device shows up in the
+    // typeahead (instead of re-registering as a duplicate). Refresh periodically + when the kiosk regains focus.
+    setInterval(loadRoster, 30000);
+    window.addEventListener('focus', loadRoster);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadRoster(); });
   </script>
 </body>
 </html>
