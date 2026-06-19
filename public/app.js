@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.12';
+const APP_VERSION = '2026.06.19.13';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1802,15 +1802,17 @@ function checkOutPlayer(player) {
 // are already cohesive units. State-only refactor: runtime behavior is identical.
 const SyncManager = {
   players:      { refreshTimer: null, refreshQueued: false, refreshRunning: false,
-                  requestSeq: 0, appliedSeq: 0, liveChannel: null },
+                  requestSeq: 0, appliedSeq: 0, liveChannel: null, bootGraceArmed: false },
   groupCatalog: { timer: null, queued: false, running: false, lastSig: '' },
-  tournament:   { refreshTimer: null, liveChannel: null },
+  tournament:   { refreshTimer: null, liveChannel: null, bootGraceArmed: false },
   poll:         { interval: null },
   rt:           { backoff: { live: 0, tournament: 0 },
                   resubTimer: { live: null, tournament: null } },
   forceSaveRunning: false,
   hooksBound: false,
+  bootSyncAt: 0, // C25 item 8: timestamp of init's initial sync (anchors the post-boot grace window)
 };
+const BOOT_GRACE_MS = 1500; // C25 item 8: skip the one redundant background refresh fired within this window after boot
 function queueSupabaseRefresh(delay = 160) {
   if (!supabaseClient) return;
   SyncManager.players.refreshQueued = true;
@@ -1931,6 +1933,11 @@ function ensureAuthorityRefreshHooks() {
 
 async function runQueuedSupabaseRefresh() {
   if (!supabaseClient || SyncManager.players.refreshRunning || !SyncManager.players.refreshQueued) return;
+  if (SyncManager.players.bootGraceArmed && (Date.now() - SyncManager.bootSyncAt) < BOOT_GRACE_MS) {
+    SyncManager.players.bootGraceArmed = false; // C25 item 8 one-shot: init already loaded fresh roster <1.5s ago
+    SyncManager.players.refreshQueued = false;
+    return;
+  }
   SyncManager.players.refreshRunning = true;
   SyncManager.players.refreshQueued = false;
   try {
@@ -2860,6 +2867,10 @@ function tournamentNavVisible() {
 }
 
 async function refreshTournamentLive() {
+  if (SyncManager.tournament.bootGraceArmed && (Date.now() - SyncManager.bootSyncAt) < BOOT_GRACE_MS) {
+    SyncManager.tournament.bootGraceArmed = false; // C25 item 8 one-shot: init's tdbRefreshTournaments already loaded
+    return;
+  }
   const prevNav = tournamentNavVisible();
   if (activeMainTab === 'tournament') {
     const ae = document.activeElement;
@@ -7120,6 +7131,13 @@ function init() {
     (async () => {
       await detectPlayersSchema();
       const synced = await syncFromSupabase();
+      if (synced) {
+        // C25 item 8: arm a one-shot post-boot grace window — init has just loaded fresh data, so skip the
+        // single redundant background refresh that focus/visibilitychange/SUBSCRIBED fire ~800ms later.
+        SyncManager.bootSyncAt = Date.now();
+        SyncManager.players.bootGraceArmed = true;
+        SyncManager.tournament.bootGraceArmed = true;
+      }
       if (synced) await loadLiveStateFromSupabase(); // C22 item 1: recover the night on load
       if (synced) saveLocal();
       ensureSupabaseLiveSync();
