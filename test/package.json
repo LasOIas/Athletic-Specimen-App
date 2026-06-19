@@ -1,0 +1,12 @@
+{
+  "name": "athletic-specimen-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Vitest suite that locks the pure tournament / balancing / scoring logic extracted to public/pure.js (C25 item 1). Dev-only; not part of the deployed app.",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.9"
+  }
+}
