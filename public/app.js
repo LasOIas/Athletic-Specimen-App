@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.17';
+const APP_VERSION = '2026.06.19.18';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2108,6 +2108,85 @@ function deriveNextLiveCourtOrder(courtOrder, liveMatchups, resultsByMatch) {
   if (orderedTeamNumbers.length !== currentOrder.length) return null;
   if (new Set(orderedTeamNumbers).size !== currentOrder.length) return null;
   return orderedTeamNumbers;
+}
+
+// C26 item 3a: read-only public live-courts data, derived from the synced live_state.
+// Truthful only — Live Nets records WIN/LOSS (no running score); rows show team NUMBERS +
+// a status pill (Playing / "Team N won"). No skill, no player names, no fabricated score.
+function getPublicLiveData() {
+  if (!Array.isArray(state.generatedTeams) || state.generatedTeams.length === 0) {
+    return { matchups: [], results: {}, waitingTeams: [], liveCount: 0 };
+  }
+  const order = normalizeLiveCourtOrder(state.liveCourtOrder, state.generatedTeams.length);
+  const live = deriveLiveTeamMatchupsFromOrder(order);
+  const results = normalizeLiveMatchResults(state.liveMatchResults, live.matchups);
+  const liveCount = live.matchups.reduce((n, m) => (Number(results[liveMatchupKey(m.teamA, m.teamB)]) ? n : n + 1), 0);
+  return { matchups: live.matchups, results, waitingTeams: live.waitingTeams, liveCount };
+}
+
+// C26 item 3a: court rows shared by Home + Scores. Returns '' when there are no teams.
+function buildPublicLiveCourtsHTML() {
+  const { matchups, results } = getPublicLiveData();
+  if (!matchups.length) return '';
+  return matchups.map((m, idx) => {
+    const winner = Number(results[liveMatchupKey(m.teamA, m.teamB)]) || 0;
+    const status = winner
+      ? `<span class="court-stat is-done">Team ${winner} won</span>`
+      : `<span class="court-stat is-live">Playing</span>`;
+    return `<div class="court-row">
+      <div class="court-row-info"><div class="court-row-name">Net ${idx + 1}</div>
+        <div class="court-row-sub">Team ${m.teamA} vs Team ${m.teamB}</div></div>
+      ${status}
+    </div>`;
+  }).join('');
+}
+
+// C26 item 3a: PUBLIC Home (layout A — session-first). Read-only except the Check In CTA,
+// which navigates to the Check In tab via the delegated [data-nav-tab] handler.
+function publicHomeHTML() {
+  const liveData = getPublicLiveData();
+  const courtsHTML = buildPublicLiveCourtsHTML();
+  const livePill = courtsHTML
+    ? `<span class="ph-live"><span class="ph-dot"></span>Live now</span>`
+    : '';
+  const sessionCard = state.currentSession
+    ? `<div class="ph-card">
+        <div class="ph-lab">Next session</div>
+        <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg><b>${escapeHTML(formatSessionDate(state.currentSession.date))}</b></div>
+        <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><b>${escapeHTML(state.currentSession.time || '')}</b></div>
+        <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>${escapeHTML(state.currentSession.location || '')}</div>
+      </div>`
+    : `<div class="ph-card ph-empty">No session scheduled yet — check back soon.</div>`;
+  const liveSection = courtsHTML
+    ? `<div class="ph-sec">Live now &middot; ${liveData.matchups.length} ${liveData.matchups.length === 1 ? 'court' : 'courts'}</div>${courtsHTML}`
+    : '';
+  return `<div class="home-screen">
+    <div class="ph-brand">Athletic Specimen ${livePill}</div>
+    ${sessionCard}
+    <button type="button" class="ph-cta" data-nav-tab="players"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 11l3 3L20 6"/><path d="M20 12v7H4V5h11"/></svg>Check In</button>
+    ${liveSection}
+  </div>`;
+}
+
+// C26 item 3a: PUBLIC Scores (read-only live scoreboard). Win/loss status only, never a score.
+function publicScoresHTML() {
+  const liveData = getPublicLiveData();
+  const courtsHTML = buildPublicLiveCourtsHTML();
+  if (!courtsHTML) {
+    return `<div class="home-screen">
+      <div class="ph-brand">Live scores</div>
+      <div class="ph-card ph-empty">No live games right now.</div>
+    </div>`;
+  }
+  const upNext = (liveData.waitingTeams || []).length
+    ? `<div class="ph-sec">Up next</div>
+       <div class="court-row"><div class="court-row-info"><div class="court-row-sub">${liveData.waitingTeams.map((t) => 'Team ' + Number(t)).join(', ')}</div></div></div>`
+    : '';
+  return `<div class="home-screen">
+    <div class="ph-brand">Live scores <span class="ph-live"><span class="ph-dot"></span>${liveData.liveCount} playing</span></div>
+    ${courtsHTML}
+    ${upNext}
+  </div>`;
 }
 
 function maybeAdvanceLiveCourtsFromResults() {
@@ -5068,39 +5147,9 @@ function renderPublicShell() {
     <div class="app-header-version">v${APP_VERSION}</div>
   </header>
   <div id="app-content">
-    <div id="tab-session" class="tab-panel">
+    <div id="tab-home" class="tab-panel">
       <div class="container">
-        ${state.currentSession ? `
-          <div class="card session-info-card">
-            <h3 style="margin:0 0 12px;">Next Session</h3>
-            <div class="session-detail-row">
-              <span class="session-detail-icon">📅</span>
-              <span>${escapeHTML(formatSessionDate(state.currentSession.date))}</span>
-            </div>
-            <div class="session-detail-row">
-              <span class="session-detail-icon">🕙</span>
-              <span>${escapeHTML(state.currentSession.time || '')}</span>
-            </div>
-            <div class="session-detail-row">
-              <span class="session-detail-icon">📍</span>
-              <span>${escapeHTML(state.currentSession.location || '')}</span>
-            </div>
-          </div>
-        ` : `
-          <div class="session-empty-state">
-            <div class="session-empty-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="4" width="18" height="18" rx="2"/>
-                <line x1="16" y1="2" x2="16" y2="6"/>
-                <line x1="8" y1="2" x2="8" y2="6"/>
-                <line x1="3" y1="10" x2="21" y2="10"/>
-                <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>
-              </svg>
-            </div>
-            <h2 class="session-empty-title">No Session Scheduled</h2>
-            <p class="session-empty-desc">Check back soon for the next session details.</p>
-          </div>
-        `}
+        ${publicHomeHTML()}
       </div>
     </div>
     <div id="tab-players" class="tab-panel">
@@ -5110,9 +5159,9 @@ function renderPublicShell() {
         ${publicCheckinHTML()}
       </div>
     </div>
-    <div id="tab-teams" class="tab-panel">
+    <div id="tab-scores" class="tab-panel">
       <div class="container">
-        <div class="card" style="text-align:center;padding:2rem;"><p style="color:#64748b;margin:0;">Log in as admin to use team generation.</p></div>
+        ${publicScoresHTML()}
       </div>
     </div>
     <div id="tab-tournament" class="tab-panel">
@@ -5122,18 +5171,22 @@ function renderPublicShell() {
     </div>
   </div>
   <nav id="bottom-nav">
-    <button class="nav-btn" data-nav-tab="session">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      <span>Session</span>
+    <button class="nav-btn" data-nav-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>
+      <span>Home</span>
     </button>
     <button class="nav-btn" data-nav-tab="players">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      <span>Check-in</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg>
+      <span>Check In</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="scores">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
+      <span>Scores</span>
     </button>
     ${(state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket' || t.status === 'completed') ? `
     <button class="nav-btn" data-nav-tab="tournament">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
-      <span>Tournament</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg>
+      <span>Bracket</span>
     </button>` : ''}
   </nav>
 </div>
@@ -5353,8 +5406,10 @@ function render() {
   }
 
   // C26 item 2: per-surface active-tab memory (set just before activateMainTab below).
-  activeMainTab = sessionStorage.getItem(currentTabKey()) || 'players';
-  if (!state.isAdmin && activeMainTab === 'teams') activeMainTab = 'players';
+  // C26 item 3a: PUBLIC defaults to 'home'; admin default stays 'players' (3b -> 'dashboard').
+  activeMainTab = sessionStorage.getItem(currentTabKey()) || (state.isAdmin ? 'players' : 'home');
+  // C26 item 3a: public 'teams' and the now-removed public 'session' tab fall back to 'home'.
+  if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'session')) activeMainTab = 'home';
 
   const shellHtml = state.isAdmin
     ? renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML)
@@ -5636,7 +5691,7 @@ bindTournamentTabV2();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
-if (!state.isAdmin && activeMainTab === 'teams') activeMainTab = 'players';
+if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'session')) activeMainTab = 'home';
 activateMainTab(activeMainTab);
 restoreTransientInteractionState(interactionSnapshot);
 refreshAzStripAvailability();
@@ -5808,6 +5863,16 @@ function attachHandlers() {
     bottomNav.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-nav-tab]');
       if (btn) activateMainTab(btn.dataset.navTab);
+    });
+  }
+  // C26 item 3a: in-content [data-nav-tab] navigation (e.g. the Home "Check In" CTA).
+  // Scoped to #app-content + idempotent so re-renders don't stack listeners.
+  const appContent = document.getElementById('app-content');
+  if (appContent && !appContent.dataset.navTabBound) {
+    appContent.dataset.navTabBound = '1';
+    appContent.addEventListener('click', (e) => {
+      const navBtn = e.target.closest('[data-nav-tab]');
+      if (navBtn) activateMainTab(navBtn.dataset.navTab);
     });
   }
   // --- Group controls (Admin Players) ---
