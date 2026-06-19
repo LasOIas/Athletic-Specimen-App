@@ -25,7 +25,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.18.13';
+const APP_VERSION = '2026.06.19.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4513,6 +4513,16 @@ async function syncFromSupabase() {
       return true;
     }
 
+    // C22 item 8: the group catalog now lives in the `groups` table (was `__as_group__:` player rows).
+    // Source remoteGroupCatalog from it; the per-row parseGroupCatalogRowName skip in the loop above
+    // stays as a defensive filter for any straggler sentinel row.
+    try {
+      const catalogTableRows = await listGroupCatalogRowsSupabase();
+      catalogTableRows.forEach((row) => { if (row && row.name) remoteGroupCatalog.push(row.name); });
+    } catch (groupsErr) {
+      console.error('Supabase groups table read error', groupsErr);
+    }
+
     const merged = mergePlayersAfterSync(remotePlayers);
     state.players = merged.players;
     normalizePlayerGroupsInState();
@@ -4670,46 +4680,32 @@ async function updatePlayerFieldsSupabase(id, fields) {
 
 async function listGroupCatalogRowsSupabase() {
   if (!supabaseClient) return [];
+  // C22 item 8: the group catalog lives in a real `groups` table (was `__as_group__:` player rows).
   const { data, error } = await supabaseClient
-    .from('players')
-    .select('id,name,group,tag')
-    .ilike('name', `${GROUP_CATALOG_NAME_PREFIX}%`);
+    .from('groups')
+    .select('id,name');
   if (error) throw error;
   return Array.isArray(data) ? data : [];
 }
 
 async function ensureGroupCatalogEntrySupabase(groupName) {
   if (!supabaseClient) return false;
-  if (!HAS_GROUP && !HAS_TAG) {
-    await detectPlayersSchema();
-  }
   const normalized = normalizeGroupName(groupName);
   if (!normalized) return false;
-  const rowName = toGroupCatalogRowName(normalized);
   const targetKey = normalizeGroupKey(normalized);
 
   try {
+    // C22 item 8: catalog rows are now plain-name rows in the `groups` table.
     const catalogRows = await listGroupCatalogRowsSupabase();
-    const matchingRows = catalogRows.filter((row) => {
-      const parsed = parseGroupCatalogRowName(row && row.name);
-      return parsed && normalizeGroupKey(parsed) === targetKey;
-    });
+    const matchingRows = catalogRows.filter((row) => row && normalizeGroupKey(row.name) === targetKey);
 
     if (matchingRows.length) {
       const existingRow = matchingRows[0];
-      const payload = {};
-      if (existingRow.name !== rowName) payload.name = rowName;
-      if (HAS_GROUP && normalizeGroupName(existingRow.group || '') !== normalized) {
-        payload.group = normalized;
-      }
-      if (HAS_TAG && normalizeGroupName(existingRow.tag || '') !== normalized) {
-        payload.tag = normalized;
-      }
-
-      if (Object.keys(payload).length) {
+      // keep the latest-entered casing as the display name (parity with the old behavior)
+      if (existingRow.name !== normalized) {
         const { error: updateError } = await supabaseClient
-          .from('players')
-          .update(payload)
+          .from('groups')
+          .update({ name: normalized })
           .eq('id', existingRow.id);
         if (updateError) throw updateError;
       }
@@ -4720,7 +4716,7 @@ async function ensureGroupCatalogEntrySupabase(groupName) {
         .filter(Boolean);
       for (const duplicateId of duplicateIds) {
         const { error: deleteError } = await supabaseClient
-          .from('players')
+          .from('groups')
           .delete()
           .eq('id', duplicateId);
         if (deleteError) {
@@ -4730,12 +4726,11 @@ async function ensureGroupCatalogEntrySupabase(groupName) {
       return true;
     }
 
-    const payload = { name: rowName, skill: 0 };
-    if (HAS_GROUP) payload.group = normalized;
-    if (HAS_TAG) payload.tag = normalized;
-
-    const { error: insertError } = await supabaseClient.from('players').insert([payload]);
-    if (insertError) throw insertError;
+    const { error: insertError } = await supabaseClient.from('groups').insert([{ name: normalized }]);
+    if (insertError) {
+      if (insertError.code === '23505') return true; // ci-unique race: already exists
+      throw insertError;
+    }
     return true;
   } catch (err) {
     console.error('Supabase group catalog upsert error', err);
@@ -4788,12 +4783,10 @@ async function deleteGroupCatalogEntrySupabase(groupName) {
   if (!targetKey) return false;
 
   try {
+    // C22 item 8: catalog rows are now plain-name rows in the `groups` table.
     const catalogRows = await listGroupCatalogRowsSupabase();
     const matchingIds = catalogRows
-      .filter((row) => {
-        const parsed = parseGroupCatalogRowName(row && row.name);
-        return parsed && normalizeGroupKey(parsed) === targetKey;
-      })
+      .filter((row) => row && normalizeGroupKey(row.name) === targetKey)
       .map((row) => row && row.id)
       .filter(Boolean);
 
@@ -4802,7 +4795,7 @@ async function deleteGroupCatalogEntrySupabase(groupName) {
     let failed = false;
     for (const id of matchingIds) {
       const { error } = await supabaseClient
-        .from('players')
+        .from('groups')
         .delete()
         .eq('id', id);
       if (error) {
