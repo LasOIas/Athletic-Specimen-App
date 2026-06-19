@@ -31,8 +31,10 @@ describe('validateScores (current behavior — no upper cap yet; item 3 will add
     expect(() => validateScores(-1, 5)).toThrow();
     expect(() => validateScores(1.5, 3)).toThrow();
   });
-  it('currently accepts absurdly large values (locks pre-item-3 behavior)', () => {
-    expect(validateScores(99999, 0)).toEqual({ sa: 99999, sb: 0 });
+  it('rejects scores above the cap (item 3) and accepts the boundary', () => {
+    expect(validateScores(99, 0)).toEqual({ sa: 99, sb: 0 }); // boundary OK
+    expect(() => validateScores(100, 0)).toThrow();
+    expect(() => validateScores(99999, 0)).toThrow();
   });
 });
 

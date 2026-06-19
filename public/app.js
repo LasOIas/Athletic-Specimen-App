@@ -25,7 +25,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.6';
+const APP_VERSION = '2026.06.19.7';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2669,10 +2669,21 @@ async function tdbStartPoolPlay(tournament) {
     .update({ status: 'pools', updated_at: new Date().toISOString() }).eq('id', tournament.id);
 }
 
+// C25 item 3: before submitting, sanity-check a lopsided score that still passes validation
+// (a fat-finger blowout). Empty scores (e.g. tap-to-win bracket) skip the check. Returns false on cancel.
+var BIG_MARGIN = 20;
+function confirmBigMargin(saStr, sbStr) {
+  const aRaw = String(saStr == null ? '' : saStr).trim();
+  const bRaw = String(sbStr == null ? '' : sbStr).trim();
+  if (aRaw === '' || bRaw === '') return true;                    // no scores entered -> nothing to confirm
+  const a = Number(aRaw), b = Number(bRaw);
+  if (!Number.isInteger(a) || !Number.isInteger(b)) return true;  // let validateScores surface the error
+  if (Math.abs(a - b) < BIG_MARGIN) return true;
+  return confirm('That\'s a big margin — submit ' + a + '–' + b + '? Tap Cancel to fix it.');
+}
+
 // Submit a match result with optimistic concurrency (CAS on version). Returns the
 // updated row, or throws a "another device updated this" message on a version conflict.
-// Validate a score pair: whole numbers, 0 or more. Throws a friendly message.
-
 async function tdbSubmitResult(match, scoreA, scoreB) {
   if (!supabaseClient || !match) throw new Error('No match.');
   const { sa, sb } = validateScores(scoreA, scoreB);
@@ -5637,6 +5648,7 @@ function bindTournamentTabV2() {
         }
         const sa = (document.getElementById('bsc-a-' + id) || {}).value;
         const sb = (document.getElementById('bsc-b-' + id) || {}).value;
+        if (!confirmBigMargin(sa, sb)) return;
         await tdbSubmitBracketResult(m, el.getAttribute('data-winner'), sa, sb);
         await tdbRefreshTournaments();
         render();
@@ -5649,6 +5661,7 @@ function bindTournamentTabV2() {
         const m = (state.tournamentMatches || []).find((x) => x.id === id);
         const sa = (document.getElementById('sc-a-' + id) || {}).value;
         const sb = (document.getElementById('sc-b-' + id) || {}).value;
+        if (!confirmBigMargin(sa, sb)) return;
         await tdbSubmitResult(m, sa, sb);
         await tdbRefreshTournaments();
         render();

@@ -149,10 +149,16 @@ function generateBalancedGroups(players, checkedInKeys, groupCount) {
   };
 }
 
+// C25 item 3: a per-game score above MAX_SCORE is a fat-finger typo for pickup volleyball/basketball
+// (no real game reaches 100), so reject it before a value like 99999 can poison standings/seeding.
+var MAX_SCORE = 99;
 function validateScores(scoreA, scoreB) {
   const sa = Number(scoreA), sb = Number(scoreB);
   if (!Number.isInteger(sa) || !Number.isInteger(sb) || sa < 0 || sb < 0) {
     throw new Error('Scores must be whole numbers (0 or more).');
+  }
+  if (sa > MAX_SCORE || sb > MAX_SCORE) {
+    throw new Error('Scores can\'t be above ' + MAX_SCORE + '. Double-check the score.');
   }
   return { sa, sb };
 }
