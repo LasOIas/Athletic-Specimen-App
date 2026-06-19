@@ -25,7 +25,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.7';
+const APP_VERSION = '2026.06.19.8';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -992,6 +992,17 @@ function updateBulkBarVisibility() {
 // iOS scrolls the document body to 0 when the status bar is tapped. Our app
 // keeps body overflow at 1px (see styles.css), pre-scrolls past 0, and watches
 // for the scroll event so we can forward it to the actually-scrolling tab panel.
+// C25 item 4: collapse a burst of resize events (iOS URL-bar show/hide fires them constantly) into a
+// single trailing call, so resize-bound work (re-pin body, bracket breakpoint re-render) runs once after settle.
+function debounce(fn, ms) {
+  let t = null;
+  return function () {
+    const ctx = this, args = arguments;
+    clearTimeout(t);
+    t = setTimeout(function () { fn.apply(ctx, args); }, ms);
+  };
+}
+
 (function ensureClockTapHandler() {
   if (window.__clockTapBound) return;
   window.__clockTapBound = true;
@@ -1003,7 +1014,7 @@ function updateBulkBarVisibility() {
   }
   setTimeout(pinBody, 0);
   window.addEventListener('load', pinBody);
-  window.addEventListener('resize', pinBody);
+  window.addEventListener('resize', debounce(pinBody, 150));
 
   // C24 item 9: only forward scroll-to-top on a GENUINE status-bar tap (the user taps the iOS clock —
   // no finger on the page content), NOT on an ordinary rubber-band overscroll (finger dragging the
@@ -5700,10 +5711,10 @@ function bindTournamentTabV2() {
 
   // Re-render the bracket when crossing the wide/narrow (700px) breakpoint (tree <-> single-round).
   let lastWide = typeof window !== 'undefined' && window.innerWidth >= 700;
-  window.addEventListener('resize', () => {
+  window.addEventListener('resize', debounce(() => {
     const wide = window.innerWidth >= 700;
     if (wide !== lastWide) { lastWide = wide; if (activeMainTab === 'tournament') render(); }
-  });
+  }, 150));
 }
 
 function activateMainTab(tab) {
