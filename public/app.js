@@ -24,9 +24,9 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.16';
+const APP_VERSION = '2026.06.19.17';
 const LS_TAB_KEY = 'athletic_specimen_tab';
-let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
+let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
 const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
@@ -4735,152 +4735,13 @@ function bindSelectionHandlers() {
 // existing content to reflect the current state. Event handlers are
 // attached inline within this function. To minimize reflows, we build
 // strings for larger sections and assign innerHTML.
-function render() {
-  const root = document.getElementById('root');
-  if (!root) return;
-  const existingPanel = document.getElementById('tab-' + activeMainTab);
-  const savedScrollY = existingPanel ? existingPanel.scrollTop : 0;
-  const interactionSnapshot = captureTransientInteractionState();
+// C26 item 2: per-surface tab persistence — admin and public keep independent active-tab memory.
+function currentTabKey() { return state.isAdmin ? 'as_main_tab_admin' : 'as_main_tab_public'; }
 
-  // Helper to escape text for safe insertion into HTML
-  const escapeHTML = (str) => String(str == null ? '' : str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
-  const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE ? UNGROUPED_FILTER_LABEL : (normalizedActiveGroup || 'All');
-  const isActiveGroupValue = (value) => normalizeActiveGroupSelection(value || 'All') === normalizedActiveGroup;
-  const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
-  const topFormGroupOptions = getTopFormGroupDatalistOptions();
-  const topFormContext = renderTopFormGroupsHelpAndPreview('', '');
-  const isCardCollapsed = (cardId) => !!(state.collapsedCards && state.collapsedCards[cardId]);
-  const renderCardCollapseToggle = (cardId, bodyId) => {
-    const collapsed = isCardCollapsed(cardId);
-    return `
-      <button
-        type="button"
-        class="secondary card-collapse-toggle"
-        data-role="toggle-card-collapse"
-        data-card-id="${escapeHTML(cardId)}"
-        aria-controls="${escapeHTML(bodyId)}"
-        aria-expanded="${collapsed ? 'false' : 'true'}"
-      >${collapsed ? 'Expand' : 'Collapse'}</button>
-    `;
-  };
-
-  // Build registration and check‑in messages
-  const regMsg = messages.registration ? `<p class="msg">${escapeHTML(messages.registration)}</p>` : '';
-  const checkMsg = messages.checkIn ? `<p class="msg">${escapeHTML(messages.checkIn)}</p>` : '';
-
-  // Build generated teams HTML
-  let teamsHTML = '';
-  let teamsFairnessHTML = '';
-  let liveMatchupsHTML = '';
-  if (state.generatedTeams.length > 0) {
-    if (state.generatedTeamsSummary) {
-      teamsFairnessHTML = `
-        <p class="small" style="margin:0.25rem 0 0.5rem;">
-          Fairness spread: <strong>${state.generatedTeamsSummary.skillSpread.toFixed(1)}</strong>
-          | Team size spread: <strong>${state.generatedTeamsSummary.countSpread}</strong>
-          | Candidate runs: <strong>${state.generatedTeamsSummary.attempts}</strong>
-        </p>
-      `;
-    }
-
-    const normalizedCourtOrder = normalizeLiveCourtOrder(state.liveCourtOrder, state.generatedTeams.length);
-    state.liveCourtOrder = normalizedCourtOrder;
-    const liveMatchups = deriveLiveTeamMatchupsFromOrder(normalizedCourtOrder);
-    const resultsByMatch = normalizeLiveMatchResults(state.liveMatchResults, liveMatchups.matchups);
-    state.liveMatchResults = resultsByMatch;
-    const snapshotsByMatch = normalizeLiveMatchSkillSnapshots(state.liveMatchSkillSnapshots, resultsByMatch);
-    state.liveMatchSkillSnapshots = snapshotsByMatch;
-    const matchupRows = liveMatchups.matchups.map((match, idx) => {
-      const matchKey = liveMatchupKey(match.teamA, match.teamB);
-      const winner = Number(resultsByMatch[matchKey]) || 0;
-      const loser = winner === match.teamA ? match.teamB : (winner === match.teamB ? match.teamA : 0);
-      const teamASize = Array.isArray(state.generatedTeams[match.teamA - 1]) ? state.generatedTeams[match.teamA - 1].length : 0;
-      const teamBSize = Array.isArray(state.generatedTeams[match.teamB - 1]) ? state.generatedTeams[match.teamB - 1].length : 0;
-      return `
-      <article class="live-net-card">
-        <div class="live-net-header">
-          <span class="live-net-label">Net ${idx + 1}</span>
-          <span class="small live-net-match-label">Team ${match.teamA} vs Team ${match.teamB}</span>
-        </div>
-        <div class="live-net-court" role="group" aria-label="Net ${idx + 1} teams">
-          <div class="live-net-team">
-            <strong>Team ${match.teamA}</strong>
-            <span class="small live-net-team-size">Team of ${teamASize}</span>
-          </div>
-          <div class="live-net-divider" aria-hidden="true">NET</div>
-          <div class="live-net-team">
-            <strong>Team ${match.teamB}</strong>
-            <span class="small live-net-team-size">Team of ${teamBSize}</span>
-          </div>
-        </div>
-        <div class="live-matchup-actions">
-          <button
-            type="button"
-            class="live-matchup-result-btn ${winner === match.teamA ? 'is-selected' : ''}"
-            data-role="report-live-match-result"
-            data-match-key="${matchKey}"
-            data-winner-team="${match.teamA}"
-          >Team ${match.teamA} Won</button>
-          <button
-            type="button"
-            class="live-matchup-result-btn ${winner === match.teamB ? 'is-selected' : ''}"
-            data-role="report-live-match-result"
-            data-match-key="${matchKey}"
-            data-winner-team="${match.teamB}"
-          >Team ${match.teamB} Won</button>
-          ${winner ? `
-          <button
-            type="button"
-            class="live-matchup-clear-btn"
-            data-role="clear-live-match-result"
-            data-match-key="${matchKey}"
-          >Clear Result</button>` : ''}
-        </div>
-        ${winner ? `<div class="small live-matchup-result">Recorded: Team ${winner} defeated Team ${loser}</div>` : ''}
-      </article>
-    `;
-    }).join('');
-    const waitingLabel = liveMatchups.waitingTeams.map((teamNo) => `Team ${teamNo}`).join(', ');
-    liveMatchupsHTML = `
-      <div class="live-matchups-board">
-        <h4>Live Nets</h4>
-        <div class="live-nets-grid">
-          ${matchupRows || '<p class="small live-matchups-empty">No pairings available.</p>'}
-        </div>
-        ${waitingLabel ? `<p class="small live-matchups-waiting"><strong>Waiting Off Court:</strong> ${waitingLabel}</p>` : ''}
-      </div>
-    `;
-
-    teamsHTML = '<div class="teams">' + state.generatedTeams.map((team, i) => {
-      const members = team.map((p, memberIndex) => {
-        const playerKey = playerIdentityKey(p) || `temp:${i}:${memberIndex}`;
-        return `
-          <li
-            class="team-player-card"
-            draggable="true"
-            data-team-index="${i}"
-            data-player-key="${escapeHTML(playerKey)}"
-            title="Drag to move to another team"
-          >
-            <span class="name">${escapeHTML(p.name)}</span>
-            <span class="small">${escapeHTML(String(Number(p.skill) || 0))}</span>
-          </li>
-        `;
-      }).join('');
-      const totalSkill = team.reduce((sum, p) => sum + (Number(p.skill) || 0), 0).toFixed(1);
-      return `
-  <div class="team generated-team" data-team-index="${i}">
-    <h4>Team ${i + 1} <span class="small" style="font-weight:normal;">(Total: ${totalSkill})</span></h4>
-    <ul class="team-player-list">${members || '<li class="team-drop-empty small">Drop here</li>'}</ul>
-  </div>
-`;
-    }).join('') + '</div>';
-  }
-
-  // Admin panel HTML, only visible when state.isAdmin is true.
-  // Teams card is separated into adminTeamsHTML so it lives in its own tab.
-  const adminTeamsHTML = state.isAdmin ? `<div class="card card-generate-teams">
+// C26 item 2: Teams card (admin-only tab). Markup moved verbatim from render(); the shell decides
+// when to call it, so the old `state.isAdmin ? … : ''` wrapper is gone.
+function adminTeamsHTML(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
+  return `<div class="card card-generate-teams">
   <div class="card-collapsible-head">
     <h3>Generate Teams</h3>
   </div>
@@ -4915,9 +4776,19 @@ function render() {
     </div>
   </div>` : ''}
   </div>
-</div>` : '';
+</div>`;
+}
 
-  const adminPlayersHTML = state.isAdmin ? `
+// C26 item 2: Admin Players panel. Markup moved verbatim from render(); locals recomputed at the top
+// (byte-identical to render()'s former locals), the old `state.isAdmin ? … : ''` wrapper removed.
+function adminPlayersHTML() {
+  const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
+  const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE ? UNGROUPED_FILTER_LABEL : (normalizedActiveGroup || 'All');
+  const isActiveGroupValue = (value) => normalizeActiveGroupSelection(value || 'All') === normalizedActiveGroup;
+  const topFormGroupOptions = getTopFormGroupDatalistOptions();
+  const topFormContext = renderTopFormGroupsHelpAndPreview('', '');
+  const checkMsg = messages.checkIn ? `<p class="msg">${escapeHTML(messages.checkIn)}</p>` : '';
+  return `
     <div id="admin-players-shell">
       <div class="admin-toolbar">
         <select id="admin-quick-open" aria-label="Menu">
@@ -5139,9 +5010,13 @@ function render() {
   </div>
 </div>
 </div>
-  ` : '';
+  `;
+}
 
-  const adminLoginHTML = !state.isAdmin ? `
+// C26 item 2: Admin Login card (public surface only). Static markup moved verbatim; old
+// `!state.isAdmin ? … : ''` wrapper removed — the public shell decides when to render it.
+function adminLoginHTML() {
+  return `
     <div class="card">
       <h2>Admin Login</h2>
       <form id="admin-login-form" class="row" autocomplete="on">
@@ -5149,9 +5024,15 @@ function render() {
         <button type="submit" id="btn-admin-login">Login</button>
       </form>
     </div>
-  ` : '';
+  `;
+}
 
-  const publicCheckinHTML = !state.isAdmin ? `
+// C26 item 2: Public check-in / register panel. Markup moved verbatim; locals recomputed at the top
+// (byte-identical to render()'s former locals), old `!state.isAdmin ? … : ''` wrapper removed.
+function publicCheckinHTML() {
+  const regMsg = messages.registration ? `<p class="msg">${escapeHTML(messages.registration)}</p>` : '';
+  const checkMsg = messages.checkIn ? `<p class="msg">${escapeHTML(messages.checkIn)}</p>` : '';
+  return `
   <div class="grid-2">
   <div class="card card-checkin">
     <h2>Check In</h2>
@@ -5170,9 +5051,14 @@ function render() {
     ${regMsg}
   </div>
   </div>
-  ` : '';
+  `;
+}
 
-  const html = `
+// C26 item 2: Public surface shell — hardcodes the non-admin branch of every former interleaved
+// `state.isAdmin ?` ternary. Returns the full #app-shell string.
+function renderPublicShell() {
+  const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
+  return `
 <div id="app-shell">
   <header id="app-header">
     <div class="app-header-top-row">
@@ -5184,7 +5070,93 @@ function render() {
   <div id="app-content">
     <div id="tab-session" class="tab-panel">
       <div class="container">
-        ${state.isAdmin ? `
+        ${state.currentSession ? `
+          <div class="card session-info-card">
+            <h3 style="margin:0 0 12px;">Next Session</h3>
+            <div class="session-detail-row">
+              <span class="session-detail-icon">📅</span>
+              <span>${escapeHTML(formatSessionDate(state.currentSession.date))}</span>
+            </div>
+            <div class="session-detail-row">
+              <span class="session-detail-icon">🕙</span>
+              <span>${escapeHTML(state.currentSession.time || '')}</span>
+            </div>
+            <div class="session-detail-row">
+              <span class="session-detail-icon">📍</span>
+              <span>${escapeHTML(state.currentSession.location || '')}</span>
+            </div>
+          </div>
+        ` : `
+          <div class="session-empty-state">
+            <div class="session-empty-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2"/>
+                <line x1="16" y1="2" x2="16" y2="6"/>
+                <line x1="8" y1="2" x2="8" y2="6"/>
+                <line x1="3" y1="10" x2="21" y2="10"/>
+                <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>
+              </svg>
+            </div>
+            <h2 class="session-empty-title">No Session Scheduled</h2>
+            <p class="session-empty-desc">Check back soon for the next session details.</p>
+          </div>
+        `}
+      </div>
+    </div>
+    <div id="tab-players" class="tab-panel">
+      <div class="container">
+        <div id="js-checkin-stats">${buildCheckinStatsHTML()}</div>
+        ${adminLoginHTML()}
+        ${publicCheckinHTML()}
+      </div>
+    </div>
+    <div id="tab-teams" class="tab-panel">
+      <div class="container">
+        <div class="card" style="text-align:center;padding:2rem;"><p style="color:#64748b;margin:0;">Log in as admin to use team generation.</p></div>
+      </div>
+    </div>
+    <div id="tab-tournament" class="tab-panel">
+      <div class="container">
+        ${buildTournamentTabHTML()}
+      </div>
+    </div>
+  </div>
+  <nav id="bottom-nav">
+    <button class="nav-btn" data-nav-tab="session">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      <span>Session</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="players">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      <span>Check-in</span>
+    </button>
+    ${(state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket' || t.status === 'completed') ? `
+    <button class="nav-btn" data-nav-tab="tournament">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+      <span>Tournament</span>
+    </button>` : ''}
+  </nav>
+</div>
+  `;
+}
+
+// C26 item 2: Admin surface shell — hardcodes the admin branch of every former interleaved
+// `state.isAdmin ?` ternary. Returns the full #app-shell string.
+function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
+  const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
+  return `
+<div id="app-shell">
+  <header id="app-header">
+    <div class="app-header-top-row">
+      <div class="app-header-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'}</div>
+      <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
+    </div>
+    <div class="app-header-version">v${APP_VERSION}</div>
+  </header>
+  <div id="app-content">
+    <div id="tab-session" class="tab-panel">
+      <div class="container">
+
           <div class="card session-admin-card">
             <h3 style="margin:0 0 12px;">Current Session</h3>
             <div class="session-form">
@@ -5222,49 +5194,18 @@ function render() {
               <span>${escapeHTML(state.currentSession.location || '')}</span>
             </div>
           </div>` : ''}
-        ` : state.currentSession ? `
-          <div class="card session-info-card">
-            <h3 style="margin:0 0 12px;">Next Session</h3>
-            <div class="session-detail-row">
-              <span class="session-detail-icon">📅</span>
-              <span>${escapeHTML(formatSessionDate(state.currentSession.date))}</span>
-            </div>
-            <div class="session-detail-row">
-              <span class="session-detail-icon">🕙</span>
-              <span>${escapeHTML(state.currentSession.time || '')}</span>
-            </div>
-            <div class="session-detail-row">
-              <span class="session-detail-icon">📍</span>
-              <span>${escapeHTML(state.currentSession.location || '')}</span>
-            </div>
-          </div>
-        ` : `
-          <div class="session-empty-state">
-            <div class="session-empty-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="4" width="18" height="18" rx="2"/>
-                <line x1="16" y1="2" x2="16" y2="6"/>
-                <line x1="8" y1="2" x2="8" y2="6"/>
-                <line x1="3" y1="10" x2="21" y2="10"/>
-                <path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/>
-              </svg>
-            </div>
-            <h2 class="session-empty-title">No Session Scheduled</h2>
-            <p class="session-empty-desc">Check back soon for the next session details.</p>
-          </div>
-        `}
+
       </div>
     </div>
     <div id="tab-players" class="tab-panel">
       <div class="container">
         <div id="js-checkin-stats">${buildCheckinStatsHTML()}</div>
-        ${adminLoginHTML}
-        ${state.isAdmin ? adminPlayersHTML : publicCheckinHTML}
+        ${adminPlayersHTML()}
       </div>
     </div>
     <div id="tab-teams" class="tab-panel">
       <div class="container">
-        ${state.isAdmin ? adminTeamsHTML : '<div class="card" style="text-align:center;padding:2rem;"><p style="color:#64748b;margin:0;">Log in as admin to use team generation.</p></div>'}
+        ${adminTeamsHTML(teamsHTML, teamsFairnessHTML, liveMatchupsHTML)}
       </div>
     </div>
     <div id="tab-tournament" class="tab-panel">
@@ -5280,24 +5221,145 @@ function render() {
     </button>
     <button class="nav-btn" data-nav-tab="players">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      <span>${state.isAdmin ? 'Players' : 'Check-in'}</span>
+      <span>Players</span>
     </button>
-    ${state.isAdmin ? `
     <button class="nav-btn" data-nav-tab="teams">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       <span>Teams</span>
-    </button>` : ''}
-    ${(state.isAdmin || (state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket' || t.status === 'completed')) ? `
+    </button>
     <button class="nav-btn" data-nav-tab="tournament">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
       <span>Tournament</span>
-    </button>` : ''}
+    </button>
   </nav>
 </div>
   `;
+}
 
-  const sanitized = html.replace(/\n?\]\s*$/, '');
-  root.innerHTML = sanitized;
+function render() {
+  const root = document.getElementById('root');
+  if (!root) return;
+  const existingPanel = document.getElementById('tab-' + activeMainTab);
+  const savedScrollY = existingPanel ? existingPanel.scrollTop : 0;
+  const interactionSnapshot = captureTransientInteractionState();
+
+  // Build generated teams HTML
+  let teamsHTML = '';
+  let teamsFairnessHTML = '';
+  let liveMatchupsHTML = '';
+  if (state.generatedTeams.length > 0) {
+    if (state.generatedTeamsSummary) {
+      teamsFairnessHTML = `
+        <p class="small" style="margin:0.25rem 0 0.5rem;">
+          Fairness spread: <strong>${state.generatedTeamsSummary.skillSpread.toFixed(1)}</strong>
+          | Team size spread: <strong>${state.generatedTeamsSummary.countSpread}</strong>
+          | Candidate runs: <strong>${state.generatedTeamsSummary.attempts}</strong>
+        </p>
+      `;
+    }
+
+    const normalizedCourtOrder = normalizeLiveCourtOrder(state.liveCourtOrder, state.generatedTeams.length);
+    state.liveCourtOrder = normalizedCourtOrder;
+    const liveMatchups = deriveLiveTeamMatchupsFromOrder(normalizedCourtOrder);
+    const resultsByMatch = normalizeLiveMatchResults(state.liveMatchResults, liveMatchups.matchups);
+    state.liveMatchResults = resultsByMatch;
+    const snapshotsByMatch = normalizeLiveMatchSkillSnapshots(state.liveMatchSkillSnapshots, resultsByMatch);
+    state.liveMatchSkillSnapshots = snapshotsByMatch;
+    const matchupRows = liveMatchups.matchups.map((match, idx) => {
+      const matchKey = liveMatchupKey(match.teamA, match.teamB);
+      const winner = Number(resultsByMatch[matchKey]) || 0;
+      const loser = winner === match.teamA ? match.teamB : (winner === match.teamB ? match.teamA : 0);
+      const teamASize = Array.isArray(state.generatedTeams[match.teamA - 1]) ? state.generatedTeams[match.teamA - 1].length : 0;
+      const teamBSize = Array.isArray(state.generatedTeams[match.teamB - 1]) ? state.generatedTeams[match.teamB - 1].length : 0;
+      return `
+      <article class="live-net-card">
+        <div class="live-net-header">
+          <span class="live-net-label">Net ${idx + 1}</span>
+          <span class="small live-net-match-label">Team ${match.teamA} vs Team ${match.teamB}</span>
+        </div>
+        <div class="live-net-court" role="group" aria-label="Net ${idx + 1} teams">
+          <div class="live-net-team">
+            <strong>Team ${match.teamA}</strong>
+            <span class="small live-net-team-size">Team of ${teamASize}</span>
+          </div>
+          <div class="live-net-divider" aria-hidden="true">NET</div>
+          <div class="live-net-team">
+            <strong>Team ${match.teamB}</strong>
+            <span class="small live-net-team-size">Team of ${teamBSize}</span>
+          </div>
+        </div>
+        <div class="live-matchup-actions">
+          <button
+            type="button"
+            class="live-matchup-result-btn ${winner === match.teamA ? 'is-selected' : ''}"
+            data-role="report-live-match-result"
+            data-match-key="${matchKey}"
+            data-winner-team="${match.teamA}"
+          >Team ${match.teamA} Won</button>
+          <button
+            type="button"
+            class="live-matchup-result-btn ${winner === match.teamB ? 'is-selected' : ''}"
+            data-role="report-live-match-result"
+            data-match-key="${matchKey}"
+            data-winner-team="${match.teamB}"
+          >Team ${match.teamB} Won</button>
+          ${winner ? `
+          <button
+            type="button"
+            class="live-matchup-clear-btn"
+            data-role="clear-live-match-result"
+            data-match-key="${matchKey}"
+          >Clear Result</button>` : ''}
+        </div>
+        ${winner ? `<div class="small live-matchup-result">Recorded: Team ${winner} defeated Team ${loser}</div>` : ''}
+      </article>
+    `;
+    }).join('');
+    const waitingLabel = liveMatchups.waitingTeams.map((teamNo) => `Team ${teamNo}`).join(', ');
+    liveMatchupsHTML = `
+      <div class="live-matchups-board">
+        <h4>Live Nets</h4>
+        <div class="live-nets-grid">
+          ${matchupRows || '<p class="small live-matchups-empty">No pairings available.</p>'}
+        </div>
+        ${waitingLabel ? `<p class="small live-matchups-waiting"><strong>Waiting Off Court:</strong> ${waitingLabel}</p>` : ''}
+      </div>
+    `;
+
+    teamsHTML = '<div class="teams">' + state.generatedTeams.map((team, i) => {
+      const members = team.map((p, memberIndex) => {
+        const playerKey = playerIdentityKey(p) || `temp:${i}:${memberIndex}`;
+        return `
+          <li
+            class="team-player-card"
+            draggable="true"
+            data-team-index="${i}"
+            data-player-key="${escapeHTML(playerKey)}"
+            title="Drag to move to another team"
+          >
+            <span class="name">${escapeHTML(p.name)}</span>
+            <span class="small">${escapeHTML(String(Number(p.skill) || 0))}</span>
+          </li>
+        `;
+      }).join('');
+      const totalSkill = team.reduce((sum, p) => sum + (Number(p.skill) || 0), 0).toFixed(1);
+      return `
+  <div class="team generated-team" data-team-index="${i}">
+    <h4>Team ${i + 1} <span class="small" style="font-weight:normal;">(Total: ${totalSkill})</span></h4>
+    <ul class="team-player-list">${members || '<li class="team-drop-empty small">Drop here</li>'}</ul>
+  </div>
+`;
+    }).join('') + '</div>';
+  }
+
+  // C26 item 2: per-surface active-tab memory (set just before activateMainTab below).
+  activeMainTab = sessionStorage.getItem(currentTabKey()) || 'players';
+  if (!state.isAdmin && activeMainTab === 'teams') activeMainTab = 'players';
+
+  const shellHtml = state.isAdmin
+    ? renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML)
+    : renderPublicShell();
+  root.innerHTML = shellHtml.replace(/\n?\]\s*$/, '');
 
 // ---- dropdown menu CSS (keep ONLY this block) ----
 let menuStyle = document.getElementById('menu-css');
@@ -5733,7 +5795,7 @@ function bindTournamentTabV2() {
 
 function activateMainTab(tab) {
   activeMainTab = tab;
-  sessionStorage.setItem('as_main_tab', tab);
+  sessionStorage.setItem(currentTabKey(), tab);
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
   document.querySelectorAll('#bottom-nav .nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.navTab === tab));
   window.dispatchEvent(new Event('as-tab-changed')); // C25 item 5: refresh back-to-top visibility for the new panel
