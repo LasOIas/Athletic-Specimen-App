@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.13';
+const APP_VERSION = '2026.06.19.14';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2627,27 +2627,37 @@ async function tdbDrawPools(tournament) {
   if (cur && cur.status !== 'setup') throw new Error('Pool play already started — Reset Pools first.');
   const teams = await tdbListTeams(tournament.id);
   if (teams.length < 2) throw new Error('Add at least 2 teams first.');
-  for (const p of await tdbListPools(tournament.id)) {
-    await supabaseClient.from('pools').delete().eq('id', p.id);
+  // C25 item 9: one delete for ALL existing pools of this tournament (was a per-pool delete loop).
+  // FK pools<-teams is ON DELETE SET NULL, so this also nulls teams.pool_id; cascades pool matches.
+  {
+    const { error } = await supabaseClient.from('pools').delete().eq('tournament_id', tournament.id);
+    if (error) throw error;
   }
   // Clamp pools so every pool gets at least 2 teams (no 1-team / 0-match pools).
   const poolCount = Math.max(1, Math.min(Number(tournament.pool_count) || 1, Math.floor(teams.length / 2)));
-  const poolRows = [];
+  // C25 item 9: one batched insert for all pools (was N single inserts). RETURNING preserves VALUES order;
+  // sort by display_order anyway so poolRows[i] aligns with the round-robin index below.
+  const poolPayload = [];
   for (let i = 0; i < poolCount; i++) {
-    const { data, error } = await supabaseClient.from('pools')
-      .insert([{ tournament_id: tournament.id, label: String.fromCharCode(65 + i), display_order: i }])
-      .select().single();
-    if (error) throw error;
-    poolRows.push(data);
+    poolPayload.push({ tournament_id: tournament.id, label: String.fromCharCode(65 + i), display_order: i });
   }
+  const { data: insertedPools, error: poolErr } = await supabaseClient.from('pools').insert(poolPayload).select();
+  if (poolErr) throw poolErr;
+  if (!insertedPools || insertedPools.length !== poolCount) throw new Error('Pool creation failed.');
+  const poolRows = insertedPools.slice().sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
   const shuffled = teams.slice();
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     const tmp = shuffled[i]; shuffled[i] = shuffled[j]; shuffled[j] = tmp;
   }
-  for (let i = 0; i < shuffled.length; i++) {
-    const pool = poolRows[i % poolCount];
-    const { error } = await supabaseClient.from('teams').update({ pool_id: pool.id }).eq('id', shuffled[i].id);
+  // C25 item 9: round-robin-assign teams to pools, then ONE grouped update per pool (was one update
+  // per team). Grouped .in('id', ids) updates only pool_id — safe (a partial-row upsert would fail the
+  // teams NOT-NULL columns before ON CONFLICT). poolCount updates instead of teams.length.
+  const idsByPool = poolRows.map(() => []);
+  for (let i = 0; i < shuffled.length; i++) idsByPool[i % poolCount].push(shuffled[i].id);
+  for (let p = 0; p < poolRows.length; p++) {
+    if (!idsByPool[p].length) continue;
+    const { error } = await supabaseClient.from('teams').update({ pool_id: poolRows[p].id }).in('id', idsByPool[p]);
     if (error) throw error;
   }
 }
