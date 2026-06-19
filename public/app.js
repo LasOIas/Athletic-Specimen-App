@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.14';
+const APP_VERSION = '2026.06.19.15';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5144,10 +5144,10 @@ function render() {
   const adminLoginHTML = !state.isAdmin ? `
     <div class="card">
       <h2>Admin Login</h2>
-      <div class="row">
-        <input type="password" id="admin-code" placeholder="Enter admin code" />
-        <button id="btn-admin-login">Login</button>
-      </div>
+      <form id="admin-login-form" class="row" autocomplete="on">
+        <input type="password" id="admin-code" name="admin-code" placeholder="Enter admin code" autocomplete="current-password" aria-label="Admin code" />
+        <button type="submit" id="btn-admin-login">Login</button>
+      </form>
     </div>
   ` : '';
 
@@ -6099,13 +6099,9 @@ if (gmOpen && gmRoot) {
 
   // --- Admin login/logout ---
 // Admin login
-const loginBtn = document.getElementById('btn-admin-login');
-const adminCodeInputForEnter = document.getElementById('admin-code');
-if (adminCodeInputForEnter && loginBtn) {
-  adminCodeInputForEnter.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); loginBtn.click(); }
-  });
-}
+// C25 item 10: the admin login is a <form> now — native submit fires on Enter AND the submit button,
+// so the manual Enter-keydown listener is no longer needed.
+const adminLoginForm = document.getElementById('admin-login-form');
 
 // C21 — server-verified admin login (the ONLY login path). POSTs only the code to the admin_login
 // Edge Function, which checks it against a server-only map (NOT in this bundle) and returns a real
@@ -6128,8 +6124,9 @@ async function adminLoginWithCode(code) {
   }
 }
 
-if (loginBtn) {
-  loginBtn.addEventListener('click', async () => {
+if (adminLoginForm) {
+  adminLoginForm.addEventListener('submit', async (e) => {
+    e.preventDefault(); // C25 item 10: native form submit — stop the page reload, run the login flow
     const codeInput = document.getElementById('admin-code');
     const code = codeInput ? codeInput.value.trim() : '';
     if (!code) return;
