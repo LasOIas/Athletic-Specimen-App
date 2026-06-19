@@ -25,7 +25,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.2';
+const APP_VERSION = '2026.06.19.3';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1230,6 +1230,64 @@ function partialRender() {
   refreshAzStripAvailability();
 }
 
+// ---------------------------------------------------------------------------
+// C24 reliability core: error funnel, render coalescer, top-level error boundary.
+// ---------------------------------------------------------------------------
+
+// Item 2: single error funnel so failures stop vanishing into empty catch{}. Sentry-ready — once a DSN
+// is wired (C23 item 2) it forwards automatically. NEVER let reporting itself throw.
+function reportError(err, context) {
+  try {
+    console.error(`[reportError]${context ? ' [' + context + ']' : ''}`, err);
+    if (window.Sentry && typeof window.Sentry.captureException === 'function') {
+      window.Sentry.captureException(err instanceof Error ? err : new Error(String(err)), { extra: { context } });
+    }
+  } catch (_) { /* reporting must never throw */ }
+}
+
+// Item 14: top-level error boundary. One uncaught error must not freeze the SPA mid-session for a
+// non-technical admin. "Reset view" re-pulls from the cloud WITHOUT discarding pending local writes.
+let _errorBoundaryShown = false;
+function showErrorBoundary(err, context) {
+  reportError(err, context || 'uncaught');
+  if (_errorBoundaryShown) return;
+  _errorBoundaryShown = true;
+  try {
+    if (document.getElementById('app-error-boundary')) return;
+    const el = document.createElement('div');
+    el.id = 'app-error-boundary';
+    el.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(241,245,249,0.97);display:flex;align-items:center;justify-content:center;padding:24px;';
+    el.innerHTML =
+      '<div style="max-width:340px;text-align:center;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">'
+      + '<div style="font-size:18px;font-weight:700;margin-bottom:8px;">Hit a snag</div>'
+      + '<div style="font-size:14px;color:#334155;margin-bottom:18px;line-height:1.4;">Tap below to reload. Your data is safe.</div>'
+      + '<button id="app-error-reset" style="background:#2563eb;color:#fff;border:none;border-radius:8px;padding:12px 18px;font-size:15px;font-weight:700;">Reset view</button>'
+      + '</div>';
+    document.body.appendChild(el);
+    const btn = el.querySelector('#app-error-reset');
+    if (btn) btn.addEventListener('click', async () => {
+      try {
+        if (typeof syncFromSupabase === 'function') await syncFromSupabase(); // re-pull; keeps pending writes
+        render();
+      } catch (e) { reportError(e, 'error-boundary-reset'); }
+      finally { el.remove(); _errorBoundaryShown = false; }
+    });
+  } catch (_) { /* the boundary must never throw */ }
+}
+
+function installErrorBoundary() {
+  window.addEventListener('error', (event) => {
+    // ignore resource-load errors (img/script 404s bubble here with an element target) — only real JS errors
+    if (event && event.target && event.target !== window && event.target.tagName) return;
+    showErrorBoundary(event && (event.error || event.message), 'window.onerror');
+  });
+  // unhandled promise rejections are usually recoverable (a failed fetch) — funnel them, but don't throw up
+  // the full-screen overlay for every one.
+  window.addEventListener('unhandledrejection', (event) => {
+    reportError(event && event.reason, 'unhandledrejection');
+  });
+}
+
 function normalizeGroupName(value) {
   return String(value || '').trim();
 }
@@ -1748,6 +1806,41 @@ function queueSupabaseRefresh(delay = 160) {
   }, Math.max(0, Number(delay) || 0));
 }
 
+// C24 item 1: realtime resubscribe with exponential backoff. The subscribe() status callbacks null the
+// channel handle on error/close and reschedule (capped), so a slept/disconnected phone self-heals instead
+// of silently dropping to the 15s poll forever. On (re)subscribe success, one refresh catches missed rows.
+const _rtBackoffAttempt = { live: 0, tournament: 0 };
+const _rtResubTimer = { live: null, tournament: null };
+function _scheduleResubscribe(kind, resubscribeFn) {
+  if (_rtResubTimer[kind]) return; // a resubscribe is already pending
+  const attempt = (_rtBackoffAttempt[kind] = Math.min(_rtBackoffAttempt[kind] + 1, 6));
+  const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000); // 1s,2s,4s,…,cap 30s
+  _rtResubTimer[kind] = setTimeout(() => { _rtResubTimer[kind] = null; resubscribeFn(); }, delay);
+}
+function _handleRealtimeStatus(kind, status, onResubscribed) {
+  if (status === 'SUBSCRIBED') {
+    _rtBackoffAttempt[kind] = 0;
+    if (_rtResubTimer[kind]) { clearTimeout(_rtResubTimer[kind]); _rtResubTimer[kind] = null; }
+    if (typeof onResubscribed === 'function') onResubscribed(); // catch rows missed while disconnected
+    return;
+  }
+  if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+    // Null the handle BEFORE removeChannel: removeChannel synchronously re-fires CLOSED into this same
+    // callback, so if the handle were still set it would removeChannel again -> infinite recursion.
+    if (kind === 'live') {
+      const ch = supabaseLiveSyncChannel;
+      supabaseLiveSyncChannel = null;
+      try { if (ch) supabaseClient.removeChannel(ch); } catch (_) {}
+      _scheduleResubscribe('live', ensureSupabaseLiveSync);
+    } else {
+      const ch = tournamentLiveSyncChannel;
+      tournamentLiveSyncChannel = null;
+      try { if (ch) supabaseClient.removeChannel(ch); } catch (_) {}
+      _scheduleResubscribe('tournament', ensureTournamentLiveSync);
+    }
+  }
+}
+
 function ensureSupabaseLiveSync() {
   if (!supabaseClient || supabaseLiveSyncChannel) return;
   try {
@@ -1767,9 +1860,9 @@ function ensureSupabaseLiveSync() {
           queueSupabaseRefresh(800); // C22 item 1: a co-admin/spectator follows the live night
         }
       )
-      .subscribe();
+      .subscribe((status) => _handleRealtimeStatus('live', status, () => queueSupabaseRefresh(800)));
   } catch (err) {
-    console.error('Supabase live sync subscribe error', err);
+    reportError(err, 'live-sync-subscribe');
   }
 }
 
@@ -1788,7 +1881,7 @@ function ensureAuthorityRefreshHooks() {
       setSharedSyncState(SHARED_SYNC_PENDING);
       const syncNoticeEl = document.getElementById('js-sync-notice');
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
-      else render();
+      else partialRender(); // C24 item 3: background sync repaints stay partial (CLAUDE.md rule)
     }
     ensureSupabaseLiveSync();
     void flushOutbox(); // C22 item 3: retry any queued offline writes on reconnect/focus
@@ -2917,7 +3010,7 @@ function ensureTournamentLiveSync() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'tournaments' }, ping)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, ping)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'pools' }, ping)
-    .subscribe();
+    .subscribe((status) => _handleRealtimeStatus('tournament', status, () => queueTournamentRefresh(800)));
 }
 
 // Top-level builders can't see render()'s local escapeHTML; alias to the global escaper.
@@ -7392,6 +7485,7 @@ if (removeBtn) {
 // optionally syncs with Supabase, registers the service worker and
 // renders the UI for the first time.
 function init() {
+  installErrorBoundary(); // C24 item 14: catch uncaught errors before they freeze the SPA mid-session
   // Load from localStorage
   loadLocal();
   if (!supabaseClient) {
