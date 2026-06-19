@@ -25,7 +25,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.18.11';
+const APP_VERSION = '2026.06.18.12';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5222,7 +5222,7 @@ function render() {
         </select>
         <div class="admin-toolbar-actions">
           <button id="btn-save-supabase" class="secondary">Save</button>
-          <button id="btn-reset-checkins" class="danger">Reset</button>
+          <button id="btn-reset-checkins" class="danger">New session</button>
           <button id="btn-logout" class="secondary">Logout</button>
         </div>
       </div>
@@ -6849,14 +6849,18 @@ if (saveSupabaseBtn) {
   }
   attachPlayerRowHandlers();
 
-  // --- Reset all checkins ---
+  // --- Start new session (was: reset all check-ins) ---
+  // C22 item 4: rolls attendance to a fresh session — checks everyone out AND preserves tonight's
+  // attendance as durable history (the prior session's check_ins rows are kept). Server-side via the
+  // start_new_session RPC (authenticated/admin only); players.checked_in stays the live UI flag.
   const resetBtn = document.getElementById('btn-reset-checkins');
   if (resetBtn) {
     resetBtn.addEventListener('click', async () => {
-      if (!canAccessOperatorSafetyControls()) return; // master-admin only; real server gate = C21
+      if (!canAccessOperatorSafetyControls()) return; // master-admin only; server gate = authenticated RPC
       const previouslyCheckedIn = normalizeCheckedInEntries(state.checkedIn || []);
+      const n = previouslyCheckedIn.length;
       const confirmed = window.confirm(
-        `Reset all check-ins (${previouslyCheckedIn.length} currently checked in)?\n\nThis will check everyone out and sync that state to Supabase.`
+        `Start a new session?\n\n${n} player${n === 1 ? ' is' : 's are'} checked in — they'll be checked out and tonight's attendance is saved as history.`
       );
       if (!confirmed) return;
 
@@ -6865,11 +6869,11 @@ if (saveSupabaseBtn) {
       render();
       recordOperatorAction({
         scope: 'players',
-        action: 'reset-checkins',
+        action: 'start-new-session',
         entityType: 'checkins',
         entityId: '',
-        title: 'Reset all check-ins.',
-        detail: `${previouslyCheckedIn.length} players were checked out.`,
+        title: 'Started a new session.',
+        detail: `${n} player${n === 1 ? ' was' : 's were'} checked out; tonight's attendance was saved.`,
         tone: 'warning',
         undo: {
           kind: 'checkins',
@@ -6879,18 +6883,18 @@ if (saveSupabaseBtn) {
 
       if (supabaseClient) {
         try {
-          const { error } = await supabaseClient.from('players').update({ checked_in: false }).eq('checked_in', true);
+          const { error } = await supabaseClient.rpc('start_new_session', { p_label: null });
           if (error) throw error;
           queueSupabaseRefresh();
         } catch (err) {
-          console.error('Supabase reset error', err);
-          await reconcileToSupabaseAuthority('reset-check-ins');
+          console.error('Supabase start-new-session error', err);
+          await reconcileToSupabaseAuthority('start-new-session');
           recordOperatorAction({
             scope: 'players',
-            action: 'reset-checkins-failed',
+            action: 'start-new-session-failed',
             entityType: 'checkins',
             entityId: '',
-            title: 'Reset check-ins failed to sync.',
+            title: 'Start new session failed to sync.',
             detail: 'Supabase write failed. Latest shared state was restored.',
             tone: 'error'
           });
