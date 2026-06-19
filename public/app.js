@@ -25,7 +25,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.18.8';
+const APP_VERSION = '2026.06.18.9';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1758,6 +1758,13 @@ function ensureSupabaseLiveSync() {
           queueSupabaseRefresh(800);
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'live_state' },
+        () => {
+          queueSupabaseRefresh(800); // C22 item 1: a co-admin/spectator follows the live night
+        }
+      )
       .subscribe();
   } catch (err) {
     console.error('Supabase live sync subscribe error', err);
@@ -1829,6 +1836,7 @@ async function runQueuedSupabaseRefresh() {
       }
       return;
     }
+    await loadLiveStateFromSupabase(); // C22 item 1: refresh the night (spectators follow the DB)
     saveLocal();
     partialRender();
   } catch (err) {
@@ -4002,6 +4010,7 @@ function saveGeneratedTeamsToLocal() {
       state.liveCourtOrder = [];
     }
     clearStoredGeneratedTeams();
+    queueLiveStateSave(); // C22 item 1: mirror the clear to the DB (admin only)
     return;
   }
 
@@ -4033,6 +4042,67 @@ function saveGeneratedTeamsToLocal() {
     localStorage.setItem(LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY, JSON.stringify(normalizedSnapshots));
   } else {
     localStorage.removeItem(LS_LIVE_MATCH_SKILL_SNAPSHOTS_KEY);
+  }
+  queueLiveStateSave(); // C22 item 1: write-through the shareable night to the DB (admin only)
+}
+
+// --- C22 item 1: Live Nets persistence (DB-authoritative, write-through) ----------------------
+// The night's SHAREABLE state (generated team keys, court order, "Won" tallies) is persisted to a
+// single `live_state` row so it survives a browser clear and a co-admin / spectator sees the same
+// night. SKILL data (skill snapshots, fairness summary) is intentionally NOT persisted here — this
+// row is anon-readable and skill is admin-only. The admin (a real authenticated session) is the
+// SOLE writer; spectators read only. localStorage stays as the write-through cache.
+let liveStateSaveTimer = null;
+let liveStateHydratedOnce = false;
+
+function queueLiveStateSave(delay = 400) {
+  if (!supabaseClient || !state.isAdmin) return; // only a real admin session writes the night
+  clearTimeout(liveStateSaveTimer);
+  liveStateSaveTimer = setTimeout(() => { void saveLiveStateToSupabase(); }, Math.max(0, Number(delay) || 0));
+}
+
+async function saveLiveStateToSupabase() {
+  if (!supabaseClient || !state.isAdmin) return;
+  try {
+    const hasTeams = Array.isArray(state.generatedTeams) && state.generatedTeams.length > 0;
+    const teamKeys = serializeGeneratedTeamsForStorage(state.generatedTeams);
+    if (hasTeams && !teamKeys) return; // transient invalid state (checked-in mismatch) — don't clobber the DB
+    const payload = {
+      teamKeys: teamKeys || [],
+      courtOrder: Array.isArray(state.liveCourtOrder) ? state.liveCourtOrder : [],
+      results: (state.liveMatchResults && typeof state.liveMatchResults === 'object') ? state.liveMatchResults : {}
+    };
+    const { error } = await supabaseClient
+      .from('live_state')
+      .upsert({ id: 'current', data: payload, updated_at: new Date().toISOString() }, { onConflict: 'id' });
+    if (error) throw error;
+  } catch (err) {
+    console.error('live_state save error', err);
+  }
+}
+
+// Hydrate the night from the DB. The admin's local state is authoritative AFTER their first load
+// (so routine re-syncs can't clobber in-progress edits); spectators always follow the DB so they
+// see live updates. Returns true if local live state changed. Requires players + checkedIn loaded.
+async function loadLiveStateFromSupabase() {
+  if (!supabaseClient) return false;
+  if (state.isAdmin && liveStateHydratedOnce) return false;
+  try {
+    const { data, error } = await supabaseClient.from('live_state').select('data').eq('id', 'current').maybeSingle();
+    if (error) throw error;
+    liveStateHydratedOnce = true;
+    const d = (data && data.data) || null;
+    if (!d || !Array.isArray(d.teamKeys) || d.teamKeys.length === 0) return false;
+    const restored = hydrateGeneratedTeamsFromStoredKeys(d.teamKeys);
+    if (!restored) return false; // the checked-in set doesn't match these teams — keep local
+    state.generatedTeams = restored;
+    state.liveCourtOrder = normalizeLiveCourtOrder(Array.isArray(d.courtOrder) ? d.courtOrder : [], restored.length);
+    const matchups = deriveLiveTeamMatchupsFromOrder(state.liveCourtOrder);
+    state.liveMatchResults = normalizeLiveMatchResults((d.results && typeof d.results === 'object') ? d.results : {}, matchups.matchups);
+    return true;
+  } catch (err) {
+    console.error('live_state load error', err);
+    return false;
   }
 }
 
@@ -6332,6 +6402,10 @@ if (loginBtn) {
 
     const synced = await syncFromSupabase();   // re-fetch as the authenticated admin (incl. skill)
     if (synced) saveLocal();
+    // C22 item 1: re-hydrate the night now that players carry skill — an anon init hydrate built the
+    // teams from skill-less player objects, so fairness totals would read 0 until this re-maps them.
+    liveStateHydratedOnce = false;
+    if (synced) { await loadLiveStateFromSupabase(); saveLocal(); }
     if (synced && canRunAdminSharedBackfill()) {
       (async () => {
         const catalogSynced = await backfillGroupCatalogToSupabase();
@@ -7301,6 +7375,7 @@ function init() {
     (async () => {
       await detectPlayersSchema();
       const synced = await syncFromSupabase();
+      if (synced) await loadLiveStateFromSupabase(); // C22 item 1: recover the night on load
       if (synced) saveLocal();
       ensureSupabaseLiveSync();
       ensureTournamentLiveSync();
