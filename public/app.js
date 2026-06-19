@@ -25,7 +25,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.18.12';
+const APP_VERSION = '2026.06.18.13';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6865,8 +6865,6 @@ if (saveSupabaseBtn) {
       if (!confirmed) return;
 
       state.checkedIn = [];
-      saveLocal();
-      render();
       recordOperatorAction({
         scope: 'players',
         action: 'start-new-session',
@@ -6880,6 +6878,11 @@ if (saveSupabaseBtn) {
           checkedIn: previouslyCheckedIn
         }
       });
+      saveLocal();
+      // Full render() AFTER recording so the "Started a new session." entry + Undo appear in the
+      // operator-actions log. partialRender (background sync) and tab-switches don't regenerate that
+      // card, so a render() before recordOperatorAction (the old Reset's order) showed nothing.
+      render();
 
       if (supabaseClient) {
         try {
