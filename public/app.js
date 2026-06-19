@@ -25,7 +25,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.18.9';
+const APP_VERSION = '2026.06.18.10';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -954,7 +954,9 @@ function resetGeneratedTeamDragState() {
           queueSupabaseRefresh();
         } catch (err) {
           console.error(inBtn ? 'Supabase update error' : 'Supabase check-out error', err);
-          await reconcileToSupabaseAuthority(inBtn ? 'delegated-check-in' : 'delegated-check-out');
+          // C22 item 3: queue the write to retry on reconnect; keep the optimistic flip (the merge
+          // overlay preserves it across syncs) instead of reverting to DB authority.
+          outboxEnqueue({ key: 'att:' + player.id, kind: inBtn ? 'check_in' : 'check_out', payload: { p_id: player.id }, ts: Date.now() });
         }
       })();
     }
@@ -1789,6 +1791,7 @@ function ensureAuthorityRefreshHooks() {
       else render();
     }
     ensureSupabaseLiveSync();
+    void flushOutbox(); // C22 item 3: retry any queued offline writes on reconnect/focus
     queueSupabaseRefresh(800);
   };
 
@@ -4106,6 +4109,68 @@ async function loadLiveStateFromSupabase() {
   }
 }
 
+// --- C22 item 3: durable retry outbox --------------------------------------------------------
+// A localStorage queue of check-in/out/register writes that failed (offline / network blip), each
+// keyed by an idempotency key so re-enqueues collapse and the latest intent for a key wins. Replayed
+// on reconnect (online/focus/visibility) + a timer + on load. The RPCs are idempotent (check_in/out
+// set a fixed value; register_player dedups), so replay is safe. mergePlayersAfterSync overlays the
+// queued attendance intents so a pending check-in/out survives a sync until it lands.
+const LS_OUTBOX_KEY = 'athletic_specimen_outbox';
+let outboxFlushing = false;
+
+function outboxLoad() {
+  try { const a = JSON.parse(localStorage.getItem(LS_OUTBOX_KEY) || '[]'); return Array.isArray(a) ? a : []; }
+  catch { return []; }
+}
+function outboxSave(ops) {
+  try { localStorage.setItem(LS_OUTBOX_KEY, JSON.stringify((ops || []).slice(0, 200))); } catch {}
+}
+function outboxEnqueue(op) {
+  if (!op || !op.key) return;
+  const ops = outboxLoad().filter((o) => o && o.key !== op.key); // collapse: latest intent for a key wins
+  ops.push(op);
+  outboxSave(ops);
+}
+function outboxRemove(key) {
+  outboxSave(outboxLoad().filter((o) => o && o.key !== key));
+}
+// Queued attendance intents, as player-id sets, for the sync merge to overlay onto checkedIn.
+function outboxAttendanceIntents() {
+  const inSet = new Set(), outSet = new Set();
+  for (const o of outboxLoad()) {
+    const id = (o && o.payload && o.payload.p_id) ? String(o.payload.p_id) : '';
+    if (!id) continue;
+    if (o.kind === 'check_in') { inSet.add(id); outSet.delete(id); }
+    else if (o.kind === 'check_out') { outSet.add(id); inSet.delete(id); }
+  }
+  return { inSet, outSet };
+}
+
+// Replay queued writes against the (idempotent) RPCs; drop each one that lands, keep the rest.
+async function flushOutbox() {
+  if (!supabaseClient || outboxFlushing) return;
+  const ops = outboxLoad();
+  if (!ops.length) return;
+  outboxFlushing = true;
+  const before = ops.length;
+  try {
+    for (const op of ops) {
+      try {
+        let res = null;
+        if (op.kind === 'check_in') res = await supabaseClient.rpc('check_in', { p_id: op.payload.p_id });
+        else if (op.kind === 'check_out') res = await supabaseClient.rpc('check_out', { p_id: op.payload.p_id });
+        else if (op.kind === 'register') res = await supabaseClient.rpc('register_player', { p_name: op.payload.name, p_group: op.payload.group || '' });
+        else { outboxRemove(op.key); continue; }
+        if (res && res.error) throw res.error;
+        outboxRemove(op.key); // landed
+      } catch { /* still failing (offline?) — keep queued, retry next flush */ }
+    }
+  } finally {
+    outboxFlushing = false;
+    if (outboxLoad().length < before) queueSupabaseRefresh(300); // reflect the writes that landed
+  }
+}
+
 // Lightweight floating toast whose text reflects the real async-save outcome
 // (honest status) — created with a neutral "Saving…" then settled to a result.
 function makeSaveToast(text) {
@@ -4274,9 +4339,19 @@ function mergePlayersAfterSync(remotePlayers) {
     const pendingChecked = pendingLocal
       .map((p) => playerIdentityKey(p))
       .filter((k) => k && prevCheckedAuth.has(k));
+    // C22 item 3: overlay queued (offline) attendance intents so a pending check-in/out survives a
+    // sync until the outbox flushes it to the DB. Additive — a no-op when the outbox is empty.
+    const mergedChecked = new Set([...remoteChecked, ...pendingChecked]);
+    const intents = outboxAttendanceIntents();
+    if (intents.inSet.size || intents.outSet.size) {
+      const keyById = new Map();
+      cleanedRemotePlayers.forEach((p) => { if (p && p.id) keyById.set(String(p.id), playerIdentityKey(p)); });
+      intents.inSet.forEach((id) => { const k = keyById.get(id); if (k) mergedChecked.add(k); });
+      intents.outSet.forEach((id) => { const k = keyById.get(id); if (k) mergedChecked.delete(k); });
+    }
     return {
       players: [...cleanedRemotePlayers, ...pendingLocal],
-      checkedIn: [...remoteChecked, ...pendingChecked]
+      checkedIn: [...mergedChecked]
     };
   }
 
@@ -6660,7 +6735,7 @@ if (saveSupabaseBtn) {
                 queueSupabaseRefresh();
               } catch (err) {
                 console.error('Supabase update error', err);
-                await reconcileToSupabaseAuthority('public-check-in');
+                outboxEnqueue({ key: 'att:' + player.id, kind: 'check_in', payload: { p_id: player.id }, ts: Date.now() });
               }
             })();
           }
@@ -6697,7 +6772,7 @@ if (saveSupabaseBtn) {
                 queueSupabaseRefresh();
               } catch (err) {
                 console.error('Supabase check-out error', err);
-                await reconcileToSupabaseAuthority('public-check-out');
+                outboxEnqueue({ key: 'att:' + player.id, kind: 'check_out', payload: { p_id: player.id }, ts: Date.now() });
               }
             })();
           }
@@ -6780,9 +6855,11 @@ if (saveSupabaseBtn) {
               }
             } catch (err) {
               console.error('Supabase insert error', err);
-              inserted.pending = false;
-              messages.registration = 'Could not save — check your connection and try again.';
-              await reconcileToSupabaseAuthority('public-register');
+              // C22 item 3: keep the row pending (the sync merge carries it forward) + queue the
+              // register to retry on reconnect, instead of dropping the write.
+              inserted.pending = true;
+              outboxEnqueue({ key: 'reg:' + normalize(name) + ':' + (group || ''), kind: 'register', payload: { name, group }, ts: Date.now() });
+              messages.registration = 'Saved on this device — will sync when back online.';
             }
             render();
             setTimeout(() => { messages.registration = ''; render(); }, 2500);
@@ -7379,6 +7456,7 @@ function init() {
       if (synced) saveLocal();
       ensureSupabaseLiveSync();
       ensureTournamentLiveSync();
+      void flushOutbox(); // C22 item 3: flush writes queued during a prior offline session
       if (synced && canRunAdminSharedBackfill()) {
         (async () => {
           const catalogSynced = await backfillGroupCatalogToSupabase();
@@ -7394,6 +7472,7 @@ function init() {
         // Keep multiple devices converged without requiring a full page refresh.
         crossDeviceRefreshInterval = setInterval(() => {
           if (document.hidden) return;
+          void flushOutbox(); // C22 item 3: keep retrying queued offline writes
           queueSupabaseRefresh(800);
           queueTournamentRefresh(800);
         }, 15000);
