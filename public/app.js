@@ -25,7 +25,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.18.10';
+const APP_VERSION = '2026.06.18.11';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = sessionStorage.getItem('as_main_tab') || 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2826,40 +2826,12 @@ async function tdbSubmitBracketResult(match, winnerSide, scoreA, scoreB) {
 // the most recent tap.
 async function tdbClearBracketResult(match) {
   if (!supabaseClient || !match) return;
-  const all = await tdbListMatches(match.tournament_id, 'main');
-  const byId = {};
-  all.forEach((m) => { byId[m.id] = m; });
-  const toReset = [];
-  const seen = new Set();
-  const visit = (m) => {
-    if (!m || seen.has(m.id)) return;
-    seen.add(m.id);
-    toReset.push(m);
-    [m.winner_next_match_id, m.loser_next_match_id].forEach((nid) => {
-      if (nid && byId[nid] && byId[nid].status !== 'scheduled') visit(byId[nid]);
-    });
-  };
-  visit(byId[match.id] || match);
-  // reset every collected match to scheduled (their team slots stay; downstream slots are nulled below)
-  for (const m of toReset) {
-    await supabaseClient.from('matches').update({
-      score_a: null, score_b: null, winner_team_id: null, loser_team_id: null, status: 'scheduled'
-    }).eq('id', m.id);
-  }
-  // null the team slots fed by any reset match (those teams came from a now-undone result)
-  for (const m of toReset) {
-    if (m.winner_next_match_id) {
-      const col = m.winner_next_slot === 1 ? 'team_b_id' : 'team_a_id';
-      await supabaseClient.from('matches').update({ [col]: null }).eq('id', m.winner_next_match_id);
-    }
-    if (m.loser_next_match_id) {
-      const col = m.loser_next_slot === 1 ? 'team_b_id' : 'team_a_id';
-      await supabaseClient.from('matches').update({ [col]: null }).eq('id', m.loser_next_match_id);
-    }
-  }
-  await supabaseClient.from('tournaments')
-    .update({ status: 'bracket', updated_at: new Date().toISOString() })
-    .eq('id', match.tournament_id).eq('status', 'completed');
+  // C22 item 7: atomic recursive clear — reset this match + its non-scheduled downstream chain,
+  // null the team slots they fed, and re-open the tournament — in ONE SECURITY DEFINER call, so a
+  // mid-sequence network blip can't strand the bracket half-cleared. (Faithful port of the prior
+  // N-separate-writes cascade; verified on a synthetic bracket.)
+  const { error } = await supabaseClient.rpc('clear_bracket_atomic', { p_match: match.id });
+  if (error) throw error;
 }
 
 // Reload tournament list (+ active tournament's teams/pools/matches) into state. No render.
