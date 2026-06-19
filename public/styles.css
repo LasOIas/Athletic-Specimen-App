@@ -4,37 +4,41 @@
 
 /* ── Design tokens ── */
 :root {
-  --brand:        #2563eb;
-  --brand-dark:   #1d4ed8;
-  --brand-light:  #eff6ff;
-  --brand-ring:   rgba(37,99,235,.18);
+  /* direction-A "Clean Light" — canonical names (used by C26 components) */
+  --bg:          oklch(0.985 0.003 75);   /* warm-stone app background */
+  --card:        oklch(0.97 0.003 75);    /* card / surface */
+  --border:      oklch(0.90 0.005 75);
+  --ink:         oklch(0.18 0.005 75);     /* primary text */
+  --muted:       oklch(0.50 0.005 75);     /* secondary text / labels */
+  --faint:       oklch(0.62 0.005 75);     /* tertiary text / icon stroke */
+  --accent:      oklch(0.55 0.07 240);     /* muted blue — single accent */
+  --accent-soft: oklch(0.96 0.015 240);    /* accent tint (avatar bg, pills, icon tiles) */
+  --live:        oklch(0.55 0.09 150);     /* muted green — live/positive/checked-in */
+  --warn:        oklch(0.58 0.10 70);      /* amber — admin cautions only */
+  --shadow:      0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
 
-  --success:      #16a34a;
-  --success-light:#dcfce7;
-  --success-border:#bbf7d0;
-
-  --danger:       #dc2626;
-  --danger-dark:  #b91c1c;
-  --danger-light: #fee2e2;
-
-  --surface:      #ffffff;
-  --surface-2:    #f8fafc;
-  --surface-3:    #f1f5f9;
-
-  --border:       #e2e8f0;
-  --border-2:     #cbd5e1;
-
-  --text:         #0f172a;
-  --text-2:       #334155;
-  --text-3:       #64748b;
-  --text-4:       #5b6678; /* C24 item 12: was #94a3b8 (2.56:1, fails WCAG AA) -> 5.30:1 on the light surface */
-
-  --shadow-sm:    0 1px 2px rgba(0,0,0,.06);
-  --shadow-md:    0 1px 3px rgba(0,0,0,.08), 0 3px 10px rgba(0,0,0,.05);
-
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 16px;
+  /* legacy aliases — re-pointed to direction-A so existing components reskin coherently */
+  --brand:        var(--accent);
+  --brand-dark:   oklch(0.48 0.08 240);
+  --brand-light:  var(--accent-soft);
+  --brand-ring:   oklch(0.55 0.07 240 / .18);
+  --success:      var(--live);
+  --success-light:oklch(0.95 0.03 150);
+  --success-border:oklch(0.88 0.05 150);
+  --danger:       oklch(0.55 0.16 25);
+  --danger-dark:  oklch(0.48 0.16 25);
+  --danger-light: oklch(0.95 0.03 25);
+  --surface:      var(--card);
+  --surface-2:    var(--bg);
+  --surface-3:    oklch(0.95 0.004 75);
+  --border-2:     oklch(0.85 0.006 75);
+  --text:         var(--ink);
+  --text-2:       oklch(0.30 0.005 75);
+  --text-3:       var(--muted);
+  --text-4:       var(--faint);
+  --shadow-sm:    0 1px 2px oklch(0.18 0.005 75 / .06);
+  --shadow-md:    var(--shadow);
+  --r-sm: 8px; --r-md: 13px; --r-lg: 16px;
 }
 
 /* ── Reset ── */
@@ -56,13 +60,15 @@ body {
 html { overflow: hidden; }
 
 body {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                "Helvetica Neue", Arial, sans-serif;
   margin: 0;
   padding: 0;
   background: var(--surface-3);
   color: var(--text);
 }
+/* direction-A brand/display face */
+.app-header-brand, h1, h2, h3, h4, .statbig .n, .score, .av { font-family: 'Sora', 'Inter', sans-serif; }
 
 /* ── Layout ── */
 .container {
