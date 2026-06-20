@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.12';
+const APP_VERSION = '2026.06.20.13';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5315,6 +5315,7 @@ function adminDashboardHTML() {
     <div class="ad-top">
       <div class="ad-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'} <span class="ad-badge">ADMIN</span></div>
     </div>
+    <div class="ad-statcard" id="js-dashboard-stat">${buildDashboardStatHTML()}</div>
     <div class="ad-sec">Quick actions</div>
     <div class="ad-qgrid">
       <button type="button" class="ad-qa" data-qa="checkin">
@@ -5334,7 +5335,6 @@ function adminDashboardHTML() {
         <div class="ad-qt">Session</div><div class="ad-qs">${escapeHTML(sessLabel)}</div>
       </button>
     </div>
-    <div class="ad-statcard" id="js-dashboard-stat">${buildDashboardStatHTML()}</div>
     ${liveSection}
   </div>
 </div>`;
