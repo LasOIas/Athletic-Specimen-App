@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.19';
+const APP_VERSION = '2026.06.20.20';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4943,10 +4943,6 @@ function adminPlayersHTML() {
   const isActiveGroupValue = (value) => normalizeActiveGroupSelection(value || 'All') === normalizedActiveGroup;
   const topFormGroupOptions = getTopFormGroupDatalistOptions();
   const topFormContext = renderTopFormGroupsHelpAndPreview('', '');
-  // Reliability fix (2026-06-20): stable aria-live feedback node for the admin Check In modal. The
-  // handler (#btn-check-in/#btn-check-out, re-added in attachHandlers) writes into it directly, so the
-  // modal can stay open for back-to-back check-ins without a full render() that would close it.
-  const checkMsg = `<p id="admin-checkin-msg" class="msg" role="status" aria-live="polite"></p>`;
   const rosterCount = (state.players || []).length;
   const chip = (value, label) => `<button type="button" class="chip ${state.playerTab === value ? 'on' : ''}" data-chip-tab="${value}" aria-pressed="${state.playerTab === value ? 'true' : 'false'}">${label}</button>`;
   const groupsChipOn = normalizedActiveGroup !== 'All';
@@ -5084,23 +5080,6 @@ function adminPlayersHTML() {
       <button type="button" class="secondary" data-role="close-popup" data-target="player-edit-modal">Cancel</button>
     </div>
     <div class="popup-body" id="player-edit-modal-body"></div>
-  </div>
-</div>
-
-<div id="admin-checkin-modal" class="popup-overlay" style="display:none;" aria-hidden="true">
-  <div class="popup-card card" role="dialog" aria-modal="true" aria-labelledby="admin-checkin-modal-title">
-    <div class="popup-header">
-      <h3 id="admin-checkin-modal-title">Check In</h3>
-      <button type="button" class="secondary" data-role="close-popup" data-target="admin-checkin-modal">Close</button>
-    </div>
-    <div class="popup-body">
-      <input type="text" id="check-name" placeholder="First and Last Name" autocapitalize="words" autocomplete="off" spellcheck="false" />
-      <div class="row checkin-actions">
-        <button id="btn-check-in">Check In</button>
-        <button id="btn-check-out">Check Out</button>
-      </div>
-      ${checkMsg}
-    </div>
   </div>
 </div>
 
@@ -6139,52 +6118,9 @@ const closePopup = (popupId) => {
 // Show QR = the Dashboard tile, Check-in = the roster search + tap toggle — all duplicated). Its change
 // handler is removed here as a dead orphan.
 
-// Admin Check In modal (Menu -> Check In): type a name, tap Check In / Check Out. The C36 T1 rewrite
-// orphaned these buttons (markup left, handlers dropped) — a dead control presented as functional.
-// Re-bound here (RPC-routed, so it maintains check_ins history and does NOT reintroduce the bulk-bar
-// bypass). Mirrors the per-row delegated handler: optimistic local toggle -> partialRender (modal stays
-// open via the transient-state restore) -> check_in/check_out RPC with outbox fallback.
-const adminCheckNameInput = document.getElementById('check-name');
-const adminCheckInBtn = document.getElementById('btn-check-in');
-const adminCheckOutBtn = document.getElementById('btn-check-out');
-const setAdminCheckMsg = (text) => {
-  const el = document.getElementById('admin-checkin-msg');
-  if (el) el.textContent = text || '';
-};
-const runAdminModalCheck = (shouldCheckIn) => {
-  const name = ((adminCheckNameInput && adminCheckNameInput.value) || '').trim();
-  if (!name) {
-    setAdminCheckMsg('Type a player name first.');
-    if (adminCheckNameInput) adminCheckNameInput.focus();
-    return;
-  }
-  const player = state.players.find((p) => normalize(p.name) === normalize(name));
-  if (!player) {
-    setAdminCheckMsg(`No player named "${name}".`);
-    return;
-  }
-  const changed = shouldCheckIn ? checkInPlayer(player) : checkOutPlayer(player);
-  saveLocal();
-  partialRender(); // roster + stats update; the open modal is preserved by restoreTransientInteractionState
-  setAdminCheckMsg(`${player.name} — ${changed
-    ? (shouldCheckIn ? 'checked in' : 'checked out')
-    : (shouldCheckIn ? 'already checked in' : 'was not checked in')}.`);
-  if (adminCheckNameInput) { adminCheckNameInput.value = ''; adminCheckNameInput.focus(); }
-  if (changed && supabaseClient && player.id) {
-    (async () => {
-      try {
-        const { error } = await supabaseClient.rpc(shouldCheckIn ? 'check_in' : 'check_out', { p_id: player.id });
-        if (error) throw error;
-        queueSupabaseRefresh();
-      } catch (err) {
-        console.error(shouldCheckIn ? 'Supabase admin check-in error' : 'Supabase admin check-out error', err);
-        outboxEnqueue({ key: 'att:' + player.id, kind: shouldCheckIn ? 'check_in' : 'check_out', payload: { p_id: player.id }, ts: Date.now() });
-      }
-    })();
-  }
-};
-if (adminCheckInBtn) adminCheckInBtn.addEventListener('click', () => runAdminModalCheck(true));
-if (adminCheckOutBtn) adminCheckOutBtn.addEventListener('click', () => runAdminModalCheck(false));
+// C47 cleanup: the admin "Check In by name" modal (#admin-checkin-modal) was removed — it duplicated the
+// roster search + per-row in/out toggle (and the public kiosk). Its markup, #admin-checkin-msg node, and
+// handlers (#btn-check-in / #btn-check-out / runAdminModalCheck) are all deleted.
 
 function openQrModal() {
   const modal = document.getElementById('qrModal');
@@ -6587,37 +6523,9 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
   });
 }
 
-const saveSupabaseBtn = document.getElementById('btn-save-supabase');
-if (saveSupabaseBtn) {
-  saveSupabaseBtn.addEventListener('click', async () => {
-    if (SyncManager.forceSaveRunning) return;
-    if (!supabaseClient) {
-      alert('Supabase is not configured for this app.');
-      return;
-    }
-
-    SyncManager.forceSaveRunning = true;
-    saveSupabaseBtn.disabled = true;
-    saveSupabaseBtn.textContent = 'Saving...';
-
-    try {
-      const summary = await forceSaveAllToSupabase();
-      const pieces = [
-        `Updated ${summary.updated}`,
-        `Inserted ${summary.inserted}`
-      ];
-      if (summary.matchedByName) pieces.push(`Matched ${summary.matchedByName} by name`);
-      if (summary.failed) pieces.push(`Failed ${summary.failed}`);
-      alert(`Saved to Supabase. ${pieces.join(' | ')}`);
-    } catch (err) {
-      console.error('Manual save to Supabase error', err);
-      alert('Save to Supabase failed. Check connection and try again.');
-    } finally {
-      SyncManager.forceSaveRunning = false;
-      render();
-    }
-  });
-}
+// C47 cleanup: the manual "Save" button (#btn-save-supabase) was removed in C40 (the app auto-saves via
+// realtime + the offline outbox). Its click handler is removed as a dead orphan. forceSaveAllToSupabase()
+// stays — it's still used by the attendance write-through paths.
 
   // --- Admin: Save player (add/update) ---
   const savePlayerBtn = document.getElementById('btn-save-player');
