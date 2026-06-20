@@ -459,8 +459,9 @@ function disambiguatePlayersByName(players, query) {
   const scored = [];
   for (const p of (players || [])) {
     if (!p || typeof p !== 'object') continue;
-    if (typeof p.id === 'string' && p.id.indexOf('__as_') === 0) continue; // sentinel rows
     const name = String(p.name || '');
+    // sentinel rows are keyed by id OR by name (__as_group__:, __as_tournament_state__) — exclude both
+    if ((typeof p.id === 'string' && p.id.indexOf('__as_') === 0) || name.indexOf('__as_') === 0) continue;
     const lower = name.toLowerCase();
     const pos = lower.indexOf(q);
     if (pos < 0) continue;

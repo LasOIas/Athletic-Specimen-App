@@ -208,6 +208,7 @@ describe('disambiguatePlayersByName (C36 T1 kiosk search)', () => {
     { id: '3', name: 'Brian Lee', group: 'Mon', skill: 7, checked_in: false },
     { id: '4', name: 'Mariana', group: '', skill: 5, checked_in: false }, // substring 'ana' (not prefix)
     { id: '__as_sentinel', name: 'All Players', group: 'All', skill: 0, checked_in: false },
+    { id: 'g9', name: '__as_group__:Hidden', group: '', skill: 0, checked_in: false }, // name-keyed sentinel
   ];
 
   it('returns [] for an empty / whitespace query', () => {
@@ -223,6 +224,11 @@ describe('disambiguatePlayersByName (C36 T1 kiosk search)', () => {
     expect(ids).toContain('4'); // Mariana
     expect(ids).not.toContain('2'); // Adam Cole — no 'an' substring
     expect(ids).not.toContain('__as_sentinel'); // sentinel always excluded
+  });
+
+  it('excludes name-keyed sentinels (__as_group__:, __as_tournament_state__) too', () => {
+    const out = disambiguatePlayersByName(players, 'hidden'); // matches the __as_group__:Hidden name
+    expect(out).toEqual([]); // the name-keyed sentinel must never surface as a checkin-able person
   });
 
   it('prefix matches sort before mid-string matches', () => {
