@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.15';
+const APP_VERSION = '2026.06.20.16';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4987,8 +4987,9 @@ function adminPlayersHTML() {
       ${chip('skill', 'Skill')}
       ${chip('unrated', 'Unset')}
       <button type="button" class="chip ${groupsChipOn ? 'on' : ''}" data-chip-groups aria-pressed="${groupsChipOn ? 'true' : 'false'}">Groups</button>
-      <button type="button" class="chip" id="btn-select-all-visible">Select all shown</button>
     </div>
+    <!-- C45 (rank 17): "Select all shown" is a SELECTION action, not a filter — moved out of the chip row. -->
+    <div class="select-all-row"><button type="button" id="btn-select-all-visible" class="select-all-btn">Select all shown</button></div>
 
     <!-- Source-of-truth filter select (visually hidden; chips set the same state) -->
     <select id="player-tab-select" class="sr-only-control" aria-hidden="true" tabindex="-1">
@@ -5487,10 +5488,9 @@ function render() {
   if (state.generatedTeams.length > 0) {
     if (state.generatedTeamsSummary) {
       teamsFairnessHTML = `
-        <p class="small" style="margin:0.25rem 0 0.5rem;">
-          Fairness spread: <strong>${state.generatedTeamsSummary.skillSpread.toFixed(1)}</strong>
-          | Team size spread: <strong>${state.generatedTeamsSummary.countSpread}</strong>
-          | Candidate runs: <strong>${state.generatedTeamsSummary.attempts}</strong>
+        <p class="small fairness-line">
+          <strong>${state.generatedTeamsSummary.skillSpread <= 0.5 ? 'Well balanced' : state.generatedTeamsSummary.skillSpread <= 1.5 ? 'Fairly balanced' : 'A bit uneven — regenerate to improve'}</strong>
+          &middot; skill spread ${state.generatedTeamsSummary.skillSpread.toFixed(1)} &middot; team sizes within ${state.generatedTeamsSummary.countSpread}
         </p>
       `;
     }
