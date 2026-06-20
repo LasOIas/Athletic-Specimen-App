@@ -14,6 +14,7 @@
   --accent:      oklch(0.55 0.07 240);     /* muted blue — single accent */
   --accent-soft: oklch(0.96 0.015 240);    /* accent tint (avatar bg, pills, icon tiles) */
   --live:        oklch(0.55 0.09 150);     /* muted green — live/positive/checked-in */
+  --live-soft:   oklch(0.96 0.03 150);     /* muted-green tint — live status pill bg */
   --warn:        oklch(0.58 0.10 70);      /* amber — admin cautions only */
   --shadow:      0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
 
@@ -1046,7 +1047,8 @@ select:focus {
   font-size: 1rem;
 }
 .session-detail-row:last-child { border-bottom: none; }
-.session-detail-icon { font-size: 1.1rem; flex-shrink: 0; width: 24px; }
+.session-detail-icon { flex-shrink: 0; width: 20px; display: flex; align-items: center; }
+.session-detail-icon svg { width: 18px; height: 18px; color: var(--faint); display: block; }
 
 /* ── Teams tab ── */
 .team-size-label { font-size: .8rem; font-weight: 600; color: var(--text-2); margin: 0 0 6px; }
@@ -1576,7 +1578,7 @@ select:focus {
 }
 .court-stat.is-live {
   color: var(--live);
-  background: oklch(0.96 0.03 150);
+  background: var(--live-soft);
 }
 .court-stat.is-done {
   color: var(--muted);

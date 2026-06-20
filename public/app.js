@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.19';
+const APP_VERSION = '2026.06.19.20';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5302,15 +5302,15 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
           <div class="card session-info-card">
             <p class="session-info-label">What players will see</p>
             <div class="session-detail-row">
-              <span class="session-detail-icon">📅</span>
+              <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></span>
               <span>${escapeHTML(formatSessionDate(state.currentSession.date))}</span>
             </div>
             <div class="session-detail-row">
-              <span class="session-detail-icon">🕙</span>
+              <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
               <span>${escapeHTML(state.currentSession.time || '')}</span>
             </div>
             <div class="session-detail-row">
-              <span class="session-detail-icon">📍</span>
+              <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg></span>
               <span>${escapeHTML(state.currentSession.location || '')}</span>
             </div>
           </div>` : ''}
