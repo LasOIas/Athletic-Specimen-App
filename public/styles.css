@@ -1190,6 +1190,15 @@ select:focus {
   font-size: 1rem;
 }
 .session-detail-row:last-child { border-bottom: none; }
+
+/* C36 T4 (§38 option B): unified session screen — title + form + inline "what players see" preview */
+.session-title { font-family: 'Sora', 'Inter', sans-serif; font-size: 1.1rem; font-weight: 800; letter-spacing: -.3px; margin: 2px 2px 12px; color: var(--ink); }
+.session-card-h { font-family: 'Sora', 'Inter', sans-serif; font-size: .95rem; font-weight: 700; margin: 0 0 12px; }
+.session-input { border-radius: var(--r-md); }
+.session-preview { margin-top: 14px; background: var(--accent-soft); border-radius: var(--r-md); padding: 12px 14px; }
+.session-preview-label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+.session-preview .session-detail-row { border-bottom: none; padding: 5px 0; font-size: .95rem; }
+.session-preview .session-detail-icon svg { color: var(--accent); }
 .session-detail-icon { flex-shrink: 0; width: 20px; display: flex; align-items: center; }
 .session-detail-icon svg { width: 18px; height: 18px; color: var(--faint); display: block; }
 

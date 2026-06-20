@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.5';
+const APP_VERSION = '2026.06.20.6';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5308,9 +5308,11 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
     </div>
     <div id="tab-session" class="tab-panel">
       <div class="container">
-
+        <div class="session-screen">
+          <h2 class="session-title">Session</h2>
+          <!-- C36 T4 (§38 option B — one unified card): form + the "what players will see" preview together. -->
           <div class="card session-admin-card">
-            <h3 style="margin:0 0 12px;">Current Session</h3>
+            <h3 class="session-card-h">Current session</h3>
             <div class="session-form">
               <label class="session-label" for="session-date">Date</label>
               <input type="date" id="session-date" class="session-input"
@@ -5324,29 +5326,29 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
                 placeholder="e.g. Gym A, 123 Main St"
                 value="${escapeHTML(state.currentSession?.location || '')}" />
               <div class="session-form-actions">
-                <button id="btn-save-session" class="primary">Save Session</button>
-                <button id="btn-share-session" class="secondary">Share QR / Link</button>
+                <button id="btn-save-session" class="primary">Save session</button>
+                <button id="btn-share-session" class="secondary">Share QR / link</button>
               </div>
-              <div id="session-save-msg" style="display:none; margin-top:8px; font-size:13px; color:var(--success);"></div>
+              <div id="session-save-msg" style="display:none; margin-top:8px; font-size:13px; color:var(--live);"></div>
+              ${state.currentSession ? `
+              <div class="session-preview">
+                <p class="session-preview-label">What players will see</p>
+                <div class="session-detail-row">
+                  <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></span>
+                  <span>${escapeHTML(formatSessionDate(state.currentSession.date))}</span>
+                </div>
+                <div class="session-detail-row">
+                  <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
+                  <span>${escapeHTML(state.currentSession.time || '')}</span>
+                </div>
+                <div class="session-detail-row">
+                  <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg></span>
+                  <span>${escapeHTML(state.currentSession.location || '')}</span>
+                </div>
+              </div>` : ''}
             </div>
           </div>
-          ${state.currentSession ? `
-          <div class="card session-info-card">
-            <p class="session-info-label">What players will see</p>
-            <div class="session-detail-row">
-              <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></span>
-              <span>${escapeHTML(formatSessionDate(state.currentSession.date))}</span>
-            </div>
-            <div class="session-detail-row">
-              <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
-              <span>${escapeHTML(state.currentSession.time || '')}</span>
-            </div>
-            <div class="session-detail-row">
-              <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg></span>
-              <span>${escapeHTML(state.currentSession.location || '')}</span>
-            </div>
-          </div>` : ''}
-
+        </div>
       </div>
     </div>
     <div id="tab-players" class="tab-panel">
