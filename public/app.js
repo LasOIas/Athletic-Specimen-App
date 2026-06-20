@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.20';
+const APP_VERSION = '2026.06.19.21';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -980,7 +980,7 @@ function updateBulkBarVisibility() {
   if (window.__headerTapBound) return;
   window.__headerTapBound = true;
   document.addEventListener('click', (e) => {
-    const brand = e.target.closest && e.target.closest('.app-header-brand');
+    const brand = e.target.closest && e.target.closest('.ph-brand, .ad-brand');
     if (!brand) return;
     const activePanel = document.querySelector('.tab-panel.active');
     if (activePanel) activePanel.scrollTo({ top: 0, behavior: 'smooth' });
@@ -5140,11 +5140,8 @@ function renderPublicShell() {
   return `
 <div id="app-shell">
   <header id="app-header">
-    <div class="app-header-top-row">
-      <div class="app-header-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'}</div>
-      <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
-    </div>
-    <div class="app-header-version">v${APP_VERSION}</div>
+    <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
+    <span class="app-header-version">v${APP_VERSION}</span>
   </header>
   <div id="app-content">
     <div id="tab-home" class="tab-panel">
@@ -5264,11 +5261,8 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
   return `
 <div id="app-shell">
   <header id="app-header">
-    <div class="app-header-top-row">
-      <div class="app-header-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'}</div>
-      <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
-    </div>
-    <div class="app-header-version">v${APP_VERSION}</div>
+    <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
+    <span class="app-header-version">v${APP_VERSION}</span>
   </header>
   <div id="app-content">
     <div id="tab-dashboard" class="tab-panel">
