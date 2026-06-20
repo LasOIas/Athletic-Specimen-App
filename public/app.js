@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.2';
+const APP_VERSION = '2026.06.20.3';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2546,8 +2546,8 @@ function renderFilteredPlayers() {
         </div>
         <div class="prow-actions">
           ${checked
-            ? `<button class="btn-checkout tg in" data-id="${player.id}"><span class="tg-dot"></span>Out</button>`
-            : `<button class="btn-checkin tg" data-id="${player.id}"><span class="tg-dot"></span>In</button>`
+            ? `<button class="btn-checkout tg in" data-id="${player.id}" aria-label="${escapeHTMLText(player.name || '')} is checked in — tap to check out"><span class="tg-dot"></span>In</button>`
+            : `<button class="btn-checkin tg" data-id="${player.id}" aria-label="${escapeHTMLText(player.name || '')} is checked out — tap to check in"><span class="tg-dot"></span>Out</button>`
           }
           ${state.isAdmin ? `
             <div class="menu-wrap">
