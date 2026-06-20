@@ -255,6 +255,8 @@
     }
 
     let loadRosterInFlight = false;
+    let rosterLoaded = false;       // C46 (rank 3): true only after a successful roster load
+    let rosterInitFocused = false;  // C46 (rank 27): autofocus the name input once, when ready
     async function loadRoster() {
       if (loadRosterInFlight) return; // C24 item 7: guard concurrent focus/visibility/interval fetches
       loadRosterInFlight = true;
@@ -266,7 +268,12 @@
           .order('name', { ascending: true });
         if (error) throw error;
         roster = (data || []).filter((p) => p.name && !p.name.startsWith('__'));
+        rosterLoaded = true;
         $('loadingState').hidden = true;
+        // C46 (rank 3): re-run suggestions with the current input once the roster is in, so a name typed
+        // DURING the load now matches (instead of falling through to a duplicate self-registration).
+        renderSuggestions($('nameInput').value);
+        if (!rosterInitFocused) { rosterInitFocused = true; $('nameInput').focus(); } // rank 27: autofocus once ready
       } catch (err) {
         console.error('Load error:', err);
         $('loadingState').hidden = true;
@@ -318,7 +325,10 @@
       // C25 item 6: show the "I'm new — register me" prompt ONLY when the user has typed
       // a non-empty query that matched nobody. On an empty query (incl. initial load) the
       // prompt stays hidden (matches=[] would otherwise un-hide it).
-      noMatch.hidden = matches.length > 0 || !query.trim();
+      // C46 (rank 3): only offer "I'm new — register" once the roster has actually loaded — otherwise a
+      // name typed during the initial load (or on a load failure) wrongly looks like "no match" and the
+      // player self-registers a duplicate of someone already on the list.
+      noMatch.hidden = matches.length > 0 || !query.trim() || !rosterLoaded;
     }
 
     async function checkInExisting(player, onError) {
@@ -364,14 +374,20 @@
       errEl.hidden = false;
     }
 
+    let successResetTimer = null;
     function showSuccess(name) {
       $('main').hidden = true;
       $('successName').textContent = name;
       $('successScreen').hidden = false;
       if (navigator.vibrate) navigator.vibrate(40);
+      // C46 (rank 27): auto-return to the entry screen after a few seconds so the next person can just
+      // start typing ("Check in someone else" still works immediately).
+      clearTimeout(successResetTimer);
+      successResetTimer = setTimeout(resetForAnother, 6000);
     }
 
     function resetForAnother() {
+      clearTimeout(successResetTimer);
       $('successScreen').hidden = true;
       $('main').hidden = false;
       $('nameInput').value = '';
