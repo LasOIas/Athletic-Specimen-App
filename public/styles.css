@@ -1193,64 +1193,78 @@ select:focus {
 .session-detail-icon { flex-shrink: 0; width: 20px; display: flex; align-items: center; }
 .session-detail-icon svg { width: 18px; height: 18px; color: var(--faint); display: block; }
 
-/* ── Teams tab ── */
-.team-size-label { font-size: .8rem; font-weight: 600; color: var(--text-2); margin: 0 0 6px; }
+/* ── Courts (Teams) tab — C36 T3 direction-A (run-the-night, nets-first) ── */
+.team-size-label { font-size: .8rem; font-weight: 600; color: var(--text-2); margin: 0 0 8px; }
 .team-size-chips {
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
 }
+/* .szc look: each size is a tappable card; accent tint, accent fill when active */
 .team-size-chip {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  padding: 8px 4px;
-  min-height: 54px;
-  background: var(--brand-light);
-  border: 1px solid #bfdbfe;
-  border-radius: var(--r-sm);
+  gap: 3px;
+  padding: 10px 4px;
+  min-height: 58px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
+  transition: background .15s, border-color .15s, box-shadow .15s, transform .05s;
 }
-.team-size-chip:hover { background: #dbeafe; }
-.team-size-chip.is-active { background: var(--brand); border-color: var(--brand); }
+.team-size-chip:hover { background: var(--accent-soft); border-color: var(--accent); }
+.team-size-chip:active { transform: translateY(1px); }
+.team-size-chip.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+}
 .team-size-chip.is-active strong,
 .team-size-chip.is-active span { color: #fff; }
-.team-size-chip strong { font-size: 1.4rem; font-weight: 700; color: var(--brand); line-height: 1; }
-.team-size-chip span   { font-size: .72rem; color: var(--text-3); font-weight: 500; }
+.team-size-chip strong {
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: 1.35rem; font-weight: 700; color: var(--accent); line-height: 1;
+}
+.team-size-chip span { font-size: .72rem; color: var(--text-3); font-weight: 500; }
 
 .teams {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
+/* .tcard look: clean surface card, Sora team #, tokenized */
 .generated-team {
-  padding: 10px;
+  padding: 12px;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  background: var(--surface-2);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
   transition: border-color .15s, background .15s, box-shadow .15s;
 }
 .generated-team h4 {
-  margin: 0 0 8px;
-  font-size: .8rem;
+  margin: 0 0 10px;
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: .82rem;
   font-weight: 700;
-  color: var(--brand);
+  color: var(--accent);
   text-transform: uppercase;
   letter-spacing: .04em;
 }
 
-.generated-team.is-drop-enabled { border-color: #93c5fd; border-style: dashed; }
+.generated-team.is-drop-enabled { border-color: var(--accent); border-style: dashed; }
 .generated-team.is-drop-target  {
-  border-color: var(--brand) !important;
-  background: var(--brand-light) !important;
+  border-color: var(--accent) !important;
+  background: var(--accent-soft) !important;
   box-shadow: 0 0 0 3px var(--brand-ring) !important;
 }
-.generated-team.is-drop-target .team-drop-empty { border-color: var(--brand); background: #dbeafe; }
+.generated-team.is-drop-target .team-drop-empty { border-color: var(--accent); background: var(--accent-soft); }
 
 .team-player-list {
   list-style: none;
@@ -1262,10 +1276,10 @@ select:focus {
 }
 
 .team-player-card {
-  background: var(--surface);
+  background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  padding: 9px 11px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1275,25 +1289,27 @@ select:focus {
   user-select: none;
   touch-action: none; /* stop iOS claiming the gesture as vertical scroll before the drag threshold trips */
   min-height: 44px;
-  transition: box-shadow .12s;
+  transition: box-shadow .12s, border-color .12s, background .12s;
 }
+.team-player-card:hover  { border-color: var(--accent); }
 .team-player-card:active { cursor: grabbing; }
-.team-player-card .name  { font-weight: 600; font-size: .9rem; }
+.team-player-card .name  { font-weight: 600; font-size: .9rem; color: var(--text); }
+.team-player-card .small { color: var(--text-3); font-weight: 600; }
 
-.team-player-card.is-dragging   { opacity: .35; border-style: dashed; border-color: #93c5fd; }
+.team-player-card.is-dragging   { opacity: .35; border-style: dashed; border-color: var(--accent); }
 .team-player-card.is-swap-target {
-  border-color: var(--success);
-  background: var(--success-light);
-  box-shadow: inset 0 0 0 2px rgba(22,163,74,.25);
+  border-color: var(--live);
+  background: var(--live-soft);
+  box-shadow: inset 0 0 0 2px color-mix(in oklch, var(--live) 30%, transparent);
   transform: scale(1.02);
 }
 
 .team-drop-empty {
-  border: 2px dashed #bfdbfe;
-  border-radius: 8px;
+  border: 2px dashed var(--border-2);
+  border-radius: var(--r-sm);
   padding: 12px 10px;
   text-align: center;
-  background: #f0f9ff;
+  background: var(--accent-soft);
   color: var(--text-3);
   font-size: .85rem;
 }
@@ -1309,12 +1325,12 @@ select:focus {
 .card-generate-teams #group-count { width: 80px; min-width: 80px; flex: 0 0 80px; }
 .card-generate-teams .generate-teams-controls button { min-height: 40px; }
 
-/* ── Live nets / matchups ── */
+/* ── Live Nets / matchups — .net look (the live action, front-and-center) ── */
 .card-generate-teams .live-matchups-board {
-  margin: 8px 0;
-  padding: 10px 12px;
+  margin: 8px 0 0;
+  padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface-2);
 }
 .card-generate-teams .live-matchups-board h4 { margin: 0 0 8px; }
@@ -1322,15 +1338,15 @@ select:focus {
 .card-generate-teams .live-nets-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(180px, 1fr));
-  gap: 8px;
+  gap: 10px;
   justify-content: start;
   align-items: start;
 }
 
 .card-generate-teams .live-net-card {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px;
+  border-radius: var(--r-md);
+  padding: 12px;
   background: var(--surface);
   min-height: 240px;
   display: flex;
@@ -1342,8 +1358,9 @@ select:focus {
   gap: 6px; margin-bottom: 8px;
 }
 .card-generate-teams .live-net-label {
-  font-size: .75rem; font-weight: 700; letter-spacing: .05em;
-  text-transform: uppercase; color: var(--brand);
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: .78rem; font-weight: 700; letter-spacing: .05em;
+  text-transform: uppercase; color: var(--accent);
 }
 .card-generate-teams .live-net-match-label { color: var(--text-3); font-size: .8rem; text-align: right; }
 
@@ -1354,10 +1371,10 @@ select:focus {
   justify-items: center;
   align-items: center;
   gap: 6px;
-  border: 1px dashed #bfdbfe;
-  border-radius: 8px;
+  border: 1px dashed var(--border-2);
+  border-radius: var(--r-sm);
   padding: 8px;
-  background: var(--brand-light);
+  background: var(--accent-soft);
   min-height: 140px;
   flex: 1;
 }
@@ -1365,7 +1382,7 @@ select:focus {
 .card-generate-teams .live-net-team {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   width: 100%; min-height: 48px;
-  border: 1px solid var(--border); border-radius: 8px;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
   background: var(--surface); padding: 6px;
   line-height: 1.2; gap: 2px; color: var(--text);
 }
@@ -1374,36 +1391,41 @@ select:focus {
 
 .card-generate-teams .live-net-divider {
   font-size: .65rem; font-weight: 700; letter-spacing: .1em;
-  color: var(--brand); display: inline-flex; align-items: center; gap: 4px; text-transform: uppercase;
+  color: var(--accent); display: inline-flex; align-items: center; gap: 4px; text-transform: uppercase;
 }
 .card-generate-teams .live-net-divider::before,
-.card-generate-teams .live-net-divider::after { content: ''; width: 24px; border-top: 2px solid #93c5fd; }
+.card-generate-teams .live-net-divider::after { content: ''; width: 24px; border-top: 2px solid var(--border-2); }
 
 .card-generate-teams .live-matchup-actions {
-  display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; justify-content: center;
+  display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; justify-content: center;
 }
+/* .wbtn — big Won buttons */
 .card-generate-teams .live-matchup-result-btn {
-  padding: 8px 14px; min-height: 44px; font-size: 14px !important; min-width: 120px; flex: 1 1 120px;
-  border: 1px solid var(--border-2); border-radius: 999px;
+  padding: 10px 14px; min-height: 46px; font-size: 14px !important; font-weight: 600;
+  min-width: 120px; flex: 1 1 120px;
+  border: 1px solid var(--border-2); border-radius: var(--r-sm);
   background: var(--surface); color: var(--text-2);
+  transition: background .12s, border-color .12s, color .12s;
 }
-.card-generate-teams .live-matchup-result-btn:hover { background: var(--surface-3); }
+.card-generate-teams .live-matchup-result-btn:hover { background: var(--surface-3); border-color: var(--accent); }
+/* recorded winner highlighted with --live-soft / --live */
 .card-generate-teams .live-matchup-result-btn.is-selected {
-  border-color: var(--success-border); background: var(--success-light);
-  color: var(--success); font-weight: 600;
+  border-color: color-mix(in oklch, var(--live) 45%, transparent);
+  background: var(--live-soft);
+  color: var(--live); font-weight: 700;
 }
 .card-generate-teams .live-matchup-clear-btn {
-  padding: 8px 14px; min-height: 44px; font-size: 14px !important;
-  border: 1px solid #fecaca; border-radius: 999px;
-  background: var(--danger-light); color: #9f1239;
+  padding: 10px 14px; min-height: 46px; font-size: 14px !important;
+  border: 1px solid color-mix(in oklch, var(--danger) 30%, transparent); border-radius: var(--r-sm);
+  background: var(--danger-light); color: var(--danger-dark);
 }
-.card-generate-teams .live-matchup-clear-btn:hover { background: #ffe4e6; }
-.card-generate-teams .live-matchup-result   { margin-top: 4px; text-align: center; font-size: .8rem; color: var(--text-2); }
+.card-generate-teams .live-matchup-clear-btn:hover { background: color-mix(in oklch, var(--danger-light) 80%, var(--danger) 8%); }
+.card-generate-teams .live-matchup-result   { margin-top: 6px; text-align: center; font-size: .8rem; color: var(--text-2); }
 .card-generate-teams .live-matchups-empty   { margin: 0; color: var(--text-3); }
-.card-generate-teams .live-matchups-waiting { margin: 4px 0 0; color: var(--text-3); font-size: .85rem; }
+.card-generate-teams .live-matchups-waiting { margin: 8px 0 0; color: var(--text-3); font-size: .85rem; }
 
-/* Collapsible Live Nets — slim header card, tap to expand (keeps team rosters prominent) */
-.live-nets-collapsible { margin: 8px 0; }
+/* Collapsible Live Nets — header card, tap to collapse (defaults EXPANDED, nets-first) */
+.live-nets-collapsible { margin: 4px 0 12px; }
 .live-nets-toggle {
   width: 100%;
   display: flex;
@@ -1412,15 +1434,17 @@ select:focus {
   gap: 8px;
   padding: 12px 14px;
   min-height: 48px;
-  background: var(--surface-2);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
   color: var(--text);
+  font-family: 'Sora', 'Inter', sans-serif;
   font-weight: 700;
   font-size: 15px !important;
 }
 .live-nets-toggle:hover { background: var(--surface-3); }
-.live-nets-caret { font-weight: 600; color: var(--brand); font-size: 13px !important; }
+.live-nets-caret { font-weight: 600; color: var(--accent); font-size: 13px !important; }
 .live-nets-body.is-collapsed { display: none; }
 .live-nets-collapsible .live-matchups-board { margin-top: 8px; }
 .live-nets-collapsible .live-matchups-board h4 { display: none; } /* the toggle is the header now */

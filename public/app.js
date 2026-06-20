@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.3';
+const APP_VERSION = '2026.06.20.4';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4827,9 +4827,14 @@ function currentTabKey() { return state.isAdmin ? 'as_main_tab_admin' : 'as_main
 // C26 item 2: Teams card (admin-only tab). Markup moved verbatim from render(); the shell decides
 // when to call it, so the old `state.isAdmin ? … : ''` wrapper is gone.
 function adminTeamsHTML(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
+  // C36 T3 (§38 A — run the night, nets first): title "Courts" → size chips + Generate → Live Nets
+  // board UP TOP (default EXPANDED when nets exist) → fairness → team cards below. The Live Nets
+  // collapse defaults OPEN now: only a user's explicit collapse (state.liveNetsCollapsed === true)
+  // hides it; undefined/false = expanded so the live action is front-and-center.
+  const liveNetsCollapsed = state.liveNetsCollapsed === true;
   return `<div class="card card-generate-teams">
   <div class="card-collapsible-head">
-    <h3>Generate Teams</h3>
+    <h3>Courts</h3>
   </div>
   <div id="card-body-admin-generate-teams">
   <div class="team-size-label">Team size — tap to build teams of that size</div>
@@ -4850,17 +4855,17 @@ function adminTeamsHTML(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
     </label>
     <button id="btn-generate-teams">Generate</button>
   </div>
-  ${teamsFairnessHTML}
-  ${teamsHTML}
   ${liveMatchupsHTML ? `<div class="live-nets-collapsible">
-    <button type="button" class="live-nets-toggle" data-role="toggle-live-nets" aria-expanded="${state.liveNetsCollapsed === false ? 'true' : 'false'}">
+    <button type="button" class="live-nets-toggle" data-role="toggle-live-nets" aria-expanded="${liveNetsCollapsed ? 'false' : 'true'}">
       <span>Live Nets</span>
-      <span class="live-nets-caret">${state.liveNetsCollapsed === false ? '▾ Hide' : '▸ Show'}</span>
+      <span class="live-nets-caret">${liveNetsCollapsed ? '▸ Show' : '▾ Hide'}</span>
     </button>
-    <div class="live-nets-body${state.liveNetsCollapsed === false ? '' : ' is-collapsed'}">
+    <div class="live-nets-body${liveNetsCollapsed ? ' is-collapsed' : ''}">
       ${liveMatchupsHTML}
     </div>
   </div>` : ''}
+  ${teamsFairnessHTML}
+  ${teamsHTML}
   </div>
 </div>`;
 }
