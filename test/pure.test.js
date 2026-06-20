@@ -9,7 +9,7 @@ const pure = require('../public/pure.js');
 const {
   validateScores, decideWinner, generateRoundRobin, generateDoubleElim,
   computeStandings, computeSeeding, computeChampion, summarizeTeamFairness,
-  generateBalancedGroups, playerIdentityKey,
+  generateBalancedGroups, playerIdentityKey, disambiguatePlayersByName,
 } = pure;
 
 // Build a FINAL pool match the way computeStandings/computeSeeding read it.
@@ -196,5 +196,51 @@ describe('generateBalancedGroups (stochastic — invariants only)', () => {
     const out = generateBalancedGroups([{ id: '1', skill: 5 }], [], 3);
     expect(out.teams.length).toBe(3);
     expect(out.teams.flat().length).toBe(0);
+  });
+});
+
+// C36 T1 — kiosk "tap your name" search. Pure: name-substring filter (case-insensitive),
+// drops __as_* sentinels, prefix-matches sort first, max 12, NO skill in the result shape.
+describe('disambiguatePlayersByName (C36 T1 kiosk search)', () => {
+  const players = [
+    { id: '1', name: 'Anna Reed', group: 'Mon', skill: 9, checked_in: false },
+    { id: '2', name: 'Adam Cole', group: 'Wed', skill: 3, checked_in: true },
+    { id: '3', name: 'Brian Lee', group: 'Mon', skill: 7, checked_in: false },
+    { id: '4', name: 'Mariana', group: '', skill: 5, checked_in: false }, // substring 'ana' (not prefix)
+    { id: '__as_sentinel', name: 'All Players', group: 'All', skill: 0, checked_in: false },
+  ];
+
+  it('returns [] for an empty / whitespace query', () => {
+    expect(disambiguatePlayersByName(players, '')).toEqual([]);
+    expect(disambiguatePlayersByName(players, '   ')).toEqual([]);
+  });
+
+  it('filters by case-insensitive name substring and excludes __as_* sentinels', () => {
+    const out = disambiguatePlayersByName(players, 'an');
+    const ids = out.map((p) => p.id);
+    // 'an' matches "Anna" (An…) and "Mariana" (…an…); "Adam Cole" has no 'an' substring
+    expect(ids).toContain('1'); // Anna Reed
+    expect(ids).toContain('4'); // Mariana
+    expect(ids).not.toContain('2'); // Adam Cole — no 'an' substring
+    expect(ids).not.toContain('__as_sentinel'); // sentinel always excluded
+  });
+
+  it('prefix matches sort before mid-string matches', () => {
+    const out = disambiguatePlayersByName(players, 'an');
+    // "Anna Reed" (prefix) must come before "Mariana" (mid-string)
+    expect(out[0].id).toBe('1');
+  });
+
+  it('returns the no-skill shape {id,name,group,initials,checkedIn} and never leaks skill', () => {
+    const out = disambiguatePlayersByName(players, 'adam');
+    expect(out.length).toBe(1);
+    const row = out[0];
+    expect(row).toEqual({ id: '2', name: 'Adam Cole', group: 'Wed', initials: 'AC', checkedIn: true });
+    expect('skill' in row).toBe(false);
+  });
+
+  it('caps results at 12', () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ id: String(i), name: `Sam ${i}`, group: 'G', skill: i, checked_in: false }));
+    expect(disambiguatePlayersByName(many, 'sam').length).toBe(12);
   });
 });

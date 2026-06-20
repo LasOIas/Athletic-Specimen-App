@@ -1805,3 +1805,179 @@ select:focus {
 @media (min-width: 769px) {
   .ad-brand { font-size: 20px; }
 }
+
+/* ============================================================
+   C36 T1 — Check In kiosk (public): type your name -> tap it -> checked in.
+   Direction-A tokens only. NO skill, NO emoji, NO neon. Mobile-first (390) + 1920.
+   ============================================================ */
+.ci-kiosk {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 8px 0 24px;
+  position: relative;
+}
+.cik-h {
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: 26px;
+  font-weight: 700;
+  text-align: center;
+  color: var(--text);
+  margin: 14px 0 4px;
+}
+.cik-sub {
+  text-align: center;
+  color: var(--text-3);
+  font-size: 15px;
+  margin: 0 0 18px;
+}
+.cik-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  border-radius: var(--r-md);
+  padding: 4px 14px;
+  box-shadow: var(--shadow-sm);
+}
+.cik-search svg { width: 22px; height: 22px; color: var(--accent); flex-shrink: 0; }
+.cik-search input {
+  border: none !important;
+  background: transparent;
+  box-shadow: none !important;
+  height: 52px;
+  flex: 1;
+  font-size: 18px !important;   /* >=16px: no iOS zoom-on-focus */
+  padding: 0;
+  color: var(--text);
+}
+.cik-search input:focus { outline: none; box-shadow: none !important; }
+
+#checkin-results { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+.cik-btn {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+  min-height: 70px;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.cik-btn:hover { border-color: var(--border-2); }
+.cik-btn:active { transform: translateY(1px); }
+.cik-btn .av {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cik-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.cik-nm {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cik-gp { font-size: 13px; color: var(--text-3); }
+.cik-state {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--live);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+/* checked-in row: muted-green tint + accent on the avatar swaps to live */
+.cik-btn.is-in {
+  background: var(--live-soft);
+  border-color: var(--success-border);
+}
+.cik-btn.is-in .av { background: oklch(0.92 0.05 150); color: var(--live); }
+
+.cik-none {
+  text-align: center;
+  color: var(--text-3);
+  font-size: 14px;
+  margin: 16px 0;
+}
+
+.cik-new {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 16px;
+  background: transparent;
+  color: var(--text-2);
+  border: 1.5px dashed var(--border-2);
+  border-radius: var(--r-md);
+  min-height: 52px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.cik-new:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.cik-new svg { width: 20px; height: 20px; }
+
+.cik-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 84px;
+  transform: translateX(-50%);
+  background: var(--live);
+  color: #fff;
+  padding: 12px 20px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  box-shadow: var(--shadow-md);
+  z-index: 1200;
+  animation: cik-toast-up .22s ease-out;
+  max-width: calc(100vw - 32px);
+  text-align: center;
+}
+.cik-toast[hidden] { display: none; }
+@keyframes cik-toast-up {
+  from { opacity: 0; transform: translate(-50%, 10px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.cik-adminpanel { margin-top: 18px; }
+.cik-adminpanel[hidden] { display: none; }
+
+.cik-admin {
+  display: block;
+  margin: 22px auto 0;
+  background: transparent;
+  border: none;
+  color: var(--text-4);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: 6px 10px;
+}
+.cik-admin:hover { color: var(--text-3); }
+
+@media (min-width: 769px) {
+  .cik-h { font-size: 30px; }
+}

@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.22';
+const APP_VERSION = '2026.06.20.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5106,29 +5106,40 @@ function adminLoginHTML() {
   `;
 }
 
-// C26 item 2: Public check-in / register panel. Markup moved verbatim; locals recomputed at the top
-// (byte-identical to render()'s former locals), old `!state.isAdmin ? … : ''` wrapper removed.
-function publicCheckinHTML() {
-  const regMsg = messages.registration ? `<p class="msg">${escapeHTML(messages.registration)}</p>` : '';
-  const checkMsg = messages.checkIn ? `<p class="msg">${escapeHTML(messages.checkIn)}</p>` : '';
-  return `
-  <div class="grid-2">
-  <div class="card card-checkin">
-    <h2>Check In</h2>
-    <input type="text" id="check-name" placeholder="First and Last Name" autocapitalize="words" autocomplete="off" spellcheck="false" />
-    <div class="row checkin-actions">
-      <button id="btn-check-in">Check In</button>
-      <button id="btn-check-out">Check Out</button>
-    </div>
-    ${checkMsg}
-  </div>
+// C36 T1: PUBLIC Check In → kiosk "type your name → tap it → checked in" (design LOCKED §38 B).
+// NO skill anywhere (rulebook §AS-1 — public surface): same-name players are disambiguated by
+// GROUP + full name, never skill. NO emoji / NO neon — direction-A tokens + SVG icons only.
+// All behavior (check in / check out toggle / register) routes through the SAME existing paths/RPCs
+// wired in attachHandlers (check_in / check_out / register_player) — no new DB. The big name buttons
+// render into #checkin-results via a targeted DOM update (renderCheckinResults), never full-render
+// on keystroke. The "Admin" corner link reveals the existing adminLoginHTML() form (handler intact).
+function renderCheckinButton(row) {
+  const inClass = row.checkedIn ? ' is-in' : '';
+  const stateLabel = row.checkedIn ? 'Checked in' : '';
+  const group = row.group ? `<span class="cik-gp">${escapeHTML(row.group)}</span>` : '';
+  return `<button class="cik-btn${inClass}" type="button" data-checkin-id="${escapeHTML(String(row.id))}">`
+    + `<span class="av">${escapeHTML(row.initials || '')}</span>`
+    + `<span class="cik-info"><span class="cik-nm">${escapeHTML(row.name)}</span>${group}</span>`
+    + `<span class="cik-state">${stateLabel}</span></button>`;
+}
 
-  <div class="card card-register">
-    <h2>Register Player</h2>
-    <input type="text" id="register-name" placeholder="First and Last Name" autocapitalize="words" autocomplete="off" spellcheck="false" />
-    <button id="btn-register">Register</button>
-    ${regMsg}
-  </div>
+function publicCheckinHTML() {
+  return `
+  <div class="ci-kiosk">
+    <h2 class="cik-h">Check in</h2>
+    <p class="cik-sub">Type your name, then tap it</p>
+    <div class="cik-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="checkin-search" type="text" placeholder="Start typing your name&hellip;" autocapitalize="words" autocomplete="off" spellcheck="false" aria-label="Type your name" />
+    </div>
+    <div id="checkin-results"></div>
+    <button class="cik-new" id="btn-checkin-new" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      I'm new &mdash; add me
+    </button>
+    <div id="checkin-toast" class="cik-toast" hidden></div>
+    <div id="checkin-admin-panel" class="cik-adminpanel" hidden>${adminLoginHTML()}</div>
+    <button class="cik-admin" id="btn-open-admin" type="button">Admin</button>
   </div>
   `;
 }
@@ -5152,7 +5163,6 @@ function renderPublicShell() {
     <div id="tab-players" class="tab-panel">
       <div class="container">
         <div id="js-checkin-stats">${buildCheckinStatsHTML()}</div>
-        ${adminLoginHTML()}
         ${publicCheckinHTML()}
       </div>
     </div>
@@ -6597,101 +6607,113 @@ if (saveSupabaseBtn) {
     });
   }
 
-  // --- Public: Check in/out ---
-  const checkInBtn = document.getElementById('btn-check-in');
-  if (checkInBtn) {
-    checkInBtn.addEventListener('click', () => {
-      const input = document.getElementById('check-name');
-      const name = (input && input.value || '').trim();
-      if (!name) return;
+  // --- Public: Check In kiosk (C36 T1) — type your name -> tap it -> checked in ---
+  const checkinSearch = document.getElementById('checkin-search');
+  const checkinResults = document.getElementById('checkin-results');
+  if (checkinSearch && checkinResults) {
+    // Targeted DOM update — render the big name buttons from live state for the current query.
+    // NEVER full-render on keystroke; this re-reads state so it also reflects in/out changes.
+    // The pure helper's `checkedIn` is seeded from player.checked_in (the synced DB field); the
+    // LIVE source of truth for the toggle is state.checkedIn (the key array checkInPlayer/
+    // checkOutPlayer mutate instantly), so overlay it here so a just-tapped button flips at once,
+    // before any Supabase round-trip.
+    const renderCheckinResultsForQuery = () => {
+      const q = checkinSearch.value;
+      const inSet = new Set(state.checkedIn || []);
+      const list = disambiguatePlayersByName(state.players, q).map((row) => {
+        const p = state.players.find((pl) => String(pl.id) === String(row.id));
+        return p ? { ...row, checkedIn: inSet.has(playerIdentityKey(p)) } : row;
+      });
+      checkinResults.innerHTML = list.length
+        ? list.map(renderCheckinButton).join('')
+        : (q.trim() ? '<p class="cik-none">No match &mdash; tap &ldquo;I&rsquo;m new&rdquo; to add yourself.</p>' : '');
+    };
 
-      const player = state.players.find((p) => normalize(p.name) === normalize(name));
-      if (player) {
-        const changed = checkInPlayer(player);
-        if (changed) {
-          if (supabaseClient && player.id) {
+    const showCheckinToast = (text) => {
+      const toast = document.getElementById('checkin-toast');
+      if (!toast) return;
+      toast.textContent = text;
+      toast.hidden = false;
+      clearTimeout(showCheckinToast._t);
+      showCheckinToast._t = setTimeout(() => { toast.hidden = true; }, 2600);
+    };
+
+    checkinSearch.addEventListener('input', renderCheckinResultsForQuery);
+
+    // Toggle: tapping a NOT-checked-in name checks in; tapping a checked-in name checks out.
+    // Both route through the SAME existing optimistic + rpc('check_in'|'check_out') + outbox path.
+    checkinResults.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-checkin-id]');
+      if (!btn) return;
+      const id = btn.getAttribute('data-checkin-id');
+      const player = state.players.find((p) => String(p.id) === String(id));
+      if (!player) return;
+
+      const isIn = (state.checkedIn || []).includes(playerIdentityKey(player));
+      if (!isIn) {
+        if (checkInPlayer(player) && supabaseClient && player.id) {
+          (async () => {
+            try {
+              const { error } = await supabaseClient.rpc('check_in', { p_id: player.id });
+              if (error) throw error;
+              queueSupabaseRefresh();
+            } catch (err) {
+              console.error('Supabase update error', err);
+              outboxEnqueue({ key: 'att:' + player.id, kind: 'check_in', payload: { p_id: player.id }, ts: Date.now() });
+            }
+          })();
+        }
+        showCheckinToast(`${player.name} — you're checked in`);
+      } else {
+        if (checkOutPlayer(player) && supabaseClient && player.id) {
+          (async () => {
+            try {
+              const { error } = await supabaseClient.rpc('check_out', { p_id: player.id });
+              if (error) throw error;
+              queueSupabaseRefresh();
+            } catch (err) {
+              console.error('Supabase check-out error', err);
+              outboxEnqueue({ key: 'att:' + player.id, kind: 'check_out', payload: { p_id: player.id }, ts: Date.now() });
+            }
+          })();
+        }
+        showCheckinToast(`${player.name} — checked out`);
+      }
+      saveLocal();
+      // Refresh just the stats + the result buttons (so the tapped button flips state) — no full render.
+      const statsEl = document.getElementById('js-checkin-stats');
+      if (statsEl) statsEl.innerHTML = buildCheckinStatsHTML();
+      renderCheckinResultsForQuery();
+    });
+
+    // "I'm new — add me": reuse the EXACT register path, then check the new player in (kiosk intent).
+    const newBtn = document.getElementById('btn-checkin-new');
+    if (newBtn) {
+      newBtn.addEventListener('click', async () => {
+        const name = (checkinSearch.value || '').trim();
+        if (!name) { showCheckinToast('Type your name first'); checkinSearch.focus(); return; }
+
+        // Already in history? Treat the kiosk "new" tap as a check-in for that existing player.
+        const exists = state.players.find((p) => normalize(p.name) === normalize(name));
+        if (exists) {
+          if (checkInPlayer(exists) && supabaseClient && exists.id) {
             (async () => {
               try {
-                const { error } = await supabaseClient.rpc('check_in', { p_id: player.id });
+                const { error } = await supabaseClient.rpc('check_in', { p_id: exists.id });
                 if (error) throw error;
                 queueSupabaseRefresh();
               } catch (err) {
                 console.error('Supabase update error', err);
-                outboxEnqueue({ key: 'att:' + player.id, kind: 'check_in', payload: { p_id: player.id }, ts: Date.now() });
+                outboxEnqueue({ key: 'att:' + exists.id, kind: 'check_in', payload: { p_id: exists.id }, ts: Date.now() });
               }
             })();
           }
-          messages.checkIn = 'You are checked in';
-        } else {
-          messages.checkIn = 'You are already checked in.';
-        }
-      } else {
-        messages.checkIn = 'Player not found in history';
-      }
-
-      setTimeout(() => { messages.checkIn = ''; render(); }, 3000);
-      if (input) input.value = '';
-      saveLocal();
-      render();
-    });
-  }
-
-  const checkOutBtn = document.getElementById('btn-check-out');
-  if (checkOutBtn) {
-    checkOutBtn.addEventListener('click', () => {
-      const input = document.getElementById('check-name');
-      const name = (input && input.value || '').trim();
-      if (!name) return;
-
-      const player = state.players.find((p) => normalize(p.name) === normalize(name));
-      if (player) {
-        if (checkOutPlayer(player)) {
-          if (supabaseClient && player.id) {
-            (async () => {
-              try {
-                const { error } = await supabaseClient.rpc('check_out', { p_id: player.id });
-                if (error) throw error;
-                queueSupabaseRefresh();
-              } catch (err) {
-                console.error('Supabase check-out error', err);
-                outboxEnqueue({ key: 'att:' + player.id, kind: 'check_out', payload: { p_id: player.id }, ts: Date.now() });
-              }
-            })();
-          }
-          messages.checkIn = 'You are now checked out.';
-        } else {
-          messages.checkIn = 'You were not checked in.';
-        }
-      } else {
-        messages.checkIn = 'Player not found.';
-      }
-
-      setTimeout(() => { messages.checkIn = ''; render(); }, 3000);
-      if (input) input.value = '';
-      saveLocal();
-      render();
-    });
-  }
-
-    // --- Public: Register new player (simple, default skill) ---
-    const registerBtn = document.getElementById('btn-register');
-    if (registerBtn) {
-      registerBtn.addEventListener('click', async () => {
-        const input = document.getElementById('register-name');
-        const name = (input && input.value || '').trim();
-        if (!name) {
-          messages.registration = 'Please enter a name';
-          setTimeout(() => { messages.registration = ''; render(); }, 2500);
-          return render();
-        }
-
-        // prevent duplicates by normalized name
-        const exists = state.players.find((p) => normalize(p.name) === normalize(name));
-        if (exists) {
-          messages.registration = 'Player already registered';
-          setTimeout(() => { messages.registration = ''; render(); }, 2500);
-          if (input) input.value = '';
-          return render();
+          showCheckinToast(`${exists.name} — you're checked in`);
+          saveLocal();
+          const statsEl = document.getElementById('js-checkin-stats');
+          if (statsEl) statsEl.innerHTML = buildCheckinStatsHTML();
+          renderCheckinResultsForQuery();
+          return;
         }
 
         const activeGroupForRegister = normalizeActiveGroupSelection(state.activeGroup || 'All');
@@ -6700,57 +6722,66 @@ if (saveSupabaseBtn) {
           : (activeGroupForRegister && activeGroupForRegister !== 'All' && activeGroupForRegister !== UNGROUPED_FILTER_VALUE ? activeGroupForRegister : '');
         const groups = group ? [group] : [];
         const skill = 0.0;
-        const newPlayer = { name, skill, group, groups };
-        // pending:true keeps this in-flight row alive through a racing sync until the
-        // insert resolves (see mergePlayersAfterSync) — fixes "registered player vanishes".
-        const inserted = { ...newPlayer, pending: true };
+        // pending:true keeps this in-flight row alive through a racing sync (mergePlayersAfterSync).
+        const inserted = { name, skill, group, groups, pending: true };
         state.players = [...state.players, inserted];
-
-        if (input) input.value = '';
-        messages.registration = supabaseClient ? 'Registering…' : 'Registered';
+        // kiosk intent: a "new" player is here and checking in now — check them in optimistically too.
+        checkInPlayer(inserted);
+        showCheckinToast(`${name} — you're checked in`);
         saveLocal();
-        render();
+        const statsEl0 = document.getElementById('js-checkin-stats');
+        if (statsEl0) statsEl0.innerHTML = buildCheckinStatsHTML();
+        renderCheckinResultsForQuery();
 
         if (supabaseClient) {
-          (async () => {
-            try {
-              let remoteOK = false;
-              // C21: register through the SECURITY DEFINER RPC (the only anon write door under
-              // locked RLS). Idempotent server-side; returns the row so we adopt its id. No
-              // p_checked_in -> false: public register leaves the player checked OUT (the separate
-              // Check In step still applies), matching prior behavior.
-              {
-                const { data, error } = await supabaseClient.rpc('register_player', { p_name: name, p_group: group });
-                if (error) throw error;
-                remoteOK = true;
-                const row = Array.isArray(data) ? data[0] : data;
-                if (row && row.id) inserted.id = row.id;
+          try {
+            // C21: register through the SECURITY DEFINER RPC (the only anon write door under locked RLS).
+            const { data, error } = await supabaseClient.rpc('register_player', { p_name: name, p_group: group });
+            if (error) throw error;
+            const row = Array.isArray(data) ? data[0] : data;
+            if (row && row.id) inserted.id = row.id;
+            await ensureGroupCatalogEntriesSupabase(group ? [group] : []);
+            inserted.pending = false;
+            // Now that the row has a real id, check it in server-side too.
+            if (inserted.id) {
+              try {
+                const { error: ciErr } = await supabaseClient.rpc('check_in', { p_id: inserted.id });
+                if (ciErr) throw ciErr;
+              } catch (ciErr) {
+                console.error('Supabase check-in error', ciErr);
+                outboxEnqueue({ key: 'att:' + inserted.id, kind: 'check_in', payload: { p_id: inserted.id }, ts: Date.now() });
               }
-              await ensureGroupCatalogEntriesSupabase(group ? [group] : []);
-              inserted.pending = false;
-              if (remoteOK) {
-                messages.registration = 'Registered';
-                queueSupabaseRefresh();
-              } else {
-                messages.registration = 'Could not save — check your connection and try again.';
-                await reconcileToSupabaseAuthority('public-register');
-              }
-            } catch (err) {
-              console.error('Supabase insert error', err);
-              // C22 item 3: keep the row pending (the sync merge carries it forward) + queue the
-              // register to retry on reconnect, instead of dropping the write.
-              inserted.pending = true;
-              outboxEnqueue({ key: 'reg:' + normalize(name) + ':' + (group || ''), kind: 'register', payload: { name, group }, ts: Date.now() });
-              messages.registration = 'Saved on this device — will sync when back online.';
             }
-            render();
-            setTimeout(() => { messages.registration = ''; render(); }, 2500);
-          })();
-        } else {
-          setTimeout(() => { messages.registration = ''; render(); }, 2500);
+            queueSupabaseRefresh();
+          } catch (err) {
+            console.error('Supabase insert error', err);
+            inserted.pending = true;
+            outboxEnqueue({ key: 'reg:' + normalize(name) + ':' + (group || ''), kind: 'register', payload: { name, group }, ts: Date.now() });
+            showCheckinToast('Saved on this device — will sync when online');
+          }
+          saveLocal();
+          const statsEl1 = document.getElementById('js-checkin-stats');
+          if (statsEl1) statsEl1.innerHTML = buildCheckinStatsHTML();
+          renderCheckinResultsForQuery();
         }
       });
     }
+
+    // "Admin" corner link reveals the existing adminLoginHTML() form (its submit handler is bound
+    // separately and stays intact). Just toggle the hidden panel + focus the code field.
+    const openAdminBtn = document.getElementById('btn-open-admin');
+    if (openAdminBtn) {
+      openAdminBtn.addEventListener('click', () => {
+        const panel = document.getElementById('checkin-admin-panel');
+        if (!panel) return;
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden) {
+          const codeInput = document.getElementById('admin-code');
+          if (codeInput) codeInput.focus();
+        }
+      });
+    }
+  }
 
   // --- Player cards: inline actions ---
   function attachPlayerRowHandlers() {

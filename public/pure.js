@@ -445,12 +445,47 @@ function generateDoubleElim(N, resetEnabled) {
   return { realMatches, B, K, seedCount: N };
 }
 
+// C36 T1: kiosk "tap your name" search. PURE (no DOM / no app state) so the kiosk handler can
+// feed it state.players + the live search text and render the result buttons. Returns a NO-SKILL
+// row shape {id,name,group,initials,checkedIn} — skill is admin-only and must never reach this
+// public surface (rulebook §AS-1). Disambiguation is by group + full name, never skill.
+//   - case-insensitive name SUBSTRING match
+//   - drops __as_* sentinel rows (the "All Players" pseudo-row etc.)
+//   - prefix matches sort before mid-string matches (typing your first name surfaces you first)
+//   - capped at 12 so the kiosk list stays tappable; [] for an empty/whitespace query
+function disambiguatePlayersByName(players, query) {
+  const q = String(query == null ? '' : query).trim().toLowerCase();
+  if (!q) return [];
+  const scored = [];
+  for (const p of (players || [])) {
+    if (!p || typeof p !== 'object') continue;
+    if (typeof p.id === 'string' && p.id.indexOf('__as_') === 0) continue; // sentinel rows
+    const name = String(p.name || '');
+    const lower = name.toLowerCase();
+    const pos = lower.indexOf(q);
+    if (pos < 0) continue;
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    const initials = (parts.length
+      ? (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : ''))
+      : '').toUpperCase();
+    scored.push({
+      _prefix: pos === 0 ? 0 : 1,
+      _name: lower,
+      row: { id: p.id, name, group: p.group || '', initials, checkedIn: !!p.checked_in }
+    });
+  }
+  // prefix matches first, then alphabetical by name for a stable, predictable order
+  scored.sort((a, b) => (a._prefix - b._prefix) || a._name.localeCompare(b._name));
+  return scored.slice(0, 12).map((s) => s.row);
+}
+
 // CommonJS export for the test runner; skipped in the browser (module is undefined there).
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
     generateOneBalancedCandidate, generateBalancedGroups, validateScores,
     generateRoundRobin, decideWinner, computeStandings, applyHeadToHeadGroups,
-    nextPow2, seedOrder, computeSeeding, computeChampion, generateDoubleElim
+    nextPow2, seedOrder, computeSeeding, computeChampion, generateDoubleElim,
+    disambiguatePlayersByName
   };
 }
