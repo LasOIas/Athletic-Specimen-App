@@ -2112,3 +2112,91 @@ select:focus {
 @media (min-width: 769px) {
   .cik-h { font-size: 30px; }
 }
+
+/* ===================================================================
+   C40/C41/C42 (2026-06-20) — mobile UI reliability check
+   Players declutter + Dashboard live board + audit correctness fixes.
+   =================================================================== */
+
+/* C40: small Log out in the admin header (operator control moved off the roster) */
+.app-header-logout {
+  flex-shrink: 0;
+  font: 600 12.5px 'Inter', system-ui, sans-serif;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 12px;
+  min-height: 36px;
+  cursor: pointer;
+}
+.app-header-logout:active { background: var(--accent-soft); }
+
+/* C40: Session "Run the night" note */
+.session-newnight-note { margin: 0 0 12px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+
+/* C41: Dashboard live-courts empty state */
+.ad-live-empty {
+  background: var(--card);
+  border: 1px dashed var(--border);
+  border-radius: 13px;
+  padding: 16px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* C42 rank 1: per-row kebab (⋮) overflow menu — previously had ZERO css (unstyled / off-screen) */
+.menu-wrap { position: relative; }
+.btn-actions {
+  width: 40px; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid transparent; border-radius: 10px;
+  color: var(--muted); cursor: pointer; padding: 0;
+}
+.btn-actions:active { background: var(--accent-soft); }
+.card-menu {
+  display: none;
+  position: absolute; right: 0; top: calc(100% + 4px);
+  z-index: 60; min-width: 168px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow-md);
+  padding: 6px;
+}
+.menu-wrap.menu-open .card-menu { display: block; }
+.menu-item {
+  display: flex; align-items: center; width: 100%; text-align: left;
+  min-height: 44px; padding: 0 12px;
+  background: transparent; border: none; border-radius: 8px;
+  font: 600 14px 'Inter', system-ui, sans-serif; color: var(--ink); cursor: pointer;
+}
+.menu-item:active { background: var(--accent-soft); }
+.menu-item.danger { color: var(--danger); }
+
+/* C42 rank 4: tournament standings/pool table — previously had ZERO css (raw default table) */
+.table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table th {
+  text-align: left; font-weight: 700; color: var(--muted);
+  padding: 7px 9px; border-bottom: 1px solid var(--border);
+  font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em;
+}
+.table td { padding: 8px 9px; border-bottom: 1px solid var(--border); color: var(--ink); }
+.table tr:last-child td { border-bottom: none; }
+.table td:not(:first-child), .table th:not(:first-child) { text-align: right; }
+
+/* C42 rank 5: bigger tap targets for core session controls */
+.chip { min-height: 40px; display: inline-flex; align-items: center; }
+.nav-btn { min-height: 48px; }
+.player-select { width: 26px; height: 26px; }
+
+/* C42 rank 13: press / focus feedback on the primary tappable cards + buttons (was none) */
+.ad-qa { transition: transform .08s ease, background .12s ease; }
+.ad-qa:active { transform: scale(.985); background: var(--accent-soft); }
+.ph-cta { transition: transform .08s ease, filter .12s ease; }
+.ph-cta:active { transform: scale(.99); filter: brightness(.97); }
+.nav-btn:active { background: var(--accent-soft); }
+.ad-qa:focus-visible, .ph-cta:focus-visible, .nav-btn:focus-visible,
+.roster-add:focus-visible, .app-header-logout:focus-visible, .chip:focus-visible,
+.btn-actions:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}

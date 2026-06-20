@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.11';
+const APP_VERSION = '2026.06.20.12';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1262,10 +1262,12 @@ function partialRender() {
     }
   }
 
-  if (!syncNoticeEl || !statsEl || !playersEl) { render(); return; }
+  if (!syncNoticeEl || !playersEl) { render(); return; }
 
   syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
-  statsEl.innerHTML = buildCheckinStatsHTML();
+  // C40 (2026-06-20): the checked-in stat card was removed from the admin Players page (it duplicated
+  // the Dashboard stat), so #js-checkin-stats may be absent on the admin surface — guard it.
+  if (statsEl) statsEl.innerHTML = buildCheckinStatsHTML();
   // Reliability fix (2026-06-20): keep the admin Dashboard checked-in stat live (it lives in the
   // hidden dashboard panel; activateMainTab doesn't re-render, so without this it shows the stale
   // login-time count after a check-in).
@@ -4948,28 +4950,8 @@ function adminPlayersHTML() {
           <button type="button" id="roster-add-player" class="roster-add" aria-label="Add or update player" title="Add / update player">
             <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
           </button>
-          <div class="admin-toolbar">
-            <select id="admin-quick-open" aria-label="Menu">
-              <option value="">Menu</option>
-              <option value="checkin">Check In</option>
-              <option value="add-player">Add/Update Player</option>
-              <option value="show-qr">Show QR Code</option>
-            </select>
-            <div class="admin-toolbar-actions">
-              <button id="btn-save-supabase" class="secondary">Save</button>
-              <button id="btn-reset-checkins" class="danger">New session</button>
-              <button id="btn-logout" class="secondary">Logout</button>
-            </div>
-          </div>
         </div>
       </div>
-
-      ${canAccessOperatorSafetyControls() ? `
-      <details class="card recent-actions-card" ${state.operatorActions && state.operatorActions.length ? 'open' : ''}>
-        <summary class="recent-actions-summary"><h3>Recent Actions</h3></summary>
-        ${renderOperatorActionsLogHTML()}
-      </details>
-      ` : ''}
 
 <div class="card card-players">
   <div id="card-body-admin-players">
@@ -5316,36 +5298,44 @@ function buildDashboardStatHTML() {
 }
 
 function adminDashboardHTML() {
+  // C41 (2026-06-20): Dashboard leads with the 2x2 tiles (Mike's call), then the live status
+  // (checked-in stat + live courts board) below. Tile subtitles are STATEFUL. Co-pilot teaser
+  // removed (it duplicated the Co-pilot nav tab — Mike: remove what's duplicated).
+  const inCount = (state.checkedIn || []).length;
+  const teamCount = Array.isArray(state.generatedTeams) ? state.generatedTeams.length : 0;
+  const tourActive = (state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket');
+  const sessLabel = state.currentSession?.date ? formatSessionDate(state.currentSession.date) : 'Not set yet';
+  const courtsHTML = buildPublicLiveCourtsHTML();
+  const liveSection = courtsHTML
+    ? `<div class="ad-sec">On the courts now</div>${courtsHTML}`
+    : `<div class="ad-sec">On the courts now</div><div class="ad-live-empty">No courts live yet — generate teams to start a round.</div>`;
   return `
 <div class="container">
   <div class="ad-screen">
     <div class="ad-top">
       <div class="ad-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'} <span class="ad-badge">ADMIN</span></div>
     </div>
-    <div class="ad-statcard" id="js-dashboard-stat">${buildDashboardStatHTML()}</div>
     <div class="ad-sec">Quick actions</div>
     <div class="ad-qgrid">
       <button type="button" class="ad-qa" data-qa="checkin">
         <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg></div>
-        <div class="ad-qt">Check-in mode</div><div class="ad-qs">door kiosk / QR</div>
+        <div class="ad-qt">Check-in mode</div><div class="ad-qs">${inCount ? inCount + ' checked in' : 'door kiosk / QR'}</div>
       </button>
       <button type="button" class="ad-qa" data-qa="generate">
         <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3 20c0-3 2.7-5 6-5s6 2 6 5M15.5 20c0-2 1-3.4 3-3.8"/></svg></div>
-        <div class="ad-qt">Generate teams</div><div class="ad-qs">balanced</div>
+        <div class="ad-qt">Generate teams</div><div class="ad-qs">${teamCount ? teamCount + ' teams ready' : (inCount ? 'balanced' : 'needs check-ins')}</div>
       </button>
       <button type="button" class="ad-qa" data-qa="tournament">
         <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg></div>
-        <div class="ad-qt">Tournament</div><div class="ad-qs">pools + bracket</div>
+        <div class="ad-qt">Tournament</div><div class="ad-qs">${tourActive ? 'in progress' : 'pools + bracket'}</div>
       </button>
       <button type="button" class="ad-qa" data-qa="session">
         <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></div>
-        <div class="ad-qt">Session</div><div class="ad-qs">date &middot; QR share</div>
+        <div class="ad-qt">Session</div><div class="ad-qs">${escapeHTML(sessLabel)}</div>
       </button>
     </div>
-    <button type="button" class="ad-copilot" data-nav-tab="copilot">
-      <div class="ad-sp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z"/><path d="M19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9z"/></svg></div>
-      <div><div class="ad-ct">Ask the co-pilot</div><div class="ad-cs">coming soon</div></div>
-    </button>
+    <div class="ad-statcard" id="js-dashboard-stat">${buildDashboardStatHTML()}</div>
+    ${liveSection}
   </div>
 </div>`;
 }
@@ -5376,6 +5366,7 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
   <header id="app-header">
     <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
     <span class="app-header-version">v${APP_VERSION}</span>
+    <button type="button" id="btn-logout" class="app-header-logout">Log out</button>
   </header>
   <div id="app-content">
     <div id="tab-dashboard" class="tab-panel">
@@ -5423,12 +5414,21 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
               </div>` : ''}
             </div>
           </div>
+          <div class="card session-admin-card">
+            <h3 class="session-card-h">Run the night</h3>
+            <p class="small session-newnight-note">Start a new session to begin a fresh attendance night — everyone is checked out and the previous night is kept as history.</p>
+            <button id="btn-reset-checkins" class="danger">Start new session</button>
+            ${canAccessOperatorSafetyControls() ? `
+            <details class="recent-actions-card" ${state.operatorActions && state.operatorActions.length ? 'open' : ''}>
+              <summary class="recent-actions-summary"><h3>Recent actions</h3></summary>
+              ${renderOperatorActionsLogHTML()}
+            </details>` : ''}
+          </div>
         </div>
       </div>
     </div>
     <div id="tab-players" class="tab-panel">
       <div class="container">
-        <div id="js-checkin-stats">${buildCheckinStatsHTML()}</div>
         ${adminPlayersHTML()}
       </div>
     </div>
@@ -7518,11 +7518,11 @@ if (removeBtn) {
       btnSaveSession.textContent = 'Saving…';
       const ok = await saveSession(date, time, location);
       btnSaveSession.disabled = false;
-      btnSaveSession.textContent = 'Save Session';
+      btnSaveSession.textContent = 'Save session';
       const msg = document.getElementById('session-save-msg');
       if (msg) {
         msg.style.color = ok ? 'var(--success)' : 'var(--danger)';
-        msg.textContent  = ok ? '✓ Session saved' : '✗ Save failed — check connection';
+        msg.textContent  = ok ? 'Session saved' : 'Save failed — check connection';
         msg.style.display = 'block';
         if (ok) { setTimeout(() => { msg.style.display = 'none'; }, 2500); render(); }
       }
