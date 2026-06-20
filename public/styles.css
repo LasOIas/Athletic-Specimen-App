@@ -247,6 +247,10 @@ select:focus {
   justify-content: flex-end;
   gap: 10px;
   padding: 6px 16px;
+  /* viewport-fit=cover (C26 4c): clear the iOS notch / status bar so the strip isn't hidden under it */
+  padding-top: calc(6px + env(safe-area-inset-top, 0px));
+  padding-right: calc(16px + env(safe-area-inset-right, 0px));
+  padding-left: calc(16px + env(safe-area-inset-left, 0px));
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   min-height: 0;
