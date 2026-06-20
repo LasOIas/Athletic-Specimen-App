@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.8';
+const APP_VERSION = '2026.06.20.9';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1239,10 +1239,33 @@ function partialRender() {
   const statsEl = document.getElementById('js-checkin-stats');
   const playersEl = document.querySelector('.players');
 
+  // Reliability fix (2026-06-20): the public Check In kiosk has no `.players` element, so partialRender
+  // would otherwise fall through to a full render() that rebuilds the shell and WIPES the half-typed
+  // name out of #checkin-search on every background sync (15s poll, cross-device realtime push,
+  // focus/visibility). When the kiosk search is in active use, update it surgically and leave the input
+  // untouched. (Empty + unfocused → fall through to full render so Home/Scores/Bracket still refresh.)
+  if (!playersEl) {
+    const checkinResultsEl = document.getElementById('checkin-results');
+    const checkinSearchEl = document.getElementById('checkin-search');
+    const kioskActive = checkinSearchEl
+      && (document.activeElement === checkinSearchEl || ((checkinSearchEl.value || '').trim() !== ''));
+    if (checkinResultsEl && kioskActive) {
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      if (statsEl) statsEl.innerHTML = buildCheckinStatsHTML();
+      checkinResultsEl.innerHTML = buildKioskResultsHTML(checkinSearchEl.value);
+      return;
+    }
+  }
+
   if (!syncNoticeEl || !statsEl || !playersEl) { render(); return; }
 
   syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
   statsEl.innerHTML = buildCheckinStatsHTML();
+  // Reliability fix (2026-06-20): keep the admin Dashboard checked-in stat live (it lives in the
+  // hidden dashboard panel; activateMainTab doesn't re-render, so without this it shows the stale
+  // login-time count after a check-in).
+  const dashStatEl = document.getElementById('js-dashboard-stat');
+  if (dashStatEl) dashStatEl.innerHTML = buildDashboardStatHTML();
 
   const snapshot = captureTransientInteractionState();
   playersEl.innerHTML = renderFilteredPlayers();
@@ -2540,7 +2563,7 @@ function renderFilteredPlayers() {
         <div class="prow-id">
           <span class="player-name">${player.name}</span>
           <div class="player-meta-row">
-            <span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span>
+            ${state.isAdmin ? `<span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span>` : ''}
             ${groupsDisplayHTML}
           </div>
         </div>
@@ -3541,8 +3564,17 @@ async function syncCheckedInStateToSupabase() {
   for (const player of (state.players || [])) {
     if (!player || !player.id) continue;
     const shouldBeCheckedIn = checkedSet.has(playerIdentityKey(player));
-    const ok = await updatePlayerFieldsSupabase(player.id, { checked_in: shouldBeCheckedIn });
-    if (!ok) failed = true;
+    // C21 single-source contract (reliability fix 2026-06-20): reconcile through the check_in/check_out
+    // RPCs (which also maintain the check_ins history) instead of a direct checked_in UPDATE that
+    // desynced the history table. Rare path (operator undo / authority reconcile), so per-player RPCs
+    // are acceptable.
+    try {
+      const { error } = await supabaseClient.rpc(shouldBeCheckedIn ? 'check_in' : 'check_out', { p_id: player.id });
+      if (error) throw error;
+    } catch (err) {
+      console.error('syncCheckedInStateToSupabase RPC error', err);
+      failed = true;
+    }
   }
   if (failed) return false;
   queueSupabaseRefresh();
@@ -4842,7 +4874,7 @@ function adminTeamsHTML(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
     ${[2, 3, 4, 6].map((sz) => {
       const n = Math.floor(state.checkedIn.length / sz);
       const active = state.lastTeamSize === sz ? ' is-active' : '';
-      return `<button type="button" class="team-size-chip${active}" data-team-size="${sz}">
+      return `<button type="button" class="team-size-chip${active}" data-team-size="${sz}" aria-pressed="${state.lastTeamSize === sz ? 'true' : 'false'}">
         <strong>${sz}s</strong>
         <span>${n} ${n === 1 ? 'team' : 'teams'}</span>
       </button>`;
@@ -4878,7 +4910,10 @@ function adminPlayersHTML() {
   const isActiveGroupValue = (value) => normalizeActiveGroupSelection(value || 'All') === normalizedActiveGroup;
   const topFormGroupOptions = getTopFormGroupDatalistOptions();
   const topFormContext = renderTopFormGroupsHelpAndPreview('', '');
-  const checkMsg = messages.checkIn ? `<p class="msg">${escapeHTML(messages.checkIn)}</p>` : '';
+  // Reliability fix (2026-06-20): stable aria-live feedback node for the admin Check In modal. The
+  // handler (#btn-check-in/#btn-check-out, re-added in attachHandlers) writes into it directly, so the
+  // modal can stay open for back-to-back check-ins without a full render() that would close it.
+  const checkMsg = `<p id="admin-checkin-msg" class="msg" role="status" aria-live="polite"></p>`;
   const rosterCount = (state.players || []).length;
   const chip = (value, label) => `<button type="button" class="chip ${state.playerTab === value ? 'on' : ''}" data-chip-tab="${value}" aria-pressed="${state.playerTab === value ? 'true' : 'false'}">${label}</button>`;
   const groupsChipOn = normalizedActiveGroup !== 'All';
@@ -4941,6 +4976,7 @@ function adminPlayersHTML() {
       ${chip('in', 'Checked in')}
       ${chip('out', 'Out')}
       ${chip('skill', 'Skill')}
+      ${chip('unrated', 'Unset')}
       <button type="button" class="chip ${groupsChipOn ? 'on' : ''}" data-chip-groups aria-pressed="${groupsChipOn ? 'true' : 'false'}">Groups</button>
       <button type="button" class="chip" id="btn-select-all-visible">Select all shown</button>
     </div>
@@ -5151,6 +5187,21 @@ function renderCheckinButton(row) {
     + `<span class="cik-state">${stateLabel}</span></button>`;
 }
 
+// Reliability fix (2026-06-20): module-level so BOTH the kiosk closure (renderCheckinResultsForQuery)
+// and partialRender's public-kiosk branch derive the big name buttons identically. Overlays the LIVE
+// state.checkedIn truth onto the synced player.checked_in so a just-tapped / cross-device check-in
+// reflects at once. NO skill (public surface) — disambiguation is name + group only.
+function buildKioskResultsHTML(query) {
+  const inSet = new Set(state.checkedIn || []);
+  const list = disambiguatePlayersByName(state.players, query).map((row) => {
+    const p = state.players.find((pl) => String(pl.id) === String(row.id));
+    return p ? { ...row, checkedIn: inSet.has(playerIdentityKey(p)) } : row;
+  });
+  return list.length
+    ? list.map(renderCheckinButton).join('')
+    : ((query || '').trim() ? '<p class="cik-none">No match &mdash; tap &ldquo;I&rsquo;m new&rdquo; to add yourself.</p>' : '');
+}
+
 function publicCheckinHTML() {
   return `
   <div class="ci-kiosk">
@@ -5165,7 +5216,7 @@ function publicCheckinHTML() {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       I'm new &mdash; add me
     </button>
-    <div id="checkin-toast" class="cik-toast" hidden></div>
+    <div id="checkin-toast" class="cik-toast" role="status" aria-live="polite" hidden></div>
     <div id="checkin-admin-panel" class="cik-adminpanel" hidden>${adminLoginHTML()}</div>
     <button class="cik-admin" id="btn-open-admin" type="button">Admin</button>
   </div>
@@ -5233,21 +5284,24 @@ function renderPublicShell() {
 // C26 item 3b: admin Dashboard ("run the night"), layout A — statcard + 2x2 quick-actions + Co-pilot teaser.
 // Count + per-group reuse the SAME source as the Players stats card (state.checkedIn.length + computeCheckedInByGroup)
 // so the Dashboard matches Supabase. NO skill, NO emoji, SVG icons only, Direction-A tokens only.
-function adminDashboardHTML() {
+// Reliability fix (2026-06-20): the dashboard checked-in stat is refreshed by partialRender (like the
+// Players-tab #js-checkin-stats) so it stays TRUE after a check-in instead of going stale at its login value.
+function buildDashboardStatHTML() {
   const group = (state.isAdmin && !state.limitedGroup) ? computeCheckedInByGroup() : [];
   const grpLine = group.length
     ? `<div class="ad-grpline">${group.map((r) => `<span><b>${r.in}</b> ${escapeHTML(r.groupLabel)}</span>`).join('')}</div>`
     : '';
+  return `<div class="ad-statbig"><span class="ad-statnum">${state.checkedIn.length}</span><span class="ad-statlab">checked in</span></div>${grpLine}`;
+}
+
+function adminDashboardHTML() {
   return `
 <div class="container">
   <div class="ad-screen">
     <div class="ad-top">
       <div class="ad-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'} <span class="ad-badge">ADMIN</span></div>
     </div>
-    <div class="ad-statcard">
-      <div class="ad-statbig"><span class="ad-statnum">${state.checkedIn.length}</span><span class="ad-statlab">checked in</span></div>
-      ${grpLine}
-    </div>
+    <div class="ad-statcard" id="js-dashboard-stat">${buildDashboardStatHTML()}</div>
     <div class="ad-sec">Quick actions</div>
     <div class="ad-qgrid">
       <button type="button" class="ad-qa" data-qa="checkin">
@@ -5958,7 +6012,15 @@ function activateMainTab(tab) {
   activeMainTab = tab;
   sessionStorage.setItem(currentTabKey(), tab);
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
-  document.querySelectorAll('#bottom-nav .nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.navTab === tab));
+  // Reliability fix (2026-06-20): expose the current tab to assistive tech, not just a visual .active
+  // class (this is the single place nav active state is set — first paint via activateMainTab(activeMainTab)
+  // and on click — so aria-current stays correct everywhere).
+  document.querySelectorAll('#bottom-nav .nav-btn').forEach((b) => {
+    const isActive = b.dataset.navTab === tab;
+    b.classList.toggle('active', isActive);
+    if (isActive) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
   window.dispatchEvent(new Event('as-tab-changed')); // C25 item 5: refresh back-to-top visibility for the new panel
 }
 
@@ -6053,6 +6115,51 @@ if (adminQuickOpen) {
     adminQuickOpen.value = '';
   });
 }
+
+// Admin Check In modal (Menu -> Check In): type a name, tap Check In / Check Out. The C36 T1 rewrite
+// orphaned these buttons (markup left, handlers dropped) — a dead control presented as functional.
+// Re-bound here (RPC-routed, so it maintains check_ins history and does NOT reintroduce the bulk-bar
+// bypass). Mirrors the per-row delegated handler: optimistic local toggle -> partialRender (modal stays
+// open via the transient-state restore) -> check_in/check_out RPC with outbox fallback.
+const adminCheckNameInput = document.getElementById('check-name');
+const adminCheckInBtn = document.getElementById('btn-check-in');
+const adminCheckOutBtn = document.getElementById('btn-check-out');
+const setAdminCheckMsg = (text) => {
+  const el = document.getElementById('admin-checkin-msg');
+  if (el) el.textContent = text || '';
+};
+const runAdminModalCheck = (shouldCheckIn) => {
+  const name = ((adminCheckNameInput && adminCheckNameInput.value) || '').trim();
+  if (!name) {
+    setAdminCheckMsg('Type a player name first.');
+    if (adminCheckNameInput) adminCheckNameInput.focus();
+    return;
+  }
+  const player = state.players.find((p) => normalize(p.name) === normalize(name));
+  if (!player) {
+    setAdminCheckMsg(`No player named "${name}".`);
+    return;
+  }
+  const changed = shouldCheckIn ? checkInPlayer(player) : checkOutPlayer(player);
+  saveLocal();
+  partialRender(); // roster + stats update; the open modal is preserved by restoreTransientInteractionState
+  setAdminCheckMsg(`${player.name} — ${shouldCheckIn ? 'checked in' : 'checked out'}.`);
+  if (adminCheckNameInput) { adminCheckNameInput.value = ''; adminCheckNameInput.focus(); }
+  if (changed && supabaseClient && player.id) {
+    (async () => {
+      try {
+        const { error } = await supabaseClient.rpc(shouldCheckIn ? 'check_in' : 'check_out', { p_id: player.id });
+        if (error) throw error;
+        queueSupabaseRefresh();
+      } catch (err) {
+        console.error(shouldCheckIn ? 'Supabase admin check-in error' : 'Supabase admin check-out error', err);
+        outboxEnqueue({ key: 'att:' + player.id, kind: shouldCheckIn ? 'check_in' : 'check_out', payload: { p_id: player.id }, ts: Date.now() });
+      }
+    })();
+  }
+};
+if (adminCheckInBtn) adminCheckInBtn.addEventListener('click', () => runAdminModalCheck(true));
+if (adminCheckOutBtn) adminCheckOutBtn.addEventListener('click', () => runAdminModalCheck(false));
 
 function openQrModal() {
   const modal = document.getElementById('qrModal');
@@ -6437,12 +6544,19 @@ const logoutBtn = document.getElementById('btn-logout');
 // C21: follow the real session. If it ever ends while the UI still thinks it's admin — an explicit
 // signOut, or a failed token refresh — drop admin state so the UI can't show admin without a JWT.
 if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthStateChange === 'function') {
-  supabaseClient.auth.onAuthStateChange((event, session) => {
+  supabaseClient.auth.onAuthStateChange(async (event, session) => {
     if (!session && state.isAdmin) {
       state.isAdmin = false;
       state.masterAdminAuthenticated = false;
       state.limitedGroup = null;
       state.activeGroup = 'All';
+      // Reliability fix (2026-06-20): a SILENT session loss (JWT expiry / failed refresh) must purge
+      // skill from memory + the localStorage cache the same way explicit logout does — re-fetch as anon
+      // (the fetch omits the skill column when !isAdmin) and overwrite the cache before re-rendering.
+      try {
+        const synced = await syncFromSupabase();
+        if (synced) saveLocal();
+      } catch (err) { console.error('Post-logout anon re-sync error', err); }
       try { render(); } catch {}
     }
   });
@@ -6648,15 +6762,7 @@ if (saveSupabaseBtn) {
     // checkOutPlayer mutate instantly), so overlay it here so a just-tapped button flips at once,
     // before any Supabase round-trip.
     const renderCheckinResultsForQuery = () => {
-      const q = checkinSearch.value;
-      const inSet = new Set(state.checkedIn || []);
-      const list = disambiguatePlayersByName(state.players, q).map((row) => {
-        const p = state.players.find((pl) => String(pl.id) === String(row.id));
-        return p ? { ...row, checkedIn: inSet.has(playerIdentityKey(p)) } : row;
-      });
-      checkinResults.innerHTML = list.length
-        ? list.map(renderCheckinButton).join('')
-        : (q.trim() ? '<p class="cik-none">No match &mdash; tap &ldquo;I&rsquo;m new&rdquo; to add yourself.</p>' : '');
+      checkinResults.innerHTML = buildKioskResultsHTML(checkinSearch.value);
     };
 
     const showCheckinToast = (text) => {
@@ -7228,7 +7334,11 @@ const runBulkAttendanceAction = (shouldCheckIn) => {
     (async () => {
       try {
         for (const id of remoteIds) {
-          const { error } = await supabaseClient.from('players').update({ checked_in: shouldCheckIn }).eq('id', id);
+          // C21 single-source contract (reliability fix 2026-06-20): route bulk attendance through the
+          // SECURITY DEFINER check_in/check_out RPCs — the ONLY code that also maintains the check_ins
+          // history table. A direct `.update({checked_in})` set the flag but never inserted/deleted the
+          // check_ins row, silently under-counting attendance and leaving orphan rows on bulk check-out.
+          const { error } = await supabaseClient.rpc(shouldCheckIn ? 'check_in' : 'check_out', { p_id: id });
           if (error) throw error;
         }
         queueSupabaseRefresh();
@@ -7459,8 +7569,11 @@ function init() {
         })();
       }
       render();
-      loadSession().then(() => { if (state.currentSession) render(); });
-      tdbRefreshTournaments().then(() => render()).catch(() => {});
+      // Reliability fix (2026-06-20): coalesce the two post-boot async renders into ONE. loadSession
+      // (conditional) and tdbRefreshTournaments (unconditional) each fired their own render() within ~1s
+      // of boot, on top of this immediate paint — up to 3 full renders. Keep the immediate paint for
+      // first contentful render; render once more after both settle.
+      Promise.allSettled([loadSession(), tdbRefreshTournaments()]).then(() => render());
 
       if (!SyncManager.poll.interval) {
         // Keep multiple devices converged without requiring a full page refresh.
