@@ -2233,3 +2233,6 @@ select:focus {
 /* rank 31: team-fairness verdict line (was "Candidate runs: 250" jargon) */
 .fairness-line { margin: 4px 2px 8px; color: var(--muted); }
 .fairness-line strong { color: var(--ink); }
+
+/* C46 (rank 37): disabled secondary button (e.g. Share QR before a session is saved) */
+.secondary:disabled, button:disabled { opacity: .5; cursor: not-allowed; }
