@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.16';
+const APP_VERSION = '2026.06.20.17';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4422,17 +4422,21 @@ async function loadSession() {
 }
 
 async function saveSession(date, time, location) {
-  if (!supabaseClient) return false;
+  // C46 (rank 2): ALWAYS persist locally first so a typed session is never silently discarded —
+  // previously `if (!supabaseClient) return false` lost the data + showed a false "Save failed" toast
+  // in local-only / offline mode.
+  state.currentSession = { date, time, location };
+  saveLocal();
+  if (!supabaseClient) return true; // local-only mode: saved locally — this is success, not failure
   try {
     const { error } = await supabaseClient
       .from('sessions')
       .upsert({ id: 1, date, time, location, updated_at: new Date().toISOString() });
     if (error) throw error;
-    state.currentSession = { date, time, location };
     return true;
   } catch (err) {
     console.warn('saveSession error', err);
-    return false;
+    return false; // the local copy is saved; surface only the cloud failure
   }
 }
 
@@ -6131,16 +6135,9 @@ const closePopup = (popupId) => {
   document.body.style.overflow = '';
 };
 
-const adminQuickOpen = document.getElementById('admin-quick-open');
-if (adminQuickOpen) {
-  adminQuickOpen.addEventListener('change', () => {
-    const value = String(adminQuickOpen.value || '').trim();
-    if (value === 'checkin') openPopup('admin-checkin-modal');
-    if (value === 'add-player') openPopup('admin-add-player-modal');
-    if (value === 'show-qr') openQrModal();
-    adminQuickOpen.value = '';
-  });
-}
+// C46 cleanup: the admin "Menu" dropdown (#admin-quick-open) was removed in C40 (Add = the + button,
+// Show QR = the Dashboard tile, Check-in = the roster search + tap toggle — all duplicated). Its change
+// handler is removed here as a dead orphan.
 
 // Admin Check In modal (Menu -> Check In): type a name, tap Check In / Check Out. The C36 T1 rewrite
 // orphaned these buttons (markup left, handlers dropped) — a dead control presented as functional.
