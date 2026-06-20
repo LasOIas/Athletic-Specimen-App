@@ -2200,3 +2200,17 @@ select:focus {
 .btn-actions:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
 }
+
+/* ===== C43 (2026-06-20) — global + public polish ===== */
+/* rank 14: non-color active-nav affordance (top indicator bar, not color-only) */
+.nav-btn { position: relative; }
+.nav-btn.active::before {
+  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  width: 26px; height: 3px; border-radius: 0 0 3px 3px; background: var(--accent);
+}
+/* rank 22: "Round complete" pill on Scores when no court is actually live (was "0 playing" + a live dot) */
+.ph-done {
+  font: 700 11px 'Inter', system-ui, sans-serif;
+  color: var(--muted); background: var(--accent-soft);
+  padding: 4px 10px; border-radius: 999px; letter-spacing: .02em;
+}

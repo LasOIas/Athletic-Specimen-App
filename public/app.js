@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.13';
+const APP_VERSION = '2026.06.20.14';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2177,7 +2177,7 @@ function publicHomeHTML() {
   const liveData = getPublicLiveData();
   const courtsHTML = buildPublicLiveCourtsHTML();
   const livePill = courtsHTML
-    ? `<span class="ph-live"><span class="ph-dot"></span>Live now</span>`
+    ? `<span class="ph-live"><span class="ph-dot"></span>Live now &middot; ${liveData.matchups.length}</span>`
     : '';
   const sessionCard = state.currentSession
     ? `<div class="ph-card">
@@ -2188,7 +2188,7 @@ function publicHomeHTML() {
       </div>`
     : `<div class="ph-card ph-empty">No session scheduled yet — check back soon.</div>`;
   const liveSection = courtsHTML
-    ? `<div class="ph-sec">Live now &middot; ${liveData.matchups.length} ${liveData.matchups.length === 1 ? 'court' : 'courts'}</div>${courtsHTML}`
+    ? `<div class="ph-sec">On the courts</div>${courtsHTML}`
     : '';
   return `<div class="home-screen">
     <div class="ph-brand">Athletic Specimen ${livePill}</div>
@@ -2213,7 +2213,7 @@ function publicScoresHTML() {
        <div class="court-row"><div class="court-row-info"><div class="court-row-sub">${liveData.waitingTeams.map((t) => 'Team ' + Number(t)).join(', ')}</div></div></div>`
     : '';
   return `<div class="home-screen">
-    <div class="ph-brand">Live scores <span class="ph-live"><span class="ph-dot"></span>${liveData.liveCount} playing</span></div>
+    <div class="ph-brand">Live scores ${liveData.liveCount > 0 ? `<span class="ph-live"><span class="ph-dot"></span>${liveData.liveCount} playing</span>` : `<span class="ph-done">Round complete</span>`}</div>
     ${courtsHTML}
     ${upNext}
   </div>`;
