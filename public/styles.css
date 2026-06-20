@@ -1030,6 +1030,13 @@ select:focus {
 #bulkBar button,
 #bulkBar select { min-height: 40px; }
 #bulkBar select:disabled { opacity: .6; cursor: not-allowed; }
+/* C47 (rank 16): on phones, keep the bulk bar to ONE horizontally-scrollable row instead of wrapping
+   to 3+ rows over the last roster cards. */
+@media (max-width: 700px) {
+  .bulkbar-inner { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .bulkbar-inner .bulkbar-spacer { display: none; }
+  #bulkBar button, #bulkBar select, #bulkBar .bulkbar-grouplabel { flex-shrink: 0; white-space: nowrap; }
+}
 
 /* ── Popups / Modals ── */
 .popup-overlay {

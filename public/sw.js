@@ -1,6 +1,6 @@
 // C24 item 11: keep SW_VERSION in lockstep with APP_VERSION in app.js (bump both in the same edit) so
 // the cache name versions correctly and stale shells stop shipping.
-const SW_VERSION = '2026.06.20.20';
+const SW_VERSION = '2026.06.20.21';
 const CACHE_NAME = 'athletic-specimen-cache-' + SW_VERSION;
 const ASSETS = [
   '/',
