@@ -1600,8 +1600,9 @@ select:focus {
   .card-generate-teams .live-nets-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
   .card-generate-teams .live-net-card  { min-height: 220px; }
   .card-generate-teams .live-net-court { min-height: 124px; }
-  .card-generate-teams .live-matchups-board { max-height: 46vh; overflow: auto; }
-  .card-generate-teams .teams { max-height: 42vh; overflow: auto; padding-right: 4px; }
+  /* C36 T3: nets-first means Live Nets + team cards flow naturally (single page scroll) — the old
+     max-height/overflow caps created an awkward nested double-scroll on mobile; removed. */
+  .card-generate-teams .teams { padding-right: 4px; }
   .tournament-input-grid  { grid-template-columns: 1fr; }
   .tournament-match-actions { align-items: stretch; }
   .tournament-score-input { width: 100%; }
