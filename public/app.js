@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.6';
+const APP_VERSION = '2026.06.20.7';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3019,7 +3019,7 @@ function tournamentStatusLabel(status) {
 
 function buildTeamListHTML(teams, isAdmin) {
   if (!teams || !teams.length) {
-    return '<p class="small" style="color:#64748b;margin:0;">No teams yet.</p>';
+    return '<p class="small" style="color:var(--muted);margin:0;">No teams yet.</p>';
   }
   return teams.map((tm, i) => `
     <div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
@@ -3053,7 +3053,7 @@ function buildMatchRowHTML(m, teams, isAdmin, canSubmit) {
   if (m.status === 'final') {
     const aWin = m.winner_team_id === m.team_a_id;
     return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
-      <div class="small" style="color:#64748b;">Net ${escapeHTML(String(m.net || '-'))} · Final</div>
+      <div class="small" style="color:var(--muted);">Net ${escapeHTML(String(m.net || '-'))} · Final</div>
       <div class="row" style="justify-content:space-between;gap:8px;align-items:center;">
         <span style="flex:1;font-weight:${aWin ? '700' : '400'};color:${aWin ? 'var(--success)' : 'inherit'};">${an}</span>
         <span style="flex:0 0 auto;font-weight:700;">${escapeHTML(String(m.score_a))} - ${escapeHTML(String(m.score_b))}</span>
@@ -3064,16 +3064,16 @@ function buildMatchRowHTML(m, teams, isAdmin, canSubmit) {
   }
   if (!canSubmit) {
     return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
-      <div class="small" style="color:#64748b;">Net ${escapeHTML(String(m.net || '-'))}</div>
+      <div class="small" style="color:var(--muted);">Net ${escapeHTML(String(m.net || '-'))}</div>
       <div class="row" style="justify-content:space-between;gap:8px;">
         <span style="flex:1;min-width:0;">${an}</span>
-        <span style="flex:0 0 auto;color:#94a3b8;">vs</span>
+        <span style="flex:0 0 auto;color:var(--faint);">vs</span>
         <span style="flex:1;min-width:0;text-align:right;">${bn}</span>
       </div>
     </div>`;
   }
   return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
-    <div class="small" style="color:#64748b;">Net ${escapeHTML(String(m.net || '-'))}</div>
+    <div class="small" style="color:var(--muted);">Net ${escapeHTML(String(m.net || '-'))}</div>
     <div class="row" style="align-items:center;gap:6px;flex-wrap:nowrap;">
       <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${an}</span>
       <input type="number" inputmode="numeric" id="sc-a-${escapeHTML(m.id)}" style="flex:0 0 50px;width:50px;" placeholder="0" />
@@ -3098,7 +3098,7 @@ function buildNetBoardHTML(matches, teams) {
     const upTxt = `${escapeHTML(teamNameById(teams, up.team_a_id))} vs ${escapeHTML(teamNameById(teams, up.team_b_id))}`;
     return `<div class="row" style="justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);">
       <span style="flex:0 0 auto;font-weight:600;">Net ${net}</span>
-      <span style="flex:1;min-width:0;text-align:right;">${upTxt}${q.length > 1 ? ` <span class="small" style="color:#94a3b8;">+${q.length - 1} queued</span>` : ''}</span>
+      <span style="flex:1;min-width:0;text-align:right;">${upTxt}${q.length > 1 ? ` <span class="small" style="color:var(--faint);">+${q.length - 1} queued</span>` : ''}</span>
     </div>`;
   }).join('');
   return `<div class="card"><h3 style="margin:0 0 4px;">Up next by net</h3>${rows}</div>`;
@@ -3108,12 +3108,12 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
   const picked = pickedTeamId ? teams.find((t) => t.id === pickedTeamId) : null;
   const visiblePools = (picked && picked.pool_id) ? pools.filter((p) => p.id === picked.pool_id) : pools;
   const picker = `<div class="card">
-    <label class="small" style="color:#475569;display:block;margin-bottom:4px;">Your team (pick it to enter your scores)</label>
+    <label class="small" style="color:var(--muted);display:block;margin-bottom:4px;">Your team (pick it to enter your scores)</label>
     <select data-role="tv2-pick-team" style="width:100%;">
       <option value="">All pools</option>
       ${teams.map((t) => `<option value="${escapeHTML(t.id)}" ${t.id === pickedTeamId ? 'selected' : ''}>${escapeHTML(t.name)}</option>`).join('')}
     </select>
-    ${(!isAdmin && !pickedTeamId) ? '<p class="small" style="color:#94a3b8;margin:6px 0 0;">Pick your team above to enter your match scores.</p>' : ''}
+    ${(!isAdmin && !pickedTeamId) ? '<p class="small" style="color:var(--faint);margin:6px 0 0;">Pick your team above to enter your match scores.</p>' : ''}
   </div>`;
   const poolCards = visiblePools.map((pool) => {
     const poolTeams = teams.filter((t) => t.pool_id === pool.id);
@@ -3121,10 +3121,10 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
     const played = poolMatches.filter((m) => m.status === 'final').length;
     return `<div class="card">
       <h3 style="margin:0 0 2px;">Pool ${escapeHTML(pool.label)}</h3>
-      <div class="small" style="color:#64748b;margin:0 0 4px;">${played}/${poolMatches.length} games played</div>
+      <div class="small" style="color:var(--muted);margin:0 0 4px;">${played}/${poolMatches.length} games played</div>
       ${buildStandingsTableHTML(poolTeams, poolMatches)}
       <div style="margin-top:4px;">
-        ${poolMatches.length ? poolMatches.map((m) => buildMatchRowHTML(m, teams, isAdmin, isAdmin || (!!pickedTeamId && (m.team_a_id === pickedTeamId || m.team_b_id === pickedTeamId)))).join('') : '<p class="small" style="color:#64748b;margin:0;">No matches.</p>'}
+        ${poolMatches.length ? poolMatches.map((m) => buildMatchRowHTML(m, teams, isAdmin, isAdmin || (!!pickedTeamId && (m.team_a_id === pickedTeamId || m.team_b_id === pickedTeamId)))).join('') : '<p class="small" style="color:var(--muted);margin:0;">No matches.</p>'}
       </div>
     </div>`;
   }).join('');
@@ -3139,12 +3139,12 @@ function bracketLabelById(matches, id) {
 
 function buildBracketCardHTML(m, matches, teams, canSubmit) {
   const aKnown = !!m.team_a_id, bKnown = !!m.team_b_id;
-  const aName = aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : `<span style="color:#94a3b8;">${escapeHTML(m.source_a || 'TBD')}</span>`;
-  const bName = bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : `<span style="color:#94a3b8;">${escapeHTML(m.source_b || 'TBD')}</span>`;
+  const aName = aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : `<span style="color:var(--faint);">${escapeHTML(m.source_a || 'TBD')}</span>`;
+  const bName = bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : `<span style="color:var(--faint);">${escapeHTML(m.source_b || 'TBD')}</span>`;
   const winLbl = m.winner_next_match_id ? escapeHTML(bracketLabelById(matches, m.winner_next_match_id)) : 'Champion';
   const loseLbl = m.loser_next_match_id ? ` &nbsp;·&nbsp; Loser → ${escapeHTML(bracketLabelById(matches, m.loser_next_match_id))}` : '';
-  const header = `<div class="small" style="color:#64748b;">${escapeHTML(m.round_label || '')}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
-  const progression = `<div class="small" style="color:#94a3b8;margin-top:6px;">Winner → ${winLbl}${loseLbl}</div>`;
+  const header = `<div class="small" style="color:var(--muted);">${escapeHTML(m.round_label || '')}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
+  const progression = `<div class="small" style="color:var(--faint);margin-top:6px;">Winner → ${winLbl}${loseLbl}</div>`;
 
   let body;
   if (m.status === 'final') {
@@ -3157,7 +3157,7 @@ function buildBracketCardHTML(m, matches, teams, canSubmit) {
       <div class="row" style="justify-content:space-between;gap:8px;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--success)' : 'inherit'};">
         <span style="flex:1;min-width:0;">${bName}</span><span style="flex:0 0 auto;">${!aWin ? 'Won' : ''}</span>
       </div>
-      ${scoreTxt ? `<div class="small" style="color:#64748b;margin-top:2px;">${scoreTxt}</div>` : ''}
+      ${scoreTxt ? `<div class="small" style="color:var(--muted);margin-top:2px;">${scoreTxt}</div>` : ''}
       ${state.isAdmin ? `<button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}" style="margin-top:4px;font-size:12px;padding:4px 8px;">Clear</button>` : ''}`;
   } else if (aKnown && bKnown && canSubmit) {
     body = `
@@ -3172,28 +3172,28 @@ function buildBracketCardHTML(m, matches, teams, canSubmit) {
         <button type="button" class="primary" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="b" style="flex:0 0 auto;padding:6px 12px;">Win</button>
       </div>`;
   } else if (aKnown && bKnown) {
-    body = `<div class="row" style="justify-content:space-between;gap:8px;"><span style="flex:1;min-width:0;">${aName}</span><span style="flex:0 0 auto;color:#94a3b8;">vs</span><span style="flex:1;min-width:0;text-align:right;">${bName}</span></div>`;
+    body = `<div class="row" style="justify-content:space-between;gap:8px;"><span style="flex:1;min-width:0;">${aName}</span><span style="flex:0 0 auto;color:var(--faint);">vs</span><span style="flex:1;min-width:0;text-align:right;">${bName}</span></div>`;
   } else {
-    body = `<div style="color:#94a3b8;">${aName}</div><div style="color:#94a3b8;margin-top:2px;">${bName}</div>`;
+    body = `<div style="color:var(--faint);">${aName}</div><div style="color:var(--faint);margin-top:2px;">${bName}</div>`;
   }
   return `<div class="card" style="margin-bottom:8px;">${header}${body}${progression}</div>`;
 }
 
 function buildBracketHTML(tournament, matches, teams) {
   const main = (matches || []).filter((m) => m.phase === 'main');
-  if (!main.length) return '<div class="card"><p class="small" style="color:#64748b;margin:0;">No bracket yet.</p></div>';
+  if (!main.length) return '<div class="card"><p class="small" style="color:var(--muted);margin:0;">No bracket yet.</p></div>';
 
   const champ = computeChampion(main, teams);
-  const champBanner = champ ? `<div class="card" style="text-align:center;border:2px solid var(--success);background:#f0fdf4;">
-    <div class="small" style="color:#16a34a;letter-spacing:.04em;">CHAMPION</div>
-    <h2 style="margin:4px 0 0;color:#15803d;">${escapeHTML(champ.name)}</h2>
+  const champBanner = champ ? `<div class="card" style="text-align:center;border:2px solid var(--success);background:var(--live-soft);">
+    <div class="small" style="color:var(--live);letter-spacing:.04em;">CHAMPION</div>
+    <h2 style="margin:4px 0 0;color:var(--live);">${escapeHTML(champ.name)}</h2>
   </div>` : '';
 
   // Who can enter a bracket result: admin, or the picked team if it's IN this match.
   const pid = state.tournamentPickedTeamId;
   const canSubmit = (m) => state.isAdmin || (!!pid && (m.team_a_id === pid || m.team_b_id === pid));
   const picker = state.isAdmin ? '' : `<div class="card">
-    <label class="small" style="color:#475569;display:block;margin-bottom:4px;">Your team (pick it to enter your scores)</label>
+    <label class="small" style="color:var(--muted);display:block;margin-bottom:4px;">Your team (pick it to enter your scores)</label>
     <select data-role="tv2-pick-team" style="width:100%;">
       <option value="">View only</option>
       ${(teams || []).map((t) => `<option value="${escapeHTML(t.id)}" ${t.id === pid ? 'selected' : ''}>${escapeHTML(t.name)}</option>`).join('')}
@@ -3216,7 +3216,7 @@ function buildBracketHTML(tournament, matches, teams) {
     const columns = wRounds.map((r) => {
       const rm = wMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
       return `<div style="flex:0 0 250px;display:flex;flex-direction:column;justify-content:space-around;gap:8px;">
-        <div class="small" style="text-align:center;font-weight:600;color:#475569;">${escapeHTML(labelFor(r))}</div>
+        <div class="small" style="text-align:center;font-weight:600;color:var(--muted);">${escapeHTML(labelFor(r))}</div>
         ${rm.map((m) => buildBracketCardHTML(m, main, teams, canSubmit(m))).join('')}
       </div>`;
     }).join('');
@@ -3255,26 +3255,26 @@ function buildTournamentTabHTML() {
     const show = active || list[0];
     if (!show) {
       return `<div class="card" style="text-align:center;padding:2rem;">
-        <p style="color:#64748b;margin:0;">No tournament yet. Check back soon.</p>
+        <p style="color:var(--muted);margin:0;">No tournament yet. Check back soon.</p>
       </div>`;
     }
     const teams = (active ? state.tournamentTeams : []) || [];
     if (active && show.status === 'pools') {
       return `<div class="card">
         <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
-        <p class="small" style="color:#64748b;margin:0;">Pool play — submit your game results below.</p>
+        <p class="small" style="color:var(--muted);margin:0;">Pool play — submit your game results below.</p>
       </div>` + buildPoolPlayHTML(active, state.tournamentPools || [], teams, state.tournamentMatches || [], false, state.tournamentPickedTeamId);
     }
     if (active && (show.status === 'bracket' || show.status === 'completed')) {
       return `<div class="card">
         <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
-        <p class="small" style="color:#64748b;margin:0;">Bracket</p>
+        <p class="small" style="color:var(--muted);margin:0;">Bracket</p>
       </div>` + buildBracketHTML(active, state.tournamentMatches || [], teams);
     }
     return `<div class="card">
       <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
-      <p class="small" style="color:#64748b;margin:0 0 12px;">${escapeHTML(tournamentStatusLabel(show.status))}</p>
-      ${active ? buildTeamListHTML(teams, false) : '<p class="small" style="color:#64748b;margin:0;">Tap a tournament when the admin opens it.</p>'}
+      <p class="small" style="color:var(--muted);margin:0 0 12px;">${escapeHTML(tournamentStatusLabel(show.status))}</p>
+      ${active ? buildTeamListHTML(teams, false) : '<p class="small" style="color:var(--muted);margin:0;">Tap a tournament when the admin opens it.</p>'}
     </div>`;
   }
 
@@ -3288,23 +3288,23 @@ function buildTournamentTabHTML() {
       ? list.map((x) => `
         <div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
           <button type="button" data-role="tv2-select-tournament" data-id="${escapeHTML(x.id)}" style="background:none;border:none;text-align:left;flex:1;font-size:16px;color:var(--brand);cursor:pointer;padding:4px 0;">
-            ${escapeHTML(x.name || '')} <span class="small" style="color:#64748b;">· ${escapeHTML(tournamentStatusLabel(x.status))}</span>
+            ${escapeHTML(x.name || '')} <span class="small" style="color:var(--muted);">· ${escapeHTML(tournamentStatusLabel(x.status))}</span>
           </button>
           <button type="button" class="danger" data-role="tv2-delete-tournament" data-id="${escapeHTML(x.id)}">Delete</button>
         </div>`).join('')
-      : '<p class="small" style="color:#64748b;margin:0;">No tournaments yet — create your first one above.</p>';
+      : '<p class="small" style="color:var(--muted);margin:0;">No tournaments yet — create your first one above.</p>';
     return `${err}
     <div class="card">
       <h3 style="margin:0 0 8px;">New Tournament</h3>
       <input type="text" id="tv2-name" placeholder="Tournament name (e.g. Summer Slam 6s)" />
       <div style="display:flex;gap:8px;margin-top:8px;">
-        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:#475569;">Game to
+        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);">Game to
           <input type="number" id="tv2-cap" value="25" min="1" inputmode="numeric" style="width:100%;flex:0 0 auto;" />
         </label>
-        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:#475569;">Pools
+        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);">Pools
           <input type="number" id="tv2-pools" value="4" min="1" inputmode="numeric" style="width:100%;flex:0 0 auto;" />
         </label>
-        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:#475569;">Nets
+        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);">Nets
           <input type="number" id="tv2-nets" value="10" min="1" inputmode="numeric" style="width:100%;flex:0 0 auto;" />
         </label>
       </div>
@@ -3324,7 +3324,7 @@ function buildTournamentTabHTML() {
     <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
       <div style="flex:1;min-width:0;">
         <h3 style="margin:0;">${escapeHTML(active.name || '')}</h3>
-        <p class="small" style="color:#64748b;margin:2px 0 0;">${escapeHTML(tournamentStatusLabel(active.status))} · ${teams.length} ${teams.length === 1 ? 'team' : 'teams'} · to ${escapeHTML(String(active.match_cap))} · ${escapeHTML(String(active.pool_count))} pools · ${escapeHTML(String(active.net_count))} nets</p>
+        <p class="small" style="color:var(--muted);margin:2px 0 0;">${escapeHTML(tournamentStatusLabel(active.status))} · ${teams.length} ${teams.length === 1 ? 'team' : 'teams'} · to ${escapeHTML(String(active.match_cap))} · ${escapeHTML(String(active.pool_count))} pools · ${escapeHTML(String(active.net_count))} nets</p>
       </div>
       <button type="button" class="secondary" data-role="tv2-back">All</button>
     </div>
@@ -3344,7 +3344,7 @@ function buildTournamentTabHTML() {
       <div class="card">
         ${allDone
           ? '<button type="button" class="primary" data-role="tv2-generate-bracket" style="width:100%;margin-bottom:8px;">Generate Bracket</button>'
-          : '<p class="small" style="color:#64748b;margin:0 0 8px;">Finish all pool games to generate the bracket.</p>'}
+          : '<p class="small" style="color:var(--muted);margin:0 0 8px;">Finish all pool games to generate the bracket.</p>'}
         <button type="button" class="danger" data-role="tv2-reset-pools" style="width:100%;">Reset Pools (clear results)</button>
       </div>`;
   }
@@ -3355,7 +3355,7 @@ function buildTournamentTabHTML() {
     if (!pools.length) {
       poolSetup = `<div class="card">
         <h3 style="margin:0 0 8px;">Pools</h3>
-        <p class="small" style="color:#64748b;margin:0 0 8px;">Randomly draw ${escapeHTML(String(active.pool_count))} pools from your ${teams.length} teams.</p>
+        <p class="small" style="color:var(--muted);margin:0 0 8px;">Randomly draw ${escapeHTML(String(active.pool_count))} pools from your ${teams.length} teams.</p>
         <button type="button" class="primary" data-role="tv2-draw-pools" style="width:100%;">Draw Pools</button>
       </div>`;
     } else {
@@ -3367,7 +3367,7 @@ function buildTournamentTabHTML() {
             ${pools.map((pp) => `<option value="${escapeHTML(pp.id)}" ${pp.id === t.pool_id ? 'selected' : ''}>Pool ${escapeHTML(pp.label)}</option>`).join('')}
           </select>
         </div>`).join('');
-        return `<div style="margin-bottom:10px;"><strong>Pool ${escapeHTML(p.label)}</strong>${rows || '<p class="small" style="color:#64748b;margin:0;">empty</p>'}</div>`;
+        return `<div style="margin-bottom:10px;"><strong>Pool ${escapeHTML(p.label)}</strong>${rows || '<p class="small" style="color:var(--muted);margin:0;">empty</p>'}</div>`;
       }).join('');
       const unassigned = teams.filter((t) => !t.pool_id).length;
       poolSetup = `<div class="card">
