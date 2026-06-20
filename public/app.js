@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.14';
+const APP_VERSION = '2026.06.20.15';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2205,7 +2205,7 @@ function publicScoresHTML() {
   if (!courtsHTML) {
     return `<div class="home-screen">
       <div class="ph-brand">Live scores</div>
-      <div class="ph-card ph-empty">No live games right now.</div>
+      <div class="ph-card ph-empty">${state.loaded ? 'No live games right now.' : 'Checking for live games…'}</div>
     </div>`;
   }
   const upNext = (liveData.waitingTeams || []).length
@@ -2540,7 +2540,12 @@ function renderFilteredPlayers() {
   // sort alphabetically by name (A–Z jump strip relies on this)
   filtered.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
-  if (!filtered.length) return '<p>No players found.</p>';
+  if (!filtered.length) {
+    // C44: distinguish loading vs empty-roster vs no-match (was a bare "No players found.")
+    if (!state.loaded) return '<p class="roster-empty">Loading players…</p>';
+    if (!(state.players || []).length) return '<p class="roster-empty">No players yet — tap <strong>+</strong> to add the first one.</p>';
+    return '<p class="roster-empty">No players match — try clearing the search or filters.</p>';
+  }
 
   return filtered.map((player) => {
     const checked = checkedSet.has(playerIdentityKey(player));

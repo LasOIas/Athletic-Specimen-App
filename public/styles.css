@@ -2214,3 +2214,10 @@ select:focus {
   color: var(--muted); background: var(--accent-soft);
   padding: 4px 10px; border-radius: 999px; letter-spacing: .02em;
 }
+
+/* C44 (rank 6/23): roster loading / empty-roster / no-match states (was a bare "No players found.") */
+.roster-empty {
+  text-align: center; color: var(--muted); font-size: 14px;
+  padding: 28px 16px; line-height: 1.5;
+}
+.roster-empty strong { color: var(--accent); }
