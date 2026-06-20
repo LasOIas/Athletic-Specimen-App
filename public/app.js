@@ -1244,10 +1244,15 @@ function partialRender() {
   // name out of #checkin-search on every background sync (15s poll, cross-device realtime push,
   // focus/visibility). When the kiosk search is in active use, update it surgically and leave the input
   // untouched. (Empty + unfocused → fall through to full render so Home/Scores/Bracket still refresh.)
+  // MUST be gated on activeMainTab==='players' (the Check In tab): the public shell keeps all tab-panels
+  // mounted, so stale non-empty text left in the hidden kiosk box while the user views Scores/Home would
+  // otherwise short-circuit every sync and freeze those panels' live data. Only short-circuit when the
+  // user is actually ON the Check In tab.
   if (!playersEl) {
     const checkinResultsEl = document.getElementById('checkin-results');
     const checkinSearchEl = document.getElementById('checkin-search');
-    const kioskActive = checkinSearchEl
+    const kioskActive = activeMainTab === 'players'
+      && checkinSearchEl
       && (document.activeElement === checkinSearchEl || ((checkinSearchEl.value || '').trim() !== ''));
     if (checkinResultsEl && kioskActive) {
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
@@ -4752,10 +4757,14 @@ async function forceSaveAllToSupabase() {
     }
 
     if (remoteId) {
+      // C21 single-source contract (reliability fix 2026-06-20): do NOT write checked_in here.
+      // Attendance is maintained EXCLUSIVELY through the check_in/check_out RPCs (kiosk, per-row, bulk,
+      // reconcile, outbox) — they alone keep the check_ins history table. A direct checked_in UPDATE in
+      // this force-save desynced that history; the RPC paths already keep an existing player's remote
+      // attendance current, so the force-save only pushes the editable record fields.
       const ok = await updatePlayerFieldsSupabase(remoteId, {
         name: playerName,
         skill,
-        checked_in: checkedIn,
         group: primaryGroup,
         groups
       });
@@ -4764,7 +4773,9 @@ async function forceSaveAllToSupabase() {
       continue;
     }
 
-    const insertPayload = { name: playerName, skill, checked_in: checkedIn };
+    // checked_in intentionally omitted — a new player's attendance is set via the check_in RPC below
+    // (which maintains the check_ins history), never a direct column write.
+    const insertPayload = { name: playerName, skill };
     if (HAS_GROUP) insertPayload.group = primaryGroup;
     if (HAS_TAG) {
       insertPayload.tag = HAS_GROUP
@@ -4789,6 +4800,17 @@ async function forceSaveAllToSupabase() {
     if (insertedId) {
       player.id = insertedId;
       existingByName.set(normalize(playerName), { id: insertedId, name: playerName });
+      // C21 single-source: a just-inserted player who is checked in locally needs a check_ins row —
+      // route through the check_in RPC, never a direct checked_in write.
+      if (checkedIn) {
+        try {
+          const { error: ciErr } = await supabaseClient.rpc('check_in', { p_id: insertedId });
+          if (ciErr) throw ciErr;
+        } catch (ciErr) {
+          console.error('forceSave new-player check_in error', ciErr);
+          outboxEnqueue({ key: 'att:' + insertedId, kind: 'check_in', payload: { p_id: insertedId }, ts: Date.now() });
+        }
+      }
     }
     summary.inserted += 1;
   }
@@ -6143,7 +6165,9 @@ const runAdminModalCheck = (shouldCheckIn) => {
   const changed = shouldCheckIn ? checkInPlayer(player) : checkOutPlayer(player);
   saveLocal();
   partialRender(); // roster + stats update; the open modal is preserved by restoreTransientInteractionState
-  setAdminCheckMsg(`${player.name} — ${shouldCheckIn ? 'checked in' : 'checked out'}.`);
+  setAdminCheckMsg(`${player.name} — ${changed
+    ? (shouldCheckIn ? 'checked in' : 'checked out')
+    : (shouldCheckIn ? 'already checked in' : 'was not checked in')}.`);
   if (adminCheckNameInput) { adminCheckNameInput.value = ''; adminCheckNameInput.focus(); }
   if (changed && supabaseClient && player.id) {
     (async () => {
