@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.19.18';
+const APP_VERSION = '2026.06.19.19';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5195,6 +5195,70 @@ function renderPublicShell() {
 
 // C26 item 2: Admin surface shell — hardcodes the admin branch of every former interleaved
 // `state.isAdmin ?` ternary. Returns the full #app-shell string.
+// C26 item 3b: admin Dashboard ("run the night"), layout A — statcard + 2x2 quick-actions + Co-pilot teaser.
+// Count + per-group reuse the SAME source as the Players stats card (state.checkedIn.length + computeCheckedInByGroup)
+// so the Dashboard matches Supabase. NO skill, NO emoji, SVG icons only, Direction-A tokens only.
+function adminDashboardHTML() {
+  const group = (state.isAdmin && !state.limitedGroup) ? computeCheckedInByGroup() : [];
+  const grpLine = group.length
+    ? `<div class="ad-grpline">${group.map((r) => `<span><b>${r.in}</b> ${escapeHTML(r.groupLabel)}</span>`).join('')}</div>`
+    : '';
+  return `
+<div class="container">
+  <div class="ad-screen">
+    <div class="ad-top">
+      <div class="ad-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'} <span class="ad-badge">ADMIN</span></div>
+    </div>
+    <div class="ad-statcard">
+      <div class="ad-statbig"><span class="ad-statnum">${state.checkedIn.length}</span><span class="ad-statlab">checked in</span></div>
+      ${grpLine}
+    </div>
+    <div class="ad-sec">Quick actions</div>
+    <div class="ad-qgrid">
+      <button type="button" class="ad-qa" data-qa="checkin">
+        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg></div>
+        <div class="ad-qt">Check-in mode</div><div class="ad-qs">door kiosk / QR</div>
+      </button>
+      <button type="button" class="ad-qa" data-qa="generate">
+        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3 20c0-3 2.7-5 6-5s6 2 6 5M15.5 20c0-2 1-3.4 3-3.8"/></svg></div>
+        <div class="ad-qt">Generate teams</div><div class="ad-qs">balanced</div>
+      </button>
+      <button type="button" class="ad-qa" data-qa="tournament">
+        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg></div>
+        <div class="ad-qt">Tournament</div><div class="ad-qs">pools + bracket</div>
+      </button>
+      <button type="button" class="ad-qa" data-qa="session">
+        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></div>
+        <div class="ad-qt">Session</div><div class="ad-qs">date &middot; QR share</div>
+      </button>
+    </div>
+    <button type="button" class="ad-copilot" data-nav-tab="copilot">
+      <div class="ad-sp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z"/><path d="M19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9z"/></svg></div>
+      <div><div class="ad-ct">Ask the co-pilot</div><div class="ad-cs">coming soon</div></div>
+    </button>
+  </div>
+</div>`;
+}
+
+// C26 item 3b: STATIC Co-pilot placeholder — NO AI logic (that's C28). A heading + "coming soon" explanation +
+// a disabled input bar so it reads as not-yet-functional, never a broken control. No JS wiring for this panel.
+function adminCopilotHTML() {
+  return `
+<div class="container">
+  <div class="ad-cop-screen">
+    <div class="ad-cop-head"><svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.9" width="18" height="18"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9z"/></svg> Co-pilot</div>
+    <div class="ad-cop-empty">
+      <div class="ad-cop-emptytitle">Your admin co-pilot is coming soon</div>
+      <div class="ad-cop-emptysub">Soon you'll be able to say &ldquo;make 4 teams of 4 from who's checked in&rdquo; or &ldquo;start a 6-team tournament&rdquo; and it'll do it. Not available yet.</div>
+    </div>
+    <div class="ad-inbar" aria-disabled="true">
+      <input type="text" placeholder="Ask, or tell me to do something&hellip;" disabled aria-label="Co-pilot input (coming soon)" />
+      <div class="ad-send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg></div>
+    </div>
+  </div>
+</div>`;
+}
+
 function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
   return `
@@ -5207,6 +5271,9 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
     <div class="app-header-version">v${APP_VERSION}</div>
   </header>
   <div id="app-content">
+    <div id="tab-dashboard" class="tab-panel">
+      ${adminDashboardHTML()}
+    </div>
     <div id="tab-session" class="tab-panel">
       <div class="container">
 
@@ -5266,23 +5333,26 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
         ${buildTournamentTabHTML()}
       </div>
     </div>
+    <div id="tab-copilot" class="tab-panel">
+      ${adminCopilotHTML()}
+    </div>
   </div>
   <nav id="bottom-nav">
-    <button class="nav-btn" data-nav-tab="session">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      <span>Session</span>
+    <button class="nav-btn" data-nav-tab="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>
+      <span>Home</span>
     </button>
     <button class="nav-btn" data-nav-tab="players">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       <span>Players</span>
     </button>
     <button class="nav-btn" data-nav-tab="teams">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-      <span>Teams</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
+      <span>Courts</span>
     </button>
-    <button class="nav-btn" data-nav-tab="tournament">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
-      <span>Tournament</span>
+    <button class="nav-btn" data-nav-tab="copilot">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9z"/></svg>
+      <span>Co-pilot</span>
     </button>
   </nav>
 </div>
@@ -5406,8 +5476,10 @@ function render() {
   }
 
   // C26 item 2: per-surface active-tab memory (set just before activateMainTab below).
-  // C26 item 3a: PUBLIC defaults to 'home'; admin default stays 'players' (3b -> 'dashboard').
-  activeMainTab = sessionStorage.getItem(currentTabKey()) || (state.isAdmin ? 'players' : 'home');
+  // C26 item 3b: PUBLIC defaults to 'home'; admin defaults to 'dashboard' (the run-the-night Home).
+  // No admin stale-key guard needed: session/tournament/teams are all still valid admin panels (reachable
+  // via the Dashboard quick-actions), so a stored value for any of them is fine.
+  activeMainTab = sessionStorage.getItem(currentTabKey()) || (state.isAdmin ? 'dashboard' : 'home');
   // C26 item 3a: public 'teams' and the now-removed public 'session' tab fall back to 'home'.
   if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'session')) activeMainTab = 'home';
 
@@ -5871,6 +5943,17 @@ function attachHandlers() {
   if (appContent && !appContent.dataset.navTabBound) {
     appContent.dataset.navTabBound = '1';
     appContent.addEventListener('click', (e) => {
+      // C26 item 3b: Dashboard quick-actions wire to existing affordances (Tournament + Session
+      // left the nav but their panels remain, reachable here).
+      const qa = e.target.closest('[data-qa]');
+      if (qa) {
+        const a = qa.dataset.qa;
+        if (a === 'checkin') openQrModal();
+        else if (a === 'generate') activateMainTab('teams');
+        else if (a === 'tournament') activateMainTab('tournament');
+        else if (a === 'session') activateMainTab('session');
+        return;
+      }
       const navBtn = e.target.closest('[data-nav-tab]');
       if (navBtn) activateMainTab(navBtn.dataset.navTab);
     });
