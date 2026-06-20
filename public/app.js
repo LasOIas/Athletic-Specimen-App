@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.21';
+const APP_VERSION = '2026.06.20.22';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5118,9 +5118,9 @@ function adminPlayersHTML() {
 </div>
 
 <div id="groupManager" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:12500; padding:12px; overflow:auto;">
-  <div style="max-width:720px; max-height:calc(100vh - 24px); margin:0 auto; background:#fff; border-radius:12px; box-shadow:0 12px 32px rgba(0,0,0,.18); overflow:hidden; display:flex; flex-direction:column;">
-    <div style="display:flex; align-items:center; padding:12px 16px; background:#f8fafc;">
-      <h3 style="margin:0; font-size:18px;">Manage Groups</h3>
+  <div style="max-width:720px; max-height:calc(100dvh - 24px); margin:0 auto; background:var(--card); border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow-md); overflow:hidden; display:flex; flex-direction:column;">
+    <div style="display:flex; align-items:center; padding:12px 16px; background:var(--bg); border-bottom:1px solid var(--border);">
+      <h3 style="margin:0; font-size:18px; font-family:'Sora','Inter',sans-serif;">Manage Groups</h3>
       <span style="flex:1"></span>
       <button id="btn-close-group-manager" class="secondary">Close</button>
     </div>
