@@ -3,19 +3,25 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#0b0d10" />
+  <meta name="theme-color" content="#f6f5f1" />
   <title>Athletic Specimen · Check In</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
   <style>
+    /* C36 T6: direction-A light kiosk — mirrors the in-app Check In (T1) for consistency. */
     :root {
-      --bg: #0b0d10;
-      --surface: #14181d;
-      --surface-2: #1c2129;
-      --border: #262d38;
-      --text: #f2f4f7;
-      --text-dim: #8b95a3;
-      --accent: #4ade80;
-      --accent-dim: #14532d;
-      --danger: #f87171;
+      --bg: oklch(0.985 0.003 75);
+      --surface: oklch(0.97 0.003 75);
+      --surface-2: oklch(0.95 0.004 75);
+      --border: oklch(0.90 0.005 75);
+      --text: oklch(0.18 0.005 75);
+      --text-dim: oklch(0.50 0.005 75);
+      --accent: oklch(0.55 0.07 240);      /* muted blue — the app accent */
+      --accent-dim: oklch(0.96 0.015 240); /* accent-soft */
+      --live: oklch(0.55 0.09 150);        /* muted green — success/checked-in */
+      --live-soft: oklch(0.96 0.03 150);
+      --danger: oklch(0.55 0.16 25);
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body {
@@ -23,7 +29,7 @@
       padding: 0;
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
       font-size: 17px;
       min-height: 100vh;
       overscroll-behavior-y: none;
@@ -33,19 +39,20 @@
       max-width: 520px;
       margin: 0 auto;
     }
-    .header { margin-bottom: 28px; padding-top: 8px; }
+    .header { margin-bottom: 24px; padding-top: 8px; text-align: center; }
     .eyebrow {
       font-size: 12px;
-      letter-spacing: 2px;
+      letter-spacing: 1.5px;
       text-transform: uppercase;
       color: var(--text-dim);
+      font-weight: 600;
       margin-bottom: 6px;
     }
-    h1 { font-size: 28px; font-weight: 700; margin: 0; letter-spacing: -0.02em; }
+    h1 { font-family: 'Sora', 'Inter', sans-serif; font-size: 28px; font-weight: 800; margin: 0; letter-spacing: -0.02em; }
     .subtitle { color: var(--text-dim); margin-top: 6px; font-size: 15px; }
     input[type="text"] {
       width: 100%;
-      padding: 18px 18px;
+      padding: 17px 18px;
       background: var(--surface);
       border: 1.5px solid var(--border);
       border-radius: 14px;
@@ -55,16 +62,17 @@
       outline: none;
       transition: border-color 0.15s, background 0.15s;
     }
-    input[type="text"]:focus { border-color: var(--accent); background: var(--surface-2); }
+    input[type="text"]:focus { border-color: var(--accent); background: var(--bg); }
     input::placeholder { color: var(--text-dim); }
     #suggestions { list-style: none; padding: 0; margin: 12px 0 0 0; }
     #suggestions li {
-      padding: 18px 18px;
+      padding: 16px 18px;
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 13px;
       margin-bottom: 8px;
       font-size: 18px;
+      font-weight: 600;
       cursor: pointer;
       transition: background 0.1s, border-color 0.1s, transform 0.05s;
       user-select: none;
@@ -95,8 +103,8 @@
       cursor: pointer;
       transition: transform 0.05s, background 0.15s, opacity 0.15s;
     }
-    .btn-primary { background: var(--accent); color: #052e16; }
-    .btn-primary:active { transform: scale(0.98); background: #22c55e; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:active { transform: scale(0.98); background: oklch(0.48 0.08 240); }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
     .btn-secondary {
       background: var(--surface-2);
@@ -121,18 +129,19 @@
       height: 96px;
       margin: 0 auto 24px;
       border-radius: 50%;
-      background: var(--accent-dim);
+      background: var(--live-soft);
       display: flex;
       align-items: center;
       justify-content: center;
-      border: 2px solid var(--accent);
+      border: 2px solid var(--live);
     }
-    .success-icon svg { width: 48px; height: 48px; stroke: var(--accent); }
-    .success h2 { font-size: 24px; margin: 0 0 8px 0; font-weight: 700; }
+    .success-icon svg { width: 48px; height: 48px; stroke: var(--live); }
+    .success h2 { font-family: 'Sora', 'Inter', sans-serif; font-size: 24px; margin: 0 0 8px 0; font-weight: 800; }
     .success .name {
+      font-family: 'Sora', 'Inter', sans-serif;
       font-size: 28px;
-      font-weight: 700;
-      color: var(--accent);
+      font-weight: 800;
+      color: var(--live);
       margin: 8px 0 32px;
       word-break: break-word;
     }
@@ -140,8 +149,8 @@
     .error {
       margin-top: 12px;
       padding: 12px 16px;
-      background: rgba(248, 113, 113, 0.1);
-      border: 1px solid rgba(248, 113, 113, 0.3);
+      background: oklch(0.95 0.03 25);
+      border: 1px solid oklch(0.88 0.05 25);
       border-radius: 10px;
       color: var(--danger);
       font-size: 14px;
@@ -152,16 +161,16 @@
 </head>
 <body>
   <div id="session-banner" hidden style="
-    background: #1c2129;
-    border: 1px solid #262d38;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 14px;
     padding: 16px 20px;
     margin-bottom: 24px;
   ">
-    <div style="font-size:11px; letter-spacing:2px; text-transform:uppercase; color:#8b95a3; margin-bottom:8px;">Next Session</div>
-    <div id="session-date-el"  style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #262d38; font-size:16px;"><span style="display:flex; flex-shrink:0; color:#8b95a3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></span><span></span></div>
-    <div id="session-time-el"  style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid #262d38; font-size:16px;"><span style="display:flex; flex-shrink:0; color:#8b95a3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span><span></span></div>
-    <div id="session-loc-el"   style="display:flex; align-items:center; gap:8px; padding:6px 0; font-size:16px;"><span style="display:flex; flex-shrink:0; color:#8b95a3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg></span><span></span></div>
+    <div style="font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-dim); font-weight:600; margin-bottom:8px;">Next Session</div>
+    <div id="session-date-el"  style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); font-size:16px;"><span style="display:flex; flex-shrink:0; color:var(--accent);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></span><span></span></div>
+    <div id="session-time-el"  style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); font-size:16px;"><span style="display:flex; flex-shrink:0; color:var(--accent);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span><span></span></div>
+    <div id="session-loc-el"   style="display:flex; align-items:center; gap:8px; padding:6px 0; font-size:16px;"><span style="display:flex; flex-shrink:0; color:var(--accent);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg></span><span></span></div>
   </div>
   <div id="app">
     <div id="main">
