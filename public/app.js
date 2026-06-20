@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.1';
+const APP_VERSION = '2026.06.20.2';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2526,34 +2526,41 @@ function renderFilteredPlayers() {
       ).join('')
       : '<span class="small player-group-none">Ungrouped</span>';
 
+    void playerGroupsValue; // retained for parity with edit-row group machinery
+    const initials = String(player.name || '')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join('') || '?';
     return `
-      <div class="player-card ${isSelected ? 'is-selected' : ''}" data-id="${player.id}" data-player-key="${playerKeyValue}">
-        <span class="status-pill ${checked ? 'in' : 'out'} player-status-corner">${checked ? 'In' : 'Out'}</span>
-        <div class="player-card-main">
-          ${state.isAdmin ? `<input type="checkbox" class="player-select" data-id="${player.id}" ${isSelected ? 'checked' : ''} />` : ''}
-          <div class="player-card-info">
-            <span class="player-name">${player.name}</span>
-            <div class="player-meta-row">
-              <span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span>
-              ${groupsDisplayHTML}
-            </div>
+      <div class="player-card prow ${isSelected ? 'is-selected' : ''} ${checked ? 'is-in' : ''}" data-id="${player.id}" data-player-key="${playerKeyValue}">
+        ${state.isAdmin ? `<input type="checkbox" class="player-select" data-id="${player.id}" aria-label="Select ${escapeHTMLText(player.name || '')}" ${isSelected ? 'checked' : ''} />` : ''}
+        <span class="prow-av" aria-hidden="true">${escapeHTMLText(initials)}</span>
+        <div class="prow-id">
+          <span class="player-name">${player.name}</span>
+          <div class="player-meta-row">
+            <span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span>
+            ${groupsDisplayHTML}
           </div>
-          <div class="player-card-actions">
-            ${checked
-              ? `<button class="btn-checkout" data-id="${player.id}">Check Out</button>`
-              : `<button class="btn-checkin" data-id="${player.id}">Check In</button>`
-            }
-            ${state.isAdmin ? `
-              <div class="menu-wrap">
-                <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
-                        data-id="${player.id}" data-player-key="${playerKeyValue}" title="More actions">⋮</button>
-                <div class="card-menu" role="menu">
-                  <button type="button" class="menu-item" data-role="menu-edit" data-player-key="${playerKeyValue}">Edit</button>
-                  <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
-                </div>
+        </div>
+        <div class="prow-actions">
+          ${checked
+            ? `<button class="btn-checkout tg in" data-id="${player.id}"><span class="tg-dot"></span>Out</button>`
+            : `<button class="btn-checkin tg" data-id="${player.id}"><span class="tg-dot"></span>In</button>`
+          }
+          ${state.isAdmin ? `
+            <div class="menu-wrap">
+              <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
+                      data-id="${player.id}" data-player-key="${playerKeyValue}" title="More actions" aria-label="More actions">
+                <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false"><circle cx="10" cy="4" r="1.6"/><circle cx="10" cy="10" r="1.6"/><circle cx="10" cy="16" r="1.6"/></svg>
+              </button>
+              <div class="card-menu" role="menu">
+                <button type="button" class="menu-item" data-role="menu-edit" data-player-key="${playerKeyValue}">Edit</button>
+                <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
               </div>
-            ` : ''}
-          </div>
+            </div>
+          ` : ''}
         </div>
       </div>
     `;
@@ -4867,86 +4874,43 @@ function adminPlayersHTML() {
   const topFormGroupOptions = getTopFormGroupDatalistOptions();
   const topFormContext = renderTopFormGroupsHelpAndPreview('', '');
   const checkMsg = messages.checkIn ? `<p class="msg">${escapeHTML(messages.checkIn)}</p>` : '';
+  const rosterCount = (state.players || []).length;
+  const chip = (value, label) => `<button type="button" class="chip ${state.playerTab === value ? 'on' : ''}" data-chip-tab="${value}" aria-pressed="${state.playerTab === value ? 'true' : 'false'}">${label}</button>`;
+  const groupsChipOn = normalizedActiveGroup !== 'All';
   return `
     <div id="admin-players-shell">
-      <div class="admin-toolbar">
-        <select id="admin-quick-open" aria-label="Menu">
-          <option value="">Menu</option>
-          <option value="checkin">Check In</option>
-          <option value="add-player">Add/Update Player</option>
-          <option value="show-qr">Show QR Code</option>
-        </select>
-        <div class="admin-toolbar-actions">
-          <button id="btn-save-supabase" class="secondary">Save</button>
-          <button id="btn-reset-checkins" class="danger">New session</button>
-          <button id="btn-logout" class="secondary">Logout</button>
+      <!-- Compact header: title + add + overflow toolbar -->
+      <div class="roster-head">
+        <h3 class="roster-title">Players <span class="roster-count">· ${rosterCount}</span>${normalizedActiveGroup !== 'All' ? ` <span class="small roster-scope">(${escapeHTML(activeGroupLabel)})</span>` : ''}</h3>
+        <div class="roster-head-actions">
+          <button type="button" id="roster-add-player" class="roster-add" aria-label="Add or update player" title="Add / update player">
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+          </button>
+          <div class="admin-toolbar">
+            <select id="admin-quick-open" aria-label="Menu">
+              <option value="">Menu</option>
+              <option value="checkin">Check In</option>
+              <option value="add-player">Add/Update Player</option>
+              <option value="show-qr">Show QR Code</option>
+            </select>
+            <div class="admin-toolbar-actions">
+              <button id="btn-save-supabase" class="secondary">Save</button>
+              <button id="btn-reset-checkins" class="danger">New session</button>
+              <button id="btn-logout" class="secondary">Logout</button>
+            </div>
+          </div>
         </div>
       </div>
+
       ${canAccessOperatorSafetyControls() ? `
-      <div class="card" style="margin-top:0.75rem;">
-        <h3 style="margin:0 0 0.5rem;">Recent Actions</h3>
+      <details class="card recent-actions-card" ${state.operatorActions && state.operatorActions.length ? 'open' : ''}>
+        <summary class="recent-actions-summary"><h3>Recent Actions</h3></summary>
         ${renderOperatorActionsLogHTML()}
-      </div>
+      </details>
       ` : ''}
+
 <div class="card card-players">
-  <div class="card-collapsible-head">
-    <h3>Players${normalizedActiveGroup !== 'All' ? ` <span class="small" style="font-weight:500;">(${escapeHTML(activeGroupLabel)} Roster)</span>` : ''}</h3>
-    <div class="card-collapsible-head-actions">
-      <button id="btn-select-all-visible" class="secondary">Select All Shown</button>
-    </div>
-  </div>
   <div id="card-body-admin-players">
-  <div id="filtersBody">
-
-    <!-- Filter select (All / In / Out / Skill / Unset) -->
-    <div class="row">
-      <label for="player-tab-select">Filter:</label>
-      <select id="player-tab-select">
-        <option value="all" ${state.playerTab === 'all' ? 'selected' : ''}>All Players</option>
-        <option value="in" ${state.playerTab === 'in' ? 'selected' : ''}>Checked In</option>
-        <option value="out" ${state.playerTab === 'out' ? 'selected' : ''}>Checked Out</option>
-        <option value="skill" ${state.playerTab === 'skill' ? 'selected' : ''}>Skill Number</option>
-        <option value="unrated" ${state.playerTab === 'unrated' ? 'selected' : ''}>Unset Skill</option>
-      </select>
-    </div>
-
-    <!-- Group filter + group management -->
-   ${state.limitedGroup
-  ? `
-    <div class="row" style="margin-top: 0.5rem;">
-      <label>Group:</label>
-      <span class="badge" id="tenant-group-pill" style="font-weight:600;">${state.limitedGroup}</span>
-    </div>
-  `
-  : `
-  <div class="row" style="margin-top: 0.5rem; align-items:center;">
-    <label for="group-filter-select">Group:</label>
-    <select id="group-filter-select">
-      <option value="All" ${isActiveGroupValue('All') ? 'selected' : ''}>All</option>
-      ${getAvailableGroups().map((groupName) => `<option value="${escapeHTML(groupName)}" ${isActiveGroupValue(groupName) ? 'selected' : ''}>${escapeHTML(groupName)}</option>`).join('')}
-      <option value="${UNGROUPED_FILTER_VALUE}" ${isActiveGroupValue(UNGROUPED_FILTER_VALUE) ? 'selected' : ''}>${UNGROUPED_FILTER_LABEL}</option>
-    </select>
-
-    <button id="btn-open-group-manager" class="secondary">Manage Groups</button>
-  </div>
-`
-}
-    <!-- Skill range sub-filter (only when Filter = Skill) -->
-    ${state.playerTab === 'skill' ? `
-      <div class="row" style="margin-top: 0.5rem;">
-        <label for="skill-subtab-select">Skill Range:</label>
-        <select id="skill-subtab-select">
-          ${Array.from({ length: 9 }, (_, i) => {
-            const base = `${i + 1}.0`;
-            const selected = state.skillSubTab === base ? 'selected' : '';
-            const label = base === '9.0' ? '9.0–10' : `${base}–${i + 1}.9`;
-            return `<option value="${base}" ${selected}>${label}</option>`;
-          }).join('')}
-        </select>
-      </div>
-    ` : ''}
-
-  </div> <!-- /#filtersBody -->
 
   <!-- Sticky search bar -->
   <div class="sticky-search-bar">
@@ -4965,27 +4929,65 @@ function adminPlayersHTML() {
     </div>
   </div>
 
-  <!-- Sticky Bulk Bar (shows only when you select players) -->
-  <div id="bulkBar" class="card" style="display:none; position:sticky; bottom:0; z-index:5;">
-    <div class="row">
-      <strong id="bulkCount">0 selected</strong>
-      <span style="flex:1"></span>
-
-      <button id="btn-bulk-checkin" class="secondary">Check In</button>
-      <button id="btn-bulk-checkout" class="secondary">Check Out</button>
-
-      <label for="bulk-dest-group">Group:</label>
-      <select id="bulk-dest-group" ${state.limitedGroup ? 'disabled' : ''}>
-  <option value="">— choose —</option>
-  ${getAvailableGroups().map(g => `<option value="${g}">${g}</option>`).join('')}
-</select>
-      <button id="btn-assign-to-group" class="primary">Add</button>
-      <button id="btn-remove-from-group" class="danger">Remove</button>
-      <button id="btn-clear-selection" class="secondary">Clear</button>
+  <div id="filtersBody">
+    <!-- Filter chips (drive state.playerTab + group/skill sub-controls) -->
+    <div class="chip-row" role="group" aria-label="Filter players">
+      ${chip('all', 'All')}
+      ${chip('in', 'Checked in')}
+      ${chip('out', 'Out')}
+      ${chip('skill', 'Skill')}
+      <button type="button" class="chip ${groupsChipOn ? 'on' : ''}" data-chip-groups aria-pressed="${groupsChipOn ? 'true' : 'false'}">Groups</button>
+      <button type="button" class="chip" id="btn-select-all-visible">Select all shown</button>
     </div>
-  </div>
 
-  <!-- Filtered Player Cards -->
+    <!-- Source-of-truth filter select (visually hidden; chips set the same state) -->
+    <select id="player-tab-select" class="sr-only-control" aria-hidden="true" tabindex="-1">
+      <option value="all" ${state.playerTab === 'all' ? 'selected' : ''}>All Players</option>
+      <option value="in" ${state.playerTab === 'in' ? 'selected' : ''}>Checked In</option>
+      <option value="out" ${state.playerTab === 'out' ? 'selected' : ''}>Checked Out</option>
+      <option value="skill" ${state.playerTab === 'skill' ? 'selected' : ''}>Skill Number</option>
+      <option value="unrated" ${state.playerTab === 'unrated' ? 'selected' : ''}>Unset Skill</option>
+    </select>
+
+    <!-- Group filter + group management (revealed by the Groups chip, or when a group is active) -->
+   ${state.limitedGroup
+  ? `
+    <div class="filter-sub" style="margin-top: 0.5rem;">
+      <label>Group:</label>
+      <span class="badge" id="tenant-group-pill" style="font-weight:600;">${state.limitedGroup}</span>
+    </div>
+  `
+  : `
+  <div class="filter-sub ${groupsChipOn ? 'is-open' : ''}" id="group-filter-sub" style="margin-top: 0.5rem; align-items:center;">
+    <label for="group-filter-select">Group:</label>
+    <select id="group-filter-select">
+      <option value="All" ${isActiveGroupValue('All') ? 'selected' : ''}>All</option>
+      ${getAvailableGroups().map((groupName) => `<option value="${escapeHTML(groupName)}" ${isActiveGroupValue(groupName) ? 'selected' : ''}>${escapeHTML(groupName)}</option>`).join('')}
+      <option value="${UNGROUPED_FILTER_VALUE}" ${isActiveGroupValue(UNGROUPED_FILTER_VALUE) ? 'selected' : ''}>${UNGROUPED_FILTER_LABEL}</option>
+    </select>
+
+    <button id="btn-open-group-manager" class="secondary">Manage Groups</button>
+  </div>
+`
+}
+    <!-- Skill range sub-filter (only when Filter = Skill) -->
+    ${state.playerTab === 'skill' ? `
+      <div class="filter-sub is-open" style="margin-top: 0.5rem;">
+        <label for="skill-subtab-select">Skill range:</label>
+        <select id="skill-subtab-select">
+          ${Array.from({ length: 9 }, (_, i) => {
+            const base = `${i + 1}.0`;
+            const selected = state.skillSubTab === base ? 'selected' : '';
+            const label = base === '9.0' ? '9.0–10' : `${base}–${i + 1}.9`;
+            return `<option value="${base}" ${selected}>${label}</option>`;
+          }).join('')}
+        </select>
+      </div>
+    ` : ''}
+
+  </div> <!-- /#filtersBody -->
+
+  <!-- Filtered Player rows -->
   <div class="players">
     ${renderFilteredPlayers()}
   </div>
@@ -4996,6 +4998,27 @@ function adminPlayersHTML() {
     ${'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(L =>
       `<button type="button" class="az-letter" data-letter="${L}" aria-label="Jump to ${L}">${L}</button>`
     ).join('')}
+  </div>
+</div>
+
+  <!-- Floating Bulk Bar (shows only when you select players) -->
+  <div id="bulkBar" class="bulkbar" style="display:none;">
+    <div class="bulkbar-inner">
+      <strong id="bulkCount">0 selected</strong>
+      <span class="bulkbar-spacer"></span>
+
+      <button id="btn-bulk-checkin" class="secondary">Check In</button>
+      <button id="btn-bulk-checkout" class="secondary">Check Out</button>
+
+      <label for="bulk-dest-group" class="bulkbar-grouplabel">Group:</label>
+      <select id="bulk-dest-group" ${state.limitedGroup ? 'disabled' : ''}>
+        <option value="">— choose —</option>
+        ${getAvailableGroups().map(g => `<option value="${g}">${g}</option>`).join('')}
+      </select>
+      <button id="btn-assign-to-group" class="primary">Add</button>
+      <button id="btn-remove-from-group" class="danger">Remove</button>
+      <button id="btn-clear-selection" class="secondary">Clear</button>
+    </div>
   </div>
 </div>
 
@@ -5506,24 +5529,24 @@ const cssText = `
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  font-weight: 700;
   line-height: 1;
-  color: #2563eb;
-  background: #e0e7ff;
+  color: var(--brand-dark, #2563eb);
+  background: var(--accent-soft, #e0e7ff);
   border: none;
   border-radius: 8px;
-  width: 40px;
-  height: 40px;
-  min-height: 40px;
-  min-width: 40px;
+  width: 38px;
+  height: 38px;
+  min-height: 38px;
+  min-width: 38px;
   padding: 0;
   cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
   transition: background 0.2s ease, transform 0.1s ease;
 }
+.btn-actions svg { display: block; }
+.btn-actions svg circle { fill: currentColor; }
 .btn-actions:hover {
-  background: #c7d2fe;
+  background: color-mix(in oklch, var(--accent-soft, #c7d2fe) 70%, var(--accent) 14%);
   transform: translateY(-1px);
 }
 
@@ -7026,6 +7049,42 @@ if (saveSupabaseBtn) {
       sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
       state.skillSubTab = null;
       render();
+    });
+  }
+
+  // --- Filter chips (drive the SAME state.playerTab as #player-tab-select) ---
+  document.querySelectorAll('[data-chip-tab]').forEach((chipEl) => {
+    chipEl.addEventListener('click', () => {
+      const value = String(chipEl.getAttribute('data-chip-tab') || 'all');
+      if (state.playerTab === value) return;
+      state.playerTab = value;
+      sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
+      state.skillSubTab = null;
+      render();
+    });
+  });
+
+  // --- Groups chip: reveal/hide the group filter sub-control (no state change) ---
+  const groupsChip = document.querySelector('[data-chip-groups]');
+  if (groupsChip) {
+    groupsChip.addEventListener('click', () => {
+      const sub = document.getElementById('group-filter-sub');
+      const nextOpen = !groupsChip.classList.contains('on');
+      groupsChip.classList.toggle('on', nextOpen);
+      groupsChip.setAttribute('aria-pressed', String(nextOpen));
+      if (sub) sub.classList.toggle('is-open', nextOpen);
+    });
+  }
+
+  // --- Add (+) in the roster header: opens the Add/Update Player modal ---
+  const rosterAddBtn = document.getElementById('roster-add-player');
+  if (rosterAddBtn) {
+    rosterAddBtn.addEventListener('click', () => {
+      const modal = document.getElementById('admin-add-player-modal');
+      if (!modal) return;
+      modal.style.display = 'flex';
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
     });
   }
 
