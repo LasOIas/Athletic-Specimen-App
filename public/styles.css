@@ -2101,8 +2101,15 @@ select:focus {
   box-sizing: border-box;
 }
 #tab-players > .container:has(.ci-kiosk) > #js-checkin-stats { flex: 0 0 auto; }
+/* iPhone fix (2026-06-22, C48.7): the idle kiosk used to be flex:1 (filling below the pinned stat
+   card), so on a tall phone the check-in block centered in the LOWER region and the "N Checked In"
+   stat was stranded at the top with a big void between them — not "balanced." Instead, center the
+   stat card + the block together as ONE group: the container centers its children when idle, and the
+   kiosk takes natural height. (Scoped to .is-idle; when typing, .is-idle is dropped → container goes
+   back to top-aligned flex-start so the result buttons get full scroll room.) */
+#tab-players > .container:has(.ci-kiosk.is-idle) { justify-content: center; }
 .ci-kiosk.is-idle {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -2415,7 +2422,12 @@ select:focus {
 .ad-qa:active { transform: scale(.985); background: var(--accent-soft); }
 .ph-cta { transition: transform .08s ease, filter .12s ease; }
 .ph-cta:active { transform: scale(.99); filter: brightness(.97); }
-.nav-btn:active { background: var(--accent-soft); }
+/* iPhone fix (2026-06-22, C48.7): iOS holds :active on the LAST-tapped element until you touch
+   elsewhere, so .nav-btn:active's pressed-fill PERSISTED on the active tab (a filled box with the
+   brand-blue label sitting on it at low contrast). Gate the pressed-fill to hover-capable devices
+   (desktop), where :active is transient. On touch the active tab is already shown by .nav-btn.active
+   (brand text + the ::before top indicator) and the tap's feedback is the instant screen change. */
+@media (hover: hover) { .nav-btn:active { background: var(--accent-soft); } }
 .ad-qa:focus-visible, .ph-cta:focus-visible, .nav-btn:focus-visible,
 .roster-add:focus-visible, .app-header-logout:focus-visible, .chip:focus-visible,
 .btn-actions:focus-visible {
