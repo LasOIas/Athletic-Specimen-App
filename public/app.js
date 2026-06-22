@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.22.3';
+const APP_VERSION = '2026.06.22.4';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -806,8 +806,8 @@ function resetGeneratedTeamDragState() {
       boxShadow: '0 10px 32px rgba(0,0,0,0.35)',
       transform: 'scale(1.06) rotate(2deg)',
       transition: 'none',
-      borderRadius: '8px',
-      background: '#e0e7ff',
+      borderRadius: 'var(--r-sm)',
+      background: 'var(--accent-soft)',
     });
     document.body.appendChild(g);
     return g;
@@ -1419,12 +1419,12 @@ function showErrorBoundary(err, context) {
     if (document.getElementById('app-error-boundary')) return;
     const el = document.createElement('div');
     el.id = 'app-error-boundary';
-    el.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(241,245,249,0.97);display:flex;align-items:center;justify-content:center;padding:24px;';
+    el.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px;';
     el.innerHTML =
-      '<div style="max-width:340px;text-align:center;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">'
+      '<div style="max-width:340px;text-align:center;font-family:Arial,Helvetica,sans-serif;color:var(--ink);">'
       + '<div style="font-size:18px;font-weight:700;margin-bottom:8px;">Hit a snag</div>'
-      + '<div style="font-size:14px;color:#334155;margin-bottom:18px;line-height:1.4;">Tap below to reload. Your data is safe.</div>'
-      + '<button id="app-error-reset" style="background:#2563eb;color:#fff;border:none;border-radius:8px;padding:12px 18px;font-size:15px;font-weight:700;">Reset view</button>'
+      + '<div style="font-size:14px;color:var(--text-2);margin-bottom:18px;line-height:1.4;">Tap below to reload. Your data is safe.</div>'
+      + '<button id="app-error-reset" style="background:var(--accent);color:#fff;border:none;border-radius:var(--r-sm);padding:12px 18px;font-size:15px;font-weight:700;">Reset view</button>'
       + '</div>';
     document.body.appendChild(el);
     const btn = el.querySelector('#app-error-reset');
@@ -2598,10 +2598,12 @@ function moveGeneratedPlayerBetweenTeams(fromTeamIndex, toTeamIndex, playerKey, 
 function showTeamMoveToast(message) {
   try {
     const toast = document.createElement('div');
+    toast.className = 'save-toast';
     toast.textContent = message;
-    toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
+    toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 12px;border-radius:var(--r-sm);box-shadow:var(--shadow-md);z-index:10000;font-size:14px;';
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 1300);
+    setTimeout(() => { try { toast.classList.add('is-leaving'); } catch {} }, 1300);
+    setTimeout(() => toast.remove(), 1500);
   } catch {}
 }
 
@@ -3187,7 +3189,7 @@ function buildStandingsTableHTML(poolTeams, poolMatches) {
       <td>${r.rank}</td>
       <td>${escapeHTML(r.name)}</td>
       <td>${r.wins}-${r.losses}</td>
-      <td style="color:${r.pointDiff > 0 ? 'var(--success)' : r.pointDiff < 0 ? 'var(--danger)' : 'inherit'};">${r.pointDiff > 0 ? '+' : ''}${r.pointDiff}</td>
+      <td style="color:${r.pointDiff > 0 ? 'var(--live)' : r.pointDiff < 0 ? 'var(--danger)' : 'inherit'};">${r.pointDiff > 0 ? '+' : ''}${r.pointDiff}</td>
     </tr>`).join('')}</tbody>
   </table>`;
 }
@@ -3200,9 +3202,9 @@ function buildMatchRowHTML(m, teams, isAdmin, canSubmit) {
     return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
       <div class="small" style="color:var(--muted);">Net ${escapeHTML(String(m.net || '-'))} · Final</div>
       <div class="row" style="justify-content:space-between;gap:8px;align-items:center;">
-        <span style="flex:1;font-weight:${aWin ? '700' : '400'};color:${aWin ? 'var(--success)' : 'inherit'};">${an}</span>
+        <span style="flex:1;font-weight:${aWin ? '700' : '400'};color:${aWin ? 'var(--live)' : 'inherit'};">${an}</span>
         <span style="flex:0 0 auto;font-weight:700;">${escapeHTML(String(m.score_a))} - ${escapeHTML(String(m.score_b))}</span>
-        <span style="flex:1;text-align:right;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--success)' : 'inherit'};">${bn}</span>
+        <span style="flex:1;text-align:right;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--live)' : 'inherit'};">${bn}</span>
       </div>
       ${isAdmin ? `<button type="button" class="secondary" data-role="tv2-clear-result" data-id="${escapeHTML(m.id)}" style="margin-top:4px;font-size:12px;padding:4px 8px;">Clear</button>` : ''}
     </div>`;
@@ -3296,10 +3298,10 @@ function buildBracketCardHTML(m, matches, teams, canSubmit) {
     const aWin = m.winner_team_id === m.team_a_id;
     const scoreTxt = (m.score_a != null && m.score_b != null) ? `${escapeHTML(String(m.score_a))} - ${escapeHTML(String(m.score_b))}` : '';
     body = `
-      <div class="row" style="justify-content:space-between;gap:8px;font-weight:${aWin ? '700' : '400'};color:${aWin ? 'var(--success)' : 'inherit'};">
+      <div class="row" style="justify-content:space-between;gap:8px;font-weight:${aWin ? '700' : '400'};color:${aWin ? 'var(--live)' : 'inherit'};">
         <span style="flex:1;min-width:0;">${aName}</span><span style="flex:0 0 auto;">${aWin ? 'Won' : ''}</span>
       </div>
-      <div class="row" style="justify-content:space-between;gap:8px;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--success)' : 'inherit'};">
+      <div class="row" style="justify-content:space-between;gap:8px;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--live)' : 'inherit'};">
         <span style="flex:1;min-width:0;">${bName}</span><span style="flex:0 0 auto;">${!aWin ? 'Won' : ''}</span>
       </div>
       ${scoreTxt ? `<div class="small" style="color:var(--muted);margin-top:2px;">${scoreTxt}</div>` : ''}
@@ -3653,7 +3655,7 @@ function renderOperatorActionsLogHTML() {
         const metaParts = [entry.scope, entry.action].filter(Boolean).join(' / ');
         const canUndo = !!(entry.undo && !entry.undo.used);
         return `
-          <li class="small" style="padding:0.45rem 0; border-top:1px solid #e2e8f0;">
+          <li class="small" style="padding:0.45rem 0; border-top:1px solid var(--border);">
             <div>
               <strong>${escapeHTMLText(entry.title)}</strong>
               ${ts ? `<span style="opacity:0.75;"> | ${escapeHTMLText(ts)}</span>` : ''}
@@ -4104,8 +4106,9 @@ async function flushOutbox() {
 function makeSaveToast(text) {
   try {
     const t = document.createElement('div');
+    t.className = 'save-toast';
     t.textContent = text;
-    t.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 12px;border-radius:8px;z-index:10000;font-size:14px;';
+    t.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 12px;border-radius:var(--r-sm);box-shadow:var(--shadow-md);z-index:10000;font-size:14px;';
     document.body.appendChild(t);
     return t;
   } catch { return null; }
@@ -4114,7 +4117,10 @@ function settleSaveToast(t, ok, okText) {
   if (!t) return;
   try {
     t.textContent = ok ? (okText || 'Saved') : 'Could not save — check your connection';
-    setTimeout(() => { try { t.remove(); } catch {} }, ok ? 1200 : 2600);
+    const hold = ok ? 1200 : 2600;
+    // Fade out (mirrors .cik-toast motion; neutralized for reduce-motion users) before removing.
+    setTimeout(() => { try { t.classList.add('is-leaving'); } catch {} }, hold);
+    setTimeout(() => { try { t.remove(); } catch {} }, hold + 200);
   } catch {}
 }
 
@@ -5720,7 +5726,7 @@ const cssText = `
   min-width: 38px;
   padding: 0;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  box-shadow: var(--shadow-sm);
   transition: background 0.2s ease, transform 0.1s ease;
 }
 .btn-actions svg { display: block; }
@@ -5737,10 +5743,10 @@ const cssText = `
   right: 0;
   top: calc(100% + 4px);
   min-width: 150px;
-  background: #ffffff;
-  border: 1px solid rgba(0,0,0,0.12);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-md);
   padding: 4px 0;
   z-index: 1000;
 }
@@ -5759,22 +5765,22 @@ const cssText = `
   border: none;
   text-align: left;
   font-size: 15px;
-  color: #111827;
+  color: var(--ink);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
 .menu-item:hover {
-  background: #eff6ff;
-  color: #2563eb;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .menu-item.danger {
-  color: #dc2626;
+  color: var(--danger);
   font-weight: 600;
 }
 .menu-item.danger:hover {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--danger-soft);
+  color: var(--danger-dark);
 }
 
 /* Dropdown only jumps above the rest of the UI when it's actually open */
@@ -5790,13 +5796,13 @@ const cssText = `
 /* --- Dropdown 'Delete' should NOT look like a big red button --- */
 .card-menu .menu-item.danger {
   background: transparent !important;
-  color: #dc2626 !important;
+  color: var(--danger) !important;
   font-weight: 600;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
 }
 .card-menu .menu-item.danger:hover {
-  background: #fee2e2 !important;
-  color: #b91c1c !important;
+  background: var(--danger-soft) !important;
+  color: var(--danger-dark) !important;
 }
 `;
 
@@ -5816,8 +5822,8 @@ const editCss = `
 .players .player-card { min-height: auto !important; }
 .players .player-card .row { min-height: 0 !important; }
 .player-card.is-editing{
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.22);
-  background: #f8fffc;
+  box-shadow: 0 0 0 2px var(--success-border);
+  background: var(--card);
 }
 .player-card.is-editing .card-actions{
   display:none;
@@ -5831,9 +5837,9 @@ const editCss = `
   gap:8px;
   margin-top:8px;
   padding:8px;
-  border-radius:8px;
-  background:#f8fafc;            /* subtle background so it reads as an editor */
-  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
+  border-radius:var(--r-sm);
+  background:var(--surface-3);            /* subtle background so it reads as an editor */
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 .player-card .edit-row.show{
   display:grid !important;
@@ -5846,8 +5852,8 @@ const editCss = `
   line-height:1.2;
   padding:6px 10px;
   border-radius:6px;
-  border:1px solid #d1d5db;
-  background:#fff;
+  border:1px solid var(--border);
+  background:var(--card);
   max-width:unset;
   width:100%;
   appearance:textfield;
@@ -5860,12 +5866,12 @@ const editCss = `
 .player-card .edit-row .group-btn{
   width:100%;
   height:36px !important;
-  border:1px solid #d1d5db;
+  border:1px solid var(--border);
   border-radius:6px;
-  background:#fff;
+  background:var(--card);
   text-align:left;
   padding:0 10px;
-  color:#111827;
+  color:var(--ink);
 }
 .player-card .edit-row .group-list{
   max-height:220px;
@@ -5875,7 +5881,7 @@ const editCss = `
   font-weight:600;
 }
 .player-card .edit-row .group-list .group-item.is-primary{
-  color:#065f46;
+  color:var(--live);
 }
 .player-card .edit-row .group-chips{
   display:flex;
@@ -5887,19 +5893,19 @@ const editCss = `
   display:inline-flex;
   align-items:center;
   gap:4px;
-  border:1px solid #d1d5db;
-  background:#fff;
+  border:1px solid var(--border);
+  background:var(--card);
   border-radius:999px;
   padding:2px 6px;
 }
 .player-card .edit-row .group-chip.is-primary{
-  border-color:#86efac;
-  background:#f0fdf4;
+  border-color:var(--success-border);
+  background:var(--live-soft);
 }
 .player-card .edit-row .group-chip-label{
   border:none;
   background:transparent;
-  color:#111827;
+  color:var(--ink);
   cursor:pointer;
   font-size:12px;
   line-height:1.2;
@@ -5908,14 +5914,14 @@ const editCss = `
 .player-card .edit-row .group-chip-remove{
   border:none;
   background:transparent;
-  color:#b91c1c;
+  color:var(--danger);
   cursor:pointer;
   font-size:14px;
   line-height:1;
   padding:0 2px;
 }
 .player-card .edit-row .group-chip-empty{
-  color:#64748b;
+  color:var(--muted);
 }
 
 .player-card .edit-row .edit-actions{
@@ -5933,9 +5939,9 @@ const editCss = `
   border-radius:6px;
 }
 .player-card .edit-row .btn-cancel-edit{
-  border:1px solid #d1d5db;
-  background:#fff;
-  color:#111827;
+  border:1px solid var(--border);
+  background:var(--card);
+  color:var(--ink);
 }
 
 /* Don't let any nested .row inside the edit area expand vertically */
