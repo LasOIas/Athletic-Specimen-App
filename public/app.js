@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.22.2';
+const APP_VERSION = '2026.06.22.3';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -942,10 +942,16 @@ function resetGeneratedTeamDragState() {
     if (!changed) return;
 
     saveLocal();
-    // A check-in/out toggle only changes the player's status + the stats card —
-    // exactly partialRender's scope. Full render() here rebuilt all ~213 cards on
-    // every tap (janky + dropped in-progress taps/typing). See reliability check 2026-06-18.
-    partialRender();
+    // C48.3 (perf): a check-in/out toggle changes exactly ONE player's state. The old path called
+    // partialRender(), which rebuilt ALL ~215 roster rows (playersEl.innerHTML = renderFilteredPlayers()).
+    // Update only the tapped row instead: toggle the card's `is-in` class + swap the toggle button to
+    // reflect STATE (checked-in => green "In" via `btn-checkout tg in`; out => grey "Out" via `btn-checkin
+    // tg` — label+color both = STATE, the 2026-06-20 truthfulness fix, preserved exactly), refresh the
+    // checked-in stat cards, and if the active filter (Checked in / Out) now excludes the row, drop it.
+    // Byte-identical to a full re-filter: only this player's filter-membership changed, the list is
+    // alphabetical, so no other row moves. Falls back to partialRender() if the row isn't on screen (the
+    // public kiosk path, or an off-screen toggle) so behavior is never lost.
+    surgicalToggleRowUpdate(player);
 
     if (supabaseClient && player.id) {
       (async () => {
@@ -1286,6 +1292,105 @@ function partialRender() {
   updateBulkBarVisibility();
   restoreTransientInteractionState(snapshot);
   refreshAzStripAvailability();
+}
+
+// C48.3 (perf): scoped re-render of ONLY the admin Players panel (#tab-players). The high-frequency
+// admin filter actions (filter chips, the #player-tab-select source-of-truth select, the group-filter
+// select) only change which roster rows show + which chip/sub-control is active — none of them touch
+// the header, the bottom nav, or any other panel. The old path called full render(), which rebuilt the
+// ENTIRE #root (every panel) + forced a reflow (`void root.offsetHeight`) + re-ran activateMainTab — a
+// measured ~383ms block on a single chip tap at 4x CPU throttle, almost all of it the teardown +
+// 215-row rebuild of the whole shell. This rebuilds just the Players panel via adminPlayersHTML() (the
+// SAME builder render() uses, in the SAME `.container` wrapper) so the chips' .on highlight, the Skill
+// sub-tab, and the Groups sub-control all stay byte-identical to a full render() — then re-binds only
+// the players-panel handlers (NOT attachHandlers() wholesale, which would double-bind the non-idempotent
+// nav/login/kiosk/team/session handlers). Row-level handlers (in/out toggle, select checkbox, kebab
+// edit/delete, A-Z strip) are document-delegated and bound once, so the innerHTML swap leaves them intact.
+// Transient interaction state (search text/focus/selection, open kebab, open edit row, open group-select,
+// open modal) is preserved exactly the way partialRender does. Falls back to full render() if the panel
+// is absent or we're not on the admin surface — so it can never silently no-op on the public shell.
+function renderPlayersPanel() {
+  const panel = document.getElementById('tab-players');
+  if (!state.isAdmin || !panel) { render(); return; }
+
+  const snapshot = captureTransientInteractionState();
+  // Reproduce renderAdminShell()'s EXACT #tab-players innerHTML (incl. the template-literal whitespace
+  // around the .container wrapper) so a scoped re-render is byte-identical to a full render(), not just
+  // pixel-identical.
+  panel.innerHTML = `
+      <div class="container">
+        ${adminPlayersHTML()}
+      </div>
+    `;
+  bindPlayersPanelHandlers();
+  // Row + selection handlers are document-delegated no-ops (kept for call-site parity with render/partialRender).
+  bindPlayerRowHandlers();
+  bindSelectionHandlers();
+  updateBulkBarVisibility();
+  restoreTransientInteractionState(snapshot);
+  refreshAzStripAvailability();
+}
+
+// C48.3 (perf): surgical single-row update for the admin Players in/out toggle (the highest-frequency
+// admin gesture). Replaces partialRender()'s full 215-row rebuild with a one-element DOM edit. The
+// toggle button markup MUST stay byte-identical to renderFilteredPlayers() (app.js ~2588-2591):
+//   checked-in => <button class="btn-checkout tg in" data-id aria-label="…is checked in — tap to check out"><span class="tg-dot"></span>In</button>
+//   out         => <button class="btn-checkin tg"     data-id aria-label="…is checked out — tap to check in"><span class="tg-dot"></span>Out</button>
+// (label + color both = STATE — green "In" / grey "Out" — the 2026-06-20 truthfulness fix.) If the row
+// isn't currently rendered (e.g. the public kiosk has no .prow, or the toggled player is filtered out of
+// view), fall back to partialRender() so nothing is lost.
+function buildRowToggleButtonHTML(player, isCheckedIn) {
+  const safeName = escapeHTMLText(player.name || '');
+  return isCheckedIn
+    ? `<button class="btn-checkout tg in" data-id="${player.id}" aria-label="${safeName} is checked in — tap to check out"><span class="tg-dot"></span>In</button>`
+    : `<button class="btn-checkin tg" data-id="${player.id}" aria-label="${safeName} is checked out — tap to check in"><span class="tg-dot"></span>Out</button>`;
+}
+
+function surgicalToggleRowUpdate(player) {
+  const playersEl = document.querySelector('.players');
+  const row = playersEl ? playersEl.querySelector(`.prow[data-id="${CSS.escape(String(player.id))}"]`) : null;
+  // No on-screen row to surgically edit (kiosk has none; off-screen/filtered row) → keep the prior
+  // safe behavior so the UI never goes stale.
+  if (!playersEl || !row) { partialRender(); return; }
+
+  const nowCheckedIn = (state.checkedIn || []).includes(playerIdentityKey(player));
+
+  // 1) Card class — set the WHOLE className to the exact string renderFilteredPlayers() builds
+  //    (`player-card prow ${isSelected?'is-selected':''} ${checked?'is-in':''}`, double/trailing spaces
+  //    and all) so the row is byte-identical to a full render, not just classList-equivalent.
+  const isSelected = new Set((state.selectedIds || []).map((x) => String(x))).has(String(player.id));
+  row.className = 'player-card prow ' + (isSelected ? 'is-selected' : '') + ' ' + (nowCheckedIn ? 'is-in' : '');
+
+  // 2) Swap the toggle button (the ONLY part of .prow-actions that differs by state; the kebab is identical).
+  const toggleBtn = row.querySelector('.btn-checkin, .btn-checkout');
+  if (toggleBtn) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = buildRowToggleButtonHTML(player, nowCheckedIn);
+    const fresh = tmp.firstElementChild;
+    if (fresh) toggleBtn.replaceWith(fresh);
+  }
+
+  // 3) Stat cards — same surgical updates partialRender does (each guarded; may be absent per surface).
+  const statsEl = document.getElementById('js-checkin-stats');
+  if (statsEl) statsEl.innerHTML = buildCheckinStatsHTML();
+  const dashStatEl = document.getElementById('js-dashboard-stat');
+  if (dashStatEl) dashStatEl.innerHTML = buildDashboardStatHTML();
+
+  // 4) If the active filter now excludes this row, drop it (the list is alphabetical and only THIS
+  // player's membership changed, so removing the one row yields the same DOM as a full re-filter).
+  const filterExcludes =
+    (state.playerTab === 'in' && !nowCheckedIn) ||
+    (state.playerTab === 'out' && nowCheckedIn);
+  if (filterExcludes) {
+    row.remove();
+    // If that emptied the list, render the exact empty-state message renderFilteredPlayers() would show,
+    // wrapped in the SAME whitespace adminPlayersHTML() uses for `<div class="players">…</div>` so the
+    // `.players` innerHTML is byte-identical to a full render's empty state.
+    if (!playersEl.querySelector('.prow')) {
+      playersEl.innerHTML = `\n    ${renderFilteredPlayers()}\n  `;
+    }
+    refreshAzStripAvailability();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -6068,58 +6173,18 @@ function attachHandlers() {
       if (navBtn) activateMainTab(navBtn.dataset.navTab);
     });
   }
-  // --- Group controls (Admin Players) ---
-const groupSelect = document.getElementById('group-filter-select');
-if (groupSelect) {
-  groupSelect.addEventListener('change', () => {
-    if (state.limitedGroup) {
-      // enforce lock
-      state.activeGroup = state.limitedGroup;
-      groupSelect.value = state.limitedGroup;
-      return;
-    }
-    state.activeGroup = normalizeActiveGroupSelection(groupSelect.value || 'All');
-    saveLocal();
-    render();
-  });
-}
+  // --- Admin Players panel handlers ---
+  // C48.3 (perf): the players-panel handlers (group filter, add-player form + save, the modal
+  // close/overlay handlers, Group Manager, filter chips/select, search, skill sub-tab, select-all,
+  // bulk bar) are extracted into bindPlayersPanelHandlers() so renderPlayersPanel() (a scoped
+  // re-render of just #tab-players) can re-bind exactly them — without re-calling attachHandlers()
+  // wholesale (which would DOUBLE-BIND the bottom nav, login/logout, kiosk, team-gen, etc., none of
+  // which are guarded against re-binding). attachHandlers() runs this once per full render against a
+  // fresh DOM; renderPlayersPanel() runs it against the freshly-rebuilt panel — neither double-binds,
+  // because the previous panel elements (and their listeners) are discarded by the innerHTML swap.
+  bindPlayersPanelHandlers();
 
-const adminNameInput = document.getElementById('admin-player-name');
-const adminGroupsInput = document.getElementById('admin-player-groups');
-const adminGroupsHelp = document.getElementById('admin-player-groups-help');
-const adminGroupsPreview = document.getElementById('admin-player-groups-preview');
-if (adminGroupsInput && adminGroupsPreview) {
-  const syncTopFormGroupContext = () => {
-    const mode = renderTopFormGroupsHelpAndPreview(adminNameInput?.value || '', adminGroupsInput.value || '');
-    adminGroupsPreview.innerHTML = mode.previewHTML;
-    if (adminGroupsHelp) adminGroupsHelp.textContent = mode.helpText;
-  };
-  adminGroupsInput.addEventListener('input', syncTopFormGroupContext);
-  if (adminNameInput) adminNameInput.addEventListener('input', syncTopFormGroupContext);
-  adminGroupsInput.addEventListener('blur', () => {
-    const normalized = parseAdminGroupsInput(adminGroupsInput.value || '');
-    adminGroupsInput.value = normalized.join(', ');
-    syncTopFormGroupContext();
-  });
-  syncTopFormGroupContext();
-}
-
-const openPopup = (popupId) => {
-  const popup = document.getElementById(popupId);
-  if (!popup) return;
-  popup.style.display = 'flex';
-  popup.setAttribute('aria-hidden', 'false');
-  document.body.style.overflow = 'hidden'; // lock background scroll so the page doesn't scroll under the modal on iOS
-};
-const closePopup = (popupId) => {
-  const popup = document.getElementById(popupId);
-  if (!popup) return;
-  popup.style.display = 'none';
-  popup.setAttribute('aria-hidden', 'true');
-  document.body.style.overflow = '';
-};
-
-// C46 cleanup: the admin "Menu" dropdown (#admin-quick-open) was removed in C40 (Add = the + button,
+  // C46 cleanup: the admin "Menu" dropdown (#admin-quick-open) was removed in C40 (Add = the + button,
 // Show QR = the Dashboard tile, Check-in = the roster search + tap toggle — all duplicated). Its change
 // handler is removed here as a dead orphan.
 
@@ -6181,238 +6246,6 @@ function closeQrModal() {
     });
   }
 }());
-
-document.querySelectorAll('[data-role="close-popup"]').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const popupId = String(btn.getAttribute('data-target') || '').trim();
-    if (!popupId) return;
-    closePopup(popupId);
-  });
-});
-
-document.querySelectorAll('.popup-overlay').forEach((popup) => {
-  popup.addEventListener('click', (e) => {
-    if (e.target !== popup) return;
-    closePopup(popup.id);
-  });
-});
-
-// ----- Group Manager (master admin) -----
-const gmOpen  = document.getElementById('btn-open-group-manager');
-const gmRoot  = document.getElementById('groupManager');
-
-function gmPopulate() {
-  if (!gmRoot) return;
-
-  // Build a canonical group list (exclude "All")
-  const known = [
-    ...(state.groups || []).filter((groupName) => groupName && groupName !== 'All')
-  ];
-  // Include any groups that might exist on players but not in state.groups
-  state.players.forEach(p => {
-    known.push(...getPlayerGroups(p));
-  });
-  const list = normalizeGroupList(known).sort((a,b)=>a.localeCompare(b));
-
-  // Fill rows with counts + actions
-  const byGroup = computeCheckedInByGroup();
-  const totals = Object.fromEntries(byGroup.map(r => [r.groupKey, r.total]));
-  const ins    = Object.fromEntries(byGroup.map(r => [r.groupKey, r.in]));
-
-  const rowsEl = gmRoot.querySelector('#gm-rows');
-  if (rowsEl) {
-    rowsEl.innerHTML = list.map(g => `
-      <tr data-group="${g}">
-        <td style="overflow-wrap:anywhere;"><strong>${g}</strong></td>
-        <td style="text-align:center; white-space:nowrap;">${ins[g] || 0}</td>
-        <td style="text-align:center; white-space:nowrap;">${totals[g] || 0}</td>
-        <td>
-          <div class="row gm-actions-row" style="gap:6px; justify-content:flex-start; flex-wrap:wrap;">
-            <button class="gm-rename secondary" data-group="${g}">Rename</button>
-            <button class="gm-delete danger" data-group="${g}">Delete</button>
-          </div>
-        </td>
-      </tr>
-    `).join('');
-  }
-}
-
-if (gmOpen && gmRoot) {
-  const closeGroupManager = () => { gmRoot.style.display = 'none'; document.body.style.overflow = ''; };
-  gmOpen.addEventListener('click', () => {
-    gmPopulate();
-    gmRoot.style.display = 'block';
-    document.body.style.overflow = 'hidden'; // lock background scroll on iOS
-  });
-  const gmClose = gmRoot.querySelector('#btn-close-group-manager');
-  if (gmClose) gmClose.addEventListener('click', closeGroupManager);
-  // Tap the dark backdrop (the overlay itself) to close, matching the other modals
-  gmRoot.addEventListener('click', (e) => { if (e.target === gmRoot) closeGroupManager(); });
-
-  // Add
-  const gmAdd = gmRoot.querySelector('#gm-add');
-  if (gmAdd) gmAdd.addEventListener('click', () => {
-    const input = gmRoot.querySelector('#gm-new-name');
-    const name  = normalizeGroupName(input && input.value || '');
-    if (!name) return;
-    state.groups = ['All', ...normalizeGroupList([...(state.groups || []).filter((groupName) => groupName && groupName !== 'All'), name])];
-    state.activeGroup = name;
-    saveLocal();
-    render();
-    gmPopulate();
-    if (supabaseClient) {
-      (async () => {
-        try {
-          const synced = await ensureGroupCatalogEntrySupabase(name);
-          if (synced) queueSupabaseRefresh();
-          else await reconcileToSupabaseAuthority('group-add');
-        } catch (err) {
-          console.error('Supabase group add error', err);
-          await reconcileToSupabaseAuthority('group-add');
-        }
-      })();
-    }
-    if (input) input.value = '';
-  });
-
-  // Row actions (rename/delete)
-  gmRoot.addEventListener('click', async (e) => {
-    const renameBtn = e.target.closest('.gm-rename');
-    const deleteBtn = e.target.closest('.gm-delete');
-
-    // Rename
-    if (renameBtn) {
-      const oldName = normalizeGroupName(renameBtn.getAttribute('data-group'));
-      if (!oldName) return;
-      const requestedName = prompt(`Rename "${oldName}" to:`, oldName);
-      const newName = normalizeGroupName(requestedName);
-      if (!newName) return;
-      const oldKey = normalizeGroupKey(oldName);
-      if (normalizeGroupKey(newName) === oldKey && newName === oldName) return;
-
-      state.groups = ['All', ...normalizeGroupList(
-        (state.groups || [])
-          .filter((groupName) => groupName && groupName !== 'All')
-          .map((groupName) => (normalizeGroupKey(groupName) === oldKey ? newName : groupName))
-      )];
-      state.players = state.players.map((player) => {
-        const memberships = getPlayerGroups(player);
-        if (!memberships.some((group) => normalizeGroupKey(group) === oldKey)) return player;
-        const nextGroups = normalizeGroupList(memberships.map((group) => (normalizeGroupKey(group) === oldKey ? newName : group)));
-        return { ...player, group: nextGroups[0] || '', groups: nextGroups };
-      });
-      if (normalizeGroupKey(state.activeGroup || '') === oldKey) state.activeGroup = newName;
-
-      let renameRemoteFailed = false;
-      try {
-        await renameGroupCatalogEntrySupabase(oldName, newName);
-        const updates = state.players
-          .filter((player) => player.id && playerBelongsToGroup(player, newName))
-          .map((player) => ({
-            id: player.id,
-            group: getPlayerPrimaryGroup(player),
-            groups: getPlayerGroups(player)
-          }));
-        for (const update of updates) {
-          const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
-          if (!ok) renameRemoteFailed = true;
-        }
-        const synced = await syncFromSupabase();
-        if (!synced) renameRemoteFailed = true;
-      } catch (e) {
-        renameRemoteFailed = true;
-        console.error('Supabase rename error', e);
-      }
-      if (renameRemoteFailed) {
-        await reconcileToSupabaseAuthority('group-rename');
-        gmPopulate();
-        return;
-      }
-
-      saveLocal();
-      render();
-      gmPopulate();
-      return;
-    }
-
-    // Delete
-    if (deleteBtn) {
-      const name = normalizeGroupName(deleteBtn.getAttribute('data-group'));
-      if (!name) return;
-      const confirmed = confirmDangerousActionOrAbort({
-        title: `Delete group "${name}"?`,
-        detail: 'This removes the group from all players and cannot be auto-undone.',
-        confirmText: name
-      });
-      if (!confirmed) return;
-      const targetKey = normalizeGroupKey(name);
-
-      state.groups = ['All', ...normalizeGroupList(
-        (state.groups || []).filter((groupName) => groupName && groupName !== 'All' && normalizeGroupKey(groupName) !== targetKey)
-      )];
-      state.players = state.players.map((player) => {
-        const memberships = getPlayerGroups(player);
-        if (!memberships.some((group) => normalizeGroupKey(group) === targetKey)) return player;
-        const nextGroups = memberships.filter((group) => normalizeGroupKey(group) !== targetKey);
-        return { ...player, group: nextGroups[0] || '', groups: nextGroups };
-      });
-      if (normalizeGroupKey(state.activeGroup || '') === targetKey) state.activeGroup = 'All';
-      enforceCanonicalGroupState({
-        catalogGroups: (state.groups || []).filter((groupName) => groupName && groupName !== 'All'),
-        includeExistingGroupsWhenNoCatalog: false
-      });
-      persistCanonicalGroupCache();
-
-      let deleteRemoteFailed = false;
-      try {
-        await deleteGroupCatalogEntrySupabase(name);
-        const updates = state.players
-          .filter((player) => player.id)
-          .map((player) => ({
-            id: player.id,
-            group: getPlayerPrimaryGroup(player),
-            groups: getPlayerGroups(player)
-          }));
-        for (const update of updates) {
-          const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
-          if (!ok) deleteRemoteFailed = true;
-        }
-        const synced = await syncFromSupabase();
-        if (!synced) deleteRemoteFailed = true;
-      } catch (e) {
-        deleteRemoteFailed = true;
-        console.error('Supabase delete group error', e);
-      }
-      if (deleteRemoteFailed) {
-        await reconcileToSupabaseAuthority('group-delete');
-        recordOperatorAction({
-          scope: 'players',
-          action: 'delete-group-failed',
-          entityType: 'group',
-          entityId: targetKey,
-          title: `Delete failed for group "${name}".`,
-          detail: 'Supabase write failed. Latest shared state was restored.',
-          tone: 'error'
-        });
-        gmPopulate();
-        return;
-      }
-
-      saveLocal();
-      render();
-      gmPopulate();
-      recordOperatorAction({
-        scope: 'players',
-        action: 'delete-group',
-        entityType: 'group',
-        entityId: targetKey,
-        title: `Deleted group "${name}".`,
-        detail: 'Group membership was removed from affected players.',
-        tone: 'warning'
-      });
-    }
-  });
-}
 
   // --- Admin login/logout ---
 // Admin login
@@ -6531,163 +6364,6 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
 // C47 cleanup: the manual "Save" button (#btn-save-supabase) was removed in C40 (the app auto-saves via
 // realtime + the offline outbox). Its click handler is removed as a dead orphan. forceSaveAllToSupabase()
 // stays — it's still used by the attendance write-through paths.
-
-  // --- Admin: Save player (add/update) ---
-  const savePlayerBtn = document.getElementById('btn-save-player');
-  if (savePlayerBtn) {
-    savePlayerBtn.addEventListener('click', async () => {
-      const nameInput = document.getElementById('admin-player-name');
-      const skillInput = document.getElementById('admin-player-skill');
-      const groupsInput = document.getElementById('admin-player-groups');
-      const name = (nameInput && nameInput.value || '').trim();
-      let skill = parseFloat(skillInput && skillInput.value || '');
-      const requestedGroups = parseAdminGroupsInput(groupsInput && groupsInput.value || '');
-      const applyTopFormGroupRules = (groups, fallbackPrimary = '') => {
-        const fallback = normalizeGroupName(fallbackPrimary);
-        let next = normalizeGroupList(groups);
-        if (!next.length && fallback) next = [fallback];
-        if (state.limitedGroup) {
-          const locked = normalizeGroupName(state.limitedGroup);
-          if (locked) next = normalizeGroupList([locked, ...next.filter((groupName) => groupName !== locked)]);
-        }
-        return next;
-      };
-      if (Number.isNaN(skill)) skill = 0; // treat empty input as 0
-      if (!name || skill < 0) return;
-
-      const idx = state.players.findIndex((p) => normalize(p.name) === normalize(name));
-      const isNew = idx === -1;
-
-      // Honest save status (created before the branch, settled when the write resolves).
-      const addOkText = isNew ? 'Player added' : 'Player updated';
-      const addToast = makeSaveToast(supabaseClient ? 'Saving…' : addOkText);
-      if (!supabaseClient && addToast) setTimeout(() => { try { addToast.remove(); } catch {} }, 1200);
-
-      if (idx !== -1) {
-        // update existing
-        const updated = state.players.slice();
-        const previous = updated[idx];
-        const nextGroups = applyTopFormGroupRules(
-          requestedGroups.length ? requestedGroups : getPlayerGroups(previous)
-        );
-        const nextPrimary = nextGroups[0] || '';
-        updated[idx] = { ...previous, name, skill, group: nextPrimary, groups: nextGroups };
-        state.players = updated;
-
-        if (supabaseClient) {
-          (async () => {
-            let ok = false;
-            try {
-              let remoteOK = false;
-              if (updated[idx].id) {
-                remoteOK = await updatePlayerFieldsSupabase(updated[idx].id, {
-                  name,
-                  skill,
-                  group: nextPrimary,
-                  groups: nextGroups
-                });
-              } else {
-                const encodedGroupsTag = serializePlayerGroupsTag(nextGroups, nextPrimary);
-                try {
-                  const insertRow = HAS_TAG
-                    ? { name, skill, group: nextPrimary, tag: encodedGroupsTag }
-                    : { name, skill, group: nextPrimary };
-                  const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
-                  if (error) throw error;
-                  if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
-                  remoteOK = true;
-                } catch {
-                  try {
-                    const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: nextPrimary }]).select();
-                    if (error) throw error;
-                    if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
-                    remoteOK = true;
-                  } catch {
-                    const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-                    if (error) throw error;
-                    if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
-                    remoteOK = true;
-                  }
-                }
-              }
-              await ensureGroupCatalogEntriesSupabase(nextGroups);
-              if (remoteOK) { ok = true; queueSupabaseRefresh(); }
-              else await reconcileToSupabaseAuthority('admin-save-player-update');
-            } catch (err) {
-              console.error('Supabase update error', err);
-              await reconcileToSupabaseAuthority('admin-save-player-update');
-            }
-            settleSaveToast(addToast, ok, addOkText);
-          })();
-        }
-      } else {
-        // insert new
-        const activeGroupForInsert = normalizeActiveGroupSelection(state.activeGroup || 'All');
-        const defaultPrimary = state.limitedGroup
-          ? state.limitedGroup
-          : (activeGroupForInsert && activeGroupForInsert !== 'All' && activeGroupForInsert !== UNGROUPED_FILTER_VALUE ? activeGroupForInsert : '');
-        const groups = applyTopFormGroupRules(requestedGroups, defaultPrimary);
-        const group = groups[0] || '';
-        const newPlayer = { name, skill, group, groups };
-        // pending:true survives a racing sync until the insert lands (mergePlayersAfterSync).
-        const inserted = { ...newPlayer, pending: true };
-        state.players = [...state.players, inserted];
-
-        if (supabaseClient) {
-          (async () => {
-            let ok = false;
-            try {
-              let remoteOK = false;
-              const encodedGroupsTag = serializePlayerGroupsTag(groups, group);
-              try {
-                const insertRow = HAS_TAG
-                  ? { name, skill, group, tag: encodedGroupsTag }
-                  : { name, skill, group };
-                const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
-                if (error) throw error;
-                remoteOK = true;
-                if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
-              } catch {
-                try {
-                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-                  if (error) throw error;
-                  remoteOK = true;
-                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
-                } catch {
-                  // 3rd fallback: table has neither 'group' nor 'tag'
-                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-                  if (error) throw error;
-                  remoteOK = true;
-                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
-                }
-              }
-              await ensureGroupCatalogEntriesSupabase(groups);
-              inserted.pending = false;
-              if (remoteOK) { ok = true; queueSupabaseRefresh(); }
-              else await reconcileToSupabaseAuthority('admin-save-player-insert');
-            } catch (err) {
-              console.error('Supabase insert error', err);
-              inserted.pending = false;
-              await reconcileToSupabaseAuthority('admin-save-player-insert');
-            }
-            settleSaveToast(addToast, ok, 'Player added');
-          })();
-        } else {
-          // Offline: no client to clear pending in the async path — clear it here so the
-          // row isn't a permanent "pending" ghost. See reliability check 2026-06-18.
-          inserted.pending = false;
-        }
-      }
-
-      if (nameInput) nameInput.value = '';
-      if (skillInput) skillInput.value = '';
-      if (groupsInput) groupsInput.value = '';
-      saveLocal();
-      // Save-status toast is created before the insert/update branch (addToast) and
-      // settled honestly when the write resolves — no more premature "added/updated".
-      render();
-    });
-  }
 
   // --- Public: Check In kiosk (C36 T1) — type your name -> tap it -> checked in ---
   const checkinSearch = document.getElementById('checkin-search');
@@ -7092,6 +6768,491 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
     });
   });
 
+  // --- Session tab handlers ---
+  const btnSaveSession = document.getElementById('btn-save-session');
+  if (btnSaveSession) {
+    btnSaveSession.addEventListener('click', async () => {
+      const date     = (document.getElementById('session-date')?.value     || '').trim();
+      const time     = (document.getElementById('session-time')?.value     || '').trim();
+      const location = (document.getElementById('session-location')?.value || '').trim();
+      if (!date || !time || !location) {
+        const msg = document.getElementById('session-save-msg');
+        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'Please fill in all three fields.'; msg.style.display = 'block'; }
+        return;
+      }
+      btnSaveSession.disabled = true;
+      btnSaveSession.textContent = 'Saving…';
+      const ok = await saveSession(date, time, location);
+      btnSaveSession.disabled = false;
+      btnSaveSession.textContent = 'Save session';
+      const msg = document.getElementById('session-save-msg');
+      if (msg) {
+        msg.style.color = ok ? 'var(--success)' : 'var(--danger)';
+        msg.textContent  = ok ? 'Session saved' : 'Save failed — check connection';
+        msg.style.display = 'block';
+        if (ok) { setTimeout(() => { msg.style.display = 'none'; }, 2500); render(); }
+      }
+    });
+  }
+
+  const btnShareSession = document.getElementById('btn-share-session');
+  if (btnShareSession) {
+    btnShareSession.addEventListener('click', () => openQrModal());
+  }
+}
+
+// C48.3 (perf): players-panel handlers extracted from attachHandlers() so the scoped
+// renderPlayersPanel() can re-bind EXACTLY these after rebuilding only #tab-players, instead of
+// re-running attachHandlers() (which would double-bind the bottom nav, login/logout, kiosk,
+// team-gen, session, QR-modal handlers — none of which are idempotent). Called once per full
+// render() by attachHandlers(), and once per scoped re-render by renderPlayersPanel(); each call
+// binds to freshly-built panel elements, so there is no double-bind (the prior panel nodes and
+// their listeners are discarded by the innerHTML swap). Every block below is MOVED VERBATIM from
+// attachHandlers() — same querySelectors, same closures, same behavior. The only call-site change
+// is sites 1-3 (group filter, filter chips, #player-tab-select) now invoke renderPlayersPanel()
+// instead of render(); the rendered output is byte-identical.
+function bindPlayersPanelHandlers() {
+  // --- Group controls (Admin Players) ---
+const groupSelect = document.getElementById('group-filter-select');
+if (groupSelect) {
+  groupSelect.addEventListener('change', () => {
+    if (state.limitedGroup) {
+      // enforce lock
+      state.activeGroup = state.limitedGroup;
+      groupSelect.value = state.limitedGroup;
+      return;
+    }
+    state.activeGroup = normalizeActiveGroupSelection(groupSelect.value || 'All');
+    saveLocal();
+    renderPlayersPanel();
+  });
+}
+
+const adminNameInput = document.getElementById('admin-player-name');
+const adminGroupsInput = document.getElementById('admin-player-groups');
+const adminGroupsHelp = document.getElementById('admin-player-groups-help');
+const adminGroupsPreview = document.getElementById('admin-player-groups-preview');
+if (adminGroupsInput && adminGroupsPreview) {
+  const syncTopFormGroupContext = () => {
+    const mode = renderTopFormGroupsHelpAndPreview(adminNameInput?.value || '', adminGroupsInput.value || '');
+    adminGroupsPreview.innerHTML = mode.previewHTML;
+    if (adminGroupsHelp) adminGroupsHelp.textContent = mode.helpText;
+  };
+  adminGroupsInput.addEventListener('input', syncTopFormGroupContext);
+  if (adminNameInput) adminNameInput.addEventListener('input', syncTopFormGroupContext);
+  adminGroupsInput.addEventListener('blur', () => {
+    const normalized = parseAdminGroupsInput(adminGroupsInput.value || '');
+    adminGroupsInput.value = normalized.join(', ');
+    syncTopFormGroupContext();
+  });
+  syncTopFormGroupContext();
+}
+
+const openPopup = (popupId) => {
+  const popup = document.getElementById(popupId);
+  if (!popup) return;
+  popup.style.display = 'flex';
+  popup.setAttribute('aria-hidden', 'false');
+  document.body.style.overflow = 'hidden'; // lock background scroll so the page doesn't scroll under the modal on iOS
+};
+const closePopup = (popupId) => {
+  const popup = document.getElementById(popupId);
+  if (!popup) return;
+  popup.style.display = 'none';
+  popup.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
+};
+void openPopup; // retained verbatim from attachHandlers (defined-but-unused there too; closePopup is the live one)
+
+document.querySelectorAll('[data-role="close-popup"]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const popupId = String(btn.getAttribute('data-target') || '').trim();
+    if (!popupId) return;
+    closePopup(popupId);
+  });
+});
+
+document.querySelectorAll('.popup-overlay').forEach((popup) => {
+  popup.addEventListener('click', (e) => {
+    if (e.target !== popup) return;
+    closePopup(popup.id);
+  });
+});
+
+// ----- Group Manager (master admin) -----
+const gmOpen  = document.getElementById('btn-open-group-manager');
+const gmRoot  = document.getElementById('groupManager');
+
+function gmPopulate() {
+  if (!gmRoot) return;
+
+  // Build a canonical group list (exclude "All")
+  const known = [
+    ...(state.groups || []).filter((groupName) => groupName && groupName !== 'All')
+  ];
+  // Include any groups that might exist on players but not in state.groups
+  state.players.forEach(p => {
+    known.push(...getPlayerGroups(p));
+  });
+  const list = normalizeGroupList(known).sort((a,b)=>a.localeCompare(b));
+
+  // Fill rows with counts + actions
+  const byGroup = computeCheckedInByGroup();
+  const totals = Object.fromEntries(byGroup.map(r => [r.groupKey, r.total]));
+  const ins    = Object.fromEntries(byGroup.map(r => [r.groupKey, r.in]));
+
+  const rowsEl = gmRoot.querySelector('#gm-rows');
+  if (rowsEl) {
+    rowsEl.innerHTML = list.map(g => `
+      <tr data-group="${g}">
+        <td style="overflow-wrap:anywhere;"><strong>${g}</strong></td>
+        <td style="text-align:center; white-space:nowrap;">${ins[g] || 0}</td>
+        <td style="text-align:center; white-space:nowrap;">${totals[g] || 0}</td>
+        <td>
+          <div class="row gm-actions-row" style="gap:6px; justify-content:flex-start; flex-wrap:wrap;">
+            <button class="gm-rename secondary" data-group="${g}">Rename</button>
+            <button class="gm-delete danger" data-group="${g}">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+  }
+}
+
+if (gmOpen && gmRoot) {
+  const closeGroupManager = () => { gmRoot.style.display = 'none'; document.body.style.overflow = ''; };
+  gmOpen.addEventListener('click', () => {
+    gmPopulate();
+    gmRoot.style.display = 'block';
+    document.body.style.overflow = 'hidden'; // lock background scroll on iOS
+  });
+  const gmClose = gmRoot.querySelector('#btn-close-group-manager');
+  if (gmClose) gmClose.addEventListener('click', closeGroupManager);
+  // Tap the dark backdrop (the overlay itself) to close, matching the other modals
+  gmRoot.addEventListener('click', (e) => { if (e.target === gmRoot) closeGroupManager(); });
+
+  // Add
+  const gmAdd = gmRoot.querySelector('#gm-add');
+  if (gmAdd) gmAdd.addEventListener('click', () => {
+    const input = gmRoot.querySelector('#gm-new-name');
+    const name  = normalizeGroupName(input && input.value || '');
+    if (!name) return;
+    state.groups = ['All', ...normalizeGroupList([...(state.groups || []).filter((groupName) => groupName && groupName !== 'All'), name])];
+    state.activeGroup = name;
+    saveLocal();
+    render();
+    gmPopulate();
+    if (supabaseClient) {
+      (async () => {
+        try {
+          const synced = await ensureGroupCatalogEntrySupabase(name);
+          if (synced) queueSupabaseRefresh();
+          else await reconcileToSupabaseAuthority('group-add');
+        } catch (err) {
+          console.error('Supabase group add error', err);
+          await reconcileToSupabaseAuthority('group-add');
+        }
+      })();
+    }
+    if (input) input.value = '';
+  });
+
+  // Row actions (rename/delete)
+  gmRoot.addEventListener('click', async (e) => {
+    const renameBtn = e.target.closest('.gm-rename');
+    const deleteBtn = e.target.closest('.gm-delete');
+
+    // Rename
+    if (renameBtn) {
+      const oldName = normalizeGroupName(renameBtn.getAttribute('data-group'));
+      if (!oldName) return;
+      const requestedName = prompt(`Rename "${oldName}" to:`, oldName);
+      const newName = normalizeGroupName(requestedName);
+      if (!newName) return;
+      const oldKey = normalizeGroupKey(oldName);
+      if (normalizeGroupKey(newName) === oldKey && newName === oldName) return;
+
+      state.groups = ['All', ...normalizeGroupList(
+        (state.groups || [])
+          .filter((groupName) => groupName && groupName !== 'All')
+          .map((groupName) => (normalizeGroupKey(groupName) === oldKey ? newName : groupName))
+      )];
+      state.players = state.players.map((player) => {
+        const memberships = getPlayerGroups(player);
+        if (!memberships.some((group) => normalizeGroupKey(group) === oldKey)) return player;
+        const nextGroups = normalizeGroupList(memberships.map((group) => (normalizeGroupKey(group) === oldKey ? newName : group)));
+        return { ...player, group: nextGroups[0] || '', groups: nextGroups };
+      });
+      if (normalizeGroupKey(state.activeGroup || '') === oldKey) state.activeGroup = newName;
+
+      let renameRemoteFailed = false;
+      try {
+        await renameGroupCatalogEntrySupabase(oldName, newName);
+        const updates = state.players
+          .filter((player) => player.id && playerBelongsToGroup(player, newName))
+          .map((player) => ({
+            id: player.id,
+            group: getPlayerPrimaryGroup(player),
+            groups: getPlayerGroups(player)
+          }));
+        for (const update of updates) {
+          const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+          if (!ok) renameRemoteFailed = true;
+        }
+        const synced = await syncFromSupabase();
+        if (!synced) renameRemoteFailed = true;
+      } catch (e) {
+        renameRemoteFailed = true;
+        console.error('Supabase rename error', e);
+      }
+      if (renameRemoteFailed) {
+        await reconcileToSupabaseAuthority('group-rename');
+        gmPopulate();
+        return;
+      }
+
+      saveLocal();
+      render();
+      gmPopulate();
+      return;
+    }
+
+    // Delete
+    if (deleteBtn) {
+      const name = normalizeGroupName(deleteBtn.getAttribute('data-group'));
+      if (!name) return;
+      const confirmed = confirmDangerousActionOrAbort({
+        title: `Delete group "${name}"?`,
+        detail: 'This removes the group from all players and cannot be auto-undone.',
+        confirmText: name
+      });
+      if (!confirmed) return;
+      const targetKey = normalizeGroupKey(name);
+
+      state.groups = ['All', ...normalizeGroupList(
+        (state.groups || []).filter((groupName) => groupName && groupName !== 'All' && normalizeGroupKey(groupName) !== targetKey)
+      )];
+      state.players = state.players.map((player) => {
+        const memberships = getPlayerGroups(player);
+        if (!memberships.some((group) => normalizeGroupKey(group) === targetKey)) return player;
+        const nextGroups = memberships.filter((group) => normalizeGroupKey(group) !== targetKey);
+        return { ...player, group: nextGroups[0] || '', groups: nextGroups };
+      });
+      if (normalizeGroupKey(state.activeGroup || '') === targetKey) state.activeGroup = 'All';
+      enforceCanonicalGroupState({
+        catalogGroups: (state.groups || []).filter((groupName) => groupName && groupName !== 'All'),
+        includeExistingGroupsWhenNoCatalog: false
+      });
+      persistCanonicalGroupCache();
+
+      let deleteRemoteFailed = false;
+      try {
+        await deleteGroupCatalogEntrySupabase(name);
+        const updates = state.players
+          .filter((player) => player.id)
+          .map((player) => ({
+            id: player.id,
+            group: getPlayerPrimaryGroup(player),
+            groups: getPlayerGroups(player)
+          }));
+        for (const update of updates) {
+          const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
+          if (!ok) deleteRemoteFailed = true;
+        }
+        const synced = await syncFromSupabase();
+        if (!synced) deleteRemoteFailed = true;
+      } catch (e) {
+        deleteRemoteFailed = true;
+        console.error('Supabase delete group error', e);
+      }
+      if (deleteRemoteFailed) {
+        await reconcileToSupabaseAuthority('group-delete');
+        recordOperatorAction({
+          scope: 'players',
+          action: 'delete-group-failed',
+          entityType: 'group',
+          entityId: targetKey,
+          title: `Delete failed for group "${name}".`,
+          detail: 'Supabase write failed. Latest shared state was restored.',
+          tone: 'error'
+        });
+        gmPopulate();
+        return;
+      }
+
+      saveLocal();
+      render();
+      gmPopulate();
+      recordOperatorAction({
+        scope: 'players',
+        action: 'delete-group',
+        entityType: 'group',
+        entityId: targetKey,
+        title: `Deleted group "${name}".`,
+        detail: 'Group membership was removed from affected players.',
+        tone: 'warning'
+      });
+    }
+  });
+}
+
+  // --- Admin: Save player (add/update) ---
+  const savePlayerBtn = document.getElementById('btn-save-player');
+  if (savePlayerBtn) {
+    savePlayerBtn.addEventListener('click', async () => {
+      const nameInput = document.getElementById('admin-player-name');
+      const skillInput = document.getElementById('admin-player-skill');
+      const groupsInput = document.getElementById('admin-player-groups');
+      const name = (nameInput && nameInput.value || '').trim();
+      let skill = parseFloat(skillInput && skillInput.value || '');
+      const requestedGroups = parseAdminGroupsInput(groupsInput && groupsInput.value || '');
+      const applyTopFormGroupRules = (groups, fallbackPrimary = '') => {
+        const fallback = normalizeGroupName(fallbackPrimary);
+        let next = normalizeGroupList(groups);
+        if (!next.length && fallback) next = [fallback];
+        if (state.limitedGroup) {
+          const locked = normalizeGroupName(state.limitedGroup);
+          if (locked) next = normalizeGroupList([locked, ...next.filter((groupName) => groupName !== locked)]);
+        }
+        return next;
+      };
+      if (Number.isNaN(skill)) skill = 0; // treat empty input as 0
+      if (!name || skill < 0) return;
+
+      const idx = state.players.findIndex((p) => normalize(p.name) === normalize(name));
+      const isNew = idx === -1;
+
+      // Honest save status (created before the branch, settled when the write resolves).
+      const addOkText = isNew ? 'Player added' : 'Player updated';
+      const addToast = makeSaveToast(supabaseClient ? 'Saving…' : addOkText);
+      if (!supabaseClient && addToast) setTimeout(() => { try { addToast.remove(); } catch {} }, 1200);
+
+      if (idx !== -1) {
+        // update existing
+        const updated = state.players.slice();
+        const previous = updated[idx];
+        const nextGroups = applyTopFormGroupRules(
+          requestedGroups.length ? requestedGroups : getPlayerGroups(previous)
+        );
+        const nextPrimary = nextGroups[0] || '';
+        updated[idx] = { ...previous, name, skill, group: nextPrimary, groups: nextGroups };
+        state.players = updated;
+
+        if (supabaseClient) {
+          (async () => {
+            let ok = false;
+            try {
+              let remoteOK = false;
+              if (updated[idx].id) {
+                remoteOK = await updatePlayerFieldsSupabase(updated[idx].id, {
+                  name,
+                  skill,
+                  group: nextPrimary,
+                  groups: nextGroups
+                });
+              } else {
+                const encodedGroupsTag = serializePlayerGroupsTag(nextGroups, nextPrimary);
+                try {
+                  const insertRow = HAS_TAG
+                    ? { name, skill, group: nextPrimary, tag: encodedGroupsTag }
+                    : { name, skill, group: nextPrimary };
+                  const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
+                  if (error) throw error;
+                  if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
+                  remoteOK = true;
+                } catch {
+                  try {
+                    const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: nextPrimary }]).select();
+                    if (error) throw error;
+                    if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
+                    remoteOK = true;
+                  } catch {
+                    const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                    if (error) throw error;
+                    if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
+                    remoteOK = true;
+                  }
+                }
+              }
+              await ensureGroupCatalogEntriesSupabase(nextGroups);
+              if (remoteOK) { ok = true; queueSupabaseRefresh(); }
+              else await reconcileToSupabaseAuthority('admin-save-player-update');
+            } catch (err) {
+              console.error('Supabase update error', err);
+              await reconcileToSupabaseAuthority('admin-save-player-update');
+            }
+            settleSaveToast(addToast, ok, addOkText);
+          })();
+        }
+      } else {
+        // insert new
+        const activeGroupForInsert = normalizeActiveGroupSelection(state.activeGroup || 'All');
+        const defaultPrimary = state.limitedGroup
+          ? state.limitedGroup
+          : (activeGroupForInsert && activeGroupForInsert !== 'All' && activeGroupForInsert !== UNGROUPED_FILTER_VALUE ? activeGroupForInsert : '');
+        const groups = applyTopFormGroupRules(requestedGroups, defaultPrimary);
+        const group = groups[0] || '';
+        const newPlayer = { name, skill, group, groups };
+        // pending:true survives a racing sync until the insert lands (mergePlayersAfterSync).
+        const inserted = { ...newPlayer, pending: true };
+        state.players = [...state.players, inserted];
+
+        if (supabaseClient) {
+          (async () => {
+            let ok = false;
+            try {
+              let remoteOK = false;
+              const encodedGroupsTag = serializePlayerGroupsTag(groups, group);
+              try {
+                const insertRow = HAS_TAG
+                  ? { name, skill, group, tag: encodedGroupsTag }
+                  : { name, skill, group };
+                const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
+                if (error) throw error;
+                remoteOK = true;
+                if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
+              } catch {
+                try {
+                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
+                  if (error) throw error;
+                  remoteOK = true;
+                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
+                } catch {
+                  // 3rd fallback: table has neither 'group' nor 'tag'
+                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+                  if (error) throw error;
+                  remoteOK = true;
+                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
+                }
+              }
+              await ensureGroupCatalogEntriesSupabase(groups);
+              inserted.pending = false;
+              if (remoteOK) { ok = true; queueSupabaseRefresh(); }
+              else await reconcileToSupabaseAuthority('admin-save-player-insert');
+            } catch (err) {
+              console.error('Supabase insert error', err);
+              inserted.pending = false;
+              await reconcileToSupabaseAuthority('admin-save-player-insert');
+            }
+            settleSaveToast(addToast, ok, 'Player added');
+          })();
+        } else {
+          // Offline: no client to clear pending in the async path — clear it here so the
+          // row isn't a permanent "pending" ghost. See reliability check 2026-06-18.
+          inserted.pending = false;
+        }
+      }
+
+      if (nameInput) nameInput.value = '';
+      if (skillInput) skillInput.value = '';
+      if (groupsInput) groupsInput.value = '';
+      saveLocal();
+      // Save-status toast is created before the insert/update branch (addToast) and
+      // settled honestly when the write resolves — no more premature "added/updated".
+      render();
+    });
+  }
+
   // --- Filters & search ---
   const tabSelect = document.getElementById('player-tab-select');
   if (tabSelect) {
@@ -7099,7 +7260,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       state.playerTab = ev.target.value;
       sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
       state.skillSubTab = null;
-      render();
+      renderPlayersPanel(); // C48.3 (perf): scoped re-render — only #tab-players changes; output identical to render()
     });
   }
 
@@ -7111,7 +7272,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       state.playerTab = value;
       sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
       state.skillSubTab = null;
-      render();
+      renderPlayersPanel(); // C48.3 (perf): scoped re-render — only #tab-players changes; output identical to render()
     });
   });
 
@@ -7189,7 +7350,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
     subtabSelect.addEventListener('change', (ev) => {
       state.skillSubTab = ev.target.value;
       sessionStorage.setItem(LS_SUBTAB_KEY, state.skillSubTab);
-      render();
+      renderPlayersPanel(); // C48.3 (perf): scoped re-render — same class of action as the filter chips/select; output identical to render()
     });
   }
 
@@ -7416,38 +7577,6 @@ if (removeBtn) {
     render();
   });
 }
-
-  // --- Session tab handlers ---
-  const btnSaveSession = document.getElementById('btn-save-session');
-  if (btnSaveSession) {
-    btnSaveSession.addEventListener('click', async () => {
-      const date     = (document.getElementById('session-date')?.value     || '').trim();
-      const time     = (document.getElementById('session-time')?.value     || '').trim();
-      const location = (document.getElementById('session-location')?.value || '').trim();
-      if (!date || !time || !location) {
-        const msg = document.getElementById('session-save-msg');
-        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'Please fill in all three fields.'; msg.style.display = 'block'; }
-        return;
-      }
-      btnSaveSession.disabled = true;
-      btnSaveSession.textContent = 'Saving…';
-      const ok = await saveSession(date, time, location);
-      btnSaveSession.disabled = false;
-      btnSaveSession.textContent = 'Save session';
-      const msg = document.getElementById('session-save-msg');
-      if (msg) {
-        msg.style.color = ok ? 'var(--success)' : 'var(--danger)';
-        msg.textContent  = ok ? 'Session saved' : 'Save failed — check connection';
-        msg.style.display = 'block';
-        if (ok) { setTimeout(() => { msg.style.display = 'none'; }, 2500); render(); }
-      }
-    });
-  }
-
-  const btnShareSession = document.getElementById('btn-share-session');
-  if (btnShareSession) {
-    btnShareSession.addEventListener('click', () => openQrModal());
-  }
 }
 
 // Initialise the app. Called once on page load. It loads stored data,
