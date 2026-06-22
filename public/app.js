@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.20.22';
+const APP_VERSION = '2026.06.21.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -155,8 +155,9 @@ function openPlayerEditPopup(playerKey) {
   modal.setAttribute('aria-hidden', 'false');
   document.body.style.overflow = 'hidden'; // lock background scroll on iOS so the page doesn't scroll under the modal
 
-  const nameInput = body.querySelector('.edit-name');
-  if (nameInput) { nameInput.focus(); if (typeof nameInput.select === 'function') nameInput.select(); }
+  // Bug A fix (2026-06-21): do NOT auto-focus/select the Name field on open. Editing the name is
+  // usually NOT what the admin wants (skill/group is), and auto-focus pops the keyboard onto the
+  // wrong field. Leave focus to the admin — they tap the field they want to edit.
 }
 
 function closeInlineEditRow(row) {
@@ -228,7 +229,11 @@ function captureTransientInteractionState() {
     snapshot.openMenuPlayerId = String(openMenuButton.getAttribute('data-id') || '');
   }
 
-  const openEditRow = document.querySelector('.edit-row.show[data-player-key]');
+  // Bug B fix (2026-06-21): exclude the player-edit MODAL (.popup-edit-row) from transient
+  // capture/restore. The modal lives OUTSIDE `.players`, so partialRender never rebuilds it —
+  // capturing it only made restore -> openInlineEditRow re-focus+select Name on every background
+  // sync (15s poll / realtime), stealing the keyboard + selecting text mid-typing.
+  const openEditRow = document.querySelector('.edit-row.show[data-player-key]:not(.popup-edit-row)');
   if (openEditRow) {
     snapshot.openEditRowPlayerKey = String(openEditRow.getAttribute('data-player-key') || '');
   }
