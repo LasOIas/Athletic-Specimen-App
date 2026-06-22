@@ -765,6 +765,77 @@ select:focus {
 }
 .prow .btn-checkout.tg.in:hover { background: color-mix(in oklch, var(--live-soft) 80%, var(--live) 8%); }
 
+/* ── C48.5: grouped collapsible roster sections (admin Players "Option C") ── */
+.roster-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* small breathing room between sections (the .players flex gap handles 4px; this adds the
+   section separation without doubling the row-to-row gap inside a body) */
+.roster-group + .roster-group { margin-top: 8px; }
+
+.roster-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 6px 6px;
+  margin: 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  cursor: pointer;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background .12s;
+}
+.roster-group-head:active { background: var(--accent-soft); }
+
+.roster-group-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.roster-group-count {
+  flex: 0 0 auto;
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 1px 8px;
+  border-radius: 999px;
+  min-width: 22px;
+  text-align: center;
+}
+
+.roster-group-caret {
+  flex: 0 0 auto;
+  color: var(--faint);
+  transform: rotate(90deg); /* chevron points down when expanded */
+  transition: transform .15s ease;
+}
+.roster-group.is-collapsed .roster-group-caret { transform: rotate(0deg); } /* points right when collapsed */
+
+.roster-group-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+}
+.roster-group.is-collapsed .roster-group-body { display: none; }
+
 .player-groups-row {
   display: flex;
   flex-wrap: wrap;

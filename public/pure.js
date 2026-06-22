@@ -480,6 +480,55 @@ function disambiguatePlayersByName(players, query) {
   return scored.slice(0, 12).map((s) => s.row);
 }
 
+// C48.5: group an already-filtered + already-sorted roster into collapsible group sections
+// (admin Players "Option C"). PURE (no DOM / no app state): the caller passes the players in the
+// exact display order it wants AND a resolver that returns each player's group names (primary first).
+// Returns ordered sections [{ key, name, isUngrouped, players }]:
+//   - a player appears in EVERY group they belong to (multi-group players show in each section)
+//   - a player with no groups goes into a single "Ungrouped" section
+//   - group sections are sorted case-insensitively by name; "Ungrouped" is ALWAYS last
+//   - players inside each section keep the incoming order (the caller pre-sorts alphabetically),
+//     so the A-Z jump strip (document order across sections) stays correct
+//   - empty sections are never produced (a section exists only if it has >=1 player)
+// `key` is a stable, lowercased identity for the section (group name folded; '__ungrouped__' for the
+// no-group bucket) — used as the sessionStorage collapse key so it survives renames-by-case.
+function groupRosterPlayersBySection(players, getGroupsFn) {
+  const resolve = typeof getGroupsFn === 'function' ? getGroupsFn : () => [];
+  const sections = new Map(); // key -> { key, name, isUngrouped, players, order }
+  const UNGROUPED_KEY = '__ungrouped__';
+  let groupOrder = 0;
+  for (const player of (players || [])) {
+    if (!player || typeof player !== 'object') continue;
+    const groups = (resolve(player) || []).filter((g) => String(g || '').trim());
+    if (!groups.length) {
+      let sec = sections.get(UNGROUPED_KEY);
+      if (!sec) {
+        // sort-order Infinity pins Ungrouped last regardless of insertion order
+        sec = { key: UNGROUPED_KEY, name: 'Ungrouped', isUngrouped: true, players: [], order: Infinity };
+        sections.set(UNGROUPED_KEY, sec);
+      }
+      sec.players.push(player);
+      continue;
+    }
+    for (const groupName of groups) {
+      const name = String(groupName).trim();
+      const key = name.toLowerCase();
+      let sec = sections.get(key);
+      if (!sec) {
+        sec = { key, name, isUngrouped: false, players: [], order: groupOrder++ };
+        sections.set(key, sec);
+      }
+      sec.players.push(player);
+    }
+  }
+  return Array.from(sections.values())
+    .sort((a, b) => {
+      if (a.isUngrouped !== b.isUngrouped) return a.isUngrouped ? 1 : -1; // Ungrouped last
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    })
+    .map(({ key, name, isUngrouped, players: secPlayers }) => ({ key, name, isUngrouped, players: secPlayers }));
+}
+
 // CommonJS export for the test runner; skipped in the browser (module is undefined there).
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
@@ -487,6 +536,6 @@ if (typeof module !== "undefined" && module.exports) {
     generateOneBalancedCandidate, generateBalancedGroups, validateScores,
     generateRoundRobin, decideWinner, computeStandings, applyHeadToHeadGroups,
     nextPow2, seedOrder, computeSeeding, computeChampion, generateDoubleElim,
-    disambiguatePlayersByName
+    disambiguatePlayersByName, groupRosterPlayersBySection
   };
 }

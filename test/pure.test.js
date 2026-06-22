@@ -10,6 +10,7 @@ const {
   validateScores, decideWinner, generateRoundRobin, generateDoubleElim,
   computeStandings, computeSeeding, computeChampion, summarizeTeamFairness,
   generateBalancedGroups, playerIdentityKey, disambiguatePlayersByName,
+  groupRosterPlayersBySection,
 } = pure;
 
 // Build a FINAL pool match the way computeStandings/computeSeeding read it.
@@ -248,5 +249,61 @@ describe('disambiguatePlayersByName (C36 T1 kiosk search)', () => {
   it('caps results at 12', () => {
     const many = Array.from({ length: 30 }, (_, i) => ({ id: String(i), name: `Sam ${i}`, group: 'G', skill: i, checked_in: false }));
     expect(disambiguatePlayersByName(many, 'sam').length).toBe(12);
+  });
+});
+
+// C48.5 — grouped collapsible roster sections (admin Players "Option C").
+describe('groupRosterPlayersBySection', () => {
+  // resolver mirrors app.js getPlayerGroups: primary first, then extra memberships
+  const groupsOf = (p) => {
+    const primary = String(p.group || '').trim();
+    const extra = (p.groups || []).map((g) => String(g || '').trim()).filter(Boolean);
+    if (!primary) return extra;
+    return [primary, ...extra.filter((g) => g !== primary)];
+  };
+
+  it('groups players under their group and pins "Ungrouped" last', () => {
+    const players = [
+      { id: '1', name: 'Ana', group: 'Wed' },
+      { id: '2', name: 'Bo', group: 'Mon' },
+      { id: '3', name: 'Cy', group: '' },        // ungrouped
+      { id: '4', name: 'Di', group: 'Wed' },
+    ];
+    const out = groupRosterPlayersBySection(players, groupsOf);
+    expect(out.map((s) => s.name)).toEqual(['Mon', 'Wed', 'Ungrouped']); // alpha, Ungrouped last
+    expect(out[out.length - 1].isUngrouped).toBe(true);
+    expect(out.find((s) => s.name === 'Wed').players.map((p) => p.id)).toEqual(['1', '4']);
+  });
+
+  it('uses a lowercased key for the section and __ungrouped__ for the no-group bucket', () => {
+    const out = groupRosterPlayersBySection(
+      [{ id: '1', name: 'Ana', group: 'Wed Night' }, { id: '2', name: 'Bo', group: '' }],
+      groupsOf
+    );
+    expect(out.find((s) => s.name === 'Wed Night').key).toBe('wed night');
+    expect(out.find((s) => s.isUngrouped).key).toBe('__ungrouped__');
+  });
+
+  it('places a multi-group player in EVERY group they belong to', () => {
+    const players = [{ id: '1', name: 'Ana', group: 'Wed', groups: ['Wed', 'Mon'] }];
+    const out = groupRosterPlayersBySection(players, groupsOf);
+    expect(out.map((s) => s.name).sort()).toEqual(['Mon', 'Wed']);
+    expect(out.every((s) => s.players.length === 1)).toBe(true);
+  });
+
+  it('never emits an empty section and tolerates empty input', () => {
+    expect(groupRosterPlayersBySection([], groupsOf)).toEqual([]);
+    const out = groupRosterPlayersBySection([{ id: '1', name: 'Ana', group: 'Wed' }], groupsOf);
+    expect(out.every((s) => s.players.length > 0)).toBe(true);
+  });
+
+  it('preserves the incoming player order within a section (A-Z strip relies on it)', () => {
+    const players = [
+      { id: '1', name: 'Aaron', group: 'Wed' },
+      { id: '2', name: 'Bella', group: 'Wed' },
+      { id: '3', name: 'Cara', group: 'Wed' },
+    ];
+    const out = groupRosterPlayersBySection(players, groupsOf);
+    expect(out[0].players.map((p) => p.name)).toEqual(['Aaron', 'Bella', 'Cara']);
   });
 });

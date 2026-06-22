@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.22.4';
+const APP_VERSION = '2026.06.22.5';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -327,6 +327,22 @@ function restoreTransientInteractionState(snapshot) {
       state.collapsedCards = nextCollapsed;
       saveLocal();
       render();
+      return;
+    }
+    // C48.5 — admin Players grouped-section collapse toggle. Surgical (toggle the class only, no
+    // re-render) so it can't disturb scroll/search/selection; persisted to sessionStorage.
+    const groupToggle = e.target.closest('[data-role="toggle-group"]');
+    if (groupToggle) {
+      e.stopPropagation();
+      e.preventDefault();
+      const groupKey = String(groupToggle.getAttribute('data-group-key') || '').trim();
+      const section = groupToggle.closest('.roster-group');
+      if (!section) return;
+      const nowCollapsed = !section.classList.contains('is-collapsed');
+      section.classList.toggle('is-collapsed', nowCollapsed);
+      groupToggle.setAttribute('aria-expanded', String(!nowCollapsed));
+      setGroupCollapsed(groupKey, nowCollapsed);
+      refreshAzStripAvailability();
       return;
     }
     // 1) Toggle the dropdown when ⋮ is clicked
@@ -1060,7 +1076,11 @@ function refreshAzStripAvailability() {
   const strip = document.querySelector('.players-az-strip');
   if (!strip) return;
   const letters = new Set();
+  // C48.5: only count cards in a non-collapsed group section — a letter that lands solely in a
+  // collapsed section can't be scrolled to, so dim it like any other empty letter.
   document.querySelectorAll('.players .player-card .player-name').forEach((el) => {
+    const card = el.closest('.player-card');
+    if (card && card.closest('.roster-group.is-collapsed')) return;
     const ch = (el.textContent || '').trim().charAt(0).toUpperCase();
     if (ch) letters.add(ch);
   });
@@ -1078,6 +1098,8 @@ function refreshAzStripAvailability() {
     const target = String(letter).toUpperCase();
     const cards = document.querySelectorAll('.players .player-card');
     for (const card of cards) {
+      // C48.5: skip cards inside a collapsed group section (they're hidden → scrollIntoView is a no-op).
+      if (card.closest('.roster-group.is-collapsed')) continue;
       const name = (card.querySelector('.player-name')?.textContent || '').trim();
       if (name && name.charAt(0).toUpperCase() === target) {
         card.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
@@ -1352,6 +1374,18 @@ function surgicalToggleRowUpdate(player) {
   // No on-screen row to surgically edit (kiosk has none; off-screen/filtered row) → keep the prior
   // safe behavior so the UI never goes stale.
   if (!playersEl || !row) { partialRender(); return; }
+
+  // C48.5 — CORRECTNESS over micro-optimization for the grouped view (Option C). The grouped sections
+  // carry a per-section COUNT = matching players in that group; under the membership-sensitive filters
+  // (Checked in / Out / Unset) a single in/out toggle changes which players match → every relevant
+  // header count moves and rows leave/enter sections. Rebuilding the whole #tab-players panel
+  // (~78ms) is the simple, always-correct option — a stale group count is a visible bug. The pure
+  // single-row fast path below stays for the flat list (search/skill) AND for the grouped "All"
+  // filter (where a section's "everyone in this group" count never changes on a check-in toggle).
+  const isGroupedView = !!playersEl.querySelector('.roster-group');
+  const membershipSensitiveFilter =
+    state.playerTab === 'in' || state.playerTab === 'out' || state.playerTab === 'unrated';
+  if (isGroupedView && membershipSensitiveFilter) { renderPlayersPanel(); return; }
 
   const nowCheckedIn = (state.checkedIn || []).includes(playerIdentityKey(player));
 
@@ -2659,20 +2693,17 @@ function renderFilteredPlayers() {
     return '<p class="roster-empty">No players match — try clearing the search or filters.</p>';
   }
 
-  return filtered.map((player) => {
+  // C48.5 — single dense one-line row builder (extracted so both the flat list and the grouped
+  // sections render byte-identical .prow markup). The row class string + toggle button markup MUST
+  // stay byte-identical to surgicalToggleRowUpdate()/buildRowToggleButtonHTML() so the delegated
+  // handlers + surgical fast path keep working.
+  const renderRow = (player) => {
     const checked = checkedSet.has(playerIdentityKey(player));
     const isSelected = selectedIds.has(String(player.id));
     const playerKey = playerIdentityKey(player);
     const playerKeyValue = escapeHTMLText(playerKey);
-    const playerGroup = getPlayerPrimaryGroup(player);
     const playerGroups = getPlayerGroups(player);
     const playerGroupsValue = escapeHTMLText(JSON.stringify(playerGroups));
-    const groupsDisplayHTML = playerGroups.length
-      ? playerGroups.map((groupName, groupIndex) =>
-        `<span class="badge player-group-badge ${groupIndex === 0 ? 'is-primary' : ''}">${escapeHTMLText(groupName)}</span>`
-      ).join('')
-      : '<span class="small player-group-none">Ungrouped</span>';
-
     void playerGroupsValue; // retained for parity with edit-row group machinery
     const initials = String(player.name || '')
       .trim()
@@ -2680,16 +2711,15 @@ function renderFilteredPlayers() {
       .slice(0, 2)
       .map((part) => part.charAt(0).toUpperCase())
       .join('') || '?';
+    // Option C: the group section header carries the group → NO per-row group badge. Skill stays
+    // inline + admin-only (the .skill-pill / state.isAdmin gating is preserved — players never see skill).
     return `
       <div class="player-card prow ${isSelected ? 'is-selected' : ''} ${checked ? 'is-in' : ''}" data-id="${player.id}" data-player-key="${playerKeyValue}">
         ${state.isAdmin ? `<input type="checkbox" class="player-select" data-id="${player.id}" aria-label="Select ${escapeHTMLText(player.name || '')}" ${isSelected ? 'checked' : ''} />` : ''}
         <span class="prow-av" aria-hidden="true">${escapeHTMLText(initials)}</span>
         <div class="prow-id">
           <span class="player-name">${player.name}</span>
-          <div class="player-meta-row">
-            ${state.isAdmin ? `<span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span>` : ''}
-            ${groupsDisplayHTML}
-          </div>
+          ${state.isAdmin ? `<div class="player-meta-row"><span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span></div>` : ''}
         </div>
         <div class="prow-actions">
           ${checked
@@ -2711,7 +2741,65 @@ function renderFilteredPlayers() {
         </div>
       </div>
     `;
+  };
+
+  // C48.5 — Option C grouped collapsible sections, with the documented reconciliations:
+  //   • Search active (query non-empty)  → FLAT alphabetical (search is a global lookup; grouping it
+  //     is confusing). Returns to grouped when the query clears.
+  //   • Skill filter (skill-sorted)       → FLAT (grouping conflicts with a skill sort).
+  //   • Public surface (kiosk has no .prow here, but guard anyway) → FLAT.
+  //   • All / Checked in / Out / Unset    → GROUPED; per-section count = matching players in that
+  //     group; empty sections are never emitted (the grouping helper only makes a section with rows).
+  //   • Groups filter (single group active) → only that one group's section shows (grouping over a
+  //     1-group set yields exactly one section), forced EXPANDED so the operator sees the result.
+  const q2 = (state.searchTerm || '').toLowerCase().trim();
+  const useFlat = !state.isAdmin || !!q2 || state.playerTab === 'skill';
+  if (useFlat) {
+    return filtered.map(renderRow).join('');
+  }
+
+  const activeGroupSel = normalizeActiveGroupSelection(state.activeGroup || 'All');
+  const singleGroupActive = activeGroupSel && activeGroupSel !== 'All' && activeGroupSel !== UNGROUPED_FILTER_VALUE;
+  const collapsed = getCollapsedGroupState();
+  const sections = groupRosterPlayersBySection(filtered, getPlayerGroups);
+  return sections.map((section) => {
+    // A single active group is always shown expanded (the operator just asked to see it).
+    const isCollapsed = singleGroupActive ? false : !!collapsed[section.key];
+    const labelId = `roster-group-label-${section.key.replace(/[^a-z0-9_-]/gi, '-')}`;
+    const caretSVG = '<svg class="roster-group-caret" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return `
+      <section class="roster-group ${isCollapsed ? 'is-collapsed' : ''}" data-group-key="${escapeHTMLText(section.key)}">
+        <button type="button" class="roster-group-head" data-role="toggle-group" data-group-key="${escapeHTMLText(section.key)}" aria-expanded="${isCollapsed ? 'false' : 'true'}" aria-controls="${labelId}-body">
+          <span class="roster-group-title" id="${labelId}">${escapeHTMLText(section.name)}</span>
+          <span class="roster-group-count">${section.players.length}</span>
+          ${caretSVG}
+        </button>
+        <div class="roster-group-body" id="${labelId}-body">
+          ${section.players.map(renderRow).join('')}
+        </div>
+      </section>
+    `;
   }).join('');
+}
+
+// C48.5 — per-group collapse state for the admin Players grouped sections. Persisted in
+// sessionStorage (survives background syncs/partialRender within the session; default EXPANDED).
+// Keyed by the section key the grouping helper produces (lowercased group name / '__ungrouped__').
+const GROUP_COLLAPSE_KEY = 'as_group_collapsed';
+function getCollapsedGroupState() {
+  try {
+    const raw = sessionStorage.getItem(GROUP_COLLAPSE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  } catch (_) { return {}; }
+}
+function setGroupCollapsed(groupKey, collapsed) {
+  const key = String(groupKey || '').trim();
+  if (!key) return;
+  const map = getCollapsedGroupState();
+  if (collapsed) map[key] = true; else delete map[key];
+  try { sessionStorage.setItem(GROUP_COLLAPSE_KEY, JSON.stringify(map)); } catch (_) { /* storage may be full/blocked */ }
 }
 
 // Global state. We use a simple object to hold application state. When
