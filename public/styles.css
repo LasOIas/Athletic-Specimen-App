@@ -2107,7 +2107,12 @@ select:focus {
    stat card + the block together as ONE group: the container centers its children when idle, and the
    kiosk takes natural height. (Scoped to .is-idle; when typing, .is-idle is dropped → container goes
    back to top-aligned flex-start so the result buttons get full scroll room.) */
-#tab-players > .container:has(.ci-kiosk.is-idle) { justify-content: center; }
+/* iPhone fix (2026-06-22, C48.8): Mike — "the checked in should always be at the top and ... just
+   center what is already there." Pin the "N Checked In" stat to the very top (absolute, out of the
+   flex flow) so it never moves, and center the EXISTING kiosk block in the full screen height. No
+   font/content change. */
+#tab-players > .container:has(.ci-kiosk.is-idle) { position: relative; justify-content: center; }
+#tab-players > .container:has(.ci-kiosk.is-idle) > #js-checkin-stats { position: absolute; top: 0; left: 0; right: 0; }
 .ci-kiosk.is-idle {
   flex: 0 0 auto;
   display: flex;
@@ -2427,7 +2432,13 @@ select:focus {
    brand-blue label sitting on it at low contrast). Gate the pressed-fill to hover-capable devices
    (desktop), where :active is transient. On touch the active tab is already shown by .nav-btn.active
    (brand text + the ::before top indicator) and the tap's feedback is the instant screen change. */
-@media (hover: hover) { .nav-btn:active { background: var(--accent-soft); } }
+/* iPhone fix (2026-06-22, C48.8): the GLOBAL `button:hover { background: var(--brand-dark) }`
+   (styles.css ~232) was filling the WHOLE active nav tab dark-blue — the nav tab is a <button> and
+   iOS keeps :hover stuck on the last-tapped button until you touch elsewhere, so it stayed boxed
+   (the v.7 :active gate fixed the wrong pseudo-class). Mike: "only have the text highlight blue ...
+   not the whole box." Force nav buttons transparent in EVERY state; the active tab is shown by
+   color alone (.nav-btn.active { color: var(--brand) }). */
+.nav-btn, .nav-btn:hover, .nav-btn:active, .nav-btn:focus { background: transparent; }
 .ad-qa:focus-visible, .ph-cta:focus-visible, .nav-btn:focus-visible,
 .roster-add:focus-visible, .app-header-logout:focus-visible, .chip:focus-visible,
 .btn-actions:focus-visible {
@@ -2437,10 +2448,8 @@ select:focus {
 /* ===== C43 (2026-06-20) — global + public polish ===== */
 /* rank 14: non-color active-nav affordance (top indicator bar, not color-only) */
 .nav-btn { position: relative; }
-.nav-btn.active::before {
-  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  width: 26px; height: 3px; border-radius: 0 0 3px 3px; background: var(--accent);
-}
+/* C48.8: removed the .nav-btn.active::before top-indicator bar — Mike: "only have the text highlight
+   blue ... not the whole box." The active tab is now indicated by blue text/icon alone (.nav-btn.active). */
 /* rank 22: "Round complete" pill on Scores when no court is actually live (was "0 playing" + a live dot) */
 .ph-done {
   font: 700 11px 'Inter', system-ui, sans-serif;
