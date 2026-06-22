@@ -44,7 +44,11 @@
 }
 
 /* ── Reset ── */
-*, *::before, *::after { box-sizing: border-box; }
+/* Smoothness reliability check (2026-06-22, HIGH H1): kill the default iOS Safari grey
+   tap-highlight box that flashed on nearly every tap (only 3 selectors opted out before),
+   the single most pervasive "default-browser, not a designed app" tell. Mirrors checkin.html's
+   global rule. Intentional :active feedback below replaces it. */
+*, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 /* ── Base ── */
 html, body {
@@ -2243,3 +2247,43 @@ select:focus {
 
 /* C46 (rank 37): disabled secondary button (e.g. Share QR before a session is saved) */
 .secondary:disabled, button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ===================================================================================
+   Smoothness reliability check — Batch 2 (2026-06-22): tactile feedback + motion.
+   Additive only. Gives the controls that lacked press feedback an intentional :active,
+   eases their state changes, animates the shared modal system + the live dot, and gates
+   it all behind prefers-reduced-motion. No layout/structure change (§38-exempt).
+   =================================================================================== */
+
+/* The In/Out toggle (most-tapped control while running the night) and filter chips had
+   no :active and no transition — taps felt dead and the In<->Out flip snapped. */
+.prow .tg { transition: background-color .15s ease, color .15s ease, border-color .15s ease, transform .08s ease; }
+.prow .tg:active { transform: scale(.96); }
+.chip { transition: background-color .15s ease, color .15s ease, border-color .15s ease, transform .08s ease; }
+.chip:active { transform: scale(.96); }
+.card-generate-teams .live-matchup-result-btn { transition: background-color .15s ease, border-color .15s ease, transform .08s ease; }
+.card-generate-teams .live-matchup-result-btn:active { transform: scale(.96); }
+
+/* The player-edit / add-player / Group Manager cards use the shared .popup system, which
+   had NO entry animation (only the QR modal faded). Give the shared system a gentle,
+   consistent fade + scale-in so modals don't hard-pop. */
+.popup-overlay { animation: as-overlay-in .16s ease-out; }
+.popup-card    { animation: as-pop-in .18s cubic-bezier(.2,.8,.2,1); }
+@keyframes as-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes as-pop-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
+
+/* The "Live now / N playing" dot was a static circle. A subtle opacity pulse so it reads
+   as live (opacity only — NOT a glow/neon, per the AS palette rule). */
+.ph-dot { animation: as-live-pulse 1.8s ease-in-out infinite; }
+@keyframes as-live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+
+/* Accessibility + Mike's "no excessive motion": honor the OS reduce-motion setting —
+   neutralize the press-scale, modal animation, and live pulse for users who ask for it. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
