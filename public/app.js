@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.21.1';
+const APP_VERSION = '2026.06.22.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7534,21 +7534,36 @@ function initBackToTop() {
     const p = activePanel();
     btn.classList.toggle('visible', !!p && p.scrollTop > 200);
   };
+  // Perf (2026-06-22 smoothness reliability check): the old code read `p.scrollTop` SYNCHRONOUSLY
+  // inside a capture-phase scroll handler. During a partialRender/render the `.players` innerHTML
+  // swap resets the panel's scrollTop and fires a scroll event, so `update()` ran mid-DOM-mutation
+  // and forced a synchronous layout of the whole (215-row) panel — a measured 439ms of forced
+  // reflow on a SINGLE filter-chip tap at 4x CPU throttle (564ms total block). rAF-batch the read
+  // so it runs at most once per frame, AFTER layout has settled, off the click->paint critical
+  // path. Behavior is identical (button still shows when the active panel is scrolled >200, hides
+  // at top, works on every panel, survives renders); it just updates one frame later (imperceptible).
+  let _b2tRafPending = false;
+  const scheduleUpdate = () => {
+    if (_b2tRafPending) return;
+    _b2tRafPending = true;
+    requestAnimationFrame(() => { _b2tRafPending = false; update(); });
+  };
   // C25 item 5: serve whichever tab-panel is active (Players, Teams, Tournament),
   // not just Players. Scroll events don't bubble, so capture on document — this
   // catches scroll from the active panel AND survives render() rebuilding the
   // panels (the old code bound the #tab-players element directly, so it broke
   // after the first full render() and never worked on Teams/Tournament).
+  // passive: the handler never preventDefaults, so let the browser scroll without waiting on JS.
   document.addEventListener('scroll', (e) => {
     const t = e.target;
-    if (t && t.classList && t.classList.contains('tab-panel') && t.classList.contains('active')) update();
-  }, true);
+    if (t && t.classList && t.classList.contains('tab-panel') && t.classList.contains('active')) scheduleUpdate();
+  }, { capture: true, passive: true });
   btn.addEventListener('click', () => {
     const p = activePanel();
     if (p) p.scrollTo({ top: 0, behavior: 'smooth' });
   });
   // A freshly-activated tab may be at top or already scrolled — re-evaluate on switch.
-  window.addEventListener('as-tab-changed', update);
+  window.addEventListener('as-tab-changed', scheduleUpdate);
   update();
 }
 
