@@ -381,6 +381,11 @@ select:focus {
 /* Players tab: leave horizontal room on the right edge for the A–Z jump strip
    so every row (search, filters, cards, etc.) is consistently narrower. */
 #tab-players { padding-right: 30px; }
+/* iPhone fix (2026-06-22, C48.9): the 30px right-inset above reserves room for the admin roster's
+   A–Z jump strip — but the PUBLIC Check In kiosk is also #tab-players and has NO A–Z strip, so that
+   inset just shoved the kiosk left (off-center, more gap on the right). Mike: "still not centered on
+   either side." Drop the inset only on the kiosk so it's symmetric; the admin roster keeps it. */
+#tab-players:has(.ci-kiosk) { padding-right: 0; }
 /* Override the global sticky-search-bar's negative right margin within the
    Players tab so it stops at the container edge like every other row. */
 #tab-players .sticky-search-bar { margin-right: 0; margin-left: 0; }
