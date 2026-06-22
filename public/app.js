@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.22.5';
+const APP_VERSION = '2026.06.22.6';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1290,7 +1290,9 @@ function partialRender() {
     if (checkinResultsEl && kioskActive) {
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
       if (statsEl) statsEl.innerHTML = buildCheckinStatsHTML();
-      checkinResultsEl.innerHTML = buildKioskResultsHTML(checkinSearchEl.value);
+      const kioskHTML = buildKioskResultsHTML(checkinSearchEl.value);
+      checkinResultsEl.innerHTML = kioskHTML;
+      syncKioskIdleState(kioskHTML); // C48.6: keep the centered/top-aligned state in lockstep on background syncs
       return;
     }
   }
@@ -2347,9 +2349,15 @@ function publicScoresHTML() {
   const liveData = getPublicLiveData();
   const courtsHTML = buildPublicLiveCourtsHTML();
   if (!courtsHTML) {
-    return `<div class="home-screen">
-      <div class="ph-brand">Live scores</div>
-      <div class="ph-card ph-empty">${state.loaded ? 'No live games right now.' : 'Checking for live games…'}</div>
+    // C48.6 (Option A): empty state is vertically centered in the available #app-content height
+    // (the .idle-center wrapper fills the absolutely-positioned .tab-panel and flex-centers).
+    // Subtle line-icon mark (bar-chart, currentColor=--accent), not neon, no emoji.
+    return `<div class="idle-center">
+      <div class="idle-block">
+        <div class="idle-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V11M10 19V6M16 19v-9M22 19H2"/></svg></div>
+        <div class="idle-title">${state.loaded ? 'No live games right now' : 'Checking for live games…'}</div>
+        <div class="idle-sub">Live games show here once a round starts.</div>
+      </div>
     </div>`;
   }
   const upNext = (liveData.waitingTeams || []).length
@@ -5101,7 +5109,20 @@ function adminTeamsHTML(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
   // collapse defaults OPEN now: only a user's explicit collapse (state.liveNetsCollapsed === true)
   // hides it; undefined/false = expanded so the live action is front-and-center.
   const liveNetsCollapsed = state.liveNetsCollapsed === true;
-  return `<div class="card card-generate-teams">
+  // C48.6 (Option A): when NO teams are generated yet, the board area below the controls is dead space.
+  // Render a vertically-centered empty state in that region (subtle court/net line-icon, no emoji).
+  // The controls (chips + Generate) stay top-aligned; only the empty board region is centered. When
+  // teams exist, teamsHTML is non-empty and this block is omitted (normal top-aligned layout).
+  const hasTeams = Array.isArray(state.generatedTeams) && state.generatedTeams.length > 0;
+  const courtsEmptyHTML = hasTeams ? '' : `<div class="courts-empty">
+    <div class="idle-block">
+      <div class="idle-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="1.5"/><path d="M12 6v12M3 12h18"/></svg></div>
+      <div class="idle-title">No courts live yet</div>
+      <div class="idle-sub">Generate teams to start a round.</div>
+    </div>
+  </div>`;
+  return `<div class="courts-board${hasTeams ? '' : ' is-empty'}">
+  <div class="card card-generate-teams">
   <div class="card-collapsible-head">
     <h3>Courts</h3>
   </div>
@@ -5136,6 +5157,8 @@ function adminTeamsHTML(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
   ${teamsFairnessHTML}
   ${teamsHTML}
   </div>
+</div>
+  ${courtsEmptyHTML}
 </div>`;
 }
 
@@ -5398,9 +5421,22 @@ function buildKioskResultsHTML(query) {
     : ((query || '').trim() ? '<p class="cik-none">No match &mdash; tap &ldquo;I&rsquo;m new&rdquo; to add yourself.</p>' : '');
 }
 
+// C48.6 (Option A): the kiosk defaults to a vertically-centered idle layout (.is-idle). The moment
+// results (matches OR the "no match" hint) appear, drop .is-idle so the layout reverts to top-aligned
+// and the big name buttons get full scroll room. Called from BOTH render sites (the kiosk input closure
+// and partialRender's public-kiosk branch) so the two stay in lockstep. Pass the just-rendered results
+// markup so the decision matches exactly what's on screen.
+function syncKioskIdleState(resultsHTML) {
+  const kiosk = document.querySelector('.ci-kiosk');
+  if (!kiosk) return;
+  const hasResults = !!(resultsHTML && String(resultsHTML).trim());
+  kiosk.classList.toggle('is-idle', !hasResults);
+}
+
 function publicCheckinHTML() {
   return `
-  <div class="ci-kiosk">
+  <div class="ci-kiosk is-idle">
+    <div class="cik-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12.5l2.5 2.5L15.5 9"/><circle cx="12" cy="12" r="9"/></svg></div>
     <h2 class="cik-h">Check in</h2>
     <p class="cik-sub">Type your name, then tap it</p>
     <div class="cik-search">
@@ -6470,7 +6506,9 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
     // checkOutPlayer mutate instantly), so overlay it here so a just-tapped button flips at once,
     // before any Supabase round-trip.
     const renderCheckinResultsForQuery = () => {
-      checkinResults.innerHTML = buildKioskResultsHTML(checkinSearch.value);
+      const html = buildKioskResultsHTML(checkinSearch.value);
+      checkinResults.innerHTML = html;
+      syncKioskIdleState(html); // C48.6: top-align the moment results appear; re-center when cleared
     };
 
     const showCheckinToast = (text) => {

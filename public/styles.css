@@ -83,6 +83,63 @@ h1, h2, h3, h4, .statbig .n, .score, .av { font-family: 'Sora', 'Inter', sans-se
   padding: 12px;
 }
 
+/* ===================================================================
+   C48.6 (Option A) — centered & balanced empty/idle states.
+   Shared primitives used by the Scores empty state and (via .courts-empty)
+   the Courts empty board. .tab-panel is position:absolute; inset:0 inside
+   #app-content, so it has a definite height = the available viewport between
+   the header and bottom-nav. min-height:100% on the centering wrapper therefore
+   resolves to that height and lets us vertically center the idle block at both
+   390px and desktop, off the dvh-based shell. Tokens only, subtle line icons.
+   =================================================================== */
+/* The centering wrapper resolves min-height against its parent, so the parent .container
+   must itself fill the panel. Scope to panels that actually hold an .idle-center so the
+   content-present layouts (normal block flow) are untouched. */
+.tab-panel > .container:has(> .idle-center) {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.idle-center {
+  flex: 1 1 auto;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 24px 12px;
+  box-sizing: border-box;
+}
+.idle-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+}
+.idle-mark {
+  width: 46px;
+  height: 46px;
+  margin-bottom: 6px;
+  color: var(--accent);
+  opacity: 0.85;
+}
+.idle-mark svg { width: 100%; height: 100%; display: block; }
+.idle-title {
+  font-family: 'Sora', 'Inter', sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.2px;
+}
+.idle-sub {
+  font-size: 13.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;
@@ -2029,6 +2086,42 @@ select:focus {
   padding: 8px 0 24px;
   position: relative;
 }
+
+/* C48.6 (Option A): centered & balanced IDLE kiosk. Public Check In tab's container becomes a
+   flex column that fills the panel height; the #js-checkin-stats pill stays at the top (flex:0)
+   and the kiosk grows to vertically center its block (mark → title → sub → search → "I'm new" →
+   Admin) in the space below. The moment the user types and results appear, the JS removes
+   .is-idle (syncKioskIdleState) and the kiosk reverts to normal top-aligned scrolling so the big
+   name buttons get full room. .cik-mark only shows in the idle state. dvh-based, correct at
+   390px + desktop. (Scoped to the public surface via :has(.ci-kiosk) — admin Players has no .ci-kiosk.) */
+#tab-players > .container:has(.ci-kiosk) {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+#tab-players > .container:has(.ci-kiosk) > #js-checkin-stats { flex: 0 0 auto; }
+.ci-kiosk.is-idle {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-top: 0;
+  padding-bottom: 8px;
+}
+.cik-mark {
+  display: none;
+  width: 46px;
+  height: 46px;
+  margin: 0 auto 10px;
+  color: var(--accent);
+  opacity: 0.85;
+}
+.cik-mark svg { width: 100%; height: 100%; display: block; }
+.ci-kiosk.is-idle .cik-mark { display: block; }
+/* Idle kiosk: the new-/admin affordances stay visible but tighten up so the centered block
+   reads as one balanced unit rather than top-heavy. */
+.ci-kiosk.is-idle .cik-h { margin-top: 0; }
 .cik-h {
   font-family: 'Sora', 'Inter', sans-serif;
   font-size: 26px;
@@ -2232,6 +2325,36 @@ select:focus {
 
 /* C40: Session "Run the night" note */
 .session-newnight-note { margin: 0 0 12px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+
+/* C48.6 (Option A): Courts tab — when no teams are generated, the board area below the
+   controls is dead space. The #tab-teams container fills the panel height (min-height:100%
+   resolves against the absolutely-positioned .tab-panel, which has a definite height) and
+   becomes a flex column; .courts-board.is-empty grows to fill it, the controls card stays at
+   the top (flex:0) and .courts-empty grows to vertically center its mark + message in the
+   space below. When teams exist (.courts-board, no .is-empty) layout stays normal block flow. */
+#tab-teams > .container:has(.courts-board.is-empty) {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.courts-board.is-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.courts-board.is-empty > .card-generate-teams { flex: 0 0 auto; }
+.courts-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 24px 12px;
+  min-height: 180px;
+}
 
 /* C41: Dashboard live-courts empty state */
 .ad-live-empty {
