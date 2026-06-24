@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.4';
+const APP_VERSION = '2026.06.24.5';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5784,6 +5784,14 @@ async function handleCopilotSend(question) {
     e.preventDefault();
     handleCopilotSend(t.value);
     t.value = '';
+  });
+  // Hide the bottom nav while typing (keyboard up) so it doesn't ride up above the keyboard with the
+  // input — Mike: "the bottom nav shouldn't go up too." Toggled via a body class (CSS hides the nav).
+  document.addEventListener('focusin', function onCopilotFocusIn(e) {
+    if (e.target instanceof Element && e.target.id === 'copilot-input') document.body.classList.add('copilot-typing');
+  });
+  document.addEventListener('focusout', function onCopilotFocusOut(e) {
+    if (e.target instanceof Element && e.target.id === 'copilot-input') document.body.classList.remove('copilot-typing');
   });
 })();
 

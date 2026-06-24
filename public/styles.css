@@ -2164,6 +2164,9 @@ select:focus {
 .cop-inbar { margin-top: 10px; }
 .cop-inbar input { color: var(--ink); }
 .cop-send { opacity: 1; cursor: pointer; }
+/* While typing in the co-pilot (keyboard up), hide the bottom nav so it doesn't ride up above the
+   keyboard with the input — Mike: "the bottom nav shouldn't go up too." Toggled by JS (focusin/out). */
+body.copilot-typing #bottom-nav { display: none; }
 
 @media (min-width: 769px) {
   .ad-brand { font-size: 20px; }
