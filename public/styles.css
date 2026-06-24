@@ -2167,6 +2167,20 @@ select:focus {
 /* While typing in the co-pilot (keyboard up), hide the bottom nav so it doesn't ride up above the
    keyboard with the input — Mike: "the bottom nav shouldn't go up too." Toggled by JS (focusin/out). */
 body.copilot-typing #bottom-nav { display: none; }
+/* C28 Slice 2 — minimal Undo affordance on the co-pilot's answer bubble (instant actions). */
+.cop-undo {
+  display: inline-block;
+  margin-top: 6px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  cursor: pointer;
+}
+.cop-undo:disabled { opacity: 0.6; cursor: default; }
 
 @media (min-width: 769px) {
   .ad-brand { font-size: 20px; }

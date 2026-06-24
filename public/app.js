@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.5';
+const APP_VERSION = '2026.06.24.6';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5743,15 +5743,9 @@ async function handleCopilotSend(question) {
   appendCopilotMessage('user', q);
   const loadingId = appendCopilotMessage('copilot', '', { loading: true });
   try {
-    const context = buildCopilotContext({
-      players: state.players,
-      generatedTeams: state.generatedTeams,
-      liveData: getPublicLiveData(),
-      tournament: copilotTournamentInput(),
-    });
-    const { data, error } = await supabaseClient.functions.invoke('copilot', { body: { question: q, context } });
-    if (error || !data || !data.answer) throw new Error('copilot failed');
-    replaceCopilotMessage(loadingId, data.answer);
+    const { text, undos } = await runCopilotTurn(q);   // C28 Slice 2: tool loop (answers AND acts)
+    replaceCopilotMessage(loadingId, text);
+    if (undos && undos.length) copilotAttachUndo(loadingId, undos);
   } catch (_e) {
     replaceCopilotMessage(loadingId, "Couldn't reach the co-pilot — try again.", { isError: true });
   }
@@ -5794,6 +5788,142 @@ async function handleCopilotSend(question) {
     if (e.target instanceof Element && e.target.id === 'copilot-input') document.body.classList.remove('copilot-typing');
   });
 })();
+
+// ===== C28 Slice 2 — co-pilot ACTING (browser-driven tool loop; instant actions) =====
+// The browser holds the Claude conversation, asks the copilot edge fn (the key-holder) what to do, runs the
+// matching local executor with the admin's OWN privileges + the per-tool safety policy (enforced HERE, not
+// trusted to the model), logs to copilot_actions, and feeds the result back until Claude finishes.
+// Task 4 ships the INSTANT actions (check-in/out, make-teams). Confirm-required tournament/score actions +
+// the §38 confirm card arrive in Task 5 (copilotConfirmCard is a stub until then).
+const COPILOT_TOOLS = [
+  { name: 'check_in', description: 'Check a player in for tonight, by name.',
+    input_schema: { type: 'object', properties: { name: { type: 'string', description: "the player's name" } }, required: ['name'] } },
+  { name: 'check_out', description: 'Check a player out, by name.',
+    input_schema: { type: 'object', properties: { name: { type: 'string', description: "the player's name" } }, required: ['name'] } },
+  { name: 'make_teams', description: 'Make N balanced teams from the players who are checked in, and set up the courts.',
+    input_schema: { type: 'object', properties: { count: { type: 'integer', description: 'how many teams' } }, required: ['count'] } },
+];
+
+// Persist a check-in/out the SAME way the kiosk does: local state already set optimistically; write via the
+// C21 RPC, queue a refresh, fall back to the durable outbox on error.
+async function copilotPersistCheck(kind, player) {
+  if (!supabaseClient || !player.id) return;
+  try {
+    const { error } = await supabaseClient.rpc(kind, { p_id: player.id });
+    if (error) throw error;
+    queueSupabaseRefresh();
+  } catch (err) {
+    console.error('copilot ' + kind, err);
+    outboxEnqueue({ key: 'att:' + player.id, kind, payload: { p_id: player.id }, ts: Date.now() });
+  }
+}
+
+const copilotExecutors = {
+  async check_in(args) {
+    const r = resolvePlayerByName(state.players, args.name);
+    if (!r.ok) return { is_error: true, args, result: r.reason === 'ambiguous'
+      ? `More than one match for "${args.name}": ${r.matches.map((m) => m.name + (m.group ? ` (${m.group})` : '')).join(', ')}. Which one?`
+      : `I couldn't find a player named "${args.name}".` };
+    const player = (state.players || []).find((p) => p.id === r.player.id) || r.player;
+    if (!checkInPlayer(player)) return { args: { name: r.player.name }, result: `${r.player.name} is already checked in.` };
+    await copilotPersistCheck('check_in', player); render();
+    return { args: { name: r.player.name }, result: `Checked in ${r.player.name}.`,
+      undo: async () => { if (checkOutPlayer(player)) await copilotPersistCheck('check_out', player); render(); } };
+  },
+  async check_out(args) {
+    const r = resolvePlayerByName(state.players, args.name);
+    if (!r.ok) return { is_error: true, args, result: r.reason === 'ambiguous'
+      ? `More than one match for "${args.name}": ${r.matches.map((m) => m.name).join(', ')}. Which one?`
+      : `I couldn't find a player named "${args.name}".` };
+    const player = (state.players || []).find((p) => p.id === r.player.id) || r.player;
+    if (!checkOutPlayer(player)) return { args: { name: r.player.name }, result: `${r.player.name} isn't checked in.` };
+    await copilotPersistCheck('check_out', player); render();
+    return { args: { name: r.player.name }, result: `Checked out ${r.player.name}.`,
+      undo: async () => { if (checkInPlayer(player)) await copilotPersistCheck('check_in', player); render(); } };
+  },
+  async make_teams(args) {
+    const count = Number(args.count);
+    if (!(state.checkedIn || []).length) return { is_error: true, args, result: "No one is checked in yet, so I can't make teams." };
+    const prev = { teams: state.generatedTeams, order: state.liveCourtOrder, results: state.liveMatchResults,
+      snaps: state.liveMatchSkillSnapshots, summary: state.generatedTeamsSummary, groupCount: state.groupCount, lastTeamSize: state.lastTeamSize };
+    const gen = generateBalancedGroups(state.players, state.checkedIn, count);
+    state.lastTeamSize = null; state.groupCount = count;
+    state.generatedTeams = gen.teams; state.generatedTeamsSummary = gen.summary;
+    state.liveCourtOrder = defaultLiveCourtOrder(gen.teams.length);
+    state.liveMatchResults = {}; state.liveMatchSkillSnapshots = {};
+    saveLocal(); render();
+    return { args: { count }, result: `Made ${gen.teams.length} teams from ${state.checkedIn.length} checked-in players.`,
+      undo: () => { state.generatedTeams = prev.teams; state.liveCourtOrder = prev.order; state.liveMatchResults = prev.results;
+        state.liveMatchSkillSnapshots = prev.snaps; state.generatedTeamsSummary = prev.summary; state.groupCount = prev.groupCount;
+        state.lastTeamSize = prev.lastTeamSize; saveLocal(); render(); } };
+  },
+};
+
+// Confirm-required executors + their §38 card land in Task 5; this stub keeps the policy branch safe meanwhile.
+function copilotConfirmCard() { return Promise.resolve(false); }
+
+// Apply the per-tool safety policy + audit around an executor. Returns { result, is_error, undo? }.
+async function executeCopilotTool(name, input, requestText) {
+  const v = validateCopilotToolArgs(name, input);
+  if (!v.ok) return { result: `I can't do that: ${v.error}`, is_error: true };
+  const exec = copilotExecutors[name];
+  if (!exec) return { result: `That action ("${name}") isn't available yet.`, is_error: true };
+  if ((COPILOT_TOOL_POLICY[name] || 'confirm') === 'confirm') {
+    const ok = await copilotConfirmCard(name, input);
+    if (!ok) return { result: 'That action needs confirmation, which is coming soon.' };
+  }
+  let out;
+  try { out = await exec(input); } catch (e) { return { result: `That action failed: ${(e && e.message) || 'error'}`, is_error: true }; }
+  try {
+    await supabaseClient.rpc('log_copilot_action', { p_request: requestText, p_tool: name, p_args: out.args || {}, p_result: out.result, p_undone: false });
+  } catch (_e) { /* audit best-effort */ }
+  return { result: out.result, is_error: !!out.is_error, undo: out.undo };
+}
+
+// Browser tool loop: ask Claude (via the edge relay), run any tool, feed the result back, until done.
+// Returns the final text + any undo functions from instant actions this turn.
+async function runCopilotTurn(userText) {
+  const ctx = buildCopilotContext({ players: state.players, generatedTeams: state.generatedTeams,
+    liveData: getPublicLiveData(), tournament: copilotTournamentInput() });
+  const messages = [{ role: 'user', content: `Current state:\n${JSON.stringify(ctx)}\n\n${userText}` }];
+  const undos = [];
+  for (let i = 0; i < 8; i++) {
+    const { data, error } = await supabaseClient.functions.invoke('copilot', { body: { messages, tools: COPILOT_TOOLS } });
+    if (error || !data) throw new Error('copilot failed');
+    const content = Array.isArray(data.content) ? data.content : [];
+    messages.push({ role: 'assistant', content });
+    const toolUses = content.filter((b) => b && b.type === 'tool_use');
+    if (data.stop_reason !== 'tool_use' || !toolUses.length) {
+      const text = content.filter((b) => b && b.type === 'text').map((b) => b.text).join('').trim();
+      return { text: text || 'Done.', undos };
+    }
+    const results = [];
+    for (const tu of toolUses) {
+      const out = await executeCopilotTool(tu.name, tu.input || {}, userText);
+      if (out.undo) undos.push(out.undo);
+      results.push({ type: 'tool_result', tool_use_id: tu.id, content: out.result, is_error: !!out.is_error });
+    }
+    messages.push({ role: 'user', content: results });
+  }
+  return { text: 'I stopped after several steps — please check what happened.', undos };
+}
+
+// Minimal Undo affordance (instant actions): an Undo button on the co-pilot's final answer bubble.
+function copilotAttachUndo(msgId, undos) {
+  const el = document.querySelector(`[data-cop-msg="${msgId}"]`);
+  if (!el) return;
+  el.appendChild(document.createElement('br'));
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'cop-undo';
+  btn.textContent = 'Undo';
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    try { for (const u of undos) { await u(); } btn.textContent = 'Undone'; }
+    catch (_e) { btn.textContent = 'Undo failed'; }
+  });
+  el.appendChild(btn);
+}
 
 function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
