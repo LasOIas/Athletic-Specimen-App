@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.6';
+const APP_VERSION = '2026.06.24.7';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -661,12 +661,17 @@ function restoreTransientInteractionState(snapshot) {
           }
 
           await ensureGroupCatalogEntriesSupabase(groups);
-          next.pending = false;
+          // Reliability (2026-06-24): only clear `pending` once an id is assigned. If the insert "succeeded"
+          // but returned no row (no id), keeping pending=true lets the post-sync merge preserve this player
+          // instead of dropping it (the merge keeps a local row only while !id && pending).
+          if (next.id) next.pending = false;
           if (remoteOK) { ok = true; queueSupabaseRefresh(); }
           else await reconcileToSupabaseAuthority('inline-edit-save');
         } catch (err) {
           console.error('Supabase save error', err);
-          next.pending = false;
+          // Reliability (2026-06-24): the insert failed, so there's no id — keep pending=true so the merge
+          // preserves this player (clearing it would silently drop the row the admin just edited).
+          if (next.id) next.pending = false;
           await reconcileToSupabaseAuthority('inline-edit-save');
         }
         settleSaveToast(editToast, ok, 'Saved');
@@ -3000,7 +3005,10 @@ async function tdbStartPoolPlay(tournament) {
   const pools = await tdbListPools(tournament.id);
   if (!pools.length) throw new Error('Draw pools first.');
   const teams = await tdbListTeams(tournament.id);
-  await supabaseClient.from('matches').delete().eq('tournament_id', tournament.id).eq('phase', 'pool');
+  // Reliability (2026-06-24): check the delete — a silent failure here would leave old pool matches
+  // and then insert new ones on top (duplicate/conflicting matches), with no error surfaced.
+  const { error: delErr } = await supabaseClient.from('matches').delete().eq('tournament_id', tournament.id).eq('phase', 'pool');
+  if (delErr) throw delErr;
   const netCount = Math.max(1, Number(tournament.net_count) || 1);
   const rows = [];
   const queuePerNet = {};
@@ -3021,8 +3029,11 @@ async function tdbStartPoolPlay(tournament) {
   if (!rows.length) throw new Error('No pool games to schedule — each pool needs at least 2 teams.');
   const { error } = await supabaseClient.from('matches').insert(rows);
   if (error) throw error;
-  await supabaseClient.from('tournaments')
+  // Reliability (2026-06-24): check the status update — if it failed silently, 200+ matches would be
+  // inserted while status stays 'setup', leaving the tournament stuck (UI never transitions to pools).
+  const { error: upErr } = await supabaseClient.from('tournaments')
     .update({ status: 'pools', updated_at: new Date().toISOString() }).eq('id', tournament.id);
+  if (upErr) throw upErr;
 }
 
 // C25 item 3: before submitting, sanity-check a lopsided score that still passes validation
@@ -6975,7 +6986,8 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
             const row = Array.isArray(data) ? data[0] : data;
             if (row && row.id) inserted.id = row.id;
             await ensureGroupCatalogEntriesSupabase(group ? [group] : []);
-            inserted.pending = false;
+            // Reliability (2026-06-24): only clear pending if we got an id (else the merge could drop this new player).
+            if (inserted.id) inserted.pending = false;
             // Now that the row has a real id, check it in server-side too.
             if (inserted.id) {
               try {
@@ -7718,12 +7730,14 @@ if (gmOpen && gmRoot) {
                 }
               }
               await ensureGroupCatalogEntriesSupabase(groups);
-              inserted.pending = false;
+              // Reliability (2026-06-24): only clear pending once an id exists, so a no-id insert isn't dropped by the merge.
+              if (inserted.id) inserted.pending = false;
               if (remoteOK) { ok = true; queueSupabaseRefresh(); }
               else await reconcileToSupabaseAuthority('admin-save-player-insert');
             } catch (err) {
               console.error('Supabase insert error', err);
-              inserted.pending = false;
+              // Reliability (2026-06-24): insert failed (no id) — keep pending=true so the admin's new player survives the merge.
+              if (inserted.id) inserted.pending = false;
               await reconcileToSupabaseAuthority('admin-save-player-insert');
             }
             settleSaveToast(addToast, ok, 'Player added');
