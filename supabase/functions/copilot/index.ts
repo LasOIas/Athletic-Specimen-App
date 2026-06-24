@@ -26,6 +26,16 @@ const SYSTEM = [
   "Be concise and courtside-friendly: a few short lines for a phone chat bubble. Use plain sentences, or simple '- ' bullets for a short list, and at most **bold** on a key number. Do not use headings, tables, or code blocks.",
 ].join(" ");
 
+// C28 Slice 2 — acting system prompt (used on the tool-loop relay path).
+const SYSTEM_ACTING = [
+  "You are the Athletic Specimen admin co-pilot, helping the organizer run a pickup volleyball/basketball night.",
+  "You can ANSWER from the JSON state in the user message, and you can ACT using the provided tools when the admin asks you to do something (make teams, check players in or out, submit a score, set up a tournament).",
+  "Resolve players by name. If a name is ambiguous or not found, the tool result will say so — ask the admin which one rather than guessing.",
+  "Some tools require the admin to confirm before they run — just call them normally; the app handles the confirmation and returns the result.",
+  "Never invent players, scores, courts, or counts. Never discuss, rank by, or infer player skill ratings — they are private.",
+  "Be concise and courtside-friendly: a few short lines for a phone chat bubble; at most **bold** on a key number; no headings, tables, or code blocks.",
+].join(" ");
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     const reqHeaders = req.headers.get("access-control-request-headers");
@@ -47,16 +57,36 @@ Deno.serve(async (req) => {
   }
   if (!isAdmin) return json({ error: "unauthorized" }, 401);
 
-  // parse
-  let question = "";
-  let context: unknown = {};
-  try {
-    const body = await req.json();
-    question = String(body?.question ?? "").trim();
-    context = body?.context ?? {};
-  } catch {
-    // bad body -> empty question -> 400 below
+  // parse body once
+  let body: Record<string, unknown> = {};
+  try { body = ((await req.json()) ?? {}) as Record<string, unknown>; } catch { /* bad body */ }
+
+  // --- Slice 2: tool-loop relay (the browser drives the loop; one Claude call per step) ---
+  if (Array.isArray((body as { messages?: unknown }).messages)) {
+    try {
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 1024,
+          system: SYSTEM_ACTING,
+          tools: Array.isArray((body as { tools?: unknown }).tools) ? (body as { tools: unknown }).tools : [],
+          messages: (body as { messages: unknown }).messages,
+        }),
+      });
+      if (!resp.ok) { console.error("anthropic relay error", resp.status, await resp.text()); return json({ error: "co-pilot unavailable" }, 502); }
+      const data = await resp.json();
+      return json({ stop_reason: data?.stop_reason ?? null, content: Array.isArray(data?.content) ? data.content : [] });
+    } catch (e) {
+      console.error("copilot relay failed", (e as Error)?.message);
+      return json({ error: "co-pilot unavailable" }, 502);
+    }
   }
+
+  // --- Slice 1: single read-only question ---
+  const question = String((body as { question?: unknown }).question ?? "").trim();
+  const context = (body as { context?: unknown }).context ?? {};
   if (!question) return json({ error: "empty question" }, 400);
 
   // one Haiku call
