@@ -1202,6 +1202,7 @@ select:focus {
 .kc-q { color: var(--muted); font-size: 15px; margin: 6px 0 22px; }
 .kc-confirm, .kc-cancel { display: block; width: 100%; padding: 16px 20px; border-radius: 12px; font-size: 17px; font-weight: 600; font-family: inherit; cursor: pointer; }
 .kc-confirm { border: none; background: var(--accent); color: #fff; }
+.kc-confirm-danger { background: var(--danger); }
 .kc-confirm:active { transform: scale(.985); }
 .kc-cancel { border: 1px solid var(--border); background: var(--card); color: var(--ink); margin-top: 10px; }
 .kc-cancel:active { transform: scale(.985); }

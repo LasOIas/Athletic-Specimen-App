@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.1';
+const APP_VERSION = '2026.06.24.2';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3027,14 +3027,15 @@ async function tdbStartPoolPlay(tournament) {
 // C25 item 3: before submitting, sanity-check a lopsided score that still passes validation
 // (a fat-finger blowout). Empty scores (e.g. tap-to-win bracket) skip the check. Returns false on cancel.
 var BIG_MARGIN = 20;
-function confirmBigMargin(saStr, sbStr) {
+async function confirmBigMargin(saStr, sbStr) {
   const aRaw = String(saStr == null ? '' : saStr).trim();
   const bRaw = String(sbStr == null ? '' : sbStr).trim();
   if (aRaw === '' || bRaw === '') return true;                    // no scores entered -> nothing to confirm
   const a = Number(aRaw), b = Number(bRaw);
   if (!Number.isInteger(a) || !Number.isInteger(b)) return true;  // let validateScores surface the error
   if (Math.abs(a - b) < BIG_MARGIN) return true;
-  return confirm('That\'s a big margin — submit ' + a + '–' + b + '? Tap Cancel to fix it.');
+  // C49b: styled confirm instead of native confirm().
+  return await appConfirm({ title: 'Big margin', message: 'Submit ' + a + '–' + b + '? Tap Cancel to fix it.', confirmText: 'Submit' });
 }
 
 // Submit a match result with optimistic concurrency (CAS on version). Returns the
@@ -5481,6 +5482,30 @@ function closeKioskConfirm() {
   kioskConfirmCb = null;
 }
 
+// C49b: generic styled confirm (reuses the C47 Option-A center modal: .popup-overlay/.popup-card/.kc-*)
+// so destructive actions stop using the browser's native confirm(). Returns Promise<boolean>.
+function appConfirm({ title, message, confirmText, cancelText, danger } = {}) {
+  return new Promise((resolve) => {
+    const prev = document.getElementById('app-confirm-modal');
+    if (prev) prev.remove();
+    const el = document.createElement('div');
+    el.id = 'app-confirm-modal';
+    el.className = 'popup-overlay';
+    el.style.display = 'flex';
+    el.innerHTML =
+      '<div class="popup-card card kc-card" role="dialog" aria-modal="true">'
+      + (title ? '<div class="kc-name">' + escapeHTML(title) + '</div>' : '')
+      + '<div class="kc-q">' + escapeHTML(message || 'Are you sure?') + '</div>'
+      + '<button type="button" class="kc-confirm' + (danger ? ' kc-confirm-danger' : '') + '" id="app-confirm-yes">' + escapeHTML(confirmText || 'Confirm') + '</button>'
+      + '<button type="button" class="kc-cancel" id="app-confirm-no">' + escapeHTML(cancelText || 'Cancel') + '</button>';
+    document.body.appendChild(el);
+    const done = (val) => { el.remove(); resolve(val); };
+    el.querySelector('#app-confirm-yes').addEventListener('click', () => done(true));
+    el.querySelector('#app-confirm-no').addEventListener('click', () => done(false));
+    el.addEventListener('click', (ev) => { if (ev.target === el) done(false); });
+  });
+}
+
 function publicCheckinHTML() {
   return `
   <div class="ci-kiosk is-idle">
@@ -6190,14 +6215,19 @@ function bindTournamentTabV2() {
         render();
       } else if (role === 'tv2-delete-tournament') {
         if (!state.isAdmin) return; // defense-in-depth re-check (real server gate = C21)
-        if (!window.confirm('Delete this tournament and everything in it?')) return;
+        if (!(await appConfirm({ title: 'Delete tournament', message: 'Delete this tournament and everything in it?', confirmText: 'Delete', danger: true }))) return;
         await tdbDeleteTournament(id);
         if (state.activeTournamentId === id) state.activeTournamentId = null;
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-add-team') {
         const nameEl = document.getElementById('tv2-team-name');
-        await tdbAddTeam(state.activeTournamentId, (nameEl || {}).value || '');
+        const teamName = ((nameEl || {}).value || '').trim();
+        // C49a: block a duplicate team name (case-insensitive) — two same-named teams are unreadable in the bracket.
+        if (teamName && (state.tournamentTeams || []).some((t) => normalize(t.name) === normalize(teamName))) {
+          throw new Error('A team named "' + teamName + '" is already in this tournament.');
+        }
+        await tdbAddTeam(state.activeTournamentId, teamName);
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-delete-team') {
@@ -6218,11 +6248,14 @@ function bindTournamentTabV2() {
         render();
       } else if (role === 'tv2-reset-pools') {
         if (!state.isAdmin) return; // defense-in-depth re-check (real server gate = C21)
-        if (!window.confirm('Reset pools and clear all pool results?')) return;
+        if (!(await appConfirm({ title: 'Reset pools', message: 'Reset pools and clear all pool results?', confirmText: 'Reset', danger: true }))) return;
         const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
-        await tdbDrawPools(t);
+        // C49 BUGFIX: drop to 'setup' BEFORE re-drawing. tdbDrawPools refuses to run while status==='pools'
+        // (its own guard), so the old order (draw → then set setup) ALWAYS threw "Pool play already started"
+        // — Reset Pools never worked. Set setup first, then re-draw (which clears pool results via cascade).
         await supabaseClient.from('tournaments')
           .update({ status: 'setup', updated_at: new Date().toISOString() }).eq('id', t.id);
+        await tdbDrawPools(t);
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-generate-bracket') {
@@ -6247,7 +6280,7 @@ function bindTournamentTabV2() {
         }
         const sa = (document.getElementById('bsc-a-' + id) || {}).value;
         const sb = (document.getElementById('bsc-b-' + id) || {}).value;
-        if (!confirmBigMargin(sa, sb)) return;
+        if (!(await confirmBigMargin(sa, sb))) return;
         await tdbSubmitBracketResult(m, el.getAttribute('data-winner'), sa, sb);
         await tdbRefreshTournaments();
         render();
@@ -6260,7 +6293,7 @@ function bindTournamentTabV2() {
         const m = (state.tournamentMatches || []).find((x) => x.id === id);
         const sa = (document.getElementById('sc-a-' + id) || {}).value;
         const sb = (document.getElementById('sc-b-' + id) || {}).value;
-        if (!confirmBigMargin(sa, sb)) return;
+        if (!(await confirmBigMargin(sa, sb))) return;
         await tdbSubmitResult(m, sa, sb);
         await tdbRefreshTournaments();
         render();
