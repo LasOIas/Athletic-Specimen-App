@@ -158,6 +158,13 @@
     }
     .loading { text-align: center; padding: 40px 20px; color: var(--text-dim); }
     [hidden] { display: none !important; }
+    /* C47: confirm-on-tap dialog (Option A center modal) — replaces native confirm()/alert() */
+    .dialog-overlay { position: fixed; inset: 0; background: oklch(0.18 0.005 75 / 0.42); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 50; }
+    .dialog-card { width: 100%; max-width: 360px; background: var(--bg); border: 1px solid var(--border); border-radius: 18px; padding: 26px 22px 22px; box-shadow: 0 18px 50px oklch(0.18 0.01 75 / 0.28); text-align: center; }
+    .dialog-avatar { width: 60px; height: 60px; border-radius: 50%; background: var(--accent-dim); color: var(--accent); font-family: 'Sora', sans-serif; font-weight: 800; font-size: 22px; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+    .dialog-name { font-family: 'Sora', 'Inter', sans-serif; font-size: 24px; font-weight: 800; letter-spacing: -0.01em; word-break: break-word; }
+    .dialog-q { color: var(--text-dim); font-size: 15px; margin: 6px 0 22px; }
+    .dialog-card .btn + .btn { margin-top: 10px; }
   </style>
 </head>
 <body>
@@ -218,6 +225,15 @@
       <button id="anotherBtn" class="btn btn-secondary">Check in someone else</button>
     </div>
   </div>
+  <div id="confirmDialog" class="dialog-overlay" hidden>
+    <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="dialogName">
+      <div class="dialog-avatar" id="dialogAvatar"></div>
+      <div class="dialog-name" id="dialogName"></div>
+      <div class="dialog-q" id="dialogQ">Check this person in?</div>
+      <button class="btn btn-primary" id="dialogConfirm">Check in</button>
+      <button class="btn btn-secondary" id="dialogCancel">Cancel</button>
+    </div>
+  </div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Shared Supabase config (URL + anon key) — must load before this script (C25 item 7) -->
   <script src="/supabase-config.js"></script>
@@ -230,6 +246,24 @@
     const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
     const $ = (id) => document.getElementById(id);
     let roster = [];
+
+    // C47: styled confirm dialog (Option A center modal) — replaces native confirm()/alert().
+    let pendingConfirm = null;
+    function nameInitials(name) {
+      const w = String(name || '').trim().split(/\s+/).filter(Boolean);
+      return (((w[0] || '')[0] || '') + ((w[w.length - 1] || '')[0] || '')).toUpperCase();
+    }
+    function openConfirm(name, onConfirm, question) {
+      $('dialogName').textContent = name;
+      $('dialogAvatar').textContent = nameInitials(name);
+      $('dialogQ').textContent = question || 'Check this person in?';
+      pendingConfirm = onConfirm;
+      $('confirmDialog').hidden = false;
+    }
+    function closeConfirm() { $('confirmDialog').hidden = true; pendingConfirm = null; }
+    $('dialogConfirm').addEventListener('click', () => { const fn = pendingConfirm; closeConfirm(); if (fn) fn(); });
+    $('dialogCancel').addEventListener('click', closeConfirm);
+    $('confirmDialog').addEventListener('click', (e) => { if (e.target === $('confirmDialog')) closeConfirm(); });
 
     async function loadSessionBanner() {
       try {
@@ -309,15 +343,18 @@
         li.textContent = p.name;
         li.addEventListener('click', () => {
           if (li.dataset.busy) return;
-          li.dataset.busy = '1';
-          li.style.opacity = '0.55';
-          li.textContent = 'Checking in ' + p.name + '…';
-          ul.style.pointerEvents = 'none';
-          checkInExisting(p, () => {
-            li.dataset.busy = '';
-            li.style.opacity = '';
-            li.textContent = p.name;
-            ul.style.pointerEvents = '';
+          // C47: confirm before checking in, so a mis-tap doesn't check in the wrong person.
+          openConfirm(p.name, () => {
+            li.dataset.busy = '1';
+            li.style.opacity = '0.55';
+            li.textContent = 'Checking in ' + p.name + '…';
+            ul.style.pointerEvents = 'none';
+            checkInExisting(p, () => {
+              li.dataset.busy = '';
+              li.style.opacity = '';
+              li.textContent = p.name;
+              ul.style.pointerEvents = '';
+            });
           });
         });
         ul.appendChild(li);
@@ -342,11 +379,10 @@
       } catch (err) {
         console.error('Check-in error:', err);
         if (typeof onError === 'function') onError();
+        // C47: no native alert() — the inline #checkinError is always present in the DOM.
         if (errEl) {
           errEl.textContent = 'Something went wrong checking you in. Try again, or tell the organizer.';
           errEl.hidden = false;
-        } else {
-          alert('Something went wrong checking you in. Please try again or tell the organizer.');
         }
       }
     }
@@ -355,10 +391,8 @@
       const fullName = `${firstName} ${lastName}`.trim();
       const existing = roster.find((p) => p.name.toLowerCase() === fullName.toLowerCase());
       if (existing) {
-        const confirmed = confirm(
-          `"${existing.name}" is already in the list. Is that you?\n\nTap OK to check in as "${existing.name}".`
-        );
-        if (confirmed) await checkInExisting(existing);
+        // C47: styled confirm instead of native confirm() — "already on the list, is that you?"
+        openConfirm(existing.name, () => { checkInExisting(existing); }, 'Already on the list — check them in?');
         return;
       }
       const errEl = $('registerError');
@@ -417,8 +451,9 @@
       const last = $('lastName').value.trim();
       const errEl = $('registerError');
       errEl.hidden = true;
-      if (!first || !last) {
-        errEl.textContent = 'Please enter both your first and last name.';
+      // C47: require a real first AND last name (each >= 2 chars) — single-letter names cause "who is who" mix-ups.
+      if (first.length < 2 || last.length < 2) {
+        errEl.textContent = 'Please enter your full first and last name.';
         errEl.hidden = false;
         return;
       }

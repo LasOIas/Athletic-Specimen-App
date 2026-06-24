@@ -1195,6 +1195,16 @@ select:focus {
   overflow: auto;
   margin: 0;
 }
+/* C47: kiosk "tap a name -> confirm" popup (Option A center modal; reuses .popup-overlay/.popup-card). */
+.kc-card { width: min(360px, calc(100vw - 2rem)); text-align: center; padding: 26px 22px 22px; }
+.kc-avatar { width: 60px; height: 60px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 22px; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+.kc-name { font-family: 'Sora','Inter',sans-serif; font-size: 24px; font-weight: 800; letter-spacing: -0.01em; word-break: break-word; color: var(--ink); }
+.kc-q { color: var(--muted); font-size: 15px; margin: 6px 0 22px; }
+.kc-confirm, .kc-cancel { display: block; width: 100%; padding: 16px 20px; border-radius: 12px; font-size: 17px; font-weight: 600; font-family: inherit; cursor: pointer; }
+.kc-confirm { border: none; background: var(--accent); color: #fff; }
+.kc-confirm:active { transform: scale(.985); }
+.kc-cancel { border: 1px solid var(--border); background: var(--card); color: var(--ink); margin-top: 10px; }
+.kc-cancel:active { transform: scale(.985); }
 .popup-header {
   display: flex;
   align-items: center;

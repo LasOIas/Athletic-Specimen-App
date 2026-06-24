@@ -53,11 +53,11 @@ a one-line question, a primary action button, and Cancel.
 
 ### Part B — first/last name enforcement
 - **Shared rule (pure helper, TDD):** `isValidFullName(name)` → true iff, after `trim()` +
-  whitespace-collapse, the name has **≥2 words** and each word is ≥1 char. ("Mike" → false; "Mike O" →
-  true.) Add to `public/pure.js` (the tested pure-logic module) with unit tests in `/test`.
-  - Open question for the plan: should the last word require ≥2 chars (reject "Mike O")? Default = ≥1 char
-    (accept a last initial) unless Mike says stricter. Mike's AskUserQuestion answer = "Approved — build
-    the mockups" (did not ask for stricter), so default to ≥1 char.
+  whitespace-collapse, the name has **≥2 words** AND the first and last words are each **≥2 characters**
+  (Mike's call 2026-06-24: a single-letter last name is a mix-up risk). Examples: "Mike" → false;
+  "Mike O" → false; "M Olas" → false; "Mike Olas" → true; "Jo Oz" → true. Length counts characters, so
+  "O'Brien" and "Oz" pass (no alphabetic-only restriction — don't reject apostrophes/hyphens). Add to
+  `public/pure.js` (the tested pure-logic module) with unit tests in `/test`.
 - **Apply at every add/register door**, blocking with an inline styled error ("Please enter a first and
   last name") when invalid:
   - in-app kiosk "I'm new" register (`app.js`),

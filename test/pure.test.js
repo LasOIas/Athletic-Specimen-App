@@ -10,8 +10,43 @@ const {
   validateScores, decideWinner, generateRoundRobin, generateDoubleElim,
   computeStandings, computeSeeding, computeChampion, summarizeTeamFairness,
   generateBalancedGroups, playerIdentityKey, disambiguatePlayersByName,
-  groupRosterPlayersBySection,
+  groupRosterPlayersBySection, isValidFullName,
 } = pure;
+
+describe('isValidFullName (C47 — first+last name enforcement)', () => {
+  it('accepts a normal first and last name', () => {
+    expect(isValidFullName('Mike Olas')).toBe(true);
+  });
+  it('accepts two-letter first and last names', () => {
+    expect(isValidFullName('Jo Oz')).toBe(true);
+  });
+  it('accepts names with apostrophes/hyphens (length counts characters)', () => {
+    expect(isValidFullName("Mike O'Brien")).toBe(true);
+    expect(isValidFullName('Mary-Jane Watson')).toBe(true);
+  });
+  it('accepts three-or-more words when first and last are each >= 2 chars', () => {
+    expect(isValidFullName('Mike Van Olas')).toBe(true);
+  });
+  it('collapses surrounding and internal whitespace', () => {
+    expect(isValidFullName('   Mike    Olas   ')).toBe(true);
+  });
+  it('rejects a single word (no last name)', () => {
+    expect(isValidFullName('Mike')).toBe(false);
+  });
+  it('rejects a single-letter last name', () => {
+    expect(isValidFullName('Mike O')).toBe(false);
+  });
+  it('rejects a single-letter first name', () => {
+    expect(isValidFullName('M Olas')).toBe(false);
+  });
+  it('rejects empty / whitespace / non-string input', () => {
+    expect(isValidFullName('')).toBe(false);
+    expect(isValidFullName('   ')).toBe(false);
+    expect(isValidFullName(null)).toBe(false);
+    expect(isValidFullName(undefined)).toBe(false);
+    expect(isValidFullName(42)).toBe(false);
+  });
+});
 
 // Build a FINAL pool match the way computeStandings/computeSeeding read it.
 const poolGame = (aId, bId, sa, sb) => ({

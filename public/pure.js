@@ -530,12 +530,23 @@ function groupRosterPlayersBySection(players, getGroupsFn) {
 }
 
 // CommonJS export for the test runner; skipped in the browser (module is undefined there).
+// C47 - first+last name enforcement at every add/register door. A new player's name must be
+// at least two words, with the first AND last word each >= 2 characters (Mike 2026-06-24:
+// a single-letter last name is a "who is who" mix-up risk). Length counts characters so
+// "O'Brien"/"Oz" pass. Used by the in-app kiosk register, the admin Add-Player save, and /checkin.html.
+function isValidFullName(name) {
+  if (typeof name !== "string") return false;
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+  return words[0].length >= 2 && words[words.length - 1].length >= 2;
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
     generateOneBalancedCandidate, generateBalancedGroups, validateScores,
     generateRoundRobin, decideWinner, computeStandings, applyHeadToHeadGroups,
     nextPow2, seedOrder, computeSeeding, computeChampion, generateDoubleElim,
-    disambiguatePlayersByName, groupRosterPlayersBySection
+    disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName
   };
 }

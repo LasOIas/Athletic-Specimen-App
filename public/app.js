@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.22.9';
+const APP_VERSION = '2026.06.24.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5318,7 +5318,7 @@ function adminPlayersHTML() {
     </div>
     <div class="popup-body">
       <div class="row admin-player-form-row">
-        <input type="text" id="admin-player-name" placeholder="Name" autocapitalize="words" autocomplete="off" spellcheck="false" />
+        <input type="text" id="admin-player-name" placeholder="First and last name" autocapitalize="words" autocomplete="off" spellcheck="false" />
         <input type="number" id="admin-player-skill" placeholder="Skill" step="0.1" />
         <div class="admin-player-groups-field">
           <input
@@ -5431,6 +5431,54 @@ function syncKioskIdleState(resultsHTML) {
   if (!kiosk) return;
   const hasResults = !!(resultsHTML && String(resultsHTML).trim());
   kiosk.classList.toggle('is-idle', !hasResults);
+}
+
+// C47: kiosk "tap a name -> confirm" popup (Option A center modal). Created once and appended to
+// <body> (outside .players, so partialRender never captures/wipes it); reuses .popup-overlay/.popup-card.
+// The confirm button reads the module-level callback set by openKioskConfirm, so its listener binds once.
+let kioskConfirmCb = null;
+function kioskNameInitials(name) {
+  const w = String(name || '').trim().split(/\s+/).filter(Boolean);
+  return (((w[0] || '')[0] || '') + ((w[w.length - 1] || '')[0] || '')).toUpperCase();
+}
+function ensureKioskConfirmModal() {
+  let el = document.getElementById('kiosk-confirm-modal');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'kiosk-confirm-modal';
+  el.className = 'popup-overlay';
+  el.style.display = 'none';
+  el.innerHTML =
+    '<div class="popup-card card kc-card" role="dialog" aria-modal="true" aria-labelledby="kc-name">'
+    + '<div class="kc-avatar" id="kc-avatar"></div>'
+    + '<div class="kc-name" id="kc-name"></div>'
+    + '<div class="kc-q" id="kc-q"></div>'
+    + '<button type="button" class="kc-confirm" id="kc-confirm"></button>'
+    + '<button type="button" class="kc-cancel" id="kc-cancel">Cancel</button>'
+    + '</div>';
+  document.body.appendChild(el);
+  el.addEventListener('click', (e) => { if (e.target === el) closeKioskConfirm(); });
+  el.querySelector('#kc-cancel').addEventListener('click', closeKioskConfirm);
+  el.querySelector('#kc-confirm').addEventListener('click', () => {
+    const fn = kioskConfirmCb;
+    closeKioskConfirm();
+    if (fn) fn();
+  });
+  return el;
+}
+function openKioskConfirm(player, isIn, onConfirm) {
+  const el = ensureKioskConfirmModal();
+  el.querySelector('#kc-avatar').textContent = kioskNameInitials(player.name);
+  el.querySelector('#kc-name').textContent = player.name;
+  el.querySelector('#kc-q').textContent = isIn ? 'Check this person out?' : 'Check this person in?';
+  el.querySelector('#kc-confirm').textContent = isIn ? 'Check out' : 'Check in';
+  kioskConfirmCb = onConfirm;
+  el.style.display = 'flex';
+}
+function closeKioskConfirm() {
+  const el = document.getElementById('kiosk-confirm-modal');
+  if (el) el.style.display = 'none';
+  kioskConfirmCb = null;
 }
 
 function publicCheckinHTML() {
@@ -6524,14 +6572,9 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
 
     // Toggle: tapping a NOT-checked-in name checks in; tapping a checked-in name checks out.
     // Both route through the SAME existing optimistic + rpc('check_in'|'check_out') + outbox path.
-    checkinResults.addEventListener('click', (e) => {
-      const btn = e.target.closest('[data-checkin-id]');
-      if (!btn) return;
-      const id = btn.getAttribute('data-checkin-id');
-      const player = state.players.find((p) => String(p.id) === String(id));
-      if (!player) return;
-
-      const isIn = (state.checkedIn || []).includes(playerIdentityKey(player));
+    // C47: tapping a name opens a confirm popup (Check in / Check out / Cancel) instead of toggling
+    // immediately — so a mis-tap can't check the wrong person in or out. The toggle body is unchanged.
+    const performKioskToggle = (player, isIn) => {
       if (!isIn) {
         if (checkInPlayer(player) && supabaseClient && player.id) {
           (async () => {
@@ -6566,6 +6609,16 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       const statsEl = document.getElementById('js-checkin-stats');
       if (statsEl) statsEl.innerHTML = buildCheckinStatsHTML();
       renderCheckinResultsForQuery();
+    };
+
+    checkinResults.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-checkin-id]');
+      if (!btn) return;
+      const id = btn.getAttribute('data-checkin-id');
+      const player = state.players.find((p) => String(p.id) === String(id));
+      if (!player) return;
+      const isIn = (state.checkedIn || []).includes(playerIdentityKey(player));
+      openKioskConfirm(player, isIn, () => performKioskToggle(player, isIn));
     });
 
     // "I'm new — add me": reuse the EXACT register path, then check the new player in (kiosk intent).
@@ -6574,6 +6627,8 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       newBtn.addEventListener('click', async () => {
         const name = (checkinSearch.value || '').trim();
         if (!name) { showCheckinToast('Type your name first'); checkinSearch.focus(); return; }
+        // C47: require a real first AND last name (each >= 2 chars) — single names cause "who is who" mix-ups.
+        if (!isValidFullName(name)) { showCheckinToast('Enter your full first and last name'); checkinSearch.focus(); return; }
 
         // Already in history? Treat the kiosk "new" tap as a check-in for that existing player.
         const exists = state.players.find((p) => normalize(p.name) === normalize(name));
@@ -7253,6 +7308,14 @@ if (gmOpen && gmRoot) {
 
       const idx = state.players.findIndex((p) => normalize(p.name) === normalize(name));
       const isNew = idx === -1;
+      // C47: a NEW player must have a real first AND last name (mix-up prevention). Updating an
+      // existing player is exempt, so a legacy single-name entry can still be fixed/renamed.
+      if (isNew && !isValidFullName(name)) {
+        const t = makeSaveToast('Enter a first and last name');
+        if (t) setTimeout(() => { try { t.remove(); } catch {} }, 1800);
+        if (nameInput) nameInput.focus();
+        return;
+      }
 
       // Honest save status (created before the branch, settled when the write resolves).
       const addOkText = isNew ? 'Player added' : 'Player updated';
