@@ -10,7 +10,7 @@ const {
   validateScores, decideWinner, generateRoundRobin, generateDoubleElim,
   computeStandings, computeSeeding, computeChampion, summarizeTeamFairness,
   generateBalancedGroups, playerIdentityKey, disambiguatePlayersByName,
-  groupRosterPlayersBySection, isValidFullName,
+  groupRosterPlayersBySection, isValidFullName, buildCopilotContext,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -340,5 +340,76 @@ describe('groupRosterPlayersBySection', () => {
     ];
     const out = groupRosterPlayersBySection(players, groupsOf);
     expect(out[0].players.map((p) => p.name)).toEqual(['Aaron', 'Bella', 'Cara']);
+  });
+});
+
+describe('buildCopilotContext (C28 — co-pilot read context)', () => {
+  it('attendance: counts checked-in players, groups them, excludes not-checked-in', () => {
+    const ctx = buildCopilotContext({
+      players: [
+        { name: 'Mikey Olas', group: 'KC Volleyball', checked_in: true, skill: 9 },
+        { name: 'Allie Hotz', group: 'KC Volleyball', checked_in: true, skill: 7 },
+        { name: 'Rich Wells', group: '', checked_in: true, skill: 5 },
+        { name: 'Jaakan Mullet', group: 'KC Volleyball', checked_in: false, skill: 8 },
+      ],
+    });
+    expect(ctx.attendance.total).toBe(3);
+    expect(ctx.attendance.byGroup).toEqual({ 'KC Volleyball': 2, 'Ungrouped': 1 });
+    expect(ctx.attendance.here).toEqual([
+      { name: 'Mikey Olas', group: 'KC Volleyball' },
+      { name: 'Allie Hotz', group: 'KC Volleyball' },
+      { name: 'Rich Wells', group: '' },
+    ]);
+  });
+
+  it('REDACTION: no skill key and no skill value leaks (players + generatedTeams)', () => {
+    const SENTINEL = 8.6531; // distinctive skill value that cannot appear as a count
+    const s = JSON.stringify(buildCopilotContext({
+      players: [{ name: 'Mikey Olas', group: 'KC', checked_in: true, skill: SENTINEL }],
+      generatedTeams: [
+        [{ name: 'Mikey Olas', skill: SENTINEL }, { name: 'Allie Hotz', skill: SENTINEL }],
+        [{ name: 'Rich Wells', skill: SENTINEL }, { name: 'Jaakan Mullet', skill: SENTINEL }],
+      ],
+      liveData: { matchups: [{ teamA: 1, teamB: 2 }], waitingTeams: [], results: {}, liveCount: 1 },
+    }));
+    expect(s).not.toContain('skill');
+    expect(s).not.toContain(String(SENTINEL));
+  });
+
+  it('casualCourts: maps matchups to redacted rosters + waiting onDeck + winner', () => {
+    const ctx = buildCopilotContext({
+      generatedTeams: [
+        [{ name: 'A1', skill: 1 }, { name: 'A2', skill: 1 }], // team 1
+        [{ name: 'B1', skill: 1 }, { name: 'B2', skill: 1 }], // team 2
+        [{ name: 'C1', skill: 1 }, { name: 'C2', skill: 1 }], // team 3 (waiting)
+      ],
+      liveData: { matchups: [{ teamA: 1, teamB: 2 }], waitingTeams: [3], results: { '1-2': 1 }, liveCount: 0 },
+    });
+    expect(ctx.casualCourts.playing).toEqual([
+      { court: 1, teamA: { n: 1, players: ['A1', 'A2'] }, teamB: { n: 2, players: ['B1', 'B2'] }, winner: 'A' },
+    ]);
+    expect(ctx.casualCourts.onDeck).toEqual([{ team: 3, players: ['C1', 'C2'] }]);
+    expect(ctx.casualCourts.inProgress).toBe(0);
+  });
+
+  it('tournament: standings + upNextByNet from teams + matches', () => {
+    const teams = [{ id: 't1', name: 'Mikey Mouse Clubhouse' }, { id: 't2', name: 'Spikers' }];
+    const matches = [
+      { id: 'm1', phase: 'pool', status: 'final', team_a_id: 't1', team_b_id: 't2', score_a: 21, score_b: 15, winner_team_id: 't1', pool_id: 'p1' },
+      { id: 'm2', phase: 'pool', status: 'scheduled', team_a_id: 't2', team_b_id: 't1', net: 1, queue_order: 0 },
+    ];
+    const ctx = buildCopilotContext({ tournament: { name: 'Summer Slam', status: 'pools', teams, matches } });
+    expect(ctx.tournament.name).toBe('Summer Slam');
+    expect(ctx.tournament.status).toBe('pools');
+    expect(ctx.tournament.standings[0]).toEqual({ rank: 1, team: 'Mikey Mouse Clubhouse', wins: 1, pointDiff: 6 });
+    expect(ctx.tournament.upNextByNet).toEqual([{ net: 1, match: 'Spikers vs Mikey Mouse Clubhouse', queued: 0 }]);
+  });
+
+  it('empty: nothing going on -> nulls + zero attendance', () => {
+    expect(buildCopilotContext({})).toEqual({
+      attendance: { total: 0, byGroup: {}, here: [] },
+      casualCourts: null,
+      tournament: null,
+    });
   });
 });

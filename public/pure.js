@@ -541,12 +541,97 @@ function isValidFullName(name) {
   return words[0].length >= 2 && words[words.length - 1].length >= 2;
 }
 
+// C28 Slice 1 — the admin AI co-pilot's READ context. PURE shaping + REDACTION (no DOM / no state global):
+// the caller assembles `input` from state + getPublicLiveData(); this returns the compact, skill-free
+// snapshot the edge function passes to Claude. Skill is admin-only and must NEVER reach the model (§AS-1),
+// so the two skill-bearing inputs (players, generatedTeams) are stripped to name+group / name here.
+function copilotRosterNames(team) {
+  return (Array.isArray(team) ? team : [])
+    .map((p) => String((p && p.name) || '').trim())
+    .filter(Boolean);
+}
+
+function copilotUpNextByNet(matches, teams) {
+  const nameById = {};
+  (teams || []).forEach((t) => { if (t && t.id != null) nameById[t.id] = t.name || ''; });
+  const live = (matches || []).filter((m) => m && m.phase === 'pool' && m.status !== 'final' && m.net);
+  const byNet = {};
+  live.forEach((m) => { (byNet[m.net] = byNet[m.net] || []).push(m); });
+  return Object.keys(byNet).map(Number).sort((a, b) => a - b).map((net) => {
+    const q = byNet[net].slice().sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
+    const up = q[0];
+    return {
+      net,
+      match: `${nameById[up.team_a_id] || '?'} vs ${nameById[up.team_b_id] || '?'}`,
+      queued: q.length - 1,
+    };
+  });
+}
+
+function buildCopilotContext(input) {
+  const inp = input || {};
+  const players = Array.isArray(inp.players) ? inp.players : [];
+  const teams = Array.isArray(inp.generatedTeams) ? inp.generatedTeams : [];
+  const liveData = inp.liveData || {};
+  const tour = inp.tournament || null;
+
+  // attendance (redacted: name + group only)
+  const here = [];
+  const byGroup = {};
+  players.forEach((p) => {
+    if (!p || !p.checked_in) return;
+    const name = String(p.name || '').trim();
+    const group = String(p.group || '').trim();
+    here.push({ name, group });
+    const key = group || 'Ungrouped';
+    byGroup[key] = (byGroup[key] || 0) + 1;
+  });
+  const attendance = { total: here.length, byGroup, here };
+
+  // casual courts (redacted rosters; null when no teams)
+  let casualCourts = null;
+  if (teams.length) {
+    const matchups = Array.isArray(liveData.matchups) ? liveData.matchups : [];
+    const results = (liveData.results && typeof liveData.results === 'object') ? liveData.results : {};
+    const rosterFor = (n) => copilotRosterNames(teams[n - 1]);
+    const playing = matchups.map((m, idx) => {
+      const w = Number(results[`${m.teamA}-${m.teamB}`]);
+      const winner = w === m.teamA ? 'A' : (w === m.teamB ? 'B' : null);
+      return {
+        court: idx + 1,
+        teamA: { n: m.teamA, players: rosterFor(m.teamA) },
+        teamB: { n: m.teamB, players: rosterFor(m.teamB) },
+        winner,
+      };
+    });
+    const onDeck = (Array.isArray(liveData.waitingTeams) ? liveData.waitingTeams : [])
+      .map((n) => ({ team: n, players: rosterFor(n) }));
+    casualCourts = { playing, onDeck, inProgress: Number(liveData.liveCount) || 0 };
+  }
+
+  // tournament (computeStandings output is already skill-free; null when none)
+  let tournament = null;
+  if (tour) {
+    const standings = computeStandings(tour.teams || [], tour.matches || [])
+      .map((r) => ({ rank: r.rank, team: r.name, wins: r.wins, pointDiff: r.pointDiff }));
+    tournament = {
+      name: tour.name || '',
+      status: tour.status || '',
+      upNextByNet: copilotUpNextByNet(tour.matches || [], tour.teams || []),
+      standings,
+    };
+  }
+
+  return { attendance, casualCourts, tournament };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
     generateOneBalancedCandidate, generateBalancedGroups, validateScores,
     generateRoundRobin, decideWinner, computeStandings, applyHeadToHeadGroups,
     nextPow2, seedOrder, computeSeeding, computeChampion, generateDoubleElim,
-    disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName
+    disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName,
+    copilotRosterNames, copilotUpNextByNet, buildCopilotContext
   };
 }
