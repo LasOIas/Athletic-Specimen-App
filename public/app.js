@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.3';
+const APP_VERSION = '2026.06.24.4';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5651,13 +5651,27 @@ function adminDashboardHTML() {
 // browser; the copilot edge function holds the API key and is admin-JWT-gated.
 const COPILOT_CHIPS = ["Who's up next?", 'How many here?', 'Tournament standings?'];
 
+// Render a co-pilot answer for a chat bubble: escape (XSS-safe) FIRST, then lightly format the
+// markdown Haiku tends to emit — **bold** and "- "/"* " bullets — since a phone bubble can't show raw
+// markdown. The <strong> tags wrap already-escaped text, so there's no injection surface.
+function copilotFormat(text) {
+  return escapeHTMLText(String(text || ''))
+    .split('\n')
+    .map((line) => line
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/^\s*[-*]\s+/, '• '))
+    .join('<br>');
+}
+
 function copilotBubbleHTML(m) {
   let cls = 'cop-msg ' + (m.role === 'user' ? 'cop-user' : 'cop-bot');
   if (m.isError) cls += ' cop-error';
   if (m.loading) cls += ' cop-loading';
   const inner = m.loading
     ? '<span class="cop-dots"><span></span><span></span><span></span></span>'
-    : escapeHTMLText(String(m.text || '')).replace(/\n/g, '<br>');
+    : (m.role === 'user'
+        ? escapeHTMLText(String(m.text || '')).replace(/\n/g, '<br>')
+        : copilotFormat(m.text));
   return `<div class="${cls}" data-cop-msg="${escapeHTMLText(m.id)}">${inner}</div>`;
 }
 

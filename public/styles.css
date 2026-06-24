@@ -2089,6 +2089,16 @@ select:focus {
 .ad-send svg { width: 16px; height: 16px; display: block; }
 
 /* --- C28 Slice 1: co-pilot chat (layout A — chat thread) --- */
+/* Fill the tab panel (which has a definite height between header + nav, like the idle-center pattern at
+   line ~98) so the thread scrolls and the chips + input pin to the bottom — instead of the whole screen
+   stopping at min-height:60vh with the input floating mid-screen. */
+.tab-panel > .container:has(> .cop-screen) {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.cop-screen { flex: 1; min-height: 0; }
 .cop-thread {
   flex: 1;
   display: flex;
