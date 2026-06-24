@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.2';
+const APP_VERSION = '2026.06.24.3';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2840,6 +2840,7 @@ const state = {
   currentSession: null, // { date, time, location } or null
   lastSharedSyncAt: 0,
   operatorActions: [],
+  copilotMessages: [], // C28 Slice 1 — admin co-pilot chat thread (persists across render() rebuilds)
   // Tournament v2 (real Supabase tables — Phase 1+)
   tournaments: [],            // [{id,name,status,match_cap,pool_count,net_count,created_at}]
   activeTournamentId: null,   // selected tournament id (admin)
@@ -5642,24 +5643,135 @@ function adminDashboardHTML() {
 </div>`;
 }
 
-// C26 item 3b: STATIC Co-pilot placeholder — NO AI logic (that's C28). A heading + "coming soon" explanation +
-// a disabled input bar so it reads as not-yet-functional, never a broken control. No JS wiring for this panel.
+// C28 Slice 1: the admin AI co-pilot chat (layout A — chat thread; Mike picked it from 3 §38 options).
+// READ-ONLY: it answers from the current state, never acts (acting is Slice 2). The thread renders from
+// state.copilotMessages so a full render() rebuild preserves history; handleCopilotSend appends to both
+// the array AND the DOM directly (no full re-render per message, so the input keeps focus). The context
+// snapshot is built by buildCopilotContext (pure.js) and is skill-redacted before it ever leaves the
+// browser; the copilot edge function holds the API key and is admin-JWT-gated.
+const COPILOT_CHIPS = ["Who's up next?", 'How many here?', 'Tournament standings?'];
+
+function copilotBubbleHTML(m) {
+  let cls = 'cop-msg ' + (m.role === 'user' ? 'cop-user' : 'cop-bot');
+  if (m.isError) cls += ' cop-error';
+  if (m.loading) cls += ' cop-loading';
+  const inner = m.loading
+    ? '<span class="cop-dots"><span></span><span></span><span></span></span>'
+    : escapeHTMLText(String(m.text || '')).replace(/\n/g, '<br>');
+  return `<div class="${cls}" data-cop-msg="${escapeHTMLText(m.id)}">${inner}</div>`;
+}
+
 function adminCopilotHTML() {
+  const msgs = Array.isArray(state.copilotMessages) ? state.copilotMessages : [];
+  const greeting = `<div class="cop-msg cop-bot cop-greet">Ask me what's going on tonight — tap a suggestion below or type a question.</div>`;
+  const thread = msgs.length ? msgs.map(copilotBubbleHTML).join('') : greeting;
+  const chips = COPILOT_CHIPS
+    .map((c) => `<button type="button" class="cop-chip" data-cop-chip="${escapeHTMLText(c)}">${escapeHTMLText(c)}</button>`)
+    .join('');
   return `
 <div class="container">
-  <div class="ad-cop-screen">
+  <div class="ad-cop-screen cop-screen">
     <div class="ad-cop-head"><svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.9" width="18" height="18"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9z"/></svg> Co-pilot</div>
-    <div class="ad-cop-empty">
-      <div class="ad-cop-emptytitle">Your admin co-pilot is coming soon</div>
-      <div class="ad-cop-emptysub">Soon you'll be able to say &ldquo;make 4 teams of 4 from who's checked in&rdquo; or &ldquo;start a 6-team tournament&rdquo; and it'll do it. Not available yet.</div>
-    </div>
-    <div class="ad-inbar" aria-disabled="true">
-      <input type="text" placeholder="Ask, or tell me to do something&hellip;" disabled aria-label="Co-pilot input (coming soon)" />
-      <div class="ad-send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg></div>
+    <div id="copilot-thread" class="cop-thread">${thread}</div>
+    <div class="cop-chips">${chips}</div>
+    <div class="ad-inbar cop-inbar">
+      <input type="text" id="copilot-input" placeholder="Ask the co-pilot&hellip;" aria-label="Ask the co-pilot" autocomplete="off" />
+      <button type="button" class="ad-send cop-send" data-role="copilot-send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
     </div>
   </div>
 </div>`;
 }
+
+// Assemble the active-tournament slice of the co-pilot snapshot (null when none is live).
+function copilotTournamentInput() {
+  const id = state.activeTournamentId;
+  if (!id) return null;
+  const active = (state.tournaments || []).find((t) => t.id === id);
+  if (!active || !['pools', 'bracket', 'completed'].includes(active.status)) return null;
+  return { name: active.name, status: active.status, teams: state.tournamentTeams || [], matches: state.tournamentMatches || [] };
+}
+
+let copilotMsgSeq = 0;
+function copilotNextId() { copilotMsgSeq += 1; return 'cm' + copilotMsgSeq; }
+
+function copilotRenderBubble(m) {
+  const thread = document.getElementById('copilot-thread');
+  if (!thread) return;
+  const greet = thread.querySelector('.cop-greet');
+  if (greet) greet.remove();
+  thread.insertAdjacentHTML('beforeend', copilotBubbleHTML(m));
+  const last = thread.lastElementChild;
+  if (last && last.scrollIntoView) last.scrollIntoView({ block: 'nearest' });
+}
+
+function appendCopilotMessage(role, text, opts) {
+  const m = { id: copilotNextId(), role, text, loading: !!(opts && opts.loading), isError: !!(opts && opts.isError) };
+  if (!Array.isArray(state.copilotMessages)) state.copilotMessages = [];
+  state.copilotMessages.push(m);
+  copilotRenderBubble(m);
+  return m.id;
+}
+
+function replaceCopilotMessage(id, text, opts) {
+  const m = (state.copilotMessages || []).find((x) => x.id === id);
+  if (m) { m.text = text; m.loading = false; m.isError = !!(opts && opts.isError); }
+  const el = document.querySelector(`[data-cop-msg="${id}"]`);
+  if (el && m) {
+    el.outerHTML = copilotBubbleHTML(m);
+    const fresh = document.querySelector(`[data-cop-msg="${id}"]`);
+    if (fresh && fresh.scrollIntoView) fresh.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+async function handleCopilotSend(question) {
+  const q = String(question || '').trim();
+  if (!q || !supabaseClient) return;
+  appendCopilotMessage('user', q);
+  const loadingId = appendCopilotMessage('copilot', '', { loading: true });
+  try {
+    const context = buildCopilotContext({
+      players: state.players,
+      generatedTeams: state.generatedTeams,
+      liveData: getPublicLiveData(),
+      tournament: copilotTournamentInput(),
+    });
+    const { data, error } = await supabaseClient.functions.invoke('copilot', { body: { question: q, context } });
+    if (error || !data || !data.answer) throw new Error('copilot failed');
+    replaceCopilotMessage(loadingId, data.answer);
+  } catch (_e) {
+    replaceCopilotMessage(loadingId, "Couldn't reach the co-pilot — try again.", { isError: true });
+  }
+}
+
+// Co-pilot chat handlers — bound once, document-delegated (same pattern as the other admin handlers),
+// so they survive every innerHTML swap.
+(function ensureCopilotBound() {
+  if (window.__copilotBound) return;
+  window.__copilotBound = true;
+  document.addEventListener('click', function onCopilotClick(e) {
+    if (!(e.target instanceof Element)) return;
+    const chip = e.target.closest('[data-cop-chip]');
+    if (chip) {
+      e.preventDefault();
+      handleCopilotSend(chip.getAttribute('data-cop-chip'));
+      return;
+    }
+    const send = e.target.closest('[data-role="copilot-send"]');
+    if (send) {
+      e.preventDefault();
+      const input = document.getElementById('copilot-input');
+      if (input) { handleCopilotSend(input.value); input.value = ''; input.focus(); }
+    }
+  });
+  document.addEventListener('keydown', function onCopilotKey(e) {
+    if (e.key !== 'Enter') return;
+    const t = e.target;
+    if (!(t instanceof Element) || t.id !== 'copilot-input') return;
+    e.preventDefault();
+    handleCopilotSend(t.value);
+    t.value = '';
+  });
+})();
 
 function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
