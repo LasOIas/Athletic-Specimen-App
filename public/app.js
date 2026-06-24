@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.7';
+const APP_VERSION = '2026.06.24.8';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5666,11 +5666,15 @@ const COPILOT_CHIPS = ["Who's up next?", 'How many here?', 'Tournament standings
 // markdown Haiku tends to emit — **bold** and "- "/"* " bullets — since a phone bubble can't show raw
 // markdown. The <strong> tags wrap already-escaped text, so there's no injection surface.
 function copilotFormat(text) {
-  return escapeHTMLText(String(text || ''))
+  // Reliability (2026-06-24): strip emojis (no-emoji UI rule). Belt-and-suspenders with the edge-fn
+  // system prompt — the model occasionally adds them (e.g. "🏐🏀") and a chat bubble must stay emoji-free.
+  const noEmoji = String(text || '').replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}️‍]/gu, '');
+  return escapeHTMLText(noEmoji)
     .split('\n')
     .map((line) => line
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/^\s*[-*]\s+/, '• '))
+      .replace(/^\s*[-*]\s+/, '• ')
+      .replace(/[ \t]+$/, ''))
     .join('<br>');
 }
 
