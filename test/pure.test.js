@@ -11,6 +11,7 @@ const {
   computeStandings, computeSeeding, computeChampion, summarizeTeamFairness,
   generateBalancedGroups, playerIdentityKey, disambiguatePlayersByName,
   groupRosterPlayersBySection, isValidFullName, buildCopilotContext,
+  resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -411,5 +412,50 @@ describe('buildCopilotContext (C28 — co-pilot read context)', () => {
       casualCourts: null,
       tournament: null,
     });
+  });
+});
+
+describe('C28 Slice 2 — co-pilot acting pure helpers', () => {
+  const players = [
+    { id: 'p1', name: 'Mikey Olas', group: 'KC', checked_in: true, skill: 9 },
+    { id: 'p2', name: 'Mike Stevens', group: 'KC', checked_in: false, skill: 4 },
+    { id: 'p3', name: 'Jet', group: 'AS', checked_in: true, skill: 5 },
+  ];
+
+  it('resolvePlayerByName: exact full-name match wins, no skill leaks', () => {
+    const r = resolvePlayerByName(players, 'mikey olas');
+    expect(r).toEqual({ ok: true, player: { id: 'p1', name: 'Mikey Olas', group: 'KC' } });
+    expect(JSON.stringify(r)).not.toContain('9');
+    expect(JSON.stringify(r)).not.toContain('skill');
+  });
+  it('resolvePlayerByName: single substring match resolves', () => {
+    expect(resolvePlayerByName(players, 'jet')).toEqual({ ok: true, player: { id: 'p3', name: 'Jet', group: 'AS' } });
+  });
+  it('resolvePlayerByName: ambiguous -> reason + match names', () => {
+    const r = resolvePlayerByName(players, 'mike');
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('ambiguous');
+    expect(r.matches).toHaveLength(2);
+    expect(r.matches.map((m) => m.name).sort()).toEqual(['Mike Stevens', 'Mikey Olas']);
+    expect(r.matches.every((m) => m.group === 'KC')).toBe(true);
+  });
+  it('resolvePlayerByName: no match -> none', () => {
+    expect(resolvePlayerByName(players, 'zzz')).toEqual({ ok: false, reason: 'none', matches: [] });
+  });
+  it('COPILOT_TOOL_POLICY: instant vs confirm per tool', () => {
+    expect(COPILOT_TOOL_POLICY.check_in).toBe('instant');
+    expect(COPILOT_TOOL_POLICY.make_teams).toBe('instant');
+    expect(COPILOT_TOOL_POLICY.submit_score).toBe('confirm');
+    expect(COPILOT_TOOL_POLICY.setup_tournament).toBe('confirm');
+    expect(COPILOT_TOOL_POLICY.generate_bracket).toBe('confirm');
+  });
+  it('validateCopilotToolArgs: make_teams needs an integer count >= 2', () => {
+    expect(validateCopilotToolArgs('make_teams', { count: 4 }).ok).toBe(true);
+    expect(validateCopilotToolArgs('make_teams', { count: 1 }).ok).toBe(false);
+    expect(validateCopilotToolArgs('make_teams', { count: 'x' }).ok).toBe(false);
+  });
+  it('validateCopilotToolArgs: check_in needs a non-empty name', () => {
+    expect(validateCopilotToolArgs('check_in', { name: 'Jet' }).ok).toBe(true);
+    expect(validateCopilotToolArgs('check_in', { name: '  ' }).ok).toBe(false);
   });
 });

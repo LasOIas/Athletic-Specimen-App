@@ -625,6 +625,43 @@ function buildCopilotContext(input) {
   return { attendance, casualCourts, tournament };
 }
 
+// C28 Slice 2 — co-pilot acting helpers (pure; no DOM/state/skill).
+// resolvePlayerByName: name -> a single player {id,name,group} (no skill), or a typed failure the
+// co-pilot can act on (ask which one / not found). Reuses the skill-free disambiguator.
+function resolvePlayerByName(players, name) {
+  const q = String(name == null ? '' : name).trim().toLowerCase();
+  if (!q) return { ok: false, reason: 'none', matches: [] };
+  const rows = disambiguatePlayersByName(players, q); // [{id,name,group,...}] — already skill-free
+  const exact = rows.filter((r) => String(r.name || '').trim().toLowerCase() === q);
+  const pick = exact.length === 1 ? exact[0] : (rows.length === 1 ? rows[0] : null);
+  if (pick) return { ok: true, player: { id: pick.id, name: pick.name, group: pick.group || '' } };
+  if (rows.length === 0) return { ok: false, reason: 'none', matches: [] };
+  return { ok: false, reason: 'ambiguous', matches: rows.map((r) => ({ name: r.name, group: r.group || '' })) };
+}
+
+// Per-tool safety policy (Mike's hybrid): instant+undo for the cleanly-reversible, confirm-first for
+// the messy-to-undo. Enforced in the browser executor, NOT by trusting the model.
+var COPILOT_TOOL_POLICY = {
+  check_in: 'instant', check_out: 'instant', make_teams: 'instant',
+  submit_score: 'confirm', setup_tournament: 'confirm', generate_bracket: 'confirm',
+};
+
+function validateCopilotToolArgs(tool, args) {
+  const a = args || {};
+  if (tool === 'make_teams') {
+    const n = Number(a.count);
+    return Number.isInteger(n) && n >= 2 ? { ok: true } : { ok: false, error: 'count must be a whole number >= 2' };
+  }
+  if (tool === 'check_in' || tool === 'check_out') {
+    return String(a.name || '').trim() ? { ok: true } : { ok: false, error: 'a player name is required' };
+  }
+  if (tool === 'setup_tournament') {
+    return String(a.name || '').trim() && Array.isArray(a.teams) && a.teams.length >= 2
+      ? { ok: true } : { ok: false, error: 'a tournament name and at least 2 team names are required' };
+  }
+  return { ok: true }; // submit_score / generate_bracket validated at execution against live state
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -632,6 +669,7 @@ if (typeof module !== "undefined" && module.exports) {
     generateRoundRobin, decideWinner, computeStandings, applyHeadToHeadGroups,
     nextPow2, seedOrder, computeSeeding, computeChampion, generateDoubleElim,
     disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName,
-    copilotRosterNames, copilotUpNextByNet, buildCopilotContext
+    copilotRosterNames, copilotUpNextByNet, buildCopilotContext,
+    resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs
   };
 }
