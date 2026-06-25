@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.13';
+const APP_VERSION = '2026.06.24.14';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3476,16 +3476,16 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds) {
     body = row(aName, m.team_a_id, aWin) + row(bName, m.team_b_id, !aWin)
       + (state.isAdmin ? `<div class="bt-act"><button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}">Clear</button></div>` : '');
   } else if (aKnown && bKnown && canSubmit) {
-    body = `<div class="bt-row bt-sub">
-        <span class="bt-name">${aName}</span>
-        <input type="number" inputmode="numeric" min="0" id="bsc-a-${escapeHTML(m.id)}" class="bt-in" placeholder="–" />
-        <button type="button" class="primary bt-win" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="a">Win</button>
-      </div>
-      <div class="bt-row bt-sub">
-        <span class="bt-name">${bName}</span>
-        <input type="number" inputmode="numeric" min="0" id="bsc-b-${escapeHTML(m.id)}" class="bt-in" placeholder="–" />
-        <button type="button" class="primary bt-win" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="b">Win</button>
+    // Name on its OWN line above the score+Win row so it stays readable in a narrow node
+    // (a wide field truncated "Net Gains" -> "Ne…" when the name shared the row).
+    const subTeam = (name, slot) => `<div class="bt-sub">
+        <span class="bt-name">${name}</span>
+        <span class="bt-subctl">
+          <input type="number" inputmode="numeric" min="0" id="bsc-${slot}-${escapeHTML(m.id)}" class="bt-in" placeholder="–" />
+          <button type="button" class="primary bt-win" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="${slot}">Win</button>
+        </span>
       </div>`;
+    body = subTeam(aName, 'a') + subTeam(bName, 'b');
   } else if (aKnown && bKnown) {
     body = `<div class="bt-row"><span class="bt-name">${aName}</span></div>
       <div class="bt-vs">vs</div>

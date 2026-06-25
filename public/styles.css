@@ -2704,8 +2704,11 @@ body.copilot-typing #bottom-nav { display: none; }
 .bt-name.bt-tbd { color: var(--faint); font-style: italic; }
 .bt-sc { flex: 0 0 auto; font-family: 'Sora','Inter',sans-serif; font-size: 15px; color: var(--faint); }
 .bt-row.win .bt-sc { color: var(--live); font-weight: 700; }
-.bt-row.bt-sub { padding: 6px 9px; }
-.bt-in { flex: 0 0 34px; width: 34px; height: 30px; padding: 2px; text-align: center; font-size: 13px; }
-.bt-win { flex: 0 0 auto; min-height: 30px; padding: 4px 10px; font-size: 13px; }
+.bt-sub { padding: 7px 9px; }
+.bt-sub + .bt-sub { border-top: 1px solid var(--border); }
+.bt-sub .bt-name { display: block; margin-bottom: 5px; }
+.bt-subctl { display: flex; align-items: center; gap: 8px; }
+.bt-in { flex: 0 0 48px; width: 48px; height: 32px; padding: 2px; text-align: center; font-size: 14px; }
+.bt-win { flex: 1; min-height: 32px; padding: 4px 10px; font-size: 13px; }
 .bt-act { display: flex; justify-content: flex-end; padding: 4px 8px 8px; }
 .bt-act button { min-height: 28px; padding: 3px 10px; font-size: 12px; }
