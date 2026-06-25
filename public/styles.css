@@ -2678,7 +2678,9 @@ body.copilot-typing #bottom-nav { display: none; }
 .bt-pan { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-md);
   background: radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0) 0 0 / 22px 22px, var(--bg);
   touch-action: pan-x pan-y; }
-.bt-pan.zoom { overflow: auto; cursor: grab; -webkit-overflow-scrolling: touch; }
+/* Zoom-in = slide the bracket sideways; vertical is the normal page scroll so you can always
+   reach the bottom matches (a fixed-height nested vertical scroll trapped them under the nav). */
+.bt-pan.zoom { overflow-x: auto; overflow-y: hidden; cursor: grab; -webkit-overflow-scrolling: touch; }
 .bt-pan.zoom.drag { cursor: grabbing; }
 .bt-canvas { position: relative; transform-origin: top left; width: max-content; }
 .bt-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
@@ -2704,11 +2706,10 @@ body.copilot-typing #bottom-nav { display: none; }
 .bt-name.bt-tbd { color: var(--faint); font-style: italic; }
 .bt-sc { flex: 0 0 auto; font-family: 'Sora','Inter',sans-serif; font-size: 15px; color: var(--faint); }
 .bt-row.win .bt-sc { color: var(--live); font-weight: 700; }
-.bt-sub { padding: 7px 9px; }
+.bt-sub { display: flex; align-items: center; gap: 8px; padding: 7px 9px; }
 .bt-sub + .bt-sub { border-top: 1px solid var(--border); }
-.bt-sub .bt-name { display: block; margin-bottom: 5px; }
-.bt-subctl { display: flex; align-items: center; gap: 8px; }
-.bt-in { flex: 0 0 48px; width: 48px; height: 32px; padding: 2px; text-align: center; font-size: 14px; }
-.bt-win { flex: 1; min-height: 32px; padding: 4px 10px; font-size: 13px; }
+.bt-sub .bt-name { flex: 1; min-width: 0; }
+.bt-in { flex: 0 0 48px; width: 48px; height: 36px; padding: 2px; text-align: center; font-size: 15px; }
+.bt-save { display: block; width: calc(100% - 18px); margin: 8px 9px 9px; min-height: 38px; }
 .bt-act { display: flex; justify-content: flex-end; padding: 4px 8px 8px; }
 .bt-act button { min-height: 28px; padding: 3px 10px; font-size: 12px; }

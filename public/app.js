@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.14';
+const APP_VERSION = '2026.06.24.15';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3457,7 +3457,7 @@ function championPathIds(main, champ) {
     .map((m) => m.id));
 }
 
-// One bracket match = a node in the tree. Preserves every submit/clear hook (tv2-bracket-win/
+// One bracket match = a node in the tree. Preserves every submit/clear hook (tv2-bracket-save/
 // -clear, bsc-a-/bsc-b- score-input ids) so admins + picked-team players still enter results.
 function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds) {
   const aKnown = !!m.team_a_id, bKnown = !!m.team_b_id;
@@ -3476,16 +3476,14 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds) {
     body = row(aName, m.team_a_id, aWin) + row(bName, m.team_b_id, !aWin)
       + (state.isAdmin ? `<div class="bt-act"><button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}">Clear</button></div>` : '');
   } else if (aKnown && bKnown && canSubmit) {
-    // Name on its OWN line above the score+Win row so it stays readable in a narrow node
-    // (a wide field truncated "Net Gains" -> "Ne…" when the name shared the row).
+    // Each team = name + its own score box on one row, then ONE "Submit result" button.
+    // Winner = whoever scored higher (same as pool-play entry) — clear + one tap on a phone.
     const subTeam = (name, slot) => `<div class="bt-sub">
         <span class="bt-name">${name}</span>
-        <span class="bt-subctl">
-          <input type="number" inputmode="numeric" min="0" id="bsc-${slot}-${escapeHTML(m.id)}" class="bt-in" placeholder="–" />
-          <button type="button" class="primary bt-win" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="${slot}">Win</button>
-        </span>
+        <input type="number" inputmode="numeric" min="0" id="bsc-${slot}-${escapeHTML(m.id)}" class="bt-in" placeholder="–" aria-label="${name} score" />
       </div>`;
-    body = subTeam(aName, 'a') + subTeam(bName, 'b');
+    body = subTeam(aName, 'a') + subTeam(bName, 'b')
+      + `<button type="button" class="primary bt-save" data-role="tv2-bracket-save" data-id="${escapeHTML(m.id)}">Submit result</button>`;
   } else if (aKnown && bKnown) {
     body = `<div class="bt-row"><span class="bt-name">${aName}</span></div>
       <div class="bt-vs">vs</div>
@@ -3597,7 +3595,9 @@ function layoutBracketTree() {
   svg.innerHTML = paths;
 
   if (state.bracketZoom === 'zoom') {
-    pan.style.height = Math.min(H, Math.round((window.innerHeight || 800) * 0.72)) + 'px';
+    // Natural height = the full bracket; vertical scrolling is the normal page scroll (always
+    // reachable), only sideways is a pan (.bt-pan.zoom = overflow-x auto / overflow-y hidden).
+    pan.style.height = '';
     pan.onclick = null;
     wireBracketPan(pan);
   } else {
@@ -6749,7 +6749,7 @@ function bindTournamentTabV2() {
       } else if (role === 'tv2-bracket-zoom') {
         state.bracketZoom = el.getAttribute('data-zoom') === 'zoom' ? 'zoom' : 'fit';
         partialRenderTournament();
-      } else if (role === 'tv2-bracket-win') {
+      } else if (role === 'tv2-bracket-save') {
         const m = (state.tournamentMatches || []).find((x) => x.id === id);
         const pid = state.tournamentPickedTeamId;
         if (!(state.isAdmin || (m && pid && (m.team_a_id === pid || m.team_b_id === pid)))) {
@@ -6757,8 +6757,11 @@ function bindTournamentTabV2() {
         }
         const sa = (document.getElementById('bsc-a-' + id) || {}).value;
         const sb = (document.getElementById('bsc-b-' + id) || {}).value;
+        if (sa === '' || sb === '' || sa == null || sb == null) throw new Error('Enter both scores.');
+        if (Number(sa) === Number(sb)) throw new Error("Scores can't be tied — one team has to win.");
         if (!(await confirmBigMargin(sa, sb))) return;
-        await tdbSubmitBracketResult(m, el.getAttribute('data-winner'), sa, sb);
+        const winner = Number(sa) > Number(sb) ? 'a' : 'b'; // higher score wins
+        await tdbSubmitBracketResult(m, winner, sa, sb);
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-bracket-clear') {
