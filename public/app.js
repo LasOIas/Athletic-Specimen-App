@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.20';
+const APP_VERSION = '2026.06.25.21';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3877,6 +3877,9 @@ function wireBracketGestures(pan, canvas) {
     else if (e.touches.length === 1) { // lifted from pinch to one finger → resume panning smoothly
       const p = xy(e.touches[0].clientX, e.touches[0].clientY);
       panStart = { x: p.x, y: p.y, bx: btX, by: btY }; pinchLast = null;
+    } else if (e.touches.length >= 2) { // 3→2 fingers: re-seed the pair distance so the scale doesn't jump a frame
+      const a = xy(e.touches[0].clientX, e.touches[0].clientY), b = xy(e.touches[1].clientX, e.touches[1].clientY);
+      pinchLast = Math.hypot(a.x - b.x, a.y - b.y) || 1; panStart = null;
     }
   };
   pan.addEventListener('touchend', endTouch);
