@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.2';
+const APP_VERSION = '2026.06.25.3';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3505,7 +3505,7 @@ function openBracketResultModal(matchId) {
   // is the backstop). The write goes through the anon-allowed submit_match_score RPC.
   overlay.innerHTML = `<div class="popup-card brm-card" role="dialog" aria-modal="true" aria-label="Enter match result">
     <div class="brm-title">${escapeHTML(title)}</div>
-    <p class="brm-sub">Tap the team that won.</p>
+    <p class="brm-sub">Tap the winner and enter the final score.</p>
     <button type="button" class="brm-team" data-w="a"><span class="brm-name">${escapeHTML(aName)}</span><span class="brm-pick" aria-hidden="true"></span></button>
     <button type="button" class="brm-team" data-w="b"><span class="brm-name">${escapeHTML(bName)}</span><span class="brm-pick" aria-hidden="true"></span></button>
     <div class="brm-scores">
@@ -3513,7 +3513,7 @@ function openBracketResultModal(matchId) {
       <span class="brm-dash">–</span>
       <input type="number" inputmode="numeric" min="0" id="brm-b" placeholder="–" aria-label="${escapeHTML(bName)} score" />
     </div>
-    <p class="brm-opt">Add the score if you want — optional</p>
+    <p class="brm-opt">Final score</p>
     <div class="brm-err" id="brm-err" hidden></div>
     <div class="brm-actions">
       <button type="button" class="secondary" id="brm-cancel">Cancel</button>
@@ -3538,8 +3538,10 @@ function openBracketResultModal(matchId) {
   // entered scores agree with the tap (and caps them), and advances the bracket server-side.
   overlay.querySelector('#brm-save').onclick = async () => {
     if (!winner) return fail('Tap the team that won.');
+    const sa = overlay.querySelector('#brm-a').value, sb = overlay.querySelector('#brm-b').value;
+    if (sa === '' || sb === '') return fail('Enter both scores.'); // scores are required (Mike)
     try {
-      await tdbSubmitBracketResult(m, winner, overlay.querySelector('#brm-a').value, overlay.querySelector('#brm-b').value);
+      await tdbSubmitBracketResult(m, winner, sa, sb);
       await tdbRefreshTournaments();
       close();
       render();
