@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.24';
+const APP_VERSION = '2026.06.25.25';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3971,7 +3971,7 @@ function buildPublicRegisterHTML(t, teams) {
       <label class="reg-label" for="reg-team">Team name</label>
       <input type="text" id="reg-team" class="reg-input" placeholder="e.g. Bumpin Uglies" autocomplete="off" autocapitalize="words" />
       <div class="reg-label">Players (4)</div>
-      <input type="text" id="reg-p1" class="reg-input" placeholder="Player 1 (captain)" autocomplete="off" autocapitalize="words" />
+      <input type="text" id="reg-p1" class="reg-input" placeholder="Player 1" autocomplete="off" autocapitalize="words" />
       <input type="text" id="reg-p2" class="reg-input" placeholder="Player 2" autocomplete="off" autocapitalize="words" />
       <input type="text" id="reg-p3" class="reg-input" placeholder="Player 3" autocomplete="off" autocapitalize="words" />
       <input type="text" id="reg-p4" class="reg-input" placeholder="Player 4" autocomplete="off" autocapitalize="words" />
