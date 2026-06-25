@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.12';
+const APP_VERSION = '2026.06.24.13';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3265,6 +3265,7 @@ async function tdbRefreshTournaments() {
 function partialRenderTournament() {
   const c = document.querySelector('#tab-tournament .container');
   if (c) c.innerHTML = buildTournamentTabHTML();
+  layoutBracketTree(); // draw connectors + fit/zoom the bracket tree (no-op if no tree present)
 }
 
 // Background freshness: reload tournament data + surgically re-render the tab so a
@@ -3443,52 +3444,57 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
   return picker + buildNetBoardHTML(matches, teams) + poolCards;
 }
 
-// ---- Bracket renderer: single-round-focus (the design Mike picked, mockup #1) ----
-function bracketLabelById(matches, id) {
-  const m = (matches || []).find((x) => x.id === id);
-  return m ? (m.round_label || '') : '';
+// ---- Bracket renderer: connected "March Madness" tree (C32 #9, Mike's §38 pick) ----
+// One pannable/zoomable tree for phone + desktop. The textual "Winner → next round" line the
+// old card carried is now drawn as an SVG elbow connector by layoutBracketTree() — the bracket
+// shows progression visually, the way a real bracket does. NEVER renders skill (public-safe).
+
+// The champion's route to the title = every match the champion won. Used to highlight the path.
+function championPathIds(main, champ) {
+  if (!champ) return new Set();
+  return new Set((main || [])
+    .filter((m) => m.status === 'final' && m.winner_team_id === champ.teamId)
+    .map((m) => m.id));
 }
 
-function buildBracketCardHTML(m, matches, teams, canSubmit) {
+// One bracket match = a node in the tree. Preserves every submit/clear hook (tv2-bracket-win/
+// -clear, bsc-a-/bsc-b- score-input ids) so admins + picked-team players still enter results.
+function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds) {
   const aKnown = !!m.team_a_id, bKnown = !!m.team_b_id;
-  const aName = aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : `<span style="color:var(--faint);">${escapeHTML(m.source_a || 'TBD')}</span>`;
-  const bName = bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : `<span style="color:var(--faint);">${escapeHTML(m.source_b || 'TBD')}</span>`;
-  const winLbl = m.winner_next_match_id ? escapeHTML(bracketLabelById(matches, m.winner_next_match_id)) : 'Champion';
-  const loseLbl = m.loser_next_match_id ? ` &nbsp;·&nbsp; Loser → ${escapeHTML(bracketLabelById(matches, m.loser_next_match_id))}` : '';
-  const header = `<div class="small" style="color:var(--muted);">${escapeHTML(m.round_label || '')}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
-  const progression = `<div class="small" style="color:var(--faint);margin-top:6px;">Winner → ${winLbl}${loseLbl}</div>`;
+  const aName = aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : escapeHTML(m.source_a || 'TBD');
+  const bName = bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : escapeHTML(m.source_b || 'TBD');
+  const meta = `<div class="bt-meta">${escapeHTML((m.round_label || '').replace(/ M\d+$/, ''))}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
 
   let body;
   if (m.status === 'final') {
     const aWin = m.winner_team_id === m.team_a_id;
-    const scoreTxt = (m.score_a != null && m.score_b != null) ? `${escapeHTML(String(m.score_a))} - ${escapeHTML(String(m.score_b))}` : '';
-    body = `
-      <div class="row" style="justify-content:space-between;gap:8px;font-weight:${aWin ? '700' : '400'};color:${aWin ? 'var(--live)' : 'inherit'};">
-        <span style="flex:1;min-width:0;">${aName}</span><span style="flex:0 0 auto;">${aWin ? 'Won' : ''}</span>
-      </div>
-      <div class="row" style="justify-content:space-between;gap:8px;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--live)' : 'inherit'};">
-        <span style="flex:1;min-width:0;">${bName}</span><span style="flex:0 0 auto;">${!aWin ? 'Won' : ''}</span>
-      </div>
-      ${scoreTxt ? `<div class="small" style="color:var(--muted);margin-top:2px;">${scoreTxt}</div>` : ''}
-      ${state.isAdmin ? `<button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}" style="margin-top:4px;font-size:12px;padding:4px 8px;">Clear</button>` : ''}`;
+    const haveScores = m.score_a != null && m.score_b != null;
+    const row = (name, id, win) => `<div class="bt-row${win ? ' win' : ''}">
+        <span class="bt-name">${name}</span>
+        <span class="bt-sc">${haveScores ? escapeHTML(String(id === m.team_a_id ? m.score_a : m.score_b)) : (win ? 'W' : '')}</span>
+      </div>`;
+    body = row(aName, m.team_a_id, aWin) + row(bName, m.team_b_id, !aWin)
+      + (state.isAdmin ? `<div class="bt-act"><button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}">Clear</button></div>` : '');
   } else if (aKnown && bKnown && canSubmit) {
-    body = `
-      <div class="row" style="align-items:center;gap:6px;">
-        <span style="flex:1;min-width:0;">${aName}</span>
-        <input type="number" inputmode="numeric" min="0" id="bsc-a-${escapeHTML(m.id)}" style="flex:0 0 42px;width:42px;" placeholder="–" />
-        <button type="button" class="primary" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="a" style="flex:0 0 auto;padding:6px 12px;">Win</button>
+    body = `<div class="bt-row bt-sub">
+        <span class="bt-name">${aName}</span>
+        <input type="number" inputmode="numeric" min="0" id="bsc-a-${escapeHTML(m.id)}" class="bt-in" placeholder="–" />
+        <button type="button" class="primary bt-win" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="a">Win</button>
       </div>
-      <div class="row" style="align-items:center;gap:6px;margin-top:4px;">
-        <span style="flex:1;min-width:0;">${bName}</span>
-        <input type="number" inputmode="numeric" min="0" id="bsc-b-${escapeHTML(m.id)}" style="flex:0 0 42px;width:42px;" placeholder="–" />
-        <button type="button" class="primary" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="b" style="flex:0 0 auto;padding:6px 12px;">Win</button>
+      <div class="bt-row bt-sub">
+        <span class="bt-name">${bName}</span>
+        <input type="number" inputmode="numeric" min="0" id="bsc-b-${escapeHTML(m.id)}" class="bt-in" placeholder="–" />
+        <button type="button" class="primary bt-win" data-role="tv2-bracket-win" data-id="${escapeHTML(m.id)}" data-winner="b">Win</button>
       </div>`;
   } else if (aKnown && bKnown) {
-    body = `<div class="row" style="justify-content:space-between;gap:8px;"><span style="flex:1;min-width:0;">${aName}</span><span style="flex:0 0 auto;color:var(--faint);">vs</span><span style="flex:1;min-width:0;text-align:right;">${bName}</span></div>`;
+    body = `<div class="bt-row"><span class="bt-name">${aName}</span></div>
+      <div class="bt-vs">vs</div>
+      <div class="bt-row"><span class="bt-name">${bName}</span></div>`;
   } else {
-    body = `<div style="color:var(--faint);">${aName}</div><div style="color:var(--faint);margin-top:2px;">${bName}</div>`;
+    body = `<div class="bt-row"><span class="bt-name bt-tbd">${aName}</span></div>
+      <div class="bt-row"><span class="bt-name bt-tbd">${bName}</span></div>`;
   }
-  return `<div class="card" style="margin-bottom:8px;">${header}${body}${progression}</div>`;
+  return `<div class="bt-node${pathIds.has(m.id) ? ' path' : ''}" data-mid="${escapeHTML(m.id)}">${meta}${body}</div>`;
 }
 
 function buildBracketHTML(tournament, matches, teams) {
@@ -3496,15 +3502,16 @@ function buildBracketHTML(tournament, matches, teams) {
   if (!main.length) return '<div class="card"><p class="small" style="color:var(--muted);margin:0;">No bracket yet.</p></div>';
 
   const champ = computeChampion(main, teams);
-  const champBanner = champ ? `<div class="card" style="text-align:center;border:2px solid var(--success);background:var(--live-soft);">
-    <div class="small" style="color:var(--live);letter-spacing:.04em;">CHAMPION</div>
-    <h2 style="margin:4px 0 0;color:var(--live);">${escapeHTML(champ.name)}</h2>
+  const pathIds = championPathIds(main, champ);
+  const champBanner = champ ? `<div class="bt-champ">
+    <span class="bt-cup" aria-hidden="true">&#9733;</span>
+    <span><span class="bt-champ-lbl">CHAMPION</span><span class="bt-champ-nm">${escapeHTML(champ.name)}</span></span>
   </div>` : '';
 
   // Who can enter a bracket result: admin, or the picked team if it's IN this match.
   const pid = state.tournamentPickedTeamId;
   const canSubmit = (m) => state.isAdmin || (!!pid && (m.team_a_id === pid || m.team_b_id === pid));
-  const picker = state.isAdmin ? '' : `<div class="card">
+  const picker = state.isAdmin ? '' : `<div class="card" style="margin-bottom:8px;">
     <label class="small" style="color:var(--muted);display:block;margin-bottom:4px;">Your team (pick it to enter your scores)</label>
     <select data-role="tv2-pick-team" style="width:100%;">
       <option value="">View only</option>
@@ -3512,47 +3519,115 @@ function buildBracketHTML(tournament, matches, teams) {
     </select>
   </div>`;
 
+  // Double-elim has Winners / Losers / Final brackets — one connected tree per side.
   const sideDefs = [['winners', 'Winners'], ['losers', 'Losers'], ['grand_final', 'Final']].filter(([s]) => main.some((m) => m.side === s));
   let side = state.bracketSide;
   if (!sideDefs.some(([s]) => s === side)) side = sideDefs[0][0];
-  const sideTabs = `<div class="row" style="gap:6px;margin-bottom:8px;">
-    ${sideDefs.map(([s, lbl]) => `<button type="button" data-role="tv2-bracket-side" data-side="${s}" class="${s === side ? 'primary' : 'secondary'}" style="flex:1;">${lbl}</button>`).join('')}
+  const sideTabs = sideDefs.length > 1 ? `<div class="bt-sides">
+    ${sideDefs.map(([s, lbl]) => `<button type="button" data-role="tv2-bracket-side" data-side="${s}" class="${s === side ? 'on' : ''}">${lbl}</button>`).join('')}
+  </div>` : '';
+
+  // Fit-to-screen by default (whole bracket, no scroll); "Zoom in" lets you drag/scroll a big field.
+  const zoom = state.bracketZoom === 'zoom' ? 'zoom' : 'fit';
+  const zoomToggle = `<div class="bt-bar">
+    <div class="bt-zoom">
+      <button type="button" data-role="tv2-bracket-zoom" data-zoom="fit" class="${zoom === 'fit' ? 'on' : ''}">Whole bracket</button>
+      <button type="button" data-role="tv2-bracket-zoom" data-zoom="zoom" class="${zoom === 'zoom' ? 'on' : ''}">Zoom in</button>
+    </div>
+    <span class="bt-hint">${zoom === 'fit' ? 'tap a match to zoom in' : 'drag to explore'}</span>
   </div>`;
 
-  // Wide screens (>=700px): the classic column-per-round tree (mockup #3). Phones keep the
-  // single-round-focus view below. Switched by viewport width (re-renders on resize).
-  if (typeof window !== 'undefined' && window.innerWidth >= 700) {
-    const wMatches = main.filter((m) => m.side === side);
-    const wRounds = Array.from(new Set(wMatches.map((m) => m.round))).sort((a, b) => a - b);
-    const labelFor = (r) => { const s = wMatches.find((m) => m.round === r); return s ? (s.round_label || ('R' + r)).replace(/ M\d+$/, '') : ('R' + r); };
-    const columns = wRounds.map((r) => {
-      const rm = wMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
-      return `<div style="flex:0 0 250px;display:flex;flex-direction:column;justify-content:space-around;gap:8px;">
-        <div class="small" style="text-align:center;font-weight:600;color:var(--muted);">${escapeHTML(labelFor(r))}</div>
-        ${rm.map((m) => buildBracketCardHTML(m, main, teams, canSubmit(m))).join('')}
-      </div>`;
-    }).join('');
-    return `${champBanner}${sideTabs}${picker}<div style="display:flex;gap:12px;overflow-x:auto;padding-bottom:8px;-webkit-overflow-scrolling:touch;">${columns}</div>`;
-  }
-
+  // Columns left-to-right = rounds; connector lines between them are drawn post-render.
   const sideMatches = main.filter((m) => m.side === side);
   const rounds = Array.from(new Set(sideMatches.map((m) => m.round))).sort((a, b) => a - b);
-  let round = state.bracketRound;
-  if (!rounds.includes(round)) {
-    round = rounds.find((r) => sideMatches.some((m) => m.round === r && m.status !== 'final')) || rounds[rounds.length - 1];
-  }
   const roundLabelFor = (r) => {
     const sample = sideMatches.find((m) => m.round === r);
     return sample ? (sample.round_label || ('R' + r)).replace(/ M\d+$/, '') : ('R' + r);
   };
-  const roundPills = rounds.length > 1 ? `<div style="display:flex;gap:6px;overflow-x:auto;margin-bottom:8px;-webkit-overflow-scrolling:touch;">
-    ${rounds.map((r) => `<button type="button" data-role="tv2-bracket-round" data-round="${r}" class="${r === round ? 'primary' : 'secondary'}" style="flex:0 0 auto;white-space:nowrap;font-size:13px;padding:6px 10px;">${escapeHTML(roundLabelFor(r))}</button>`).join('')}
-  </div>` : '';
+  const cols = rounds.map((r) => {
+    const rm = sideMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
+    return `<div class="bt-col">
+      <div class="bt-rlabel">${escapeHTML(roundLabelFor(r))}</div>
+      ${rm.map((m) => buildBracketNodeHTML(m, main, teams, canSubmit(m), pathIds)).join('')}
+    </div>`;
+  }).join('');
 
-  const roundMatches = sideMatches.filter((m) => m.round === round).sort((a, b) => a.slot - b.slot);
-  const cards = roundMatches.map((m) => buildBracketCardHTML(m, main, teams, canSubmit(m))).join('');
+  return `${champBanner}${sideTabs}${picker}${zoomToggle}
+    <div class="bt-pan${zoom === 'zoom' ? ' zoom' : ''}" data-role="bt-pan">
+      <div class="bt-canvas" data-role="bt-canvas">
+        <svg class="bt-links" data-role="bt-links" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="bt-cols" data-role="bt-cols">${cols}</div>
+      </div>
+    </div>`;
+}
 
-  return `${champBanner}${sideTabs}${picker}${roundPills}${cards}`;
+// Post-render pass for the connected bracket: draws the SVG elbow connectors from each match to
+// the match its winner advances to, then either fits the whole tree to the viewport width
+// (state.bracketZoom='fit', the default) or lets the user pan it ('zoom'). Called after every
+// render of the tournament tab + on resize + on tab-in. No-op when no bracket tree is present
+// or when the tab is hidden (offsetParent null), so background syncs don't misfire.
+function layoutBracketTree() {
+  const pan = document.querySelector('[data-role="bt-pan"]');
+  if (!pan || !pan.offsetParent) return;
+  const canvas = pan.querySelector('[data-role="bt-canvas"]');
+  const svg = pan.querySelector('[data-role="bt-links"]');
+  if (!canvas || !svg) return;
+
+  // Reset any prior fit-scale so we measure the tree's natural geometry.
+  canvas.style.transform = 'none';
+  const W = canvas.offsetWidth, H = canvas.offsetHeight;
+  svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  const pos = {};
+  canvas.querySelectorAll('.bt-node').forEach((n) => {
+    pos[n.getAttribute('data-mid')] = { x: n.offsetLeft, y: n.offsetTop, w: n.offsetWidth, h: n.offsetHeight, path: n.classList.contains('path') };
+  });
+  const main = (state.tournamentMatches || []).filter((m) => m.phase === 'main');
+  let paths = '';
+  main.forEach((m) => {
+    const from = pos[m.id];
+    const to = m.winner_next_match_id ? pos[m.winner_next_match_id] : null;
+    if (!from || !to) return;
+    const x1 = from.x + from.w, y1 = from.y + from.h / 2, x2 = to.x, y2 = to.y + to.h / 2;
+    const mx = x1 + Math.max(12, (x2 - x1) / 2);
+    const onPath = from.path && to.path;
+    // Styled via CSS (.bt-link/.bt-link.on) — var() is unreliable inside an SVG stroke attribute.
+    paths += `<path class="bt-link${onPath ? ' on' : ''}" d="M${x1} ${y1} H${mx} V${y2} H${x2}" />`;
+  });
+  svg.innerHTML = paths;
+
+  if (state.bracketZoom === 'zoom') {
+    pan.style.height = Math.min(H, Math.round((window.innerHeight || 800) * 0.72)) + 'px';
+    pan.onclick = null;
+    wireBracketPan(pan);
+  } else {
+    const avail = pan.clientWidth - 4;
+    const scale = avail > 0 ? Math.min(1, avail / W) : 1;
+    canvas.style.transform = `scale(${scale})`;
+    pan.style.height = Math.ceil(H * scale) + 'px';
+    // Tap the (scaled-down) bracket to jump into zoom/pan mode — but not when tapping a control.
+    pan.onclick = (e) => {
+      if (e.target.closest('button, input, select, a')) return;
+      state.bracketZoom = 'zoom';
+      partialRenderTournament();
+    };
+  }
+}
+
+// Desktop mouse drag-to-pan in zoom mode (touch already pans natively via overflow:auto).
+// Attached to the fresh pan element each render; guarded so repeat layouts don't double-bind it.
+let _btPanWired = null;
+function wireBracketPan(pan) {
+  if (_btPanWired === pan) return;
+  _btPanWired = pan;
+  let down = false, sx, sy, sl, st;
+  pan.addEventListener('pointerdown', (e) => {
+    if (e.pointerType && e.pointerType !== 'mouse') return; // let touch use native scroll
+    down = true; pan.classList.add('drag'); sx = e.clientX; sy = e.clientY; sl = pan.scrollLeft; st = pan.scrollTop;
+  });
+  pan.addEventListener('pointerup', () => { down = false; pan.classList.remove('drag'); });
+  pan.addEventListener('pointerleave', () => { down = false; pan.classList.remove('drag'); });
+  pan.addEventListener('pointermove', (e) => { if (!down) return; pan.scrollLeft = sl - (e.clientX - sx); pan.scrollTop = st - (e.clientY - sy); });
 }
 
 // Builds the Tournament tab body (admin create/manage, or public read-only).
@@ -6581,6 +6656,7 @@ refreshAzStripAvailability();
 void root.offsetHeight;
 const restoredPanel = document.getElementById('tab-' + activeMainTab);
 if (savedScrollY > 0 && restoredPanel) restoredPanel.scrollTop = savedScrollY;
+layoutBracketTree(); // C32 #9: connectors + fit/zoom the bracket tree after a full render
 }
 
 // Attach event listeners to the current DOM. This function should be
@@ -6670,8 +6746,8 @@ function bindTournamentTabV2() {
         state.bracketSide = el.getAttribute('data-side');
         state.bracketRound = null;
         partialRenderTournament();
-      } else if (role === 'tv2-bracket-round') {
-        state.bracketRound = Number(el.getAttribute('data-round'));
+      } else if (role === 'tv2-bracket-zoom') {
+        state.bracketZoom = el.getAttribute('data-zoom') === 'zoom' ? 'zoom' : 'fit';
         partialRenderTournament();
       } else if (role === 'tv2-bracket-win') {
         const m = (state.tournamentMatches || []).find((x) => x.id === id);
@@ -6731,12 +6807,15 @@ function bindTournamentTabV2() {
     }
   });
 
-  // Re-render the bracket when crossing the wide/narrow (700px) breakpoint (tree <-> single-round).
-  let lastWide = typeof window !== 'undefined' && window.innerWidth >= 700;
+  // C32 #9: the bracket is one responsive connected tree now — re-fit it on resize (no width branch).
   window.addEventListener('resize', debounce(() => {
-    const wide = window.innerWidth >= 700;
-    if (wide !== lastWide) { lastWide = wide; if (activeMainTab === 'tournament') render(); }
+    if (activeMainTab === 'tournament') layoutBracketTree();
   }, 150));
+  // Connectors depend on text metrics: re-fit once fonts finish loading + after full page load.
+  if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => { if (activeMainTab === 'tournament') layoutBracketTree(); });
+  }
+  window.addEventListener('load', () => { if (activeMainTab === 'tournament') layoutBracketTree(); });
 }
 
 function activateMainTab(tab) {
@@ -6753,6 +6832,7 @@ function activateMainTab(tab) {
     else b.removeAttribute('aria-current');
   });
   window.dispatchEvent(new Event('as-tab-changed')); // C25 item 5: refresh back-to-top visibility for the new panel
+  if (tab === 'tournament') layoutBracketTree(); // C32 #9: fit the bracket tree when switching into the tab
 }
 
 function attachHandlers() {

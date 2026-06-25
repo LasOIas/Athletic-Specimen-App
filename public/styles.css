@@ -2647,3 +2647,65 @@ body.copilot-typing #bottom-nav { display: none; }
     scroll-behavior: auto !important;
   }
 }
+
+/* ===================================================================
+   C32 #9 — connected "March Madness" bracket tree (buildBracketHTML +
+   layoutBracketTree). One pannable/zoomable tree for phone + desktop:
+   columns = rounds, SVG elbow connectors between them, champion path
+   highlighted in --accent. Fit-to-screen by default (whole bracket, no
+   scroll); "Zoom in" lets a big field pan. Tokens only; NEVER renders skill.
+   =================================================================== */
+.bt-champ { display: flex; align-items: center; gap: 10px; background: var(--live-soft);
+  border: 1px solid var(--success); border-radius: var(--r-md); padding: 10px 12px; margin-bottom: 10px; }
+.bt-cup { width: 30px; height: 30px; flex: 0 0 auto; border-radius: 50%; background: var(--live);
+  color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+.bt-champ-lbl { display: block; font-size: 11px; letter-spacing: .08em; color: var(--live); font-weight: 700; }
+.bt-champ-nm { display: block; font-family: 'Sora','Inter',sans-serif; color: var(--live); font-weight: 700; font-size: 17px; }
+
+.bt-sides { display: flex; gap: 6px; margin-bottom: 8px; }
+.bt-sides button { flex: 1; min-height: 42px; border-radius: var(--r-sm); border: 1px solid var(--border);
+  background: var(--card); color: var(--muted); font-weight: 600; font-size: 14px; }
+.bt-sides button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.bt-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
+.bt-zoom { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px; }
+.bt-zoom button { min-height: 34px; padding: 5px 14px; border: 1px solid transparent; background: transparent;
+  color: var(--muted); font-weight: 600; font-size: 13px; border-radius: 999px; }
+.bt-zoom button.on { background: var(--accent); color: #fff; }
+.bt-hint { flex: 1; font-size: 12px; color: var(--faint); text-align: right; }
+
+.bt-pan { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-md);
+  background: radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0) 0 0 / 22px 22px, var(--bg);
+  touch-action: pan-x pan-y; }
+.bt-pan.zoom { overflow: auto; cursor: grab; -webkit-overflow-scrolling: touch; }
+.bt-pan.zoom.drag { cursor: grabbing; }
+.bt-canvas { position: relative; transform-origin: top left; width: max-content; }
+.bt-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.bt-link { fill: none; stroke: var(--faint); stroke-width: 1.5; opacity: .5; }
+.bt-link.on { stroke: var(--accent); stroke-width: 2.5; opacity: 1; }
+.bt-cols { position: relative; display: flex; gap: 46px; align-items: stretch; padding: 16px; }
+.bt-col { display: flex; flex-direction: column; justify-content: space-around; gap: 14px; }
+.bt-rlabel { font-family: 'Sora','Inter',sans-serif; font-size: 12px; color: var(--muted);
+  text-align: center; margin-bottom: 2px; white-space: nowrap; }
+
+.bt-node { position: relative; width: 176px; background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--shadow-sm); overflow: hidden; }
+.bt-node.path { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+.bt-meta { font-size: 10.5px; color: var(--muted); padding: 5px 9px 2px; text-transform: uppercase;
+  letter-spacing: .03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bt-row { display: flex; align-items: center; gap: 6px; padding: 7px 9px; }
+.bt-row.win { background: var(--live-soft); }
+.bt-row + .bt-row { border-top: 1px solid var(--border); }
+.bt-vs { font-size: 11px; color: var(--faint); text-align: center; padding: 0 9px; }
+.bt-name { flex: 1; min-width: 0; font-size: 14px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-row.win .bt-name { font-weight: 700; color: var(--ink); }
+.bt-name.bt-tbd { color: var(--faint); font-style: italic; }
+.bt-sc { flex: 0 0 auto; font-family: 'Sora','Inter',sans-serif; font-size: 15px; color: var(--faint); }
+.bt-row.win .bt-sc { color: var(--live); font-weight: 700; }
+.bt-row.bt-sub { padding: 6px 9px; }
+.bt-in { flex: 0 0 34px; width: 34px; height: 30px; padding: 2px; text-align: center; font-size: 13px; }
+.bt-win { flex: 0 0 auto; min-height: 30px; padding: 4px 10px; font-size: 13px; }
+.bt-act { display: flex; justify-content: flex-end; padding: 4px 8px 8px; }
+.bt-act button { min-height: 28px; padding: 3px 10px; font-size: 12px; }
