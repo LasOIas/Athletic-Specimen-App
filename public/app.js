@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.6';
+const APP_VERSION = '2026.06.25.7';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3376,7 +3376,7 @@ function buildStandingsTableHTML(poolTeams, poolMatches) {
   </table>`;
 }
 
-function buildMatchRowHTML(m, teams, isAdmin, canSubmit) {
+function buildMatchRowHTML(m, teams, isAdmin) {
   const an = escapeHTML(teamNameById(teams, m.team_a_id));
   const bn = escapeHTML(teamNameById(teams, m.team_b_id));
   if (m.status === 'final') {
@@ -3391,26 +3391,18 @@ function buildMatchRowHTML(m, teams, isAdmin, canSubmit) {
       ${isAdmin ? `<button type="button" class="secondary" data-role="tv2-clear-result" data-id="${escapeHTML(m.id)}" style="margin-top:4px;font-size:12px;padding:4px 8px;">Clear</button>` : ''}
     </div>`;
   }
-  if (!canSubmit) {
-    return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
-      <div class="small" style="color:var(--muted);">Net ${escapeHTML(String(m.net || '-'))}</div>
-      <div class="row" style="justify-content:space-between;gap:8px;">
-        <span style="flex:1;min-width:0;">${an}</span>
-        <span style="flex:0 0 auto;color:var(--faint);">vs</span>
-        <span style="flex:1;min-width:0;text-align:right;">${bn}</span>
-      </div>
-    </div>`;
-  }
-  return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
+  // Not final: C53 — tap the matchup to enter the result via the shared tap-the-winner pop-up
+  // (anyone can score, like the bracket). Only tappable once both teams are known.
+  const known = !!m.team_a_id && !!m.team_b_id;
+  const tap = known ? ` data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}" role="button" tabindex="0" style="padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;"` : ' style="padding:8px 0;border-bottom:1px solid var(--border);"';
+  return `<div${tap}>
     <div class="small" style="color:var(--muted);">Net ${escapeHTML(String(m.net || '-'))}</div>
-    <div class="row" style="align-items:center;gap:6px;flex-wrap:nowrap;">
-      <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${an}</span>
-      <input type="number" inputmode="numeric" id="sc-a-${escapeHTML(m.id)}" style="flex:0 0 50px;width:50px;" placeholder="0" />
-      <span style="flex:0 0 auto;">-</span>
-      <input type="number" inputmode="numeric" id="sc-b-${escapeHTML(m.id)}" style="flex:0 0 50px;width:50px;" placeholder="0" />
-      <span style="flex:1;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${bn}</span>
+    <div class="row" style="justify-content:space-between;gap:8px;">
+      <span style="flex:1;min-width:0;">${an}</span>
+      <span style="flex:0 0 auto;color:var(--faint);">vs</span>
+      <span style="flex:1;min-width:0;text-align:right;">${bn}</span>
     </div>
-    <button type="button" class="primary" data-role="tv2-submit-result" data-id="${escapeHTML(m.id)}" style="margin-top:6px;width:100%;">Submit Result</button>
+    ${known ? '<div class="small" style="color:var(--accent);font-weight:600;margin-top:2px;">Tap to enter score &rsaquo;</div>' : ''}
   </div>`;
 }
 
@@ -3434,17 +3426,8 @@ function buildNetBoardHTML(matches, teams) {
 }
 
 function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTeamId) {
-  const picked = pickedTeamId ? teams.find((t) => t.id === pickedTeamId) : null;
-  const visiblePools = (picked && picked.pool_id) ? pools.filter((p) => p.id === picked.pool_id) : pools;
-  const picker = `<div class="card">
-    <label class="small" style="color:var(--muted);display:block;margin-bottom:4px;">Your team (pick it to enter your scores)</label>
-    <select data-role="tv2-pick-team" style="width:100%;">
-      <option value="">All pools</option>
-      ${teams.map((t) => `<option value="${escapeHTML(t.id)}" ${t.id === pickedTeamId ? 'selected' : ''}>${escapeHTML(t.name)}</option>`).join('')}
-    </select>
-    ${(!isAdmin && !pickedTeamId) ? '<p class="small" style="color:var(--faint);margin:6px 0 0;">Pick your team above to enter your match scores.</p>' : ''}
-  </div>`;
-  const poolCards = visiblePools.map((pool) => {
+  // C53: anyone scores (no pick-team gate); show all pools. Tap a matchup to enter its result.
+  const poolCards = pools.map((pool) => {
     const poolTeams = teams.filter((t) => t.pool_id === pool.id);
     const poolMatches = matches.filter((m) => m.pool_id === pool.id);
     const played = poolMatches.filter((m) => m.status === 'final').length;
@@ -3453,11 +3436,11 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
       <div class="small" style="color:var(--muted);margin:0 0 4px;">${played}/${poolMatches.length} games played</div>
       ${buildStandingsTableHTML(poolTeams, poolMatches)}
       <div style="margin-top:4px;">
-        ${poolMatches.length ? poolMatches.map((m) => buildMatchRowHTML(m, teams, isAdmin, isAdmin || (!!pickedTeamId && (m.team_a_id === pickedTeamId || m.team_b_id === pickedTeamId)))).join('') : '<p class="small" style="color:var(--muted);margin:0;">No matches.</p>'}
+        ${poolMatches.length ? poolMatches.map((m) => buildMatchRowHTML(m, teams, isAdmin)).join('') : '<p class="small" style="color:var(--muted);margin:0;">No matches.</p>'}
       </div>
     </div>`;
   }).join('');
-  return picker + buildNetBoardHTML(matches, teams) + poolCards;
+  return buildNetBoardHTML(matches, teams) + poolCards;
 }
 
 // ---- Bracket renderer: connected "March Madness" tree (C32 #9, Mike's §38 pick) ----
@@ -3564,7 +3547,8 @@ function openBracketResultModal(matchId) {
     const sa = overlay.querySelector('#brm-a').value, sb = overlay.querySelector('#brm-b').value;
     if (sa === '' || sb === '') return fail('Enter both scores.'); // scores are required (Mike)
     try {
-      await tdbSubmitBracketResult(m, winner, sa, sb);
+      if (m.phase === 'pool') await tdbSubmitResult(m, sa, sb); // C53: pools derive winner from scores
+      else await tdbSubmitBracketResult(m, winner, sa, sb);
       await tdbRefreshTournaments();
       close();
       render();
@@ -3581,7 +3565,8 @@ function openBracketResultModal(matchId) {
     overlay.querySelector('#brm-a').value = String(sa);
     overlay.querySelector('#brm-b').value = String(sb);
     try {
-      await tdbSubmitBracketResult(m, winner, String(sa), String(sb));
+      if (m.phase === 'pool') await tdbSubmitResult(m, String(sa), String(sb)); // C53 pool forfeit
+      else await tdbSubmitBracketResult(m, winner, String(sa), String(sb));
       await tdbRefreshTournaments();
       close();
       render();
