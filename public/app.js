@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.16';
+const APP_VERSION = '2026.06.24.17';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3572,7 +3572,7 @@ function buildBracketHTML(tournament, matches, teams) {
       <button type="button" data-role="tv2-bracket-zoom" data-zoom="fit" class="${zoom === 'fit' ? 'on' : ''}">Whole bracket</button>
       <button type="button" data-role="tv2-bracket-zoom" data-zoom="zoom" class="${zoom === 'zoom' ? 'on' : ''}">Zoom in</button>
     </div>
-    <span class="bt-hint">${zoom === 'fit' ? 'tap a match to zoom in' : 'drag to explore'}</span>
+    <span class="bt-hint">${zoom === 'fit' ? 'tap a match to enter its score' : 'drag to slide · tap a match to score'}</span>
   </div>`;
 
   // Columns left-to-right = rounds; connector lines between them are drawn post-render.
@@ -3645,13 +3645,9 @@ function layoutBracketTree() {
     const scale = avail > 0 ? Math.min(1, avail / W) : 1;
     canvas.style.transform = `scale(${scale})`;
     pan.style.height = Math.ceil(H * scale) + 'px';
-    // Tap empty bracket space to jump into zoom/pan mode — but NOT when tapping a control or a
-    // match card (a tappable node opens the result pop-up via its own data-role handler).
-    pan.onclick = (e) => {
-      if (e.target.closest('button, input, select, a, [data-role]')) return;
-      state.bracketZoom = 'zoom';
-      partialRenderTournament();
-    };
+    // No tap-to-zoom: tapping a match card ONLY opens the result pop-up (its data-role handler);
+    // zooming is the explicit "Zoom in" toggle. (Tap-to-zoom was intercepting taps on small cards.)
+    pan.onclick = null;
   }
 }
 
