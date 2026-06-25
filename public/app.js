@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.17';
+const APP_VERSION = '2026.06.24.18';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3501,33 +3501,41 @@ function openBracketResultModal(matchId) {
   overlay.className = 'popup-overlay brm-overlay';
   overlay.innerHTML = `<div class="popup-card brm-card" role="dialog" aria-modal="true" aria-label="Enter match result">
     <div class="brm-title">${escapeHTML(title)}</div>
-    <p class="brm-sub">Enter the final score — the higher score wins.</p>
-    <label class="brm-team"><span class="brm-name">${escapeHTML(aName)}</span>
-      <input type="number" inputmode="numeric" min="0" id="brm-a" class="brm-in" placeholder="0" /></label>
-    <label class="brm-team"><span class="brm-name">${escapeHTML(bName)}</span>
-      <input type="number" inputmode="numeric" min="0" id="brm-b" class="brm-in" placeholder="0" /></label>
+    <p class="brm-sub">Tap the team that won.</p>
+    <button type="button" class="brm-team" data-w="a"><span class="brm-name">${escapeHTML(aName)}</span><span class="brm-pick" aria-hidden="true"></span></button>
+    <button type="button" class="brm-team" data-w="b"><span class="brm-name">${escapeHTML(bName)}</span><span class="brm-pick" aria-hidden="true"></span></button>
+    <div class="brm-scores">
+      <input type="number" inputmode="numeric" min="0" id="brm-a" placeholder="–" aria-label="${escapeHTML(aName)} score" />
+      <span class="brm-dash">–</span>
+      <input type="number" inputmode="numeric" min="0" id="brm-b" placeholder="–" aria-label="${escapeHTML(bName)} score" />
+    </div>
+    <p class="brm-opt">Add the score if you want — optional</p>
     <div class="brm-err" id="brm-err" hidden></div>
     <div class="brm-actions">
       <button type="button" class="secondary" id="brm-cancel">Cancel</button>
-      <button type="button" class="primary" id="brm-save">Submit result</button>
+      <button type="button" class="primary" id="brm-save">Save result</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
   const close = () => overlay.remove();
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
   overlay.querySelector('#brm-cancel').onclick = close;
-  const inA = overlay.querySelector('#brm-a'), inB = overlay.querySelector('#brm-b');
   const err = overlay.querySelector('#brm-err');
   const fail = (msg) => { err.textContent = msg; err.hidden = false; };
-  setTimeout(() => inA.focus(), 60);
+  let winner = null;
+  overlay.querySelectorAll('.brm-team').forEach((btn) => {
+    btn.onclick = () => {
+      winner = btn.getAttribute('data-w');
+      overlay.querySelectorAll('.brm-team').forEach((b) => b.classList.toggle('win', b === btn));
+      err.hidden = true;
+    };
+  });
+  // tdbSubmitBracketResult takes the tapped winner + optional scores; it validates that any
+  // entered scores agree with the tap (and caps them), and advances the bracket server-side.
   overlay.querySelector('#brm-save').onclick = async () => {
-    const sa = inA.value, sb = inB.value;
-    if (sa === '' || sb === '') return fail('Enter both scores.');
-    if (Number(sa) > 99 || Number(sb) > 99) return fail('Score can’t be above 99.');
-    if (Number(sa) === Number(sb)) return fail('Scores can’t be tied — one team has to win.');
-    const winner = Number(sa) > Number(sb) ? 'a' : 'b';
+    if (!winner) return fail('Tap the team that won.');
     try {
-      await tdbSubmitBracketResult(m, winner, sa, sb);
+      await tdbSubmitBracketResult(m, winner, overlay.querySelector('#brm-a').value, overlay.querySelector('#brm-b').value);
       await tdbRefreshTournaments();
       close();
       render();
