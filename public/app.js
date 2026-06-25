@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.18';
+const APP_VERSION = '2026.06.25.19';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1345,6 +1345,10 @@ function partialRender() {
   // spectator's scroll AND the bracket pan/zoom. maybeAutoGenerateBracket inside it is admin+tournament
   // gated, so it's a no-op for a public viewer.
   if (!playersEl && activeMainTab === 'tournament') {
+    // Wave 1e consistency (review-gate LOW-1): if the tournament was deleted while a fan sits on the
+    // Bracket tab, fall through to full render() so the orphaned-tab guard resets to Home (the Bracket
+    // nav button is gone) instead of leaving an empty bracket panel with a stale nav button.
+    if (!tournamentNavVisible()) { render(); return; }
     if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
     partialRenderTournament();
     return;
