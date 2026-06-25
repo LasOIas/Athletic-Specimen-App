@@ -1829,10 +1829,14 @@ select:focus {
 .ph-tile.is-live .ph-tile-num { color: var(--live); }
 .ph-tile.is-idle .ph-tile-num { color: var(--faint); }
 .ph-tile .ph-dot { width: 11px; height: 11px; border-radius: 99px; background: var(--live); box-shadow: 0 0 0 4px var(--live-soft); }
-.ph-tourney { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: var(--accent-soft); border: 1px solid var(--border); border-radius: var(--r-md); padding: 11px 13px; margin-top: 9px; box-shadow: var(--shadow-sm); cursor: pointer; color: var(--brand-dark); }
-.ph-tourney svg { width: 18px; height: 18px; flex: 0 0 auto; }
-.ph-tourney-t { font-family: 'Sora', system-ui, sans-serif; font-weight: 600; font-size: 13.5px; }
-.ph-tourney-go { font-size: 11.5px; color: var(--muted); margin-left: auto; white-space: nowrap; }
+/* C59: live-tournament card redesigned to a prominent accent banner (§38 option A) — the live event leads the home. */
+.ph-tourney { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; background: var(--accent); border: none; border-radius: var(--r-md); padding: 15px 16px; margin-top: 13px; box-shadow: 0 6px 18px var(--brand-ring); cursor: pointer; color: #fff; }
+.ph-tourney svg { width: 26px; height: 26px; flex: 0 0 auto; }
+.ph-tourney-mid { flex: 1; min-width: 0; }
+.ph-tourney-live { display: flex; align-items: center; gap: 7px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; font-weight: 700; opacity: 0.92; }
+.ph-tourney-live .ph-dot { width: 9px; height: 9px; border-radius: 99px; background: #fff; box-shadow: 0 0 0 4px oklch(1 0 0 / 0.22); flex: 0 0 auto; }
+.ph-tourney-t { display: block; font-family: 'Sora', system-ui, sans-serif; font-weight: 800; font-size: 17px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ph-tourney-go { font-weight: 700; font-size: 13px; flex: 0 0 auto; white-space: nowrap; }
 .ph-bottom { display: flex; gap: 9px; margin-top: 13px; align-items: stretch; }
 .ph-bottom .ph-sescard { flex: 1; margin: 0; }
 .ph-cta-compact { flex: 0 0 118px; flex-direction: column; gap: 7px; margin: 0; }

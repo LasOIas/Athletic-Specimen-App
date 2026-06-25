@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.10';
+const APP_VERSION = '2026.06.25.11';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2372,7 +2372,7 @@ function publicHomeHTML() {
     ? `<div class="ph-tile is-live"><div class="ph-tile-num"><span class="ph-dot"></span></div><div class="ph-tile-lab">tournament live</div></div>`
     : `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">no games yet</div></div>`;
   const tilesHTML = `<div class="ph-tiles" id="ph-tiles">
-    <div class="ph-tile is-here"><div class="ph-tile-num">${st.here}</div><div class="ph-tile-lab">here tonight</div></div>
+    <div class="ph-tile is-here"><div class="ph-tile-num">${st.here}</div><div class="ph-tile-lab">Checked In</div></div>
     ${liveTile}
   </div>`;
   const courtsSection = courtsHTML
@@ -2381,8 +2381,11 @@ function publicHomeHTML() {
   const tourneyStrip = tourney
     ? `<button type="button" class="ph-tourney" data-nav-tab="tournament" id="ph-tourney">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4a2 2 0 0 1-2-2V5h4M18 9h2a2 2 0 0 0 2-2V5h-4M6 5h12v3a6 6 0 0 1-12 0Z"/><path d="M9 18h6M10 21h4M12 14v4"/></svg>
-        <span class="ph-tourney-t">${escapeHTML(tourney.name || 'Tournament')} &mdash; ${tourney.status === 'bracket' ? 'bracket' : 'pool play'}</span>
-        <span class="ph-tourney-go">live &rarr;</span>
+        <span class="ph-tourney-mid">
+          <span class="ph-tourney-live"><span class="ph-dot"></span>${tourney.status === 'bracket' ? 'Bracket live' : 'Pool play live'}</span>
+          <span class="ph-tourney-t">${escapeHTML(tourney.name || 'Tournament')}</span>
+        </span>
+        <span class="ph-tourney-go">View &rarr;</span>
       </button>`
     : '<span id="ph-tourney"></span>';
   const sessionCard = state.currentSession
@@ -2397,11 +2400,11 @@ function publicHomeHTML() {
     <div class="ph-brand">Athletic Specimen</div>
     ${tilesHTML}
     ${courtsSection}
-    ${tourneyStrip}
     <div class="ph-bottom">
       ${sessionCard}
       <button type="button" class="ph-cta ph-cta-compact" data-nav-tab="players"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 11l3 3L20 6"/><path d="M20 12v7H4V5h11"/></svg>Check In</button>
     </div>
+    ${tourneyStrip}
   </div>`;
 }
 
