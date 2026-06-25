@@ -2688,6 +2688,9 @@ body.copilot-typing #bottom-nav { display: none; }
   background: radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0) 0 0 / 22px 22px, var(--bg);
   touch-action: none; cursor: grab; -webkit-user-select: none; user-select: none; }
 .bt-pan.drag { cursor: grabbing; }
+/* touch-action:none on the CHILDREN too — the finger actually lands on the canvas/cols/nodes/svg, and
+   iOS only honours the touched element's touch-action; without this the native gesture leaks through. */
+.bt-canvas, .bt-cols, .bt-col, .bt-node, .bt-links { touch-action: none; }
 .bt-canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; width: max-content; will-change: transform; }
 .bt-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .bt-link { fill: none; stroke: var(--faint); stroke-width: 1.5; opacity: .5; }

@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.21';
+const APP_VERSION = '2026.06.25.22';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3855,10 +3855,11 @@ function wireBracketGestures(pan, canvas) {
       const p = xy(e.touches[0].clientX, e.touches[0].clientY);
       panStart = { x: p.x, y: p.y, bx: btX, by: btY }; pinchLast = null; moved = false;
     } else if (e.touches.length >= 2) {
+      e.preventDefault(); // stop iOS from STARTING a whole-page pinch-zoom (touch-action:none is ignored for pinch on iOS)
       const a = xy(e.touches[0].clientX, e.touches[0].clientY), b = xy(e.touches[1].clientX, e.touches[1].clientY);
       pinchLast = Math.hypot(a.x - b.x, a.y - b.y) || 1; panStart = null; moved = true; pan.classList.add('drag');
     }
-  }, { passive: true });
+  }, { passive: false }); // non-passive so the 2-finger preventDefault above can block the iOS page-pinch
   pan.addEventListener('touchmove', (e) => {
     if (e.touches.length >= 2 && pinchLast != null) {
       e.preventDefault(); // claim the pinch (touch-action:none already set; this stops any iOS rubber-band)
@@ -3907,6 +3908,14 @@ function wireBracketGestures(pan, canvas) {
     const p = xy(e.clientX, e.clientY);
     btZoomAround(canvas, btScale * (e.deltaY < 0 ? 1.12 : 1 / 1.12), p.x, p.y);
   }, { passive: false });
+
+  // ---- iOS native pinch block (THE fix for "2 fingers zoomed the whole page, not the bracket") ----
+  // iOS Safari fires its OWN pinch as proprietary gesture* events and ignores touch-action:none +
+  // user-scalable=no for page zoom. Without blocking these, two fingers on the bracket zoom the entire
+  // page. preventDefault here kills the native page-pinch; the bracket's real zoom is driven by the
+  // 2-finger touchmove handler above. Harmless no-op on non-WebKit browsers (these events never fire).
+  ['gesturestart', 'gesturechange', 'gestureend'].forEach((t) =>
+    pan.addEventListener(t, (e) => { e.preventDefault(); moved = true; }, { passive: false }));
 
   // A drag/pinch must not also fire a click that opens a match pop-up; a clean tap (moved=false) still scores.
   pan.addEventListener('click', (e) => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
