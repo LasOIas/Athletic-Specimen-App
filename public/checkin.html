@@ -238,7 +238,7 @@
   <script src="/supabase-config.js"></script>
   <script>
     // SUPABASE_URL + SUPABASE_ANON_KEY come from public/supabase-config.js (loaded above).
-    const GROUP_NAME = 'Athletic Specimen';
+    const GROUP_NAME = CLUB_GROUP; // Wave 1d: shared canonical club group (supabase-config.js)
 
     // C21: kiosk is anon-only (no admin login); persistSession=false keeps it stateless so no
     // auth token can ever linger on this shared public device.

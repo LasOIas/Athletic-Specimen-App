@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.16';
+const APP_VERSION = '2026.06.25.17';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4552,7 +4552,7 @@ async function flushOutbox() {
         let res = null;
         if (op.kind === 'check_in') res = await supabaseClient.rpc('check_in', { p_id: op.payload.p_id });
         else if (op.kind === 'check_out') res = await supabaseClient.rpc('check_out', { p_id: op.payload.p_id });
-        else if (op.kind === 'register') res = await supabaseClient.rpc('register_player', { p_name: op.payload.name, p_group: op.payload.group || '' });
+        else if (op.kind === 'register') res = await supabaseClient.rpc('register_player', { p_name: op.payload.name, p_group: op.payload.group || '', p_checked_in: op.payload.checked_in === true }); // Wave 1d: kiosk registrations retry atomically checked-in; admin Add-Player (no flag) stays checked-out
         else { outboxRemove(op.key); continue; }
         if (res && res.error) throw res.error;
         outboxRemove(op.key); // landed
@@ -7386,9 +7386,12 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
         }
 
         const activeGroupForRegister = normalizeActiveGroupSelection(state.activeGroup || 'All');
+        // Wave 1d: a public-kiosk registration with no group selected defaults to CLUB_GROUP (the same
+        // canonical group checkin.html uses) so the two doors don't create duplicate, mutually-invisible
+        // people. An admin who has a real group selected still registers into THAT group.
         const group = state.limitedGroup
           ? state.limitedGroup
-          : (activeGroupForRegister && activeGroupForRegister !== 'All' && activeGroupForRegister !== UNGROUPED_FILTER_VALUE ? activeGroupForRegister : '');
+          : (activeGroupForRegister && activeGroupForRegister !== 'All' && activeGroupForRegister !== UNGROUPED_FILTER_VALUE ? activeGroupForRegister : CLUB_GROUP);
         const groups = group ? [group] : [];
         const skill = 0.0;
         // pending:true keeps this in-flight row alive through a racing sync (mergePlayersAfterSync).
@@ -7405,28 +7408,24 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
         if (supabaseClient) {
           try {
             // C21: register through the SECURITY DEFINER RPC (the only anon write door under locked RLS).
-            const { data, error } = await supabaseClient.rpc('register_player', { p_name: name, p_group: group });
+            // Wave 1d (2026-06-25): register AND check in atomically (p_checked_in:true) in ONE call —
+            // mirrors checkin.html. The old two-step (register, then a separate check_in) could leave the
+            // server checked_in=false if the page closed/lost network between the calls, silently dropping
+            // a first-timer who was told "you're checked in" from the count. Migration 0015's register_player
+            // records the check_ins row when p_checked_in.
+            const { data, error } = await supabaseClient.rpc('register_player', { p_name: name, p_group: group, p_checked_in: true });
             if (error) throw error;
             const row = Array.isArray(data) ? data[0] : data;
             if (row && row.id) inserted.id = row.id;
             await ensureGroupCatalogEntriesSupabase(group ? [group] : []);
             // Reliability (2026-06-24): only clear pending if we got an id (else the merge could drop this new player).
             if (inserted.id) inserted.pending = false;
-            // Now that the row has a real id, check it in server-side too.
-            if (inserted.id) {
-              try {
-                const { error: ciErr } = await supabaseClient.rpc('check_in', { p_id: inserted.id });
-                if (ciErr) throw ciErr;
-              } catch (ciErr) {
-                console.error('Supabase check-in error', ciErr);
-                outboxEnqueue({ key: 'att:' + inserted.id, kind: 'check_in', payload: { p_id: inserted.id }, ts: Date.now() });
-              }
-            }
             queueSupabaseRefresh();
           } catch (err) {
             console.error('Supabase insert error', err);
             inserted.pending = true;
-            outboxEnqueue({ key: 'reg:' + normalize(name) + ':' + (group || ''), kind: 'register', payload: { name, group }, ts: Date.now() });
+            // Wave 1d: carry the checked-in intent so the offline retry registers atomically too.
+            outboxEnqueue({ key: 'reg:' + normalize(name) + ':' + (group || ''), kind: 'register', payload: { name, group, checked_in: true }, ts: Date.now() });
             showCheckinToast('Saved on this device — will sync when online');
           }
           saveLocal();
