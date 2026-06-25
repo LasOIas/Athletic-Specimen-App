@@ -1839,6 +1839,7 @@ select:focus {
 .ph-tourney-go { font-weight: 700; font-size: 13px; flex: 0 0 auto; white-space: nowrap; }
 .ph-bottom { display: flex; gap: 9px; margin-top: 13px; align-items: stretch; }
 .ph-bottom .ph-sescard { flex: 1; margin: 0; }
+.ph-legend { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 14px 4px 0; } /* C60: board legend */
 .ph-cta-compact { flex: 0 0 118px; flex-direction: column; gap: 7px; margin: 0; }
 
 .court-row {

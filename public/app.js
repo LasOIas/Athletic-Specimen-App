@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.12';
+const APP_VERSION = '2026.06.25.13';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2425,13 +2425,18 @@ function publicScoresHTML() {
     </div>`;
   }
   const upNext = (liveData.waitingTeams || []).length
-    ? `<div class="ph-sec">Up next</div>
+    ? `<div class="ph-sec">Up next &middot; rotating onto a net</div>
        <div class="court-row"><div class="court-row-info"><div class="court-row-sub">${liveData.waitingTeams.map((t) => 'Team ' + Number(t)).join(', ')}</div></div></div>`
     : '';
+  // C60: legend so a spectator isn't guessing at "Net N" / "Team N" / why no score shows.
+  const legend = courtsHTML
+    ? `<p class="ph-legend">Teams are numbered for tonight &middot; nets are numbered by play order &middot; live games show the winner, not the score.</p>`
+    : '';
   return `<div class="home-screen">
-    <div class="ph-brand">Live scores ${liveData.liveCount > 0 ? `<span class="ph-live"><span class="ph-dot"></span>${liveData.liveCount} playing</span>` : `<span class="ph-done">Round complete</span>`}</div>
+    <div class="ph-brand">Live scores ${liveData.liveCount > 0 ? `<span class="ph-live"><span class="ph-dot"></span>${liveData.liveCount} playing</span>` : `<span class="ph-done">Round complete &middot; next round coming up</span>`}</div>
     ${courtsHTML}
     ${upNext}
+    ${legend}
   </div>`;
 }
 
@@ -5448,7 +5453,7 @@ function adminTeamsHTML(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
       const active = state.lastTeamSize === sz ? ' is-active' : '';
       return `<button type="button" class="team-size-chip${active}" data-team-size="${sz}" aria-pressed="${state.lastTeamSize === sz ? 'true' : 'false'}">
         <strong>${sz}s</strong>
-        <span>${n} ${n === 1 ? 'team' : 'teams'}</span>
+        <span>${n === 0 ? `need ${sz}+ in` : `${n} ${n === 1 ? 'team' : 'teams'}`}</span>
       </button>`;
     }).join('')}
   </div>
@@ -5712,7 +5717,7 @@ function adminLoginHTML() {
 // on keystroke. The "Admin" corner link reveals the existing adminLoginHTML() form (handler intact).
 function renderCheckinButton(row) {
   const inClass = row.checkedIn ? ' is-in' : '';
-  const stateLabel = row.checkedIn ? 'Checked in' : '';
+  const stateLabel = row.checkedIn ? 'Checked in · tap to undo' : ''; // C60: signal the tap undoes the check-in
   const group = row.group ? `<span class="cik-gp">${escapeHTML(row.group)}</span>` : '';
   return `<button class="cik-btn${inClass}" type="button" data-checkin-id="${escapeHTML(String(row.id))}">`
     + `<span class="av">${escapeHTML(row.initials || '')}</span>`
