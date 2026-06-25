@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.17';
+const APP_VERSION = '2026.06.25.18';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3006,6 +3006,15 @@ async function tdbAddTeam(tournamentId, name) {
   if (!tournamentId) throw new Error('No tournament selected.');
   const row = { tournament_id: tournamentId, name: String(name || '').trim() };
   if (!row.name) throw new Error('Team name required.');
+  // Wave 1e (C49a): case-insensitive duplicate-name guard at the DATA layer, so EVERY add door is
+  // covered — the interactive handler had its own guard but the co-pilot setup loop and any batch/PDF
+  // import call tdbAddTeam directly and bypassed it (duplicate teams = the same "who is who" risk C47
+  // fixed for players).
+  const { data: existingTeams } = await supabaseClient
+    .from('teams').select('name').eq('tournament_id', tournamentId);
+  if ((existingTeams || []).some((t) => String(t.name || '').trim().toLowerCase() === row.name.toLowerCase())) {
+    throw new Error('A team named "' + row.name + '" is already in this tournament.');
+  }
   const { data, error } = await supabaseClient
     .from('teams').insert([row]).select().single();
   if (error) { console.error('tdbAddTeam', error); throw error; }
@@ -3373,8 +3382,11 @@ async function maybeAutoGenerateBracket() {
       render();
     }
   } catch (e) {
-    _autoGenPrompted[t.id] = false; // generation FAILED (network/RPC) — re-arm so the prompt can return
-    state.tournamentTabError = (e && e.message) || 'Could not generate the bracket.';
+    // Wave 1e: do NOT clear the one-shot flag synchronously here — render() below re-invokes
+    // maybeAutoGenerateBracket, which would immediately re-pop the appConfirm on top of the error
+    // (a re-prompt loop on a flaky network). Leave it claimed; the manual "Generate Bracket" button is
+    // the retry path, and Reset Pools re-arms the auto-prompt (delete _autoGenPrompted[t.id]).
+    state.tournamentTabError = (e && e.message) || 'Could not generate the bracket — use the Generate Bracket button to retry.';
     render();
   }
 }
@@ -3646,12 +3658,18 @@ function openBracketResultModal(matchId) {
   });
   // tdbSubmitBracketResult takes the tapped winner + optional scores; it validates that any
   // entered scores agree with the tap (and caps them), and advances the bracket server-side.
+  // Wave 1e: in-flight guard — a double-tap on Save/Forfeit fired two submit_match_score calls (the 2nd
+  // failed cleanly via the server CAS but surfaced a spurious "another device updated" error). The flag
+  // blocks the 2nd tap; the finally re-arms it on every non-success exit so a real retry still works.
+  let submitting = false;
   overlay.querySelector('#brm-save').onclick = async () => {
+    if (submitting) return;
     if (!winner) return fail('Tap the team that won.');
     const sa = overlay.querySelector('#brm-a').value, sb = overlay.querySelector('#brm-b').value;
     if (sa === '' || sb === '') return fail('Enter both scores.'); // scores are required (Mike)
-    if (!(await confirmBigMargin(sa, sb))) return; // restored: catch a fat-finger blowout before it saves
+    submitting = true;
     try {
+      if (!(await confirmBigMargin(sa, sb))) return; // restored: catch a fat-finger blowout before it saves
       if (m.phase === 'pool') {
         // C53 pools derive the winner from scores — but the tap must still agree with them (parity with the
         // bracket path), else a transposed score would silently record the team you DIDN'T tap.
@@ -3663,10 +3681,12 @@ function openBracketResultModal(matchId) {
       close();
       render();
     } catch (e) { fail((e && e.message) || 'Could not save the result.'); }
+    finally { submitting = false; }
   };
   // C50 forfeit/no-show: a small win (cap / cap-2) for the team that showed, so a no-show doesn't
   // stall the net queue or the bracket. The winner is the tapped team; the score is auto-filled.
   overlay.querySelector('#brm-forfeit').onclick = async () => {
+    if (submitting) return;
     if (!winner) return fail('Tap the team that showed up first — they win the forfeit.');
     const t = (state.tournaments || []).find((x) => x.id === m.tournament_id) || {};
     const cap = Number(t.match_cap) || 25;
@@ -3674,6 +3694,7 @@ function openBracketResultModal(matchId) {
     const sa = winner === 'a' ? winS : loseS, sb = winner === 'a' ? loseS : winS;
     overlay.querySelector('#brm-a').value = String(sa);
     overlay.querySelector('#brm-b').value = String(sb);
+    submitting = true;
     try {
       if (m.phase === 'pool') await tdbSubmitResult(m, String(sa), String(sb)); // C53 pool forfeit
       else await tdbSubmitBracketResult(m, winner, String(sa), String(sb));
@@ -3681,6 +3702,7 @@ function openBracketResultModal(matchId) {
       close();
       render();
     } catch (e) { fail((e && e.message) || 'Could not save the forfeit.'); }
+    finally { submitting = false; }
   };
 }
 
@@ -6598,6 +6620,10 @@ function render() {
   activeMainTab = sessionStorage.getItem(currentTabKey()) || (state.isAdmin ? 'dashboard' : 'home');
   // C26 item 3a: public 'teams' and the now-removed public 'session' tab fall back to 'home'.
   if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'session')) activeMainTab = 'home';
+  // Wave 1e: a fan last on the Bracket tab who returns after the tournament was deleted would land on
+  // an empty 'tournament' panel with no nav button to highlight (the Bracket button is gone). Reset to
+  // Home unless a tournament is actually live.
+  if (!state.isAdmin && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 
   const shellHtml = state.isAdmin
     ? renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML)
@@ -6880,6 +6906,8 @@ bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
 if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'session')) activeMainTab = 'home';
+// Wave 1e: reset a stale public 'tournament' tab to Home when no tournament is live (else an empty panel + no nav button).
+if (!state.isAdmin && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 activateMainTab(activeMainTab);
 restoreTransientInteractionState(interactionSnapshot);
 refreshAzStripAvailability();
@@ -7469,9 +7497,14 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       if (!canAccessOperatorSafetyControls()) return; // master-admin only; server gate = authenticated RPC
       const previouslyCheckedIn = normalizeCheckedInEntries(state.checkedIn || []);
       const n = previouslyCheckedIn.length;
-      const confirmed = window.confirm(
-        `Start a new session?\n\n${n} player${n === 1 ? ' is' : 's are'} checked in — they'll be checked out and tonight's attendance is saved as history.`
-      );
+      // Wave 1e: the most destructive admin action (checks everyone out) used native window.confirm,
+      // unreliable in standalone-PWA/iOS where the rest of the app already moved to appConfirm.
+      const confirmed = await appConfirm({
+        title: 'Start a new session?',
+        message: `${n} player${n === 1 ? ' is' : 's are'} checked in — they'll be checked out and tonight's attendance is saved as history.`,
+        confirmText: 'Start new session',
+        danger: true
+      });
       if (!confirmed) return;
 
       state.checkedIn = [];

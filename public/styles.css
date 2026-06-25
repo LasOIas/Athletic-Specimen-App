@@ -425,7 +425,9 @@ select:focus {
 #back-to-top {
   display: none;
   position: fixed;
-  bottom: 80px;
+  /* Wave 1e: the bottom nav grows by env(safe-area-inset-bottom) on notched iPhones, so a static
+     80px floated this over the rightmost nav tab. Offset by the same inset to clear it. */
+  bottom: calc(80px + env(safe-area-inset-bottom, 0px));
   right: 16px;
   z-index: 900;
   width: 42px;
