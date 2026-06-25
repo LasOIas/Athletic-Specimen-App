@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.8';
+const APP_VERSION = '2026.06.24.9';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5808,8 +5808,8 @@ async function handleCopilotSend(question) {
 // The browser holds the Claude conversation, asks the copilot edge fn (the key-holder) what to do, runs the
 // matching local executor with the admin's OWN privileges + the per-tool safety policy (enforced HERE, not
 // trusted to the model), logs to copilot_actions, and feeds the result back until Claude finishes.
-// Task 4 ships the INSTANT actions (check-in/out, make-teams). Confirm-required tournament/score actions +
-// the §38 confirm card arrive in Task 5 (copilotConfirmCard is a stub until then).
+// Task 4 ships the INSTANT actions (check-in/out, make-teams). Task 5 adds the CONFIRM-required actions
+// (submit-score, setup-tournament, generate-bracket) — gated by copilotConfirmCard (the appConfirm modal).
 const COPILOT_TOOLS = [
   { name: 'check_in', description: 'Check a player in for tonight, by name.',
     input_schema: { type: 'object', properties: { name: { type: 'string', description: "the player's name" } }, required: ['name'] } },
@@ -5817,6 +5817,22 @@ const COPILOT_TOOLS = [
     input_schema: { type: 'object', properties: { name: { type: 'string', description: "the player's name" } }, required: ['name'] } },
   { name: 'make_teams', description: 'Make N balanced teams from the players who are checked in, and set up the courts.',
     input_schema: { type: 'object', properties: { count: { type: 'integer', description: 'how many teams' } }, required: ['count'] } },
+  { name: 'submit_score', description: 'Record the score of a tournament match (pool or bracket) between two teams. Confirms before saving.',
+    input_schema: { type: 'object', properties: {
+      team_a: { type: 'string', description: "one team's name" },
+      team_b: { type: 'string', description: "the other team's name" },
+      score_a: { type: 'integer', description: "team_a's score" },
+      score_b: { type: 'integer', description: "team_b's score" } },
+      required: ['team_a', 'team_b', 'score_a', 'score_b'] } },
+  { name: 'setup_tournament', description: 'Create a tournament with the given team names, draw pools, and start pool play. Confirms first.',
+    input_schema: { type: 'object', properties: {
+      name: { type: 'string', description: 'tournament name' },
+      teams: { type: 'array', items: { type: 'string' }, description: 'the team names (at least 2)' },
+      pool_count: { type: 'integer', description: 'number of pools (optional; default 4, auto-clamped to teams)' },
+      net_count: { type: 'integer', description: 'number of nets/courts (optional; default 10)' } },
+      required: ['name', 'teams'] } },
+  { name: 'generate_bracket', description: 'Generate the playoff bracket for the active tournament once every pool game is final. Confirms first.',
+    input_schema: { type: 'object', properties: {}, required: [] } },
 ];
 
 // Persist a check-in/out the SAME way the kiosk does: local state already set optimistically; write via the
@@ -5872,10 +5888,60 @@ const copilotExecutors = {
         state.liveMatchSkillSnapshots = prev.snaps; state.generatedTeamsSummary = prev.summary; state.groupCount = prev.groupCount;
         state.lastTeamSize = prev.lastTeamSize; saveLocal(); render(); } };
   },
+  // --- Task 5: CONFIRM-required actions (no undo — the confirm IS the safety). All mutate prod via the
+  // same tdb* paths the admin tournament UI uses, then refresh state + render. ---
+  async submit_score(args) {
+    if (!state.activeTournamentId) return { is_error: true, args, result: 'No active tournament to score.' };
+    const r = resolveTournamentMatch(state.tournamentTeams, state.tournamentMatches, args.team_a, args.team_b);
+    if (!r.ok) {
+      if (r.reason === 'team') return { is_error: true, args, result: `Couldn't match those team names. Teams: ${r.teams.join(', ')}.` };
+      if (r.reason === 'same') return { is_error: true, args, result: 'Those are the same team.' };
+      return { is_error: true, args, result: `No unplayed match between ${r.teamA} and ${r.teamB}.` };
+    }
+    const sa = Number(args.score_a), sb = Number(args.score_b);
+    const [scoreA, scoreB] = r.orient === 'ab' ? [sa, sb] : [sb, sa];
+    await tdbSubmitResult(r.match, scoreA, scoreB);
+    await tdbRefreshTournaments(); render();
+    return { args: { team_a: r.teamA, team_b: r.teamB, score_a: sa, score_b: sb }, result: `Recorded ${r.teamA} ${sa}–${sb} ${r.teamB}.` };
+  },
+  async setup_tournament(args) {
+    const name = String(args.name || '').trim();
+    const teamNames = (Array.isArray(args.teams) ? args.teams : []).map((t) => String(t || '').trim()).filter(Boolean);
+    const t = await tdbCreateTournament({ name, pool_count: args.pool_count, net_count: args.net_count });
+    for (const tn of teamNames) { await tdbAddTeam(t.id, tn); }
+    await tdbDrawPools(t);
+    await tdbStartPoolPlay(t);
+    state.activeTournamentId = t.id;
+    await tdbRefreshTournaments(); render();
+    return { args: { name, teams: teamNames.length }, result: `Set up "${name}": ${teamNames.length} teams, pools drawn, pool play started.` };
+  },
+  async generate_bracket() {
+    const t = (state.tournaments || []).find((x) => x.id === state.activeTournamentId);
+    if (!t) return { is_error: true, args: {}, result: 'No active tournament.' };
+    await tdbGenerateBracket(t);
+    await tdbRefreshTournaments(); render();
+    return { args: { tournament: t.name }, result: `Bracket generated for "${t.name}".` };
+  },
 };
 
-// Confirm-required executors + their §38 card land in Task 5; this stub keeps the policy branch safe meanwhile.
-function copilotConfirmCard() { return Promise.resolve(false); }
+// Task 5 confirm card: reuse the existing styled appConfirm modal (C49) — a per-tool preview of exactly
+// what will happen. Returns true to proceed, false to cancel. (§38-exempt: no new layout.)
+async function copilotConfirmCard(tool, input) {
+  let title = 'Confirm', message = 'Proceed?', confirmText = 'Do it';
+  if (tool === 'submit_score') {
+    title = 'Submit score'; confirmText = 'Submit';
+    message = `Record ${input.team_a} ${input.score_a}–${input.score_b} ${input.team_b}?`;
+  } else if (tool === 'setup_tournament') {
+    title = 'Set up tournament'; confirmText = 'Set up';
+    const n = Array.isArray(input.teams) ? input.teams.length : 0;
+    message = `Create "${String(input.name || '').trim()}" with ${n} teams, draw pools, and start pool play?`;
+  } else if (tool === 'generate_bracket') {
+    title = 'Generate bracket'; confirmText = 'Generate';
+    const t = (state.tournaments || []).find((x) => x.id === state.activeTournamentId);
+    message = `Generate the bracket${t ? ` for "${t.name}"` : ''}? This seeds from the pool standings.`;
+  }
+  return await appConfirm({ title, message, confirmText });
+}
 
 // Apply the per-tool safety policy + audit around an executor. Returns { result, is_error, undo? }.
 async function executeCopilotTool(name, input, requestText) {
@@ -5885,7 +5951,7 @@ async function executeCopilotTool(name, input, requestText) {
   if (!exec) return { result: `That action ("${name}") isn't available yet.`, is_error: true };
   if ((COPILOT_TOOL_POLICY[name] || 'confirm') === 'confirm') {
     const ok = await copilotConfirmCard(name, input);
-    if (!ok) return { result: 'That action needs confirmation, which is coming soon.' };
+    if (!ok) return { result: 'Cancelled — nothing was changed.' };
   }
   let out;
   try { out = await exec(input); } catch (e) { return { result: `That action failed: ${(e && e.message) || 'error'}`, is_error: true }; }

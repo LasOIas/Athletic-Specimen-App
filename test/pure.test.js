@@ -12,6 +12,7 @@ const {
   generateBalancedGroups, playerIdentityKey, disambiguatePlayersByName,
   groupRosterPlayersBySection, isValidFullName, buildCopilotContext,
   resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
+  resolveTournamentMatch,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -457,5 +458,59 @@ describe('C28 Slice 2 — co-pilot acting pure helpers', () => {
   it('validateCopilotToolArgs: check_in needs a non-empty name', () => {
     expect(validateCopilotToolArgs('check_in', { name: 'Jet' }).ok).toBe(true);
     expect(validateCopilotToolArgs('check_in', { name: '  ' }).ok).toBe(false);
+  });
+  it('validateCopilotToolArgs: setup_tournament needs a name + >=2 teams', () => {
+    expect(validateCopilotToolArgs('setup_tournament', { name: 'Cup', teams: ['A', 'B'] }).ok).toBe(true);
+    expect(validateCopilotToolArgs('setup_tournament', { name: 'Cup', teams: ['A'] }).ok).toBe(false);
+    expect(validateCopilotToolArgs('setup_tournament', { name: '', teams: ['A', 'B'] }).ok).toBe(false);
+  });
+});
+
+describe('resolveTournamentMatch (C28 Slice 2 — submit_score match resolution + score orientation)', () => {
+  const teams = [
+    { id: 't1', name: 'Red' },
+    { id: 't2', name: 'Blue' },
+    { id: 't3', name: 'Green' },
+  ];
+  const matches = [
+    { id: 'm1', team_a_id: 't1', team_b_id: 't2', status: 'scheduled', version: 0 },
+    { id: 'm2', team_a_id: 't1', team_b_id: 't3', status: 'final', version: 3 },
+    { id: 'm3', team_a_id: 't2', team_b_id: 't3', status: 'scheduled', version: 1 },
+  ];
+
+  it('matches a scheduled game in the given orientation (orient "ab")', () => {
+    const r = resolveTournamentMatch(teams, matches, 'Red', 'Blue');
+    expect(r.ok).toBe(true);
+    expect(r.match.id).toBe('m1');
+    expect(r.orient).toBe('ab');
+    expect(r.teamA).toBe('Red');
+    expect(r.teamB).toBe('Blue');
+  });
+  it('matches when the names are reversed vs the match slots (orient "ba")', () => {
+    const r = resolveTournamentMatch(teams, matches, 'Blue', 'Red');
+    expect(r.ok).toBe(true);
+    expect(r.match.id).toBe('m1');
+    expect(r.orient).toBe('ba'); // team_a (Blue) is slot b of m1 -> caller must swap the scores
+  });
+  it('is case- and whitespace-insensitive on team names', () => {
+    const r = resolveTournamentMatch(teams, matches, '  green ', 'BLUE');
+    expect(r.ok).toBe(true);
+    expect(r.match.id).toBe('m3');
+  });
+  it('skips a match that is already final', () => {
+    const r = resolveTournamentMatch(teams, matches, 'Red', 'Green');
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('nomatch');
+  });
+  it('reports an unknown team name', () => {
+    const r = resolveTournamentMatch(teams, matches, 'Red', 'Purple');
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('team');
+    expect(r.teams).toEqual(['Red', 'Blue', 'Green']);
+  });
+  it('rejects the same team twice', () => {
+    const r = resolveTournamentMatch(teams, matches, 'Red', 'red');
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('same');
   });
 });

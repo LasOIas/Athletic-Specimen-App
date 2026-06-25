@@ -662,6 +662,22 @@ function validateCopilotToolArgs(tool, args) {
   return { ok: true }; // submit_score / generate_bracket validated at execution against live state
 }
 
+// Resolve a tournament match between two named teams and tell the caller how to orient the scores.
+// Returns { ok:true, match, orient, teamA, teamB } where orient is 'ab' (nameA is the match's slot a,
+// pass scores as-is) or 'ba' (nameA is slot b, the caller must swap the scores). On failure returns
+// { ok:false, reason:'team'|'same'|'nomatch', ... }. Only matches a game that is NOT yet final.
+function resolveTournamentMatch(teams, matches, nameA, nameB) {
+  const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
+  const find = (n) => (teams || []).find((t) => norm(t.name) === norm(n));
+  const ta = find(nameA), tb = find(nameB);
+  if (!ta || !tb) return { ok: false, reason: 'team', teams: (teams || []).map((t) => t.name) };
+  if (ta.id === tb.id) return { ok: false, reason: 'same' };
+  const m = (matches || []).find((x) => x && x.status !== 'final'
+    && ((x.team_a_id === ta.id && x.team_b_id === tb.id) || (x.team_a_id === tb.id && x.team_b_id === ta.id)));
+  if (!m) return { ok: false, reason: 'nomatch', teamA: ta.name, teamB: tb.name };
+  return { ok: true, match: m, orient: m.team_a_id === ta.id ? 'ab' : 'ba', teamA: ta.name, teamB: tb.name };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -670,6 +686,7 @@ if (typeof module !== "undefined" && module.exports) {
     nextPow2, seedOrder, computeSeeding, computeChampion, generateDoubleElim,
     disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName,
     copilotRosterNames, copilotUpNextByNet, buildCopilotContext,
-    resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs
+    resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
+    resolveTournamentMatch
   };
 }
