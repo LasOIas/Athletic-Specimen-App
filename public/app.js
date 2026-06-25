@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.23';
+const APP_VERSION = '2026.06.25.24';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3025,6 +3025,35 @@ async function tdbAddTeam(tournamentId, name) {
   return data;
 }
 
+// Tournament team self-registration (replaces the Google Form). Anon writes through the locked RLS via
+// the register_team SECURITY DEFINER RPC (migration 0024); admin reads/edits teams directly.
+async function tdbRegisterTeam(tournamentId, teamName, roster, contact, paid) {
+  if (!supabaseClient) throw new Error('No database connection.');
+  const cleanRoster = (roster || []).map((n) => String(n || '').trim()).filter(Boolean);
+  const { data, error } = await supabaseClient.rpc('register_team', {
+    p_tournament_id: tournamentId,
+    p_team_name: String(teamName || '').trim(),
+    p_roster: cleanRoster,
+    p_contact: contact ? String(contact).trim() : null,
+    p_paid: !!paid
+  });
+  if (error) { console.error('tdbRegisterTeam', error); throw error; }
+  return Array.isArray(data) ? data[0] : data;
+}
+// Admin: flip registration open/closed + save the Venmo link + buy-in text (direct authed update).
+async function tdbSetTournamentFields(tournamentId, fields) {
+  if (!supabaseClient || !tournamentId) throw new Error('No tournament.');
+  const { error } = await supabaseClient.from('tournaments')
+    .update({ ...fields, updated_at: new Date().toISOString() }).eq('id', tournamentId);
+  if (error) { console.error('tdbSetTournamentFields', error); throw error; }
+}
+// Admin: mark a registered team paid / unpaid.
+async function tdbSetTeamPaid(teamId, paid) {
+  if (!supabaseClient || !teamId) throw new Error('No team.');
+  const { error } = await supabaseClient.from('teams').update({ paid: !!paid }).eq('id', teamId);
+  if (error) { console.error('tdbSetTeamPaid', error); throw error; }
+}
+
 async function tdbDeleteTeam(teamId) {
   if (!supabaseClient || !teamId) return;
   const { error } = await supabaseClient.from('teams').delete().eq('id', teamId);
@@ -3332,6 +3361,7 @@ async function tdbRefreshTournaments() {
     if (!state.activeTournamentId && state.tournaments.length) {
       const live = state.tournaments.find((t) => t.status === 'pools')
         || state.tournaments.find((t) => t.status === 'bracket')
+        || state.tournaments.find((t) => t.registration_open && t.status === 'setup') // self-registration is open → surface it publicly
         || state.tournaments.find((t) => t.status === 'completed') || null;
       state.activeTournamentId = live ? live.id : null;
     }
@@ -3399,7 +3429,7 @@ async function maybeAutoGenerateBracket() {
 // second phone's submission shows up — but NEVER while the operator is mid-entry
 // (a focused input/select in the tab would be clobbered).
 function tournamentNavVisible() {
-  return state.isAdmin || (state.tournaments || []).some((t) => ['pools', 'bracket', 'completed'].includes(t.status));
+  return state.isAdmin || (state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status));
 }
 
 async function refreshTournamentLive() {
@@ -3916,6 +3946,47 @@ function wireBracketGestures(pan, canvas) {
 }
 
 // Builds the Tournament tab body (admin create/manage, or public read-only).
+// Public team self-registration screen (§38 layout A — one card; replaces the Google Form). AS-custom:
+// team name + fixed 4 player names + co-ed reminder + Venmo link/"we paid" + Register. Registered teams
+// shown for social proof (names only, no skill). Submits via the anon register_team RPC.
+function buildPublicRegisterHTML(t, teams) {
+  const count = (teams || []).length;
+  const venmo = t.venmo_link ? String(t.venmo_link).trim() : '';
+  const buyIn = t.buy_in ? String(t.buy_in).trim() : '';
+  const payRow = venmo
+    ? `<div class="reg-pay">
+        <a class="reg-venmo" href="${escapeHTMLText(venmo)}" target="_blank" rel="noopener noreferrer">Pay${buyIn ? ' ' + escapeHTMLText(buyIn) : ''} on Venmo</a>
+        <label class="reg-check"><input type="checkbox" id="reg-paid" /> We paid</label>
+      </div>`
+    : `<label class="reg-check" style="margin-top:6px;"><input type="checkbox" id="reg-paid" /> We paid${buyIn ? ' (' + escapeHTMLText(buyIn) + ')' : ''}</label>`;
+  const registered = count
+    ? `<div class="card" style="margin-top:12px;"><div class="reg-label">Registered (${count})</div>${
+        (teams || []).map((tm) => `<div class="reg-regrow"><span>${escapeHTMLText(tm.name || '')}</span>${tm.paid ? '<span class="reg-paidtag">paid</span>' : ''}</div>`).join('')
+      }</div>`
+    : '';
+  return `<div class="reg-screen">
+    <h2 class="reg-h1">Register your team</h2>
+    <p class="reg-sub">${escapeHTMLText(t.name || '')}${buyIn ? ' · ' + escapeHTMLText(buyIn) : ''}</p>
+    <div class="card reg-card">
+      <label class="reg-label" for="reg-team">Team name</label>
+      <input type="text" id="reg-team" class="reg-input" placeholder="e.g. Bumpin Uglies" autocomplete="off" autocapitalize="words" />
+      <div class="reg-label">Players (4)</div>
+      <input type="text" id="reg-p1" class="reg-input" placeholder="Player 1 (captain)" autocomplete="off" autocapitalize="words" />
+      <input type="text" id="reg-p2" class="reg-input" placeholder="Player 2" autocomplete="off" autocapitalize="words" />
+      <input type="text" id="reg-p3" class="reg-input" placeholder="Player 3" autocomplete="off" autocapitalize="words" />
+      <input type="text" id="reg-p4" class="reg-input" placeholder="Player 4" autocomplete="off" autocapitalize="words" />
+      <div class="reg-remind">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4"/></svg>
+        <span>Each team needs at least one guy and one girl.</span>
+      </div>
+      ${payRow}
+    </div>
+    <button type="button" class="primary reg-primary" data-role="tv2-register-team">Register team</button>
+    <p class="reg-teamspill" id="reg-msg">${count} ${count === 1 ? 'team' : 'teams'} registered so far</p>
+    ${registered}
+  </div>`;
+}
+
 function buildTournamentTabHTML() {
   const list = state.tournaments || [];
   const active = state.activeTournamentId
@@ -3931,6 +4002,10 @@ function buildTournamentTabHTML() {
       </div>`;
     }
     const teams = (active ? state.tournamentTeams : []) || [];
+    // Registration open (pre-pools) → the public self-registration screen (replaces the Google Form).
+    if (active && show.registration_open && show.status === 'setup') {
+      return buildPublicRegisterHTML(show, teams);
+    }
     if (active && show.status === 'pools') {
       return `<div class="card">
         <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
@@ -4052,6 +4127,29 @@ function buildTournamentTabHTML() {
     }
   }
   return `${err}${headerCard}
+  <div class="card">
+    <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
+      <h3 style="margin:0;">Registration</h3>
+      <button type="button" class="${active.registration_open ? 'danger' : 'primary'}" data-role="tv2-toggle-registration">${active.registration_open ? 'Close' : 'Open'}</button>
+    </div>
+    <p class="small" style="color:var(--muted);margin:6px 0 10px;">${active.registration_open ? 'Teams can register now — share the link in GroupMe.' : 'Open registration so teams sign themselves up (replaces the Google Form).'}</p>
+    <label class="reg-label" for="tv2-venmo">Venmo payment link</label>
+    <input type="text" id="tv2-venmo" class="reg-input" placeholder="https://venmo.com/u/yourname" value="${escapeHTMLText(active.venmo_link || '')}" />
+    <label class="reg-label" for="tv2-buyin">Buy-in (shown to teams)</label>
+    <input type="text" id="tv2-buyin" class="reg-input" placeholder="$80 per team" value="${escapeHTMLText(active.buy_in || '')}" />
+    <button type="button" class="secondary" data-role="tv2-save-registration" style="width:100%;">Save</button>
+    ${active.registration_open ? '<button type="button" class="secondary" data-role="tv2-share-registration" style="width:100%;margin-top:8px;">Copy registration link</button>' : ''}
+    ${teams.length ? `<div style="margin-top:12px;"><div class="reg-label">Registered (${teams.length})</div>${teams.map((tm) => {
+      const rost = Array.isArray(tm.roster) ? tm.roster : [];
+      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
+        <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
+          <span style="flex:1;min-width:0;">${escapeHTMLText(tm.name || '')} ${tm.paid ? '<span class="reg-paidtag">paid</span>' : '<span class="reg-unpaidtag">unpaid</span>'}</span>
+          <button type="button" class="secondary" data-role="tv2-toggle-paid" data-id="${escapeHTMLText(tm.id)}">${tm.paid ? 'Unpaid' : 'Paid'}</button>
+        </div>
+        ${rost.length ? `<div class="small" style="color:var(--muted);">${rost.map((n) => escapeHTMLText(String(n))).join(', ')}</div>` : ''}
+      </div>`;
+    }).join('')}</div>` : ''}
+  </div>
   <div class="card">
     <h3 style="margin:0 0 8px;">Add Team</h3>
     <div class="row" style="gap:8px;">
@@ -5976,11 +6074,17 @@ function buildPublicNavInnerHTML() {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
       <span>Scores</span>
     </button>
-    ${(state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket' || t.status === 'completed') ? `
-    <button class="nav-btn" data-nav-tab="tournament">
+    ${(() => {
+      const ts = state.tournaments || [];
+      const live = ts.some((t) => ['pools', 'bracket', 'completed'].includes(t.status));
+      const reg = ts.some((t) => t.registration_open && t.status === 'setup');
+      if (!live && !reg) return '';
+      const label = (!live && reg) ? 'Register' : 'Bracket'; // pre-pools registration → "Register", else "Bracket"
+      return `<button class="nav-btn" data-nav-tab="tournament">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg>
-      <span>Bracket</span>
-    </button>` : ''}`;
+      <span>${label}</span>
+    </button>`;
+    })()}`;
 }
 
 function renderPublicShell() {
@@ -6663,7 +6767,7 @@ function render() {
   // Wave 1e: a fan last on the Bracket tab who returns after the tournament was deleted would land on
   // an empty 'tournament' panel with no nav button to highlight (the Bracket button is gone). Reset to
   // Home unless a tournament is actually live.
-  if (!state.isAdmin && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
+  if (!state.isAdmin && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 
   const shellHtml = state.isAdmin
     ? renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML)
@@ -6947,7 +7051,7 @@ bindSelectionHandlers();
 updateBulkBarVisibility();
 if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'session')) activeMainTab = 'home';
 // Wave 1e: reset a stale public 'tournament' tab to Home when no tournament is live (else an empty panel + no nav button).
-if (!state.isAdmin && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
+if (!state.isAdmin && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 activateMainTab(activeMainTab);
 restoreTransientInteractionState(interactionSnapshot);
 refreshAzStripAvailability();
@@ -6979,6 +7083,50 @@ function bindTournamentTabV2() {
           pool_count: val('tv2-pools'), net_count: val('tv2-nets')
         });
         state.activeTournamentId = created.id;
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-register-team') {
+        // PUBLIC: a team signs itself up (replaces the Google Form). Errors shown inline in #reg-msg.
+        const fv = (fid) => ((document.getElementById(fid) || {}).value || '').trim();
+        const teamName = fv('reg-team');
+        const roster = [fv('reg-p1'), fv('reg-p2'), fv('reg-p3'), fv('reg-p4')].filter(Boolean);
+        const paid = !!((document.getElementById('reg-paid') || {}).checked);
+        const setMsg = (txt, ok) => { const m = document.getElementById('reg-msg'); if (m) { m.textContent = txt; m.style.color = ok ? 'var(--live, #16a34a)' : 'var(--danger)'; } };
+        if (!teamName) { setMsg('Enter a team name.', false); return; }
+        try {
+          el.setAttribute('disabled', 'true'); // in-flight guard (double-tap)
+          await tdbRegisterTeam(state.activeTournamentId, teamName, roster, null, paid);
+          await tdbRefreshTournaments();
+          render();                 // rebuilds the registration screen: form clears, team + count update
+          setMsg(teamName + ' is registered — you\'re in!', true);
+        } catch (err) {
+          el.removeAttribute('disabled');
+          setMsg((err && err.message) || 'Could not register — try again.', false);
+        }
+        return;                     // handled inline (public has no admin error card)
+      } else if (role === 'tv2-toggle-registration') {
+        if (!state.isAdmin) return;
+        const t = (state.tournaments || []).find((x) => x.id === state.activeTournamentId);
+        if (!t) return;
+        await tdbSetTournamentFields(t.id, { registration_open: !t.registration_open });
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-save-registration') {
+        if (!state.isAdmin) return;
+        const venmo = ((document.getElementById('tv2-venmo') || {}).value || '').trim();
+        const buyin = ((document.getElementById('tv2-buyin') || {}).value || '').trim();
+        await tdbSetTournamentFields(state.activeTournamentId, { venmo_link: venmo || null, buy_in: buyin || null });
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-share-registration') {
+        if (!state.isAdmin) return;
+        try { await navigator.clipboard.writeText(location.origin + '/'); el.textContent = 'Link copied!'; }
+        catch (_) { el.textContent = location.origin; }
+        return;
+      } else if (role === 'tv2-toggle-paid') {
+        if (!state.isAdmin) return;
+        const tm = (state.tournamentTeams || []).find((x) => x.id === id);
+        await tdbSetTeamPaid(id, !(tm && tm.paid));
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-select-tournament') {

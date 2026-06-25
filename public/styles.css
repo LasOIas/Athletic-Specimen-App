@@ -2713,6 +2713,25 @@ body.copilot-typing #bottom-nav { display: none; }
 /* A scorable match card is a tap target that opens the result pop-up. */
 .bt-node.tappable { cursor: pointer; }
 .bt-node.tappable:active { background: var(--accent-soft); }
+
+/* Tournament team self-registration (build 1) — §38 layout A (one card). Direction-A tokens, no neon. */
+.reg-screen { padding: 4px 0 10px; }
+.reg-h1 { font: 800 22px 'Sora','Inter',sans-serif; margin: 4px 0 2px; }
+.reg-sub { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
+.reg-card { padding: 16px; }
+.reg-label { font: 600 12px 'Inter',sans-serif; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 2px 0 6px; display: block; }
+.reg-input { width: 100%; box-sizing: border-box; min-height: 46px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 16px; background: var(--bg); margin-bottom: 10px; }
+.reg-remind { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--muted); background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; margin: 2px 0 12px; }
+.reg-remind svg { flex: none; margin-top: 1px; color: var(--accent); }
+.reg-pay { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.reg-venmo { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; color: #fff; background: #3D95CE; border: none; border-radius: 10px; padding: 11px 14px; text-decoration: none; }
+.reg-check { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600; }
+.reg-check input { width: 22px; height: 22px; }
+.reg-primary { width: 100%; min-height: 52px; margin-top: 2px; }
+.reg-teamspill { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+.reg-regrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.reg-paidtag { font-size: 11px; font-weight: 700; color: var(--live, #16a34a); border: 1px solid var(--live, #16a34a); border-radius: 999px; padding: 1px 8px; }
+.reg-unpaidtag { font-size: 11px; font-weight: 700; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
 .bt-enter { font-size: 11px; font-weight: 600; color: var(--accent); padding: 4px 9px 8px; }
 
 /* Result pop-up (openBracketResultModal) — sits on the shared .popup-overlay/.popup-card. */
