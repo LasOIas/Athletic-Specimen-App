@@ -10,6 +10,7 @@ const {
   validateScores, decideWinner, generateRoundRobin, generateDoubleElim,
   computeStandings, computeSeeding, computeChampion, summarizeTeamFairness,
   generateBalancedGroups, playerIdentityKey, disambiguatePlayersByName,
+  countSharedTeammatePairs, pickMostDifferentTeams,
   groupRosterPlayersBySection, isValidFullName, buildCopilotContext,
   resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
   resolveTournamentMatch,
@@ -234,6 +235,53 @@ describe('generateBalancedGroups (stochastic — invariants only)', () => {
     const out = generateBalancedGroups([{ id: '1', skill: 5 }], [], 3);
     expect(out.teams.length).toBe(3);
     expect(out.teams.flat().length).toBe(0);
+  });
+});
+
+describe('countSharedTeammatePairs (C31 #1 — re-roll variety metric)', () => {
+  const tA = [[{ id: '1' }, { id: '2' }, { id: '3' }], [{ id: '4' }, { id: '5' }, { id: '6' }]];
+  it('identical splits share every teammate pair', () => {
+    expect(countSharedTeammatePairs(tA, tA)).toBe(6); // two teams of 3 -> 3+3 pairs
+  });
+  it('a fully reshuffled split shares zero pairs', () => {
+    const tB = [[{ id: '1' }, { id: '4' }], [{ id: '2' }, { id: '5' }], [{ id: '3' }, { id: '6' }]];
+    expect(countSharedTeammatePairs(tA, tB)).toBe(0);
+  });
+  it('counts only the pairs that stayed together', () => {
+    // keeps 1&2 together and 5&6 together; everything else moves
+    const tC = [[{ id: '1' }, { id: '2' }, { id: '4' }], [{ id: '3' }, { id: '5' }, { id: '6' }]];
+    expect(countSharedTeammatePairs(tA, tC)).toBe(2);
+  });
+});
+
+describe('pickMostDifferentTeams (C31 #1 — choose the biggest reshuffle)', () => {
+  const prev = [[{ id: '1' }, { id: '2' }], [{ id: '3' }, { id: '4' }]];
+  const candSame = [[{ id: '1' }, { id: '2' }], [{ id: '3' }, { id: '4' }]]; // shares 2
+  const candDiff = [[{ id: '1' }, { id: '3' }], [{ id: '2' }, { id: '4' }]]; // shares 0
+  it('picks the candidate that shares the fewest teammate pairs with the previous split', () => {
+    expect(pickMostDifferentTeams([candSame, candDiff], prev)).toBe(candDiff);
+  });
+  it('returns null when there is no previous split to differ from', () => {
+    expect(pickMostDifferentTeams([candSame, candDiff], null)).toBe(null);
+    expect(pickMostDifferentTeams([candSame, candDiff], [])).toBe(null);
+  });
+});
+
+describe('generateBalancedGroups re-roll (C31 #1 — varied but fair)', () => {
+  it('re-rolls to mostly-new teammates while staying within the fair band', () => {
+    const skills = [3, 4, 5, 3, 4, 5, 3, 4];
+    const players = skills.map((s, i) => ({ id: String(i + 1), skill: s }));
+    const keys = players.map(playerIdentityKey);
+    let prev = generateBalancedGroups(players, keys, 2).teams;
+    const selfPairs = countSharedTeammatePairs(prev, prev); // 2 teams of 4 -> 12
+    let changedRuns = 0;
+    for (let r = 0; r < 6; r += 1) {
+      const next = generateBalancedGroups(players, keys, 2, prev).teams;
+      expect(summarizeTeamFairness(next).skillSpread).toBeLessThanOrEqual(1.5);
+      if (countSharedTeammatePairs(next, prev) < selfPairs) changedRuns += 1;
+      prev = next;
+    }
+    expect(changedRuns).toBeGreaterThanOrEqual(5); // nearly every re-roll moves teammates
   });
 });
 

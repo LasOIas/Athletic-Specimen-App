@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.9';
+const APP_VERSION = '2026.06.24.10';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5877,7 +5877,7 @@ const copilotExecutors = {
     if (!(state.checkedIn || []).length) return { is_error: true, args, result: "No one is checked in yet, so I can't make teams." };
     const prev = { teams: state.generatedTeams, order: state.liveCourtOrder, results: state.liveMatchResults,
       snaps: state.liveMatchSkillSnapshots, summary: state.generatedTeamsSummary, groupCount: state.groupCount, lastTeamSize: state.lastTeamSize };
-    const gen = generateBalancedGroups(state.players, state.checkedIn, count);
+    const gen = generateBalancedGroups(state.players, state.checkedIn, count, state.generatedTeams);
     state.lastTeamSize = null; state.groupCount = count;
     state.generatedTeams = gen.teams; state.generatedTeamsSummary = gen.summary;
     state.liveCourtOrder = defaultLiveCourtOrder(gen.teams.length);
@@ -7191,7 +7191,8 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
   if (generateBtn) {
     generateBtn.addEventListener('click', () => {
       state.lastTeamSize = null; // manual "Teams: N" = Auto / as-equal mode
-      const generated = generateBalancedGroups(state.players, state.checkedIn, state.groupCount);
+      // C31 #1: pass the current teams so a re-roll moves the most players to new teammates (varied but fair).
+      const generated = generateBalancedGroups(state.players, state.checkedIn, state.groupCount, state.generatedTeams);
       state.generatedTeams = generated.teams;
       state.generatedTeamsSummary = generated.summary;
       state.liveCourtOrder = defaultLiveCourtOrder(generated.teams.length);
@@ -7211,7 +7212,8 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       const numTeams = Math.max(2, Math.floor(state.checkedIn.length / size));
       state.groupCount = numTeams;
       state.lastTeamSize = size;
-      const generated = generateBalancedGroups(state.players, state.checkedIn, numTeams);
+      // C31 #1: pass the current teams so re-tapping a size re-rolls to a genuinely different fair split.
+      const generated = generateBalancedGroups(state.players, state.checkedIn, numTeams, state.generatedTeams);
       state.generatedTeams = generated.teams;
       state.generatedTeamsSummary = generated.summary;
       state.liveCourtOrder = defaultLiveCourtOrder(generated.teams.length);

@@ -43,17 +43,20 @@ function generateOneBalancedCandidate(eligiblePlayers, groupCount) {
   const teams = Array.from({ length: groupCount }, () => []);
   const teamSkills = new Array(groupCount).fill(0);
 
+  // C31 #1: order by skill but randomize freely WITHIN a ~1.0 skill window so whole compositions vary
+  // tap-to-tap (not just the bench). The greedy lowest-total assignment below still keeps teams fair,
+  // and generateBalancedGroups filters every candidate to the fair band — so a looser order is safe.
   const ordered = eligiblePlayers.slice().sort((a, b) => {
     const diff = (Number(b.skill) || 0) - (Number(a.skill) || 0);
-    if (Math.abs(diff) >= 0.6) return diff;
+    if (Math.abs(diff) >= 1.0) return diff;
     return Math.random() - 0.5;
   });
 
-  // Small near-skill shuffles increase variety without wrecking fairness.
+  // Near-skill shuffles add further variety without meaningfully shifting balance.
   for (let i = 0; i < ordered.length - 1; i += 1) {
     const a = Number(ordered[i].skill) || 0;
     const b = Number(ordered[i + 1].skill) || 0;
-    if (Math.abs(a - b) <= 0.6 && Math.random() < 0.35) {
+    if (Math.abs(a - b) <= 1.0 && Math.random() < 0.5) {
       const temp = ordered[i];
       ordered[i] = ordered[i + 1];
       ordered[i + 1] = temp;
@@ -86,7 +89,7 @@ function generateOneBalancedCandidate(eligiblePlayers, groupCount) {
     }
 
     const nearBest = candidates.filter(
-      (idx) => teamSkills[idx] + (Number(player.skill) || 0) <= minProjected + 0.35
+      (idx) => teamSkills[idx] + (Number(player.skill) || 0) <= minProjected + 0.75
     );
     const pool = nearBest.length ? nearBest : candidates;
     const target = pool[Math.floor(Math.random() * pool.length)];
@@ -98,7 +101,42 @@ function generateOneBalancedCandidate(eligiblePlayers, groupCount) {
   return teams;
 }
 
-function generateBalancedGroups(players, checkedInKeys, groupCount) {
+// C31 #1: count unordered same-team player-key pairs two team-splits have in common — the metric for
+// "how much did the teams actually change" between two Generate taps (lower = more reshuffled).
+function countSharedTeammatePairs(teamsA, teamsB) {
+  const pairKey = (x, y) => (x < y ? x + '|' + y : y + '|' + x);
+  const pairsOf = (teams) => {
+    const set = new Set();
+    for (const team of teams || []) {
+      const keys = (team || []).map((p) => playerIdentityKey(p)).filter(Boolean);
+      for (let i = 0; i < keys.length; i += 1) {
+        for (let j = i + 1; j < keys.length; j += 1) set.add(pairKey(keys[i], keys[j]));
+      }
+    }
+    return set;
+  };
+  const a = pairsOf(teamsA);
+  if (!a.size) return 0;
+  let shared = 0;
+  for (const pair of pairsOf(teamsB)) if (a.has(pair)) shared += 1;
+  return shared;
+}
+
+// C31 #1: from a pool of equally-fair candidate splits, return the one that shares the FEWEST teammate
+// pairs with the previous split (the biggest reshuffle). Returns null when there is no previous split.
+function pickMostDifferentTeams(candidates, previousTeams) {
+  if (!Array.isArray(candidates) || !candidates.length) return null;
+  if (!Array.isArray(previousTeams) || !previousTeams.length) return null;
+  let best = null;
+  let bestShared = Infinity;
+  for (const cand of candidates) {
+    const shared = countSharedTeammatePairs(cand, previousTeams);
+    if (shared < bestShared) { bestShared = shared; best = cand; }
+  }
+  return best;
+}
+
+function generateBalancedGroups(players, checkedInKeys, groupCount, previousTeams) {
   const inSet = new Set(checkedInKeys || []);
   const eligible = players.filter((p) => inSet.has(playerIdentityKey(p)));
   const safeGroupCount = Math.max(2, Number(groupCount) || 2);
@@ -112,34 +150,35 @@ function generateBalancedGroups(players, checkedInKeys, groupCount) {
 
   const attempts = Math.max(24, Math.min(120, eligible.length * 6));
   let best = null;
-  const nearBest = [];
+  const candidates = [];
 
   for (let i = 0; i < attempts; i += 1) {
     const teams = generateOneBalancedCandidate(eligible, safeGroupCount);
     const fairness = summarizeTeamFairness(teams);
-    const candidate = { teams, fairness };
-
-    if (!best || fairness.score < best.fairness.score - 1e-9) {
-      best = candidate;
-      nearBest.length = 0;
-      nearBest.push(candidate);
-      continue;
-    }
-
-    if (
-      fairness.score <= best.fairness.score + 0.35 &&
-      fairness.skillSpread <= best.fairness.skillSpread + 0.25
-    ) {
-      nearBest.push(candidate);
-    }
+    candidates.push({ teams, fairness });
+    if (!best || fairness.score < best.fairness.score - 1e-9) best = { teams, fairness };
   }
 
-  const pool = nearBest.length ? nearBest : [best];
-  const chosen = pool[Math.floor(Math.random() * pool.length)] || best;
-  const chosenFairness = chosen ? chosen.fairness : { skillSpread: 0, countSpread: 0, score: 0 };
+  // C31 #1: keep EVERY candidate that's genuinely fair — within the "fairly balanced" band (team skill
+  // totals within ~1.5) or, when the roster can't do that well, anything close to the fairest — and
+  // never worse on team sizes. A wide fair pool is what lets the re-roll change a lot without going
+  // lopsided (the old code kept only a razor-thin near-best pool, so taps looked the same).
+  const FAIRLY_BALANCED_MAX = 1.5;
+  const fairThreshold = Math.max(best.fairness.skillSpread + 1e-9, FAIRLY_BALANCED_MAX);
+  let pool = candidates.filter((c) =>
+    c.fairness.skillSpread <= fairThreshold && c.fairness.countSpread <= best.fairness.countSpread
+  );
+  if (!pool.length) pool = [best];
+
+  // C31 #1: among the fair pool, pick the split that moves the most players to new teammates vs the
+  // previous teams (so repeated taps "completely change" them); random when there's no previous split.
+  const poolTeams = pool.map((c) => c.teams);
+  const chosenTeams = pickMostDifferentTeams(poolTeams, previousTeams)
+    || poolTeams[Math.floor(Math.random() * poolTeams.length)];
+  const chosenFairness = summarizeTeamFairness(chosenTeams);
 
   return {
-    teams: chosen ? chosen.teams : Array.from({ length: safeGroupCount }, () => []),
+    teams: chosenTeams,
     summary: {
       skillSpread: Number(chosenFairness.skillSpread.toFixed(2)),
       countSpread: chosenFairness.countSpread,
@@ -682,6 +721,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
     generateOneBalancedCandidate, generateBalancedGroups, validateScores,
+    countSharedTeammatePairs, pickMostDifferentTeams,
     generateRoundRobin, decideWinner, computeStandings, applyHeadToHeadGroups,
     nextPow2, seedOrder, computeSeeding, computeChampion, generateDoubleElim,
     disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName,
