@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.19';
+const APP_VERSION = '2026.06.25.20';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3833,49 +3833,79 @@ function btZoomAround(canvas, nextScale, px, py) {
   btScale = s2; btX = px - cx * s2; btY = py - cy * s2;
   btClampApply(canvas);
 }
-// Touch + mouse gesture controller: 1 pointer = pan (any direction), 2 = pinch-zoom, wheel = zoom.
+// C57 redo (2026-06-25): map-style gesture controller. Touch uses native TOUCH EVENTS (not Pointer
+// Events) because iOS Safari handles two simultaneous touch-pointers + setPointerCapture unreliably —
+// the 2nd finger was getting dropped (pinch dead) and capture made one-finger panning janky. `e.touches`
+// always reports every active finger, no capture needed → rock-solid on iOS. Exactly Mike's ask: TWO
+// fingers = pinch zoom, ONE finger = free pan in ANY direction (diagonal included). Mouse keeps Pointer
+// Events (gated to pointerType==='mouse') so a desktop drag still captures out-of-element. Wheel = zoom.
+// Tap-to-score preserved: a clean tap never preventDefaults, so its synthesized click reaches the node.
 let _btWired = null;
 function wireBracketGestures(pan, canvas) {
-  if (_btWired === pan) return; // pan is a fresh element each render; bind once per element
+  if (_btWired === pan) return; // pan is a fresh element each render; bind once per element (old listeners GC with the old node)
   _btWired = pan;
-  const pts = new Map();
-  let panStart = null, pinchStart = null, moved = false;
-  const cap = (id) => { try { pan.setPointerCapture(id); } catch (_) {} };
-  const local = (e) => { const r = pan.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const xy = (clientX, clientY) => { const r = pan.getBoundingClientRect(); return { x: clientX - r.left, y: clientY - r.top }; };
+  let moved = false;
+
+  // ---- TOUCH: 1 finger = free 2D pan · 2 fingers = pinch-zoom around the live midpoint ----
+  let panStart = null;   // {x,y,bx,by}
+  let pinchLast = null;  // last 2-finger distance in px (incremental zoom → no drift)
+  pan.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 1) {
+      const p = xy(e.touches[0].clientX, e.touches[0].clientY);
+      panStart = { x: p.x, y: p.y, bx: btX, by: btY }; pinchLast = null; moved = false;
+    } else if (e.touches.length >= 2) {
+      const a = xy(e.touches[0].clientX, e.touches[0].clientY), b = xy(e.touches[1].clientX, e.touches[1].clientY);
+      pinchLast = Math.hypot(a.x - b.x, a.y - b.y) || 1; panStart = null; moved = true; pan.classList.add('drag');
+    }
+  }, { passive: true });
+  pan.addEventListener('touchmove', (e) => {
+    if (e.touches.length >= 2 && pinchLast != null) {
+      e.preventDefault(); // claim the pinch (touch-action:none already set; this stops any iOS rubber-band)
+      const a = xy(e.touches[0].clientX, e.touches[0].clientY), b = xy(e.touches[1].clientX, e.touches[1].clientY);
+      const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      btZoomAround(canvas, btScale * (d / pinchLast), (a.x + b.x) / 2, (a.y + b.y) / 2);
+      pinchLast = d;
+    } else if (e.touches.length === 1 && panStart) {
+      const p = xy(e.touches[0].clientX, e.touches[0].clientY);
+      if (!moved && Math.abs(p.x - panStart.x) + Math.abs(p.y - panStart.y) > 6) { moved = true; pan.classList.add('drag'); }
+      if (moved) { e.preventDefault(); btX = panStart.bx + (p.x - panStart.x); btY = panStart.by + (p.y - panStart.y); btClampApply(canvas); }
+    }
+  }, { passive: false });
+  const endTouch = (e) => {
+    if (e.touches.length === 0) { panStart = null; pinchLast = null; pan.classList.remove('drag'); }
+    else if (e.touches.length === 1) { // lifted from pinch to one finger → resume panning smoothly
+      const p = xy(e.touches[0].clientX, e.touches[0].clientY);
+      panStart = { x: p.x, y: p.y, bx: btX, by: btY }; pinchLast = null;
+    }
+  };
+  pan.addEventListener('touchend', endTouch);
+  pan.addEventListener('touchcancel', endTouch);
+
+  // ---- MOUSE (desktop): drag = pan. Pointer Events, mouse-only, with capture for out-of-element drag ----
+  let mStart = null;
   pan.addEventListener('pointerdown', (e) => {
-    pts.set(e.pointerId, local(e));
-    moved = false;
-    // NOTE: do NOT capture on a single pointerdown — that retargets the click to .bt-pan and breaks
-    // tap-to-score. Capture only once a real drag/pinch starts (below), so a clean tap still scores.
-    if (pts.size === 1) { const p = local(e); panStart = { id: e.pointerId, x: p.x, y: p.y, bx: btX, by: btY }; }
-    else if (pts.size === 2) { const a = [...pts.values()]; pinchStart = { d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y), s: btScale }; panStart = null; moved = true; pan.classList.add('drag'); pts.forEach((_, id) => cap(id)); }
+    if (e.pointerType !== 'mouse') return; // touch handled above via TouchEvents
+    const p = xy(e.clientX, e.clientY); mStart = { x: p.x, y: p.y, bx: btX, by: btY }; moved = false;
   });
   pan.addEventListener('pointermove', (e) => {
-    if (!pts.has(e.pointerId)) return;
-    pts.set(e.pointerId, local(e));
-    if (pts.size >= 2 && pinchStart) {
-      const a = [...pts.values()]; const d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
-      if (pinchStart.d > 0) btZoomAround(canvas, pinchStart.s * (d / pinchStart.d), (a[0].x + a[1].x) / 2, (a[0].y + a[1].y) / 2);
-    } else if (panStart) {
-      const p = local(e);
-      if (!moved && Math.abs(p.x - panStart.x) + Math.abs(p.y - panStart.y) > 5) { moved = true; pan.classList.add('drag'); cap(panStart.id); }
-      if (moved) { btX = panStart.bx + (p.x - panStart.x); btY = panStart.by + (p.y - panStart.y); btClampApply(canvas); }
-    }
+    if (e.pointerType !== 'mouse' || !mStart) return;
+    const p = xy(e.clientX, e.clientY);
+    if (!moved && Math.abs(p.x - mStart.x) + Math.abs(p.y - mStart.y) > 5) { moved = true; pan.classList.add('drag'); try { pan.setPointerCapture(e.pointerId); } catch (_) {} }
+    if (moved) { btX = mStart.bx + (p.x - mStart.x); btY = mStart.by + (p.y - mStart.y); btClampApply(canvas); }
   });
-  const up = (e) => {
-    pts.delete(e.pointerId);
-    if (pts.size < 2) pinchStart = null;
-    if (pts.size === 1) { const id = [...pts.keys()][0]; const p = pts.get(id); panStart = { id, x: p.x, y: p.y, bx: btX, by: btY }; }
-    if (pts.size === 0) { panStart = null; pan.classList.remove('drag'); }
-  };
-  pan.addEventListener('pointerup', up);
-  pan.addEventListener('pointercancel', up);
+  const endMouse = (e) => { if (e.pointerType && e.pointerType !== 'mouse') return; mStart = null; pan.classList.remove('drag'); };
+  pan.addEventListener('pointerup', endMouse);
+  pan.addEventListener('pointercancel', endMouse);
+
+  // ---- WHEEL / trackpad: zoom around the cursor ----
   pan.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const p = local(e);
+    const p = xy(e.clientX, e.clientY);
     btZoomAround(canvas, btScale * (e.deltaY < 0 ? 1.12 : 1 / 1.12), p.x, p.y);
   }, { passive: false });
-  // A drag/pinch must not also fire a click that opens a match pop-up; a clean tap still scores.
+
+  // A drag/pinch must not also fire a click that opens a match pop-up; a clean tap (moved=false) still scores.
   pan.addEventListener('click', (e) => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
 }
 
