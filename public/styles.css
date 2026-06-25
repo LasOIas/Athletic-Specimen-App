@@ -2675,12 +2675,7 @@ body.copilot-typing #bottom-nav { display: none; }
 .bt-sides button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 
 .bt-bar { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; }
-.bt-zoom { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--border);
-  border-radius: 999px; padding: 3px; }
-.bt-zoom button { min-height: 34px; padding: 5px 14px; border: 1px solid transparent; background: transparent;
-  color: var(--muted); font-weight: 600; font-size: 13px; border-radius: 999px; }
-.bt-zoom button.on { background: var(--accent); color: #fff; }
-.bt-hint { flex: 1; font-size: 12px; color: var(--faint); text-align: right; }
+.bt-hint { flex: 1; font-size: 12px; color: var(--faint); text-align: left; }
 
 /* C57: map-style pan/zoom — the canvas is transformed (scale + translate) inside a fixed, gesture-owning
    viewport. touch-action:none so a finger drag pans the bracket any direction (handled in JS), not the page. */

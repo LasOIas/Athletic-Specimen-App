@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.22';
+const APP_VERSION = '2026.06.25.23';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3731,15 +3731,9 @@ function buildBracketHTML(tournament, matches, teams) {
     ${sideDefs.map(([s, lbl]) => `<button type="button" data-role="tv2-bracket-side" data-side="${s}" class="${s === side ? 'on' : ''}">${lbl}</button>`).join('')}
   </div>` : '';
 
-  // C57: map-style bracket — pinch / scroll to zoom, drag any direction to pan; "Fit" resets to the whole tree.
-  const zoomToggle = `<div class="bt-bar">
-    <div class="bt-zoom">
-      <button type="button" data-role="tv2-bracket-zoom" data-z="out" aria-label="Zoom out">&minus;</button>
-      <button type="button" data-role="tv2-bracket-zoom" data-z="fit">Fit</button>
-      <button type="button" data-role="tv2-bracket-zoom" data-z="in" aria-label="Zoom in">+</button>
-    </div>
-    <span class="bt-hint">tap a match to score &middot; pinch &amp; drag to explore</span>
-  </div>`;
+  // C57: map-style bracket — pinch to zoom, drag any direction to pan (gestures handle it, no zoom buttons).
+  // Mike removed the [- Fit +] control; keep a one-line hint so scoring stays discoverable.
+  const zoomToggle = `<div class="bt-bar"><span class="bt-hint">tap a match to enter its score</span></div>`;
 
   // Columns left-to-right = rounds; connector lines between them are drawn post-render.
   const sideMatches = main.filter((m) => m.side === side);
@@ -7053,12 +7047,6 @@ function bindTournamentTabV2() {
         state.bracketRound = null;
         btResetView(); // C57: show the newly-selected side fit to screen
         partialRenderTournament();
-      } else if (role === 'tv2-bracket-zoom') {
-        // C57: map-style zoom controls — Fit = reset + re-fit; +/- zoom around the centre.
-        const z = el.getAttribute('data-z');
-        const cv = document.querySelector('[data-role="bt-canvas"]');
-        if (z === 'fit') { btResetView(); layoutBracketTree(); }
-        else if (cv && btView) { btZoomAround(cv, btScale * (z === 'in' ? 1.3 : 1 / 1.3), btView.vw / 2, btView.vh / 2); }
       } else if (role === 'tv2-bracket-open') {
         openBracketResultModal(id); // pop-up handles auth (scores it, or tells you how to)
       } else if (role === 'tv2-bracket-clear') {
