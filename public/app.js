@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.25';
+const APP_VERSION = '2026.06.25.26';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2406,6 +2406,9 @@ function publicHomeHTML() {
   const courtsSection = courtsHTML
     ? `<div id="ph-courts"><div class="ph-sec">On the courts</div>${courtsHTML}</div>`
     : '<div id="ph-courts"></div>';
+  // When nothing is live, surface an open-registration tournament as a "Sign up" banner so a shared
+  // GroupMe link lands on a clear CTA (not a cold Home). Reuses the .ph-tourney accent banner.
+  const regTourney = tourney ? null : (state.tournaments || []).find((t) => t.registration_open && t.status === 'setup');
   const tourneyStrip = tourney
     ? `<button type="button" class="ph-tourney" data-nav-tab="tournament" id="ph-tourney">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4a2 2 0 0 1-2-2V5h4M18 9h2a2 2 0 0 0 2-2V5h-4M6 5h12v3a6 6 0 0 1-12 0Z"/><path d="M9 18h6M10 21h4M12 14v4"/></svg>
@@ -2414,6 +2417,15 @@ function publicHomeHTML() {
           <span class="ph-tourney-t">${escapeHTML(tourney.name || 'Tournament')}</span>
         </span>
         <span class="ph-tourney-go">View &rarr;</span>
+      </button>`
+    : regTourney
+    ? `<button type="button" class="ph-tourney" data-nav-tab="tournament" id="ph-tourney">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 14l2 2 4-4"/></svg>
+        <span class="ph-tourney-mid">
+          <span class="ph-tourney-live">Registration open</span>
+          <span class="ph-tourney-t">${escapeHTML(regTourney.name || 'Tournament')}</span>
+        </span>
+        <span class="ph-tourney-go">Sign up &rarr;</span>
       </button>`
     : '<span id="ph-tourney"></span>';
   const sessionCard = state.currentSession
@@ -3441,9 +3453,11 @@ async function refreshTournamentLive() {
   if (activeMainTab === 'tournament') {
     const ae = document.activeElement;
     if (ae && ae.closest && ae.closest('#tab-tournament') && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;
-    // Don't clobber a half-typed score even after the field blurs.
+    // Don't clobber a half-typed score OR a half-filled team registration even after the field blurs.
+    // (number = score entry; text = the registration form reg-team/reg-p1..4 — a background sync, esp. a
+    // `teams` realtime ping when ANOTHER team registers, must not rebuild the form and wipe what's typed.)
     const dirty = Array.prototype.some.call(
-      document.querySelectorAll('#tab-tournament input[type=number]'), (i) => i.value !== '');
+      document.querySelectorAll('#tab-tournament input[type=number], #tab-tournament input[type=text]'), (i) => i.value !== '');
     if (dirty) return;
     await tdbRefreshTournaments();
     if (activeMainTab === 'tournament') partialRenderTournament();
@@ -3951,7 +3965,8 @@ function wireBracketGestures(pan, canvas) {
 // shown for social proof (names only, no skill). Submits via the anon register_team RPC.
 function buildPublicRegisterHTML(t, teams) {
   const count = (teams || []).length;
-  const venmo = t.venmo_link ? String(t.venmo_link).trim() : '';
+  const venmoRaw = t.venmo_link ? String(t.venmo_link).trim() : '';
+  const venmo = /^https?:\/\//i.test(venmoRaw) ? venmoRaw : ''; // only render an http(s) link (block javascript: etc.)
   const buyIn = t.buy_in ? String(t.buy_in).trim() : '';
   const payRow = venmo
     ? `<div class="reg-pay">
@@ -7093,16 +7108,17 @@ function bindTournamentTabV2() {
         const paid = !!((document.getElementById('reg-paid') || {}).checked);
         const setMsg = (txt, ok) => { const m = document.getElementById('reg-msg'); if (m) { m.textContent = txt; m.style.color = ok ? 'var(--live, #16a34a)' : 'var(--danger)'; } };
         if (!teamName) { setMsg('Enter a team name.', false); return; }
+        el.setAttribute('disabled', 'true'); // in-flight guard (double-tap)
         try {
-          el.setAttribute('disabled', 'true'); // in-flight guard (double-tap)
           await tdbRegisterTeam(state.activeTournamentId, teamName, roster, null, paid);
-          await tdbRefreshTournaments();
-          render();                 // rebuilds the registration screen: form clears, team + count update
-          setMsg(teamName + ' is registered — you\'re in!', true);
         } catch (err) {
           el.removeAttribute('disabled');
           setMsg((err && err.message) || 'Could not register — try again.', false);
+          return;                   // the INSERT failed → real error
         }
+        // Registered for real — a refresh/render hiccup must NOT claim it failed.
+        try { await tdbRefreshTournaments(); render(); } catch (_) {} // rebuilds the screen: form clears, team + count update
+        setMsg(teamName + ' is registered — you\'re in!', true);
         return;                     // handled inline (public has no admin error card)
       } else if (role === 'tv2-toggle-registration') {
         if (!state.isAdmin) return;
