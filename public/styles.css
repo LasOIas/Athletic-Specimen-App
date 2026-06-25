@@ -2679,14 +2679,13 @@ body.copilot-typing #bottom-nav { display: none; }
 .bt-zoom button.on { background: var(--accent); color: #fff; }
 .bt-hint { flex: 1; font-size: 12px; color: var(--faint); text-align: right; }
 
+/* C57: map-style pan/zoom — the canvas is transformed (scale + translate) inside a fixed, gesture-owning
+   viewport. touch-action:none so a finger drag pans the bracket any direction (handled in JS), not the page. */
 .bt-pan { position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: var(--r-md);
   background: radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0) 0 0 / 22px 22px, var(--bg);
-  touch-action: pan-x pan-y; }
-/* Zoom-in = slide the bracket sideways; vertical is the normal page scroll so you can always
-   reach the bottom matches (a fixed-height nested vertical scroll trapped them under the nav). */
-.bt-pan.zoom { overflow-x: auto; overflow-y: hidden; cursor: grab; -webkit-overflow-scrolling: touch; }
-.bt-pan.zoom.drag { cursor: grabbing; }
-.bt-canvas { position: relative; transform-origin: top left; width: max-content; }
+  touch-action: none; cursor: grab; -webkit-user-select: none; user-select: none; }
+.bt-pan.drag { cursor: grabbing; }
+.bt-canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; width: max-content; will-change: transform; }
 .bt-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .bt-link { fill: none; stroke: var(--faint); stroke-width: 1.5; opacity: .5; }
 .bt-link.on { stroke: var(--accent); stroke-width: 2.5; opacity: 1; }

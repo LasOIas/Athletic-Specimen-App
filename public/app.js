@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.11';
+const APP_VERSION = '2026.06.25.12';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3652,14 +3652,14 @@ function buildBracketHTML(tournament, matches, teams) {
     ${sideDefs.map(([s, lbl]) => `<button type="button" data-role="tv2-bracket-side" data-side="${s}" class="${s === side ? 'on' : ''}">${lbl}</button>`).join('')}
   </div>` : '';
 
-  // Fit-to-screen by default (whole bracket, no scroll); "Zoom in" lets you drag/scroll a big field.
-  const zoom = state.bracketZoom === 'zoom' ? 'zoom' : 'fit';
+  // C57: map-style bracket — pinch / scroll to zoom, drag any direction to pan; "Fit" resets to the whole tree.
   const zoomToggle = `<div class="bt-bar">
     <div class="bt-zoom">
-      <button type="button" data-role="tv2-bracket-zoom" data-zoom="fit" class="${zoom === 'fit' ? 'on' : ''}">Whole bracket</button>
-      <button type="button" data-role="tv2-bracket-zoom" data-zoom="zoom" class="${zoom === 'zoom' ? 'on' : ''}">Zoom in</button>
+      <button type="button" data-role="tv2-bracket-zoom" data-z="out" aria-label="Zoom out">&minus;</button>
+      <button type="button" data-role="tv2-bracket-zoom" data-z="fit">Fit</button>
+      <button type="button" data-role="tv2-bracket-zoom" data-z="in" aria-label="Zoom in">+</button>
     </div>
-    <span class="bt-hint">${zoom === 'fit' ? 'tap a match to enter its score' : 'drag to slide · tap a match to score'}</span>
+    <span class="bt-hint">tap a match to score &middot; pinch &amp; drag to explore</span>
   </div>`;
 
   // Columns left-to-right = rounds; connector lines between them are drawn post-render.
@@ -3678,7 +3678,7 @@ function buildBracketHTML(tournament, matches, teams) {
   }).join('');
 
   return `${champBanner}${sideTabs}${zoomToggle}
-    <div class="bt-pan${zoom === 'zoom' ? ' zoom' : ''}" data-role="bt-pan">
+    <div class="bt-pan" data-role="bt-pan">
       <div class="bt-canvas" data-role="bt-canvas">
         <svg class="bt-links" data-role="bt-links" xmlns="http://www.w3.org/2000/svg"></svg>
         <div class="bt-cols" data-role="bt-cols">${cols}</div>
@@ -3687,10 +3687,10 @@ function buildBracketHTML(tournament, matches, teams) {
 }
 
 // Post-render pass for the connected bracket: draws the SVG elbow connectors from each match to
-// the match its winner advances to, then either fits the whole tree to the viewport width
-// (state.bracketZoom='fit', the default) or lets the user pan it ('zoom'). Called after every
-// render of the tournament tab + on resize + on tab-in. No-op when no bracket tree is present
-// or when the tab is hidden (offsetParent null), so background syncs don't misfire.
+// the match its winner advances to, then lays out the C57 map-style view — a fixed-height viewport
+// showing the whole tree fit-to-width by default, which the user can pinch/scroll-zoom + drag any
+// direction to pan. Called after every render of the tournament tab + on resize + on tab-in. No-op
+// when no bracket tree is present or the tab is hidden (offsetParent null), so background syncs don't misfire.
 function layoutBracketTree() {
   const pan = document.querySelector('[data-role="bt-pan"]');
   if (!pan || !pan.offsetParent) return;
@@ -3721,43 +3721,82 @@ function layoutBracketTree() {
   });
   svg.innerHTML = paths;
 
-  if (state.bracketZoom === 'zoom') {
-    // Natural height = the full bracket; vertical scrolling is the normal page scroll (always
-    // reachable), only sideways is a pan (.bt-pan.zoom = overflow-x auto / overflow-y hidden).
-    pan.style.height = '';
-    pan.onclick = null;
-    wireBracketPan(pan);
-  } else {
-    const avail = pan.clientWidth - 4;
-    const scale = avail > 0 ? Math.min(1, avail / W) : 1;
-    canvas.style.transform = `scale(${scale})`;
-    pan.style.height = Math.ceil(H * scale) + 'px';
-    // No tap-to-zoom: tapping a match card ONLY opens the result pop-up (its data-role handler);
-    // zooming is the explicit "Zoom in" toggle. (Tap-to-zoom was intercepting taps on small cards.)
-    pan.onclick = null;
-  }
+  // C57: map-style view — fixed on-screen viewport; default = the WHOLE bracket fit to width AND height
+  // (no scroll), centered; pinch / wheel zoom in, drag pans any direction.
+  const avail = pan.clientWidth;
+  const vh = Math.max(320, Math.round((window.innerHeight || 800) * 0.64));
+  const fit = (avail > 0 && W > 0 && H > 0) ? Math.min(1, avail / W, vh / H) : 1;
+  pan.style.height = vh + 'px';
+  btView = { W, H, vw: avail, vh, fit, max: Math.max(fit * 4, 1.8) };
+  if (btScale == null) { btScale = fit; btX = (avail - W * fit) / 2; btY = (vh - H * fit) / 2; }
+  btClampApply(canvas);
+  wireBracketGestures(pan, canvas);
 }
 
-// Desktop mouse drag-to-pan in zoom mode (touch already pans natively via overflow:auto).
-// Attached to the fresh pan element each render; guarded so repeat layouts don't double-bind it.
-let _btPanWired = null;
-function wireBracketPan(pan) {
-  if (_btPanWired === pan) return;
-  _btPanWired = pan;
-  let down = false, moved = false, sx, sy, sl, st;
+// C57: map-style bracket pan/zoom — scale + 2D translate on .bt-canvas (replaces the fit/zoom toggle).
+let btView = null;          // {W,H,vw,vh,fit,max} from the last layout
+let btScale = null;         // null => (re)fit to the whole bracket on the next layout
+let btX = 0, btY = 0;       // canvas translate (px)
+function btResetView() { btScale = null; } // force fit next layout (Fit button / side switch)
+function btClampApply(canvas) {
+  if (!btView || !canvas) return;
+  const { W, H, vw, vh, fit, max } = btView;
+  btScale = Math.min(max, Math.max(fit, btScale));
+  const cw = W * btScale, ch = H * btScale;
+  btX = cw <= vw ? (vw - cw) / 2 : Math.min(0, Math.max(vw - cw, btX));
+  btY = ch <= vh ? (vh - ch) / 2 : Math.min(0, Math.max(vh - ch, btY));
+  canvas.style.transform = `translate(${btX}px, ${btY}px) scale(${btScale})`;
+}
+function btZoomAround(canvas, nextScale, px, py) {
+  if (!btView) return;
+  const s2 = Math.min(btView.max, Math.max(btView.fit, nextScale));
+  const cx = (px - btX) / btScale, cy = (py - btY) / btScale; // content point under the focus
+  btScale = s2; btX = px - cx * s2; btY = py - cy * s2;
+  btClampApply(canvas);
+}
+// Touch + mouse gesture controller: 1 pointer = pan (any direction), 2 = pinch-zoom, wheel = zoom.
+let _btWired = null;
+function wireBracketGestures(pan, canvas) {
+  if (_btWired === pan) return; // pan is a fresh element each render; bind once per element
+  _btWired = pan;
+  const pts = new Map();
+  let panStart = null, pinchStart = null, moved = false;
+  const cap = (id) => { try { pan.setPointerCapture(id); } catch (_) {} };
+  const local = (e) => { const r = pan.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
   pan.addEventListener('pointerdown', (e) => {
-    if (e.pointerType && e.pointerType !== 'mouse') return; // let touch use native scroll
-    down = true; moved = false; pan.classList.add('drag'); sx = e.clientX; sy = e.clientY; sl = pan.scrollLeft; st = pan.scrollTop;
+    pts.set(e.pointerId, local(e));
+    moved = false;
+    // NOTE: do NOT capture on a single pointerdown — that retargets the click to .bt-pan and breaks
+    // tap-to-score. Capture only once a real drag/pinch starts (below), so a clean tap still scores.
+    if (pts.size === 1) { const p = local(e); panStart = { id: e.pointerId, x: p.x, y: p.y, bx: btX, by: btY }; }
+    else if (pts.size === 2) { const a = [...pts.values()]; pinchStart = { d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y), s: btScale }; panStart = null; moved = true; pan.classList.add('drag'); pts.forEach((_, id) => cap(id)); }
   });
-  const end = () => { down = false; pan.classList.remove('drag'); };
-  pan.addEventListener('pointerup', end);
-  pan.addEventListener('pointerleave', end);
   pan.addEventListener('pointermove', (e) => {
-    if (!down) return;
-    if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 6) moved = true;
-    pan.scrollLeft = sl - (e.clientX - sx); pan.scrollTop = st - (e.clientY - sy);
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, local(e));
+    if (pts.size >= 2 && pinchStart) {
+      const a = [...pts.values()]; const d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+      if (pinchStart.d > 0) btZoomAround(canvas, pinchStart.s * (d / pinchStart.d), (a[0].x + a[1].x) / 2, (a[0].y + a[1].y) / 2);
+    } else if (panStart) {
+      const p = local(e);
+      if (!moved && Math.abs(p.x - panStart.x) + Math.abs(p.y - panStart.y) > 5) { moved = true; pan.classList.add('drag'); cap(panStart.id); }
+      if (moved) { btX = panStart.bx + (p.x - panStart.x); btY = panStart.by + (p.y - panStart.y); btClampApply(canvas); }
+    }
   });
-  // A mouse drag shouldn't also register as a click that opens a match pop-up.
+  const up = (e) => {
+    pts.delete(e.pointerId);
+    if (pts.size < 2) pinchStart = null;
+    if (pts.size === 1) { const id = [...pts.keys()][0]; const p = pts.get(id); panStart = { id, x: p.x, y: p.y, bx: btX, by: btY }; }
+    if (pts.size === 0) { panStart = null; pan.classList.remove('drag'); }
+  };
+  pan.addEventListener('pointerup', up);
+  pan.addEventListener('pointercancel', up);
+  pan.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const p = local(e);
+    btZoomAround(canvas, btScale * (e.deltaY < 0 ? 1.12 : 1 / 1.12), p.x, p.y);
+  }, { passive: false });
+  // A drag/pinch must not also fire a click that opens a match pop-up; a clean tap still scores.
   pan.addEventListener('click', (e) => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
 }
 
@@ -6878,10 +6917,14 @@ function bindTournamentTabV2() {
       } else if (role === 'tv2-bracket-side') {
         state.bracketSide = el.getAttribute('data-side');
         state.bracketRound = null;
+        btResetView(); // C57: show the newly-selected side fit to screen
         partialRenderTournament();
       } else if (role === 'tv2-bracket-zoom') {
-        state.bracketZoom = el.getAttribute('data-zoom') === 'zoom' ? 'zoom' : 'fit';
-        partialRenderTournament();
+        // C57: map-style zoom controls — Fit = reset + re-fit; +/- zoom around the centre.
+        const z = el.getAttribute('data-z');
+        const cv = document.querySelector('[data-role="bt-canvas"]');
+        if (z === 'fit') { btResetView(); layoutBracketTree(); }
+        else if (cv && btView) { btZoomAround(cv, btScale * (z === 'in' ? 1.3 : 1 / 1.3), btView.vw / 2, btView.vh / 2); }
       } else if (role === 'tv2-bracket-open') {
         openBracketResultModal(id); // pop-up handles auth (scores it, or tells you how to)
       } else if (role === 'tv2-bracket-clear') {
