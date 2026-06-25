@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.14';
+const APP_VERSION = '2026.06.25.15';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1324,6 +1324,30 @@ function partialRender() {
         return;
       }
     }
+  }
+
+  // Wave 1b (2026-06-25): public Scores tab updates IN PLACE. Without this, a background sync (15s poll
+  // + realtime push) falls through to the line-~1338 full render() below, rebuilding #root and yanking a
+  // spectator scrolled down live Scores back to the top — the #1 stated frustration, on the most-watched
+  // public view. The public shell has no `.players`, so mirror the Home short-circuit: rebuild only the
+  // scores container (publicScoresHTML recomputes live courts/standings).
+  if (!playersEl && activeMainTab === 'scores') {
+    const c = document.querySelector('#tab-scores .container');
+    if (c) {
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      c.innerHTML = publicScoresHTML();
+      return;
+    }
+  }
+
+  // Wave 1b (2026-06-25): public Bracket/Tournament tab updates via partialRenderTournament (rebuilds
+  // only #tab-tournament .container + redraws/fits the tree) instead of a full render() that resets the
+  // spectator's scroll AND the bracket pan/zoom. maybeAutoGenerateBracket inside it is admin+tournament
+  // gated, so it's a no-op for a public viewer.
+  if (!playersEl && activeMainTab === 'tournament') {
+    if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+    partialRenderTournament();
+    return;
   }
 
   if (!syncNoticeEl || !playersEl) { render(); return; }
@@ -3365,7 +3389,16 @@ async function refreshTournamentLive() {
   } else {
     // Off the tab: keep the list fresh so the Tournament nav appears/disappears as events go live.
     state.tournaments = await tdbListTournaments();
-    if (tournamentNavVisible() !== prevNav) render();
+    if (tournamentNavVisible() !== prevNav) {
+      // Wave 1b (2026-06-25): the Bracket nav button shows/hides when a tournament goes live or ends on
+      // another device. Rebuild ONLY #bottom-nav (the click handler is delegated on the nav element, so
+      // an innerHTML swap keeps it working) instead of a full render() that resets a spectator's scroll —
+      // exactly at the peak-attention moment a tournament starts. Public-only: admin's tournamentNavVisible()
+      // is always true (isAdmin) so prevNav never flips for admin; fall back to render() defensively.
+      const nav = document.getElementById('bottom-nav');
+      if (nav && !state.isAdmin) { nav.innerHTML = buildPublicNavInnerHTML(); activateMainTab(activeMainTab); }
+      else render();
+    }
   }
 }
 
@@ -5848,6 +5881,31 @@ function publicCheckinHTML() {
 
 // C26 item 2: Public surface shell — hardcodes the non-admin branch of every former interleaved
 // `state.isAdmin ?` ternary. Returns the full #app-shell string.
+// Wave 1b (2026-06-25): the public bottom-nav buttons, extracted so refreshTournamentLive can rebuild
+// ONLY the nav (show/hide the Bracket button as a tournament goes live/ends on another device) instead
+// of a full render() that resets a spectator's scroll. The click handler is delegated on #bottom-nav
+// (attachHandlers), so swapping innerHTML keeps navigation working.
+function buildPublicNavInnerHTML() {
+  return `
+    <button class="nav-btn" data-nav-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="players">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg>
+      <span>Check In</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="scores">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
+      <span>Scores</span>
+    </button>
+    ${(state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket' || t.status === 'completed') ? `
+    <button class="nav-btn" data-nav-tab="tournament">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg>
+      <span>Bracket</span>
+    </button>` : ''}`;
+}
+
 function renderPublicShell() {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
   return `
@@ -5879,25 +5937,7 @@ function renderPublicShell() {
       </div>
     </div>
   </div>
-  <nav id="bottom-nav">
-    <button class="nav-btn" data-nav-tab="home">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>
-      <span>Home</span>
-    </button>
-    <button class="nav-btn" data-nav-tab="players">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg>
-      <span>Check In</span>
-    </button>
-    <button class="nav-btn" data-nav-tab="scores">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
-      <span>Scores</span>
-    </button>
-    ${(state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket' || t.status === 'completed') ? `
-    <button class="nav-btn" data-nav-tab="tournament">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg>
-      <span>Bracket</span>
-    </button>` : ''}
-  </nav>
+  <nav id="bottom-nav">${buildPublicNavInnerHTML()}</nav>
 </div>
   `;
 }
