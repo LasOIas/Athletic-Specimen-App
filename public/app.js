@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.1';
+const APP_VERSION = '2026.06.25.2';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3499,24 +3499,10 @@ function openBracketResultModal(matchId) {
   const aName = teamNameById(state.tournamentTeams, m.team_a_id);
   const bName = teamNameById(state.tournamentTeams, m.team_b_id);
   const title = (m.round_label || 'Match').replace(/ M\d+$/, '') + (m.net ? ' · Net ' + m.net : '');
-  const pid = state.tournamentPickedTeamId;
-  const canSubmit = state.isAdmin || (!!pid && (m.team_a_id === pid || m.team_b_id === pid));
   const overlay = document.createElement('div');
   overlay.className = 'popup-overlay brm-overlay';
-  // Viewer who can't score this match: explain how instead of a silent dead tap.
-  if (!canSubmit) {
-    const closeGate = () => overlay.remove();
-    overlay.innerHTML = `<div class="popup-card brm-card" role="dialog" aria-modal="true" aria-label="Match">
-      <div class="brm-title">${escapeHTML(title)}</div>
-      <p class="brm-sub">${escapeHTML(aName)} vs ${escapeHTML(bName)}</p>
-      <p class="brm-gate">Only the admin can enter results. Log in with <b>Check In &rsaquo; Admin</b>, or pick your team above to score your own match.</p>
-      <div class="brm-actions"><button type="button" class="primary" id="brm-ok">OK</button></div>
-    </div>`;
-    document.body.appendChild(overlay);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeGate(); });
-    overlay.querySelector('#brm-ok').onclick = closeGate;
-    return;
-  }
+  // Anyone can enter a result (Mike's "everyone scores on their own phone" model; the admin's Clear
+  // is the backstop). The write goes through the anon-allowed submit_match_score RPC.
   overlay.innerHTML = `<div class="popup-card brm-card" role="dialog" aria-modal="true" aria-label="Enter match result">
     <div class="brm-title">${escapeHTML(title)}</div>
     <p class="brm-sub">Tap the team that won.</p>
@@ -3572,16 +3558,7 @@ function buildBracketHTML(tournament, matches, teams) {
     <span><span class="bt-champ-lbl">CHAMPION</span><span class="bt-champ-nm">${escapeHTML(champ.name)}</span></span>
   </div>` : '';
 
-  // Who can enter a bracket result: admin, or the picked team if it's IN this match.
-  const pid = state.tournamentPickedTeamId;
-  const canSubmit = (m) => state.isAdmin || (!!pid && (m.team_a_id === pid || m.team_b_id === pid));
-  const picker = state.isAdmin ? '' : `<div class="card" style="margin-bottom:8px;">
-    <label class="small" style="color:var(--muted);display:block;margin-bottom:4px;">Your team (pick it to enter your scores)</label>
-    <select data-role="tv2-pick-team" style="width:100%;">
-      <option value="">View only</option>
-      ${(teams || []).map((t) => `<option value="${escapeHTML(t.id)}" ${t.id === pid ? 'selected' : ''}>${escapeHTML(t.name)}</option>`).join('')}
-    </select>
-  </div>`;
+  // Anyone can enter a result (Mike's "everyone scores on their own phone" model) — no team picker.
 
   // Double-elim has Winners / Losers / Final brackets — one connected tree per side.
   const sideDefs = [['winners', 'Winners'], ['losers', 'Losers'], ['grand_final', 'Final']].filter(([s]) => main.some((m) => m.side === s));
@@ -3612,11 +3589,11 @@ function buildBracketHTML(tournament, matches, teams) {
     const rm = sideMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
     return `<div class="bt-col">
       <div class="bt-rlabel">${escapeHTML(roundLabelFor(r))}</div>
-      ${rm.map((m) => buildBracketNodeHTML(m, main, teams, canSubmit(m), pathIds)).join('')}
+      ${rm.map((m) => buildBracketNodeHTML(m, main, teams, true, pathIds)).join('')}
     </div>`;
   }).join('');
 
-  return `${champBanner}${sideTabs}${picker}${zoomToggle}
+  return `${champBanner}${sideTabs}${zoomToggle}
     <div class="bt-pan${zoom === 'zoom' ? ' zoom' : ''}" data-role="bt-pan">
       <div class="bt-canvas" data-role="bt-canvas">
         <svg class="bt-links" data-role="bt-links" xmlns="http://www.w3.org/2000/svg"></svg>
