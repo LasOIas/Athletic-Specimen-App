@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.11';
+const APP_VERSION = '2026.06.24.12';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1299,6 +1299,30 @@ function partialRender() {
       checkinResultsEl.innerHTML = kioskHTML;
       syncKioskIdleState(kioskHTML); // C48.6: keep the centered/top-aligned state in lockstep on background syncs
       return;
+    }
+  }
+
+  // C32: public live-hub Home updates in place (no full render → no scroll jump) when the viewer is on
+  // the Home tab. Mirrors the kiosk short-circuit above. The public shell has no `.players`, so without
+  // this a background sync would fall through to a full render() and yank a spectator to the top.
+  if (!playersEl && activeMainTab === 'home') {
+    const tilesEl = document.getElementById('ph-tiles');
+    const courtsEl = document.getElementById('ph-courts');
+    const tourneyEl = document.getElementById('ph-tourney');
+    if (tilesEl && courtsEl && tourneyEl) {
+      const fresh = document.createElement('div');
+      fresh.innerHTML = publicHomeHTML();
+      const pick = (id) => fresh.querySelector('#' + id);
+      const nextTiles = pick('ph-tiles');
+      const nextCourts = pick('ph-courts');
+      const nextTourney = pick('ph-tourney');
+      if (nextTiles && nextCourts && nextTourney) {
+        if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+        tilesEl.replaceWith(nextTiles);
+        courtsEl.replaceWith(nextCourts);
+        tourneyEl.replaceWith(nextTourney);
+        return;
+      }
     }
   }
 
