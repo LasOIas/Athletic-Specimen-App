@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.15';
+const APP_VERSION = '2026.06.24.16';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3457,13 +3457,14 @@ function championPathIds(main, champ) {
     .map((m) => m.id));
 }
 
-// One bracket match = a node in the tree. Preserves every submit/clear hook (tv2-bracket-save/
-// -clear, bsc-a-/bsc-b- score-input ids) so admins + picked-team players still enter results.
+// One bracket match = a node in the tree. A match you can score (admin, or your picked team) is a
+// TAP TARGET (tv2-bracket-open) that opens the result pop-up — no cramped inputs inside the box.
 function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds) {
   const aKnown = !!m.team_a_id, bKnown = !!m.team_b_id;
   const aName = aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : escapeHTML(m.source_a || 'TBD');
   const bName = bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : escapeHTML(m.source_b || 'TBD');
   const meta = `<div class="bt-meta">${escapeHTML((m.round_label || '').replace(/ M\d+$/, ''))}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
+  const openable = aKnown && bKnown && canSubmit && m.status !== 'final';
 
   let body;
   if (m.status === 'final') {
@@ -3475,24 +3476,63 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds) {
       </div>`;
     body = row(aName, m.team_a_id, aWin) + row(bName, m.team_b_id, !aWin)
       + (state.isAdmin ? `<div class="bt-act"><button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}">Clear</button></div>` : '');
-  } else if (aKnown && bKnown && canSubmit) {
-    // Each team = name + its own score box on one row, then ONE "Submit result" button.
-    // Winner = whoever scored higher (same as pool-play entry) — clear + one tap on a phone.
-    const subTeam = (name, slot) => `<div class="bt-sub">
-        <span class="bt-name">${name}</span>
-        <input type="number" inputmode="numeric" min="0" id="bsc-${slot}-${escapeHTML(m.id)}" class="bt-in" placeholder="–" aria-label="${name} score" />
-      </div>`;
-    body = subTeam(aName, 'a') + subTeam(bName, 'b')
-      + `<button type="button" class="primary bt-save" data-role="tv2-bracket-save" data-id="${escapeHTML(m.id)}">Submit result</button>`;
   } else if (aKnown && bKnown) {
+    // Both teams set: a matchup. If you can score it, the whole card opens the result pop-up.
     body = `<div class="bt-row"><span class="bt-name">${aName}</span></div>
       <div class="bt-vs">vs</div>
-      <div class="bt-row"><span class="bt-name">${bName}</span></div>`;
+      <div class="bt-row"><span class="bt-name">${bName}</span></div>`
+      + (openable ? '<div class="bt-enter">Tap to enter score &rsaquo;</div>' : '');
   } else {
     body = `<div class="bt-row"><span class="bt-name bt-tbd">${aName}</span></div>
       <div class="bt-row"><span class="bt-name bt-tbd">${bName}</span></div>`;
   }
-  return `<div class="bt-node${pathIds.has(m.id) ? ' path' : ''}" data-mid="${escapeHTML(m.id)}">${meta}${body}</div>`;
+  const openAttrs = openable ? ` data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}" role="button" tabindex="0"` : '';
+  return `<div class="bt-node${pathIds.has(m.id) ? ' path' : ''}${openable ? ' tappable' : ''}" data-mid="${escapeHTML(m.id)}"${openAttrs}>${meta}${body}</div>`;
+}
+
+// The result pop-up: tap a match -> big teams + a score box each + Submit. Winner = higher score.
+function openBracketResultModal(matchId) {
+  const m = (state.tournamentMatches || []).find((x) => x.id === matchId);
+  if (!m || !m.team_a_id || !m.team_b_id) return;
+  const aName = teamNameById(state.tournamentTeams, m.team_a_id);
+  const bName = teamNameById(state.tournamentTeams, m.team_b_id);
+  const title = (m.round_label || 'Match').replace(/ M\d+$/, '') + (m.net ? ' · Net ' + m.net : '');
+  const overlay = document.createElement('div');
+  overlay.className = 'popup-overlay brm-overlay';
+  overlay.innerHTML = `<div class="popup-card brm-card" role="dialog" aria-modal="true" aria-label="Enter match result">
+    <div class="brm-title">${escapeHTML(title)}</div>
+    <p class="brm-sub">Enter the final score — the higher score wins.</p>
+    <label class="brm-team"><span class="brm-name">${escapeHTML(aName)}</span>
+      <input type="number" inputmode="numeric" min="0" id="brm-a" class="brm-in" placeholder="0" /></label>
+    <label class="brm-team"><span class="brm-name">${escapeHTML(bName)}</span>
+      <input type="number" inputmode="numeric" min="0" id="brm-b" class="brm-in" placeholder="0" /></label>
+    <div class="brm-err" id="brm-err" hidden></div>
+    <div class="brm-actions">
+      <button type="button" class="secondary" id="brm-cancel">Cancel</button>
+      <button type="button" class="primary" id="brm-save">Submit result</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#brm-cancel').onclick = close;
+  const inA = overlay.querySelector('#brm-a'), inB = overlay.querySelector('#brm-b');
+  const err = overlay.querySelector('#brm-err');
+  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
+  setTimeout(() => inA.focus(), 60);
+  overlay.querySelector('#brm-save').onclick = async () => {
+    const sa = inA.value, sb = inB.value;
+    if (sa === '' || sb === '') return fail('Enter both scores.');
+    if (Number(sa) > 99 || Number(sb) > 99) return fail('Score can’t be above 99.');
+    if (Number(sa) === Number(sb)) return fail('Scores can’t be tied — one team has to win.');
+    const winner = Number(sa) > Number(sb) ? 'a' : 'b';
+    try {
+      await tdbSubmitBracketResult(m, winner, sa, sb);
+      await tdbRefreshTournaments();
+      close();
+      render();
+    } catch (e) { fail((e && e.message) || 'Could not save the result.'); }
+  };
 }
 
 function buildBracketHTML(tournament, matches, teams) {
@@ -3605,9 +3645,10 @@ function layoutBracketTree() {
     const scale = avail > 0 ? Math.min(1, avail / W) : 1;
     canvas.style.transform = `scale(${scale})`;
     pan.style.height = Math.ceil(H * scale) + 'px';
-    // Tap the (scaled-down) bracket to jump into zoom/pan mode — but not when tapping a control.
+    // Tap empty bracket space to jump into zoom/pan mode — but NOT when tapping a control or a
+    // match card (a tappable node opens the result pop-up via its own data-role handler).
     pan.onclick = (e) => {
-      if (e.target.closest('button, input, select, a')) return;
+      if (e.target.closest('button, input, select, a, [data-role]')) return;
       state.bracketZoom = 'zoom';
       partialRenderTournament();
     };
@@ -3620,14 +3661,21 @@ let _btPanWired = null;
 function wireBracketPan(pan) {
   if (_btPanWired === pan) return;
   _btPanWired = pan;
-  let down = false, sx, sy, sl, st;
+  let down = false, moved = false, sx, sy, sl, st;
   pan.addEventListener('pointerdown', (e) => {
     if (e.pointerType && e.pointerType !== 'mouse') return; // let touch use native scroll
-    down = true; pan.classList.add('drag'); sx = e.clientX; sy = e.clientY; sl = pan.scrollLeft; st = pan.scrollTop;
+    down = true; moved = false; pan.classList.add('drag'); sx = e.clientX; sy = e.clientY; sl = pan.scrollLeft; st = pan.scrollTop;
   });
-  pan.addEventListener('pointerup', () => { down = false; pan.classList.remove('drag'); });
-  pan.addEventListener('pointerleave', () => { down = false; pan.classList.remove('drag'); });
-  pan.addEventListener('pointermove', (e) => { if (!down) return; pan.scrollLeft = sl - (e.clientX - sx); pan.scrollTop = st - (e.clientY - sy); });
+  const end = () => { down = false; pan.classList.remove('drag'); };
+  pan.addEventListener('pointerup', end);
+  pan.addEventListener('pointerleave', end);
+  pan.addEventListener('pointermove', (e) => {
+    if (!down) return;
+    if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 6) moved = true;
+    pan.scrollLeft = sl - (e.clientX - sx); pan.scrollTop = st - (e.clientY - sy);
+  });
+  // A mouse drag shouldn't also register as a click that opens a match pop-up.
+  pan.addEventListener('click', (e) => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
 }
 
 // Builds the Tournament tab body (admin create/manage, or public read-only).
@@ -6749,21 +6797,13 @@ function bindTournamentTabV2() {
       } else if (role === 'tv2-bracket-zoom') {
         state.bracketZoom = el.getAttribute('data-zoom') === 'zoom' ? 'zoom' : 'fit';
         partialRenderTournament();
-      } else if (role === 'tv2-bracket-save') {
+      } else if (role === 'tv2-bracket-open') {
         const m = (state.tournamentMatches || []).find((x) => x.id === id);
         const pid = state.tournamentPickedTeamId;
         if (!(state.isAdmin || (m && pid && (m.team_a_id === pid || m.team_b_id === pid)))) {
           throw new Error('Pick your team to enter this result.');
         }
-        const sa = (document.getElementById('bsc-a-' + id) || {}).value;
-        const sb = (document.getElementById('bsc-b-' + id) || {}).value;
-        if (sa === '' || sb === '' || sa == null || sb == null) throw new Error('Enter both scores.');
-        if (Number(sa) === Number(sb)) throw new Error("Scores can't be tied — one team has to win.");
-        if (!(await confirmBigMargin(sa, sb))) return;
-        const winner = Number(sa) > Number(sb) ? 'a' : 'b'; // higher score wins
-        await tdbSubmitBracketResult(m, winner, sa, sb);
-        await tdbRefreshTournaments();
-        render();
+        openBracketResultModal(id); // tap a match -> the result pop-up (entry happens there)
       } else if (role === 'tv2-bracket-clear') {
         const m = (state.tournamentMatches || []).find((x) => x.id === id);
         await tdbClearBracketResult(m);

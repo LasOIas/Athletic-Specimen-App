@@ -2706,10 +2706,20 @@ body.copilot-typing #bottom-nav { display: none; }
 .bt-name.bt-tbd { color: var(--faint); font-style: italic; }
 .bt-sc { flex: 0 0 auto; font-family: 'Sora','Inter',sans-serif; font-size: 15px; color: var(--faint); }
 .bt-row.win .bt-sc { color: var(--live); font-weight: 700; }
-.bt-sub { display: flex; align-items: center; gap: 8px; padding: 7px 9px; }
-.bt-sub + .bt-sub { border-top: 1px solid var(--border); }
-.bt-sub .bt-name { flex: 1; min-width: 0; }
-.bt-in { flex: 0 0 48px; width: 48px; height: 36px; padding: 2px; text-align: center; font-size: 15px; }
-.bt-save { display: block; width: calc(100% - 18px); margin: 8px 9px 9px; min-height: 38px; }
+/* A scorable match card is a tap target that opens the result pop-up. */
+.bt-node.tappable { cursor: pointer; }
+.bt-node.tappable:active { background: var(--accent-soft); }
+.bt-enter { font-size: 11px; font-weight: 600; color: var(--accent); padding: 4px 9px 8px; }
+
+/* Result pop-up (openBracketResultModal) — sits on the shared .popup-overlay/.popup-card. */
+.brm-card { width: min(360px, 92vw); padding: 18px; text-align: left; }
+.brm-title { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 18px; color: var(--ink); }
+.brm-sub { font-size: 13px; color: var(--muted); margin: 4px 0 14px; }
+.brm-team { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.brm-name { flex: 1; min-width: 0; font-size: 17px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.brm-in { flex: 0 0 88px; width: 88px; height: 50px; font-size: 22px; text-align: center; font-family: 'Sora','Inter',sans-serif; }
+.brm-err { color: var(--danger); font-size: 13px; margin-top: 12px; }
+.brm-actions { display: flex; gap: 10px; margin-top: 18px; }
+.brm-actions button { flex: 1; min-height: 46px; font-size: 15px; }
 .bt-act { display: flex; justify-content: flex-end; padding: 4px 8px 8px; }
 .bt-act button { min-height: 28px; padding: 3px 10px; font-size: 12px; }
