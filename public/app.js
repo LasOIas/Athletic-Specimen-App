@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.15';
+const APP_VERSION = '2026.06.25.16';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3042,10 +3042,20 @@ async function tdbMoveTeamToPool(teamId, poolId) {
   if (error) { console.error('tdbMoveTeamToPool', error); throw error; }
 }
 
+// Wave 1c (2026-06-25): in-flight guard for the pool-setup writers. tdbDrawPools/tdbStartPoolPlay
+// each delete-then-insert; a double-tap on Draw/Start (the common case) would otherwise fire the
+// whole sequence twice and silently double the schedule. This module flag makes a re-entrant call a
+// no-op (the first call is handling it). The DB-level guarantee against the rarer two-device race is
+// the partial unique indexes in migration 0023 (a concurrent duplicate INSERT fails cleanly).
+let _poolSetupInFlight = false;
+
 // Randomly draw pools: clears existing pools (cascades matches; sets teams.pool_id null),
 // creates pool_count pools (A,B,...), shuffles teams, round-robin-assigns them to pools.
 async function tdbDrawPools(tournament) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  if (_poolSetupInFlight) return; // double-tap guard — the first call is handling it
+  _poolSetupInFlight = true;
+  try {
   const cur = (await supabaseClient.from('tournaments').select('status').eq('id', tournament.id).single()).data;
   if (cur && cur.status !== 'setup') throw new Error('Pool play already started — Reset Pools first.');
   const teams = await tdbListTeams(tournament.id);
@@ -3083,11 +3093,15 @@ async function tdbDrawPools(tournament) {
     const { error } = await supabaseClient.from('teams').update({ pool_id: poolRows[p].id }).in('id', idsByPool[p]);
     if (error) throw error;
   }
+  } finally { _poolSetupInFlight = false; }
 }
 
 // Generate round-robin pool matches, assign nets + per-net queue order, set status='pools'.
 async function tdbStartPoolPlay(tournament) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  if (_poolSetupInFlight) return; // double-tap guard — the first call is handling it
+  _poolSetupInFlight = true;
+  try {
   const cur = (await supabaseClient.from('tournaments').select('status').eq('id', tournament.id).single()).data;
   if (cur && cur.status !== 'setup') throw new Error('Pool play already started — Reset Pools first.');
   const pools = await tdbListPools(tournament.id);
@@ -3122,6 +3136,7 @@ async function tdbStartPoolPlay(tournament) {
   const { error: upErr } = await supabaseClient.from('tournaments')
     .update({ status: 'pools', updated_at: new Date().toISOString() }).eq('id', tournament.id);
   if (upErr) throw upErr;
+  } finally { _poolSetupInFlight = false; }
 }
 
 // C25 item 3: before submitting, sanity-check a lopsided score that still passes validation
