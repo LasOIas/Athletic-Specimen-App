@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.5';
+const APP_VERSION = '2026.06.25.6';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3544,11 +3544,17 @@ function openBracketResultModal(matchId) {
   const err = overlay.querySelector('#brm-err');
   const fail = (msg) => { err.textContent = msg; err.hidden = false; };
   let winner = null;
+  const capOf = () => { const t = (state.tournaments || []).find((x) => x.id === m.tournament_id) || {}; return Number(t.match_cap) || 25; };
   overlay.querySelectorAll('.brm-team').forEach((btn) => {
     btn.onclick = () => {
       winner = btn.getAttribute('data-w');
       overlay.querySelectorAll('.brm-team').forEach((b) => b.classList.toggle('win', b === btn));
       err.hidden = true;
+      // C52: auto-fill the winner's score to the cap (you only type the loser's score), then focus it.
+      const winInput = overlay.querySelector(winner === 'a' ? '#brm-a' : '#brm-b');
+      const loseInput = overlay.querySelector(winner === 'a' ? '#brm-b' : '#brm-a');
+      if (winInput && winInput.value === '') winInput.value = String(capOf());
+      if (loseInput) loseInput.focus();
     };
   });
   // tdbSubmitBracketResult takes the tapped winner + optional scores; it validates that any
