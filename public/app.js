@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.13';
+const APP_VERSION = '2026.06.25.14';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2795,7 +2795,7 @@ function renderFilteredPlayers() {
         ${state.isAdmin ? `<input type="checkbox" class="player-select" data-id="${player.id}" aria-label="Select ${escapeHTMLText(player.name || '')}" ${isSelected ? 'checked' : ''} />` : ''}
         <span class="prow-av" aria-hidden="true">${escapeHTMLText(initials)}</span>
         <div class="prow-id">
-          <span class="player-name">${player.name}</span>
+          <span class="player-name">${escapeHTMLText(player.name || '')}</span>
           ${state.isAdmin ? `<div class="player-meta-row"><span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span></div>` : ''}
         </div>
         <div class="prow-actions">
