@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.4';
+const APP_VERSION = '2026.06.25.5';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3168,8 +3168,24 @@ async function tdbGenerateBracket(tournament) {
   const keyToPos = {};
   real.forEach((m) => { keyToPos[m.key] = { side: m.side, round: m.round, slot: m.slot }; });
   const slotNum = (s) => (s === 'a' ? 0 : 1);
+
+  // C51: auto-assign each bracket match a net (matches in the same round spread across the
+  // available nets 1..net_count) + a round-major queue_order, so the "Net N" chip + a bracket net
+  // board can show what plays where — instead of the admin calling out "WB R2 M1, go to net 3".
+  const netCount = Math.max(1, Number(tournament.net_count) || 1);
+  const sidePri = (s) => (s === 'winners' ? 0 : s === 'losers' ? 1 : 2);
+  const netInfo = {}; const perRound = {}; let q = 0;
+  real.slice().sort((a, b) => a.round - b.round || sidePri(a.side) - sidePri(b.side) || a.slot - b.slot)
+    .forEach((m) => {
+      const rk = m.side + ':' + m.round;
+      perRound[rk] = perRound[rk] || 0;
+      netInfo[m.key] = { net: (perRound[rk] % netCount) + 1, queue_order: q++ };
+      perRound[rk]++;
+    });
+
   const rows = real.map((m) => ({
     side: m.side, round: m.round, slot: m.slot, round_label: labelOf(m.key),
+    net: netInfo[m.key].net, queue_order: netInfo[m.key].queue_order,
     team_a_id: (m.aSource && m.aSource.seed) ? seedToTeam[m.aSource.seed] : null,
     team_b_id: (m.bSource && m.bSource.seed) ? seedToTeam[m.bSource.seed] : null,
     source_a: srcLabel(m.aSource), source_b: srcLabel(m.bSource),
