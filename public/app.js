@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.3';
+const APP_VERSION = '2026.06.25.4';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3514,6 +3514,7 @@ function openBracketResultModal(matchId) {
       <input type="number" inputmode="numeric" min="0" id="brm-b" placeholder="–" aria-label="${escapeHTML(bName)} score" />
     </div>
     <p class="brm-opt">Final score</p>
+    <button type="button" class="brm-forfeit" id="brm-forfeit">No-show? Tap the team that showed, then here for a forfeit</button>
     <div class="brm-err" id="brm-err" hidden></div>
     <div class="brm-actions">
       <button type="button" class="secondary" id="brm-cancel">Cancel</button>
@@ -3546,6 +3547,23 @@ function openBracketResultModal(matchId) {
       close();
       render();
     } catch (e) { fail((e && e.message) || 'Could not save the result.'); }
+  };
+  // C50 forfeit/no-show: a small win (cap / cap-2) for the team that showed, so a no-show doesn't
+  // stall the net queue or the bracket. The winner is the tapped team; the score is auto-filled.
+  overlay.querySelector('#brm-forfeit').onclick = async () => {
+    if (!winner) return fail('Tap the team that showed up first — they win the forfeit.');
+    const t = (state.tournaments || []).find((x) => x.id === m.tournament_id) || {};
+    const cap = Number(t.match_cap) || 25;
+    const winS = cap, loseS = Math.max(0, cap - 2);
+    const sa = winner === 'a' ? winS : loseS, sb = winner === 'a' ? loseS : winS;
+    overlay.querySelector('#brm-a').value = String(sa);
+    overlay.querySelector('#brm-b').value = String(sb);
+    try {
+      await tdbSubmitBracketResult(m, winner, String(sa), String(sb));
+      await tdbRefreshTournaments();
+      close();
+      render();
+    } catch (e) { fail((e && e.message) || 'Could not save the forfeit.'); }
   };
 }
 
