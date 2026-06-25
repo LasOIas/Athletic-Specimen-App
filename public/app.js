@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.8';
+const APP_VERSION = '2026.06.25.9';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3138,6 +3138,12 @@ async function tdbClearResult(match) {
 // Seed from pool standings + generate + persist a double-elimination bracket.
 async function tdbGenerateBracket(tournament) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  // Bracket-wipe race guard (defense-in-depth; the real guard is server-side in generate_bracket_atomic):
+  // re-fetch the LIVE status — a second device may have already generated (status -> 'bracket'). Regenerating
+  // would DELETE the scored bracket. The captured `tournament` can be stale 'pools' across devices/modals.
+  const { data: freshT, error: ftErr } = await supabaseClient.from('tournaments').select('status').eq('id', tournament.id).single();
+  if (ftErr) throw ftErr;
+  if (!freshT || freshT.status !== 'pools') throw new Error('The bracket was already generated. Reset pools first if you want to rebuild it.');
   const teams = await tdbListTeams(tournament.id);
   const poolMatches = await tdbListMatches(tournament.id, 'pool');
   if (!poolMatches.length) throw new Error('No pool play to seed from.');
@@ -3174,14 +3180,24 @@ async function tdbGenerateBracket(tournament) {
   // board can show what plays where — instead of the admin calling out "WB R2 M1, go to net 3".
   const netCount = Math.max(1, Number(tournament.net_count) || 1);
   const sidePri = (s) => (s === 'winners' ? 0 : s === 'losers' ? 1 : 2);
+  // The grand final has round=1 (reset round=2) but is PLAYED last — its raw round must not sort it among the
+  // earliest matches (which gave it queue_order ~4 and "Net 1"). Order it after every winners/losers round.
+  const maxRound = real.reduce((mx, m) => Math.max(mx, m.round || 0), 0);
+  const playRound = (m) => (m.side === 'grand_final' ? maxRound + m.round : m.round);
   const netInfo = {}; const perRound = {}; let q = 0;
-  real.slice().sort((a, b) => a.round - b.round || sidePri(a.side) - sidePri(b.side) || a.slot - b.slot)
+  real.slice().sort((a, b) => playRound(a) - playRound(b) || sidePri(a.side) - sidePri(b.side) || a.slot - b.slot)
     .forEach((m) => {
+      if (m.side === 'grand_final') { netInfo[m.key] = { net: null, queue_order: q++ }; return; } // net carried below
       const rk = m.side + ':' + m.round;
       perRound[rk] = perRound[rk] || 0;
       netInfo[m.key] = { net: (perRound[rk] % netCount) + 1, queue_order: q++ };
       perRound[rk]++;
     });
+  // Carry the grand final + reset onto the winners-final court (the WB champ is already there) rather than
+  // resetting to a misleading "Net 1" that collides with the early rounds.
+  const wbFinal = real.filter((m) => m.side === 'winners').sort((a, b) => b.round - a.round || b.slot - a.slot)[0];
+  const gfNet = (wbFinal && netInfo[wbFinal.key] && netInfo[wbFinal.key].net) || 1;
+  real.filter((m) => m.side === 'grand_final').forEach((m) => { netInfo[m.key].net = gfNet; });
 
   const rows = real.map((m) => ({
     side: m.side, round: m.round, slot: m.slot, round_label: labelOf(m.key),
@@ -3296,15 +3312,21 @@ async function maybeAutoGenerateBracket() {
   const pm = (state.tournamentMatches || []).filter((m) => m.phase === 'pool');
   const allDone = pm.length > 0 && pm.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
   if (!allDone || _autoGenPrompted[t.id]) return;
-  _autoGenPrompted[t.id] = true;
+  _autoGenPrompted[t.id] = true; // claim the one-shot up front so re-renders during the await can't double-prompt
   try {
     if (await appConfirm({ title: 'All pool games are in', message: 'Generate the playoff bracket now? (the "Generate Bracket" button still works if you want to wait.)', confirmText: 'Generate bracket' })) {
-      await tdbGenerateBracket(t);
+      // Re-read status AFTER the await: another device may have generated while this confirm sat open
+      // (the confirm lives on document.body and survives background re-renders). Bail if so — never
+      // regenerate a bracket that's no longer 'pools' (it would wipe the scored bracket).
+      const fresh = (state.tournaments || []).find((x) => x.id === t.id);
+      if (!fresh || fresh.status !== 'pools') return;
+      await tdbGenerateBracket(fresh);
       state.bracketSide = null;
       await tdbRefreshTournaments();
       render();
     }
   } catch (e) {
+    _autoGenPrompted[t.id] = false; // generation FAILED (network/RPC) — re-arm so the prompt can return
     state.tournamentTabError = (e && e.message) || 'Could not generate the bracket.';
     render();
   }
@@ -3572,9 +3594,15 @@ function openBracketResultModal(matchId) {
     if (!winner) return fail('Tap the team that won.');
     const sa = overlay.querySelector('#brm-a').value, sb = overlay.querySelector('#brm-b').value;
     if (sa === '' || sb === '') return fail('Enter both scores.'); // scores are required (Mike)
+    if (!(await confirmBigMargin(sa, sb))) return; // restored: catch a fat-finger blowout before it saves
     try {
-      if (m.phase === 'pool') await tdbSubmitResult(m, sa, sb); // C53: pools derive winner from scores
-      else await tdbSubmitBracketResult(m, winner, sa, sb);
+      if (m.phase === 'pool') {
+        // C53 pools derive the winner from scores — but the tap must still agree with them (parity with the
+        // bracket path), else a transposed score would silently record the team you DIDN'T tap.
+        const w = decideWinner(Number(sa), Number(sb));
+        if (w && w.toLowerCase() !== winner) return fail('The winner you tapped does not match the scores you entered.');
+        await tdbSubmitResult(m, sa, sb);
+      } else await tdbSubmitBracketResult(m, winner, sa, sb);
       await tdbRefreshTournaments();
       close();
       render();
@@ -6833,6 +6861,7 @@ function bindTournamentTabV2() {
         // — Reset Pools never worked. Set setup first, then re-draw (which clears pool results via cascade).
         await supabaseClient.from('tournaments')
           .update({ status: 'setup', updated_at: new Date().toISOString() }).eq('id', t.id);
+        delete _autoGenPrompted[t.id]; // re-arm the auto-generate prompt for the re-played pools
         await tdbDrawPools(t);
         await tdbRefreshTournaments();
         render();
@@ -6855,14 +6884,6 @@ function bindTournamentTabV2() {
       } else if (role === 'tv2-bracket-clear') {
         const m = (state.tournamentMatches || []).find((x) => x.id === id);
         await tdbClearBracketResult(m);
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-submit-result') {
-        const m = (state.tournamentMatches || []).find((x) => x.id === id);
-        const sa = (document.getElementById('sc-a-' + id) || {}).value;
-        const sb = (document.getElementById('sc-b-' + id) || {}).value;
-        if (!(await confirmBigMargin(sa, sb))) return;
-        await tdbSubmitResult(m, sa, sb);
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-clear-result') {
