@@ -13,7 +13,7 @@ const {
   countSharedTeammatePairs, pickMostDifferentTeams,
   groupRosterPlayersBySection, isValidFullName, buildCopilotContext,
   resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
-  resolveTournamentMatch,
+  resolveTournamentMatch, publicHubStatus,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -511,6 +511,24 @@ describe('C28 Slice 2 — co-pilot acting pure helpers', () => {
     expect(validateCopilotToolArgs('setup_tournament', { name: 'Cup', teams: ['A', 'B'] }).ok).toBe(true);
     expect(validateCopilotToolArgs('setup_tournament', { name: 'Cup', teams: ['A'] }).ok).toBe(false);
     expect(validateCopilotToolArgs('setup_tournament', { name: '', teams: ['A', 'B'] }).ok).toBe(false);
+  });
+});
+
+describe('publicHubStatus (C32 — public hub tile logic)', () => {
+  it('courts live → courts tile with the count', () => {
+    expect(publicHubStatus({ checkedInCount: 12, liveCourtCount: 3, tournamentStatus: 'pools' }))
+      .toEqual({ here: 12, liveTile: 'courts', liveCount: 3, tournamentLive: true });
+  });
+  it('no casual courts but a live tournament → tournament tile', () => {
+    expect(publicHubStatus({ checkedInCount: 8, liveCourtCount: 0, tournamentStatus: 'bracket' }))
+      .toEqual({ here: 8, liveTile: 'tournament', liveCount: 0, tournamentLive: true });
+  });
+  it('nothing live → none', () => {
+    expect(publicHubStatus({ checkedInCount: 5, liveCourtCount: 0, tournamentStatus: 'setup' }))
+      .toEqual({ here: 5, liveTile: 'none', liveCount: 0, tournamentLive: false });
+  });
+  it('coerces/guards missing inputs', () => {
+    expect(publicHubStatus({})).toEqual({ here: 0, liveTile: 'none', liveCount: 0, tournamentLive: false });
   });
 });
 

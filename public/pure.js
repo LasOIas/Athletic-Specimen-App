@@ -719,6 +719,19 @@ function resolveTournamentMatch(teams, matches, nameA, nameB) {
   return { ok: true, match: m, orient: m.team_a_id === ta.id ? 'ab' : 'ba', teamA: ta.name, teamB: tb.name };
 }
 
+// C32: single source of truth for the public hub's stat tiles. liveTile prioritises casual courts, then
+// a live tournament, else nothing — so the render stays a thin formatter.
+function publicHubStatus(input) {
+  const i = input || {};
+  const here = Math.max(0, Number(i.checkedInCount) || 0);
+  const liveCourtCount = Math.max(0, Number(i.liveCourtCount) || 0);
+  const tournamentLive = i.tournamentStatus === 'pools' || i.tournamentStatus === 'bracket';
+  let liveTile = 'none';
+  if (liveCourtCount > 0) liveTile = 'courts';
+  else if (tournamentLive) liveTile = 'tournament';
+  return { here, liveTile, liveCount: liveCourtCount, tournamentLive };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -729,6 +742,6 @@ if (typeof module !== "undefined" && module.exports) {
     disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName,
     copilotRosterNames, copilotUpNextByNet, buildCopilotContext,
     resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
-    resolveTournamentMatch
+    resolveTournamentMatch, publicHubStatus
   };
 }
