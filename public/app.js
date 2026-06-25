@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.7';
+const APP_VERSION = '2026.06.25.8';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3282,6 +3282,32 @@ function partialRenderTournament() {
   const c = document.querySelector('#tab-tournament .container');
   if (c) c.innerHTML = buildTournamentTabHTML();
   layoutBracketTree(); // draw connectors + fit/zoom the bracket tree (no-op if no tree present)
+  maybeAutoGenerateBracket(); // C54: prompt to generate the bracket the moment pools finish
+}
+
+// C54: when the last pool game goes final, the ADMIN device auto-prompts to generate the bracket
+// (no watching + hunting for the button). Admin-only (the generate RPC needs auth) + once per
+// tournament per session (the flag is set before the await so re-renders can't double-prompt).
+const _autoGenPrompted = {};
+async function maybeAutoGenerateBracket() {
+  if (!state.isAdmin || activeMainTab !== 'tournament') return;
+  const t = (state.tournaments || []).find((x) => x.id === state.activeTournamentId);
+  if (!t || t.status !== 'pools') return;
+  const pm = (state.tournamentMatches || []).filter((m) => m.phase === 'pool');
+  const allDone = pm.length > 0 && pm.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
+  if (!allDone || _autoGenPrompted[t.id]) return;
+  _autoGenPrompted[t.id] = true;
+  try {
+    if (await appConfirm({ title: 'All pool games are in', message: 'Generate the playoff bracket now? (the "Generate Bracket" button still works if you want to wait.)', confirmText: 'Generate bracket' })) {
+      await tdbGenerateBracket(t);
+      state.bracketSide = null;
+      await tdbRefreshTournaments();
+      render();
+    }
+  } catch (e) {
+    state.tournamentTabError = (e && e.message) || 'Could not generate the bracket.';
+    render();
+  }
 }
 
 // Background freshness: reload tournament data + surgically re-render the tab so a
@@ -6731,6 +6757,7 @@ void root.offsetHeight;
 const restoredPanel = document.getElementById('tab-' + activeMainTab);
 if (savedScrollY > 0 && restoredPanel) restoredPanel.scrollTop = savedScrollY;
 layoutBracketTree(); // C32 #9: connectors + fit/zoom the bracket tree after a full render
+maybeAutoGenerateBracket(); // C54: also catch the case where the admin scored the last pool game
 }
 
 // Attach event listeners to the current DOM. This function should be
