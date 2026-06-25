@@ -113,17 +113,9 @@
       border: 1px solid var(--border);
     }
     .btn-secondary:active { transform: scale(0.98); background: var(--surface); }
-    .register-form {
-      margin-top: 16px;
-      padding: 20px;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-    }
-    .register-form h3 { margin: 0 0 4px 0; font-size: 17px; font-weight: 600; }
-    .register-form .hint { color: var(--text-dim); font-size: 14px; margin-bottom: 16px; }
-    .register-form input { margin-bottom: 10px; }
-    .register-form .btn { margin-top: 8px; }
+    /* C62: the register form now lives in a center-modal popup (reuses the locked .dialog-* pattern below). */
+    .dialog-card input[type="text"] { text-align: left; margin-bottom: 10px; }
+    .dialog-card .error { text-align: left; margin: 4px 0 10px; }
     .success { text-align: center; padding: 60px 20px; }
     .success-icon {
       width: 96px;
@@ -201,14 +193,6 @@
         <p>Don't see your name?</p>
         <button id="newPlayerBtn" class="btn btn-secondary">I'm new — register me</button>
       </div>
-      <div id="registerForm" class="register-form" hidden>
-        <h3>Welcome! Let's get you added</h3>
-        <div class="hint">Please enter both your first and last name</div>
-        <input id="firstName" type="text" placeholder="First name" autocapitalize="words" spellcheck="false" />
-        <input id="lastName" type="text" placeholder="Last name" autocapitalize="words" spellcheck="false" />
-        <button id="submitRegister" class="btn btn-primary">Register & check in</button>
-        <div id="registerError" class="error" hidden></div>
-      </div>
       <div id="loadingState" class="loading">Loading roster…</div>
       <div id="loadError" class="error" hidden>
         Couldn't load the roster. Check your connection and refresh.
@@ -232,6 +216,21 @@
       <div class="dialog-q" id="dialogQ">Check this person in?</div>
       <button class="btn btn-primary" id="dialogConfirm">Check in</button>
       <button class="btn btn-secondary" id="dialogCancel">Cancel</button>
+    </div>
+  </div>
+  <!-- C62: "I'm new" opens this register popup (reuses the locked .dialog-* pattern) so the next step is unmissable. -->
+  <div id="registerDialog" class="dialog-overlay" hidden>
+    <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="registerTitle">
+      <div class="dialog-avatar" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+      </div>
+      <div class="dialog-name" id="registerTitle">Welcome! Let's add you</div>
+      <div class="dialog-q">Enter your first and last name</div>
+      <input id="firstName" type="text" placeholder="First name" autocapitalize="words" spellcheck="false" />
+      <input id="lastName" type="text" placeholder="Last name" autocapitalize="words" spellcheck="false" />
+      <div id="registerError" class="error" hidden></div>
+      <button class="btn btn-primary" id="submitRegister">Register &amp; check in</button>
+      <button class="btn btn-secondary" id="registerCancel">Cancel</button>
     </div>
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -392,6 +391,7 @@
       const existing = roster.find((p) => p.name.toLowerCase() === fullName.toLowerCase());
       if (existing) {
         // C47: styled confirm instead of native confirm() — "already on the list, is that you?"
+        closeRegister(); // C62: close the register popup so the confirm dialog isn't stacked under it
         openConfirm(existing.name, () => { checkInExisting(existing); }, 'Already on the list — check them in?');
         return;
       }
@@ -410,6 +410,7 @@
 
     let successResetTimer = null;
     function showSuccess(name) {
+      $('registerDialog').hidden = true; // C62: close the register popup before showing the success screen
       $('main').hidden = true;
       $('successName').textContent = name;
       $('successScreen').hidden = false;
@@ -429,23 +430,26 @@
       $('lastName').value = '';
       $('suggestions').innerHTML = '';
       $('noMatch').hidden = true; // C25 item 6: input is cleared on reset → empty query → keep the register prompt hidden
-      $('registerForm').hidden = true;
+      $('registerDialog').hidden = true;
       $('registerError').hidden = true;
       $('nameInput').focus();
     }
 
     $('nameInput').addEventListener('input', (e) => renderSuggestions(e.target.value));
-    $('newPlayerBtn').addEventListener('click', () => {
-      $('registerForm').hidden = false;
+    // C62: "I'm new" opens a center-modal register popup (reuses the .dialog-* pattern) instead of an
+    // inline form, so the next action is unmissable.
+    function openRegister() {
       $('noMatch').hidden = true;
+      $('registerError').hidden = true;
       const typed = $('nameInput').value.trim();
-      if (typed && !typed.includes(' ')) {
-        $('firstName').value = typed;
-        $('lastName').focus();
-      } else {
-        $('firstName').focus();
-      }
-    });
+      if (typed && !typed.includes(' ')) $('firstName').value = typed; // prefill a single typed word as the first name
+      $('registerDialog').hidden = false;
+      if ($('firstName').value) $('lastName').focus(); else $('firstName').focus();
+    }
+    function closeRegister() { $('registerDialog').hidden = true; }
+    $('newPlayerBtn').addEventListener('click', openRegister);
+    $('registerCancel').addEventListener('click', closeRegister);
+    $('registerDialog').addEventListener('click', (e) => { if (e.target === $('registerDialog')) closeRegister(); });
     $('submitRegister').addEventListener('click', async () => {
       const first = $('firstName').value.trim();
       const last = $('lastName').value.trim();
