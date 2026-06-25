@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.24.18';
+const APP_VERSION = '2026.06.25.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3464,7 +3464,9 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds) {
   const aName = aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : escapeHTML(m.source_a || 'TBD');
   const bName = bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : escapeHTML(m.source_b || 'TBD');
   const meta = `<div class="bt-meta">${escapeHTML((m.round_label || '').replace(/ M\d+$/, ''))}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
-  const openable = aKnown && bKnown && canSubmit && m.status !== 'final';
+  // Any unplayed matchup is tappable for EVERYONE — the pop-up either lets you score it (admin /
+  // your picked team) or tells you how to (log in / pick your team). A silent dead tap was the bug.
+  const openable = aKnown && bKnown && m.status !== 'final';
 
   let body;
   if (m.status === 'final') {
@@ -3497,8 +3499,24 @@ function openBracketResultModal(matchId) {
   const aName = teamNameById(state.tournamentTeams, m.team_a_id);
   const bName = teamNameById(state.tournamentTeams, m.team_b_id);
   const title = (m.round_label || 'Match').replace(/ M\d+$/, '') + (m.net ? ' · Net ' + m.net : '');
+  const pid = state.tournamentPickedTeamId;
+  const canSubmit = state.isAdmin || (!!pid && (m.team_a_id === pid || m.team_b_id === pid));
   const overlay = document.createElement('div');
   overlay.className = 'popup-overlay brm-overlay';
+  // Viewer who can't score this match: explain how instead of a silent dead tap.
+  if (!canSubmit) {
+    const closeGate = () => overlay.remove();
+    overlay.innerHTML = `<div class="popup-card brm-card" role="dialog" aria-modal="true" aria-label="Match">
+      <div class="brm-title">${escapeHTML(title)}</div>
+      <p class="brm-sub">${escapeHTML(aName)} vs ${escapeHTML(bName)}</p>
+      <p class="brm-gate">Only the admin can enter results. Log in with <b>Check In &rsaquo; Admin</b>, or pick your team above to score your own match.</p>
+      <div class="brm-actions"><button type="button" class="primary" id="brm-ok">OK</button></div>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeGate(); });
+    overlay.querySelector('#brm-ok').onclick = closeGate;
+    return;
+  }
   overlay.innerHTML = `<div class="popup-card brm-card" role="dialog" aria-modal="true" aria-label="Enter match result">
     <div class="brm-title">${escapeHTML(title)}</div>
     <p class="brm-sub">Tap the team that won.</p>
@@ -6802,12 +6820,7 @@ function bindTournamentTabV2() {
         state.bracketZoom = el.getAttribute('data-zoom') === 'zoom' ? 'zoom' : 'fit';
         partialRenderTournament();
       } else if (role === 'tv2-bracket-open') {
-        const m = (state.tournamentMatches || []).find((x) => x.id === id);
-        const pid = state.tournamentPickedTeamId;
-        if (!(state.isAdmin || (m && pid && (m.team_a_id === pid || m.team_b_id === pid)))) {
-          throw new Error('Pick your team to enter this result.');
-        }
-        openBracketResultModal(id); // tap a match -> the result pop-up (entry happens there)
+        openBracketResultModal(id); // pop-up handles auth (scores it, or tells you how to)
       } else if (role === 'tv2-bracket-clear') {
         const m = (state.tournamentMatches || []).find((x) => x.id === id);
         await tdbClearBracketResult(m);

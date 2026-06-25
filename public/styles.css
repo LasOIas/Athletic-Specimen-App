@@ -2728,6 +2728,7 @@ body.copilot-typing #bottom-nav { display: none; }
 .brm-scores input { flex: 1; height: 46px; text-align: center; font-size: 18px; }
 .brm-dash { color: var(--faint); }
 .brm-opt { font-size: 12px; color: var(--muted); text-align: center; margin: 8px 0 0; }
+.brm-gate { font-size: 14px; color: var(--ink); background: var(--accent-soft); border-radius: 10px; padding: 12px; margin: 4px 0 0; line-height: 1.4; }
 .brm-err { color: var(--danger); font-size: 13px; margin-top: 12px; }
 .brm-actions { display: flex; gap: 10px; margin-top: 18px; }
 .brm-actions button { flex: 1; min-height: 46px; font-size: 15px; }
