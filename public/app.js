@@ -2322,30 +2322,62 @@ function buildPublicLiveCourtsHTML() {
   }).join('');
 }
 
-// C26 item 3a: PUBLIC Home (layout A — session-first). Read-only except the Check In CTA,
-// which navigates to the Check In tab via the delegated [data-nav-tab] handler.
+// C32: the public-facing "live" tournament (the one the public Bracket tab follows), or null.
+function publicLiveTournament() {
+  const list = state.tournaments || [];
+  const byId = state.activeTournamentId ? list.find((t) => t.id === state.activeTournamentId) : null;
+  return (byId && (byId.status === 'pools' || byId.status === 'bracket')) ? byId
+    : list.find((t) => t.status === 'pools' || t.status === 'bracket') || null;
+}
+
+// C32: PUBLIC Home = live status hub (layout C — dashboard tiles; chosen from 3 §38 mockups). Read-only
+// except the Check In CTA. Count-only headcount (NEVER names), no skill, no fabricated scores. The hub
+// regions (#ph-tiles / #ph-courts / #ph-tourney) update in place via partialRender (no scroll jump).
 function publicHomeHTML() {
   const liveData = getPublicLiveData();
   const courtsHTML = buildPublicLiveCourtsHTML();
-  const livePill = courtsHTML
-    ? `<span class="ph-live"><span class="ph-dot"></span>Live now &middot; ${liveData.matchups.length}</span>`
-    : '';
+  const tourney = publicLiveTournament();
+  const st = publicHubStatus({
+    checkedInCount: (state.checkedIn || []).length,
+    liveCourtCount: liveData.liveCount,
+    tournamentStatus: tourney ? tourney.status : null,
+  });
+  const liveTile = st.liveTile === 'courts'
+    ? `<div class="ph-tile is-live"><div class="ph-tile-num"><span class="ph-dot"></span>${st.liveCount}</div><div class="ph-tile-lab">${st.liveCount === 1 ? 'court live now' : 'courts live now'}</div></div>`
+    : st.liveTile === 'tournament'
+    ? `<div class="ph-tile is-live"><div class="ph-tile-num"><span class="ph-dot"></span></div><div class="ph-tile-lab">tournament live</div></div>`
+    : `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">no games yet</div></div>`;
+  const tilesHTML = `<div class="ph-tiles" id="ph-tiles">
+    <div class="ph-tile is-here"><div class="ph-tile-num">${st.here}</div><div class="ph-tile-lab">here tonight</div></div>
+    ${liveTile}
+  </div>`;
+  const courtsSection = courtsHTML
+    ? `<div id="ph-courts"><div class="ph-sec">On the courts</div>${courtsHTML}</div>`
+    : '<div id="ph-courts"></div>';
+  const tourneyStrip = tourney
+    ? `<button type="button" class="ph-tourney" data-nav-tab="tournament" id="ph-tourney">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4a2 2 0 0 1-2-2V5h4M18 9h2a2 2 0 0 0 2-2V5h-4M6 5h12v3a6 6 0 0 1-12 0Z"/><path d="M9 18h6M10 21h4M12 14v4"/></svg>
+        <span class="ph-tourney-t">${escapeHTML(tourney.name || 'Tournament')} &mdash; ${tourney.status === 'bracket' ? 'bracket' : 'pool play'}</span>
+        <span class="ph-tourney-go">live &rarr;</span>
+      </button>`
+    : '<span id="ph-tourney"></span>';
   const sessionCard = state.currentSession
-    ? `<div class="ph-card">
+    ? `<div class="ph-card ph-sescard">
         <div class="ph-lab">Next session</div>
         <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg><b>${escapeHTML(formatSessionDate(state.currentSession.date))}</b></div>
         <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><b>${escapeHTML(state.currentSession.time || '')}</b></div>
         <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>${escapeHTML(state.currentSession.location || '')}</div>
       </div>`
-    : `<div class="ph-card ph-empty">No session scheduled yet — check back soon.</div>`;
-  const liveSection = courtsHTML
-    ? `<div class="ph-sec">On the courts</div>${courtsHTML}`
-    : '';
+    : `<div class="ph-card ph-sescard ph-empty">No session scheduled yet — check back soon.</div>`;
   return `<div class="home-screen">
-    <div class="ph-brand">Athletic Specimen ${livePill}</div>
-    ${sessionCard}
-    <button type="button" class="ph-cta" data-nav-tab="players"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 11l3 3L20 6"/><path d="M20 12v7H4V5h11"/></svg>Check In</button>
-    ${liveSection}
+    <div class="ph-brand">Athletic Specimen</div>
+    ${tilesHTML}
+    ${courtsSection}
+    ${tourneyStrip}
+    <div class="ph-bottom">
+      ${sessionCard}
+      <button type="button" class="ph-cta ph-cta-compact" data-nav-tab="players"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 11l3 3L20 6"/><path d="M20 12v7H4V5h11"/></svg>Check In</button>
+    </div>
   </div>`;
 }
 
