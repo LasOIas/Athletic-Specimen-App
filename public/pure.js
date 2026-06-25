@@ -122,18 +122,20 @@ function countSharedTeammatePairs(teamsA, teamsB) {
   return shared;
 }
 
-// C31 #1: from a pool of equally-fair candidate splits, return the one that shares the FEWEST teammate
-// pairs with the previous split (the biggest reshuffle). Returns null when there is no previous split.
+// C31 #1: from a pool of equally-fair candidate splits, return one from the "most reshuffled" tier vs
+// the previous split — i.e. among the candidates sharing the FEWEST teammate pairs (plus a small band),
+// pick at random. Picking the single absolute-min would flip-flop A-B-A-B between two splits on repeated
+// taps; the band + random pick makes repeated re-rolls cycle through many different fair splits. Returns
+// null when there is no previous split to differ from.
 function pickMostDifferentTeams(candidates, previousTeams) {
   if (!Array.isArray(candidates) || !candidates.length) return null;
   if (!Array.isArray(previousTeams) || !previousTeams.length) return null;
-  let best = null;
-  let bestShared = Infinity;
-  for (const cand of candidates) {
-    const shared = countSharedTeammatePairs(cand, previousTeams);
-    if (shared < bestShared) { bestShared = shared; best = cand; }
-  }
-  return best;
+  const scored = candidates.map((cand) => ({ cand, shared: countSharedTeammatePairs(cand, previousTeams) }));
+  const minShared = Math.min(...scored.map((s) => s.shared));
+  const maxShared = Math.max(...scored.map((s) => s.shared));
+  const band = Math.max(1, Math.round((maxShared - minShared) * 0.34));
+  const tier = scored.filter((s) => s.shared <= minShared + band).map((s) => s.cand);
+  return tier[Math.floor(Math.random() * tier.length)];
 }
 
 function generateBalancedGroups(players, checkedInKeys, groupCount, previousTeams) {
