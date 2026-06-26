@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.10'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.11'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3853,6 +3853,66 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds) {
 }
 
 // The result pop-up: tap a match -> big teams + a score box each + Submit. Winner = higher score.
+// NF-10: edit a tournament's settings after create (name, nets, pool/bracket targets + cap, win-by-2) so
+// "created to 25, played to 21" no longer means delete+rebuild. Saves via the guarded tdbSetTournamentFields;
+// match_cap is kept = bracket_target (NF-1 back-compat). Shown in setup/pools (moot once the bracket runs).
+function openTournamentSettingsModal(tournamentId) {
+  const t = (state.tournaments || []).find((x) => x.id === tournamentId);
+  if (!t) return;
+  const num = (v, d) => (v == null || v === '' ? d : v);
+  const overlay = document.createElement('div');
+  overlay.className = 'popup-overlay brm-overlay';
+  overlay.innerHTML = `<div class="popup-card brm-card" role="dialog" aria-modal="true" aria-label="Edit tournament settings">
+    <div class="brm-title">Edit settings</div>
+    <label class="reg-label" for="ts-name">Name</label>
+    <input type="text" id="ts-name" class="reg-input" value="${escapeHTML(t.name || '')}" autocapitalize="words" />
+    <label class="reg-label" for="ts-nets">Nets / courts</label>
+    <input type="number" inputmode="numeric" min="1" id="ts-nets" class="reg-input" value="${escapeHTML(String(num(t.net_count, 10)))}" />
+    <label class="reg-label" for="ts-pt">Pool game to</label>
+    <input type="number" inputmode="numeric" min="1" id="ts-pt" class="reg-input" value="${escapeHTML(String(num(t.pool_target, 15)))}" />
+    <label class="reg-label" for="ts-pc">Pool cap (blank = none)</label>
+    <input type="number" inputmode="numeric" min="1" id="ts-pc" class="reg-input" value="${t.pool_cap != null ? escapeHTML(String(t.pool_cap)) : ''}" />
+    <label class="reg-label" for="ts-bt">Bracket game to</label>
+    <input type="number" inputmode="numeric" min="1" id="ts-bt" class="reg-input" value="${escapeHTML(String(num(t.bracket_target, num(t.match_cap, 25))))}" />
+    <label class="reg-check" style="margin-top:8px;"><input type="checkbox" id="ts-wb2" ${(t.win_by_2 == null || t.win_by_2) ? 'checked' : ''} /> Win by 2</label>
+    <div class="brm-err" id="ts-err" hidden></div>
+    <div class="brm-actions">
+      <button type="button" class="secondary" id="ts-cancel">Cancel</button>
+      <button type="button" class="primary" id="ts-save">Save settings</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#ts-cancel').onclick = close;
+  const err = overlay.querySelector('#ts-err');
+  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
+  let saving = false;
+  overlay.querySelector('#ts-save').onclick = async () => {
+    if (saving) return;
+    const name = (overlay.querySelector('#ts-name').value || '').trim();
+    const nets = parseInt(overlay.querySelector('#ts-nets').value, 10);
+    const pt = parseInt(overlay.querySelector('#ts-pt').value, 10);
+    const pcRaw = (overlay.querySelector('#ts-pc').value || '').trim();
+    const pc = pcRaw === '' ? null : parseInt(pcRaw, 10);
+    const bt = parseInt(overlay.querySelector('#ts-bt').value, 10);
+    const wb2 = overlay.querySelector('#ts-wb2').checked;
+    if (!name) return fail('Name is required.');
+    if (!(nets >= 1) || !(pt >= 1) || !(bt >= 1)) return fail('Nets, pool target, and bracket target must each be at least 1.');
+    if (pc != null && pc < pt) return fail('Pool cap cannot be less than the pool target.');
+    saving = true;
+    try {
+      await tdbSetTournamentFields(tournamentId, {
+        name, net_count: nets, pool_target: pt, pool_cap: pc,
+        bracket_target: bt, match_cap: bt, win_by_2: wb2,
+      });
+      await tdbRefreshTournaments();
+      close();
+      render();
+    } catch (e) { saving = false; fail((e && e.message) || 'Could not save settings.'); }
+  };
+}
+
 function openBracketResultModal(matchId) {
   const m = (state.tournamentMatches || []).find((x) => x.id === matchId);
   if (!m || !m.team_a_id || !m.team_b_id) return;
@@ -4303,6 +4363,7 @@ function buildTournamentTabHTML() {
         <h3 style="margin:0;">${escapeHTML(active.name || '')}</h3>
         <p class="small" style="color:var(--muted);margin:2px 0 0;">${escapeHTML(tournamentStatusLabel(active.status))} · ${teams.length} ${teams.length === 1 ? 'team' : 'teams'} · to ${escapeHTML(String(active.match_cap))} · ${escapeHTML(String(active.pool_count))} pools · ${escapeHTML(String(active.net_count))} nets</p>
       </div>
+      ${(active.status === 'setup' || active.status === 'pools') ? `<button type="button" class="secondary" data-role="tv2-edit-settings" data-id="${escapeHTML(active.id)}">Edit</button>` : ''}
       <button type="button" class="secondary" data-role="tv2-back">All</button>
     </div>
   </div>`;
@@ -7487,6 +7548,9 @@ function bindTournamentTabV2() {
         state.activeTournamentId = id;
         await tdbRefreshTournaments();
         render();
+      } else if (role === 'tv2-edit-settings') {
+        if (!state.isAdmin) return;
+        openTournamentSettingsModal(id); // NF-10: edit name/nets/scoring after create (no delete+rebuild)
       } else if (role === 'tv2-back') {
         state.activeTournamentId = null;
         state.tournamentTeams = [];
