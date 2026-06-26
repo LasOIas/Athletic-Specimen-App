@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3188,6 +3188,16 @@ async function tdbSetTeamPaid(teamId, paid) {
   if (error) { console.error('tdbSetTeamPaid', error); throw error; }
 }
 
+// NF-3b: admin rename a team (fix a typo'd self-registered name without raw DB). Admin authenticated
+// write (same door as tdbSetTeamPaid); the caller guards against a duplicate name.
+async function tdbRenameTeam(teamId, newName) {
+  if (!supabaseClient || !teamId) throw new Error('No team.');
+  const nm = String(newName || '').trim();
+  if (!nm) throw new Error('Team name is required.');
+  const { error } = await supabaseClient.from('teams').update({ name: nm }).eq('id', teamId);
+  if (error) { console.error('tdbRenameTeam', error); throw error; }
+}
+
 async function tdbDeleteTeam(teamId) {
   if (!supabaseClient || !teamId) return;
   const { error } = await supabaseClient.from('teams').delete().eq('id', teamId);
@@ -4316,6 +4326,7 @@ function buildTournamentTabHTML() {
       return `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
         <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
           <span style="flex:1;min-width:0;">${escapeHTMLText(tm.name || '')} ${tm.paid ? '<span class="reg-paidtag">paid</span>' : '<span class="reg-unpaidtag">unpaid</span>'}</span>
+          <button type="button" class="secondary" data-role="tv2-rename-team" data-id="${escapeHTMLText(tm.id)}" data-name="${escapeHTMLText(tm.name || '')}">Rename</button>
           <button type="button" class="secondary" data-role="tv2-toggle-paid" data-id="${escapeHTMLText(tm.id)}">${tm.paid ? 'Unpaid' : 'Paid'}</button>
         </div>
         ${rost.length ? `<div class="small" style="color:var(--muted);">${rost.map((n) => escapeHTMLText(String(n))).join(', ')}</div>` : ''}
@@ -6221,6 +6232,34 @@ function appConfirm({ title, message, confirmText, cancelText, danger } = {}) {
   });
 }
 
+// A styled text-input dialog (mirrors appConfirm; reuses the .kc-card modal) — resolves to the entered
+// string, or null on cancel. Used for the NF-3 team rename (no native prompt()).
+function appPrompt({ title, message, value, confirmText, placeholder } = {}) {
+  return new Promise((resolve) => {
+    const prev = document.getElementById('app-prompt-modal');
+    if (prev) prev.remove();
+    const el = document.createElement('div');
+    el.id = 'app-prompt-modal';
+    el.className = 'popup-overlay';
+    el.style.display = 'flex';
+    el.innerHTML =
+      '<div class="popup-card card kc-card" role="dialog" aria-modal="true">'
+      + (title ? '<div class="kc-name">' + escapeHTML(title) + '</div>' : '')
+      + (message ? '<div class="kc-q">' + escapeHTML(message) + '</div>' : '')
+      + '<input type="text" id="app-prompt-input" class="reg-input" style="width:100%;margin:8px 0;" value="' + escapeHTML(value || '') + '" placeholder="' + escapeHTML(placeholder || '') + '" autocapitalize="words" autocomplete="off" />'
+      + '<button type="button" class="kc-confirm" id="app-prompt-ok">' + escapeHTML(confirmText || 'Save') + '</button>'
+      + '<button type="button" class="kc-cancel" id="app-prompt-cancel">Cancel</button>';
+    document.body.appendChild(el);
+    const input = el.querySelector('#app-prompt-input');
+    try { input.focus(); input.select(); } catch (_) {}
+    const done = (val) => { el.remove(); resolve(val); };
+    el.querySelector('#app-prompt-ok').addEventListener('click', () => done(input.value));
+    el.querySelector('#app-prompt-cancel').addEventListener('click', () => done(null));
+    el.addEventListener('click', (ev) => { if (ev.target === el) done(null); });
+    input.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); done(input.value); } });
+  });
+}
+
 function publicCheckinHTML() {
   return `
   <div class="ci-kiosk is-idle">
@@ -7336,6 +7375,7 @@ function bindTournamentTabV2() {
         const paid = !!((document.getElementById('reg-paid') || {}).checked);
         const setMsg = (txt, ok) => { const m = document.getElementById('reg-msg'); if (m) { m.textContent = txt; m.style.color = ok ? 'var(--live, #16a34a)' : 'var(--danger)'; } };
         if (!teamName) { setMsg('Enter a team name.', false); return; }
+        if (roster.length < 2) { setMsg('Enter at least 2 players.', false); return; } // NF-3a: no empty/garbage teams seeding the bracket
         el.setAttribute('disabled', 'true'); // in-flight guard (double-tap)
         try {
           await tdbRegisterTeam(state.activeTournamentId, teamName, roster, null, paid);
@@ -7371,6 +7411,19 @@ function bindTournamentTabV2() {
         if (!state.isAdmin) return;
         const tm = (state.tournamentTeams || []).find((x) => x.id === id);
         await tdbSetTeamPaid(id, !(tm && tm.paid));
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-rename-team') {
+        // NF-3b: fix a typo'd self-registered team name (no raw DB). Dup-name guarded, like registration.
+        if (!state.isAdmin) return;
+        const next = await appPrompt({ title: 'Rename team', value: el.getAttribute('data-name') || '', confirmText: 'Save', placeholder: 'Team name' });
+        if (next == null) return; // cancelled
+        const nm = String(next).trim();
+        if (!nm) throw new Error('Team name is required.');
+        if ((state.tournamentTeams || []).some((t) => t.id !== id && normalize(t.name) === normalize(nm))) {
+          throw new Error('A team named "' + nm + '" is already in this tournament.');
+        }
+        await tdbRenameTeam(id, nm);
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-select-tournament') {
