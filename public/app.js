@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.1';
+const APP_VERSION = '2026.06.26.2';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7340,8 +7340,11 @@ function bindTournamentTabV2() {
         // C49 BUGFIX: drop to 'setup' BEFORE re-drawing. tdbDrawPools refuses to run while status==='pools'
         // (its own guard), so the old order (draw → then set setup) ALWAYS threw "Pool play already started"
         // — Reset Pools never worked. Set setup first, then re-draw (which clears pool results via cascade).
-        await supabaseClient.from('tournaments')
-          .update({ status: 'setup', updated_at: new Date().toISOString() }).eq('id', t.id);
+        // NF-2 (2026-06-26): route the status write through the guarded tdbSetTournamentFields (adds
+        // updated_at + throws on {error}) instead of a bare, result-discarded update — a silent failure
+        // here used to cascade into the misleading "Pool play already started" from tdbDrawPools; now the
+        // real error surfaces via the outer catch (state.tournamentTabError).
+        await tdbSetTournamentFields(t.id, { status: 'setup' });
         delete _autoGenPrompted[t.id]; // re-arm the auto-generate prompt for the re-played pools
         await tdbDrawPools(t);
         await tdbRefreshTournaments();
