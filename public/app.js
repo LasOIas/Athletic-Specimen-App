@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.9'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.10'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3198,6 +3198,29 @@ async function tdbRenameTeam(teamId, newName) {
   if (error) { console.error('tdbRenameTeam', error); throw error; }
 }
 
+// SC-7: withdraw a team mid-pool by FORFEITING its remaining unplayed pool games (the opponent wins by
+// the pool target). This keeps computeStandings/seeding fair — a withdrawn team's unplayed games no longer
+// stay 'scheduled' and silently distort everyone else's records. Reuses the scored-result path (C50 forfeit
+// shape); the team ranks last (it lost its remaining games). No schema change.
+async function tdbWithdrawTeam(teamId, tournament) {
+  if (!supabaseClient || !teamId) throw new Error('No team.');
+  const unplayed = (state.tournamentMatches || []).filter((m) =>
+    m.phase === 'pool' && m.status !== 'final' && m.team_a_id && m.team_b_id &&
+    (m.team_a_id === teamId || m.team_b_id === teamId));
+  const r = scoringRulesFor('pool', tournament || {});
+  const winS = r.target || Number((tournament || {}).pool_target) || Number((tournament || {}).match_cap) || 15;
+  const loseS = Math.max(0, winS - 2);
+  let n = 0;
+  for (const m of unplayed) {
+    const withdrawnIsA = m.team_a_id === teamId;
+    const sa = withdrawnIsA ? loseS : winS; // the OTHER team wins by forfeit
+    const sb = withdrawnIsA ? winS : loseS;
+    await tdbSubmitResult(m, String(sa), String(sb));
+    n++;
+  }
+  return n;
+}
+
 async function tdbDeleteTeam(teamId) {
   if (!supabaseClient || !teamId) return;
   const { error } = await supabaseClient.from('teams').delete().eq('id', teamId);
@@ -3687,6 +3710,18 @@ function teamNameById(teams, id) {
   return t ? (t.name || '') : '—';
 }
 
+// SC-7: admin-only per-pool withdraw controls — offered only for teams that still have unplayed games
+// (a fully-played team has nothing to forfeit, so no flag/column is needed).
+function buildWithdrawControlsHTML(poolTeams, poolMatches) {
+  const withdrawable = (poolTeams || []).filter((tm) =>
+    (poolMatches || []).some((m) => m.status !== 'final' && m.team_a_id && m.team_b_id &&
+      (m.team_a_id === tm.id || m.team_b_id === tm.id)));
+  if (!withdrawable.length) return '';
+  return `<div class="small" style="margin:4px 0;color:var(--muted);">Withdraw (forfeits remaining games): ${
+    withdrawable.map((tm) => `<button type="button" class="secondary" data-role="tv2-withdraw-team" data-id="${escapeHTMLText(tm.id)}" data-name="${escapeHTMLText(tm.name || '')}" style="font-size:11px;padding:2px 6px;margin:2px;">${escapeHTMLText(tm.name || '')}</button>`).join('')
+  }</div>`;
+}
+
 function buildStandingsTableHTML(poolTeams, poolMatches) {
   const rows = computeStandings(poolTeams, poolMatches);
   if (!rows.length) return '';
@@ -3760,6 +3795,7 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
       <h3 style="margin:0 0 2px;">Pool ${escapeHTML(pool.label)}</h3>
       <div class="small" style="color:var(--muted);margin:0 0 4px;">${played}/${poolMatches.length} games played</div>
       ${buildStandingsTableHTML(poolTeams, poolMatches)}
+      ${isAdmin ? buildWithdrawControlsHTML(poolTeams, poolMatches) : ''}
       <div style="margin-top:4px;">
         ${poolMatches.length ? poolMatches.map((m) => buildMatchRowHTML(m, teams, isAdmin)).join('') : '<p class="small" style="color:var(--muted);margin:0;">No matches.</p>'}
       </div>
@@ -7436,6 +7472,15 @@ function bindTournamentTabV2() {
           throw new Error('A team named "' + nm + '" is already in this tournament.');
         }
         await tdbRenameTeam(id, nm);
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-withdraw-team') {
+        // SC-7: withdraw mid-pool — forfeit the team's remaining pool games so standings/seeding stay fair.
+        if (!state.isAdmin) return;
+        const nm = el.getAttribute('data-name') || 'this team';
+        if (!(await appConfirm({ title: 'Withdraw team', message: `Withdraw ${nm}? Their remaining pool games are forfeited (opponents win). This can't be undone.`, confirmText: 'Withdraw', danger: true }))) return;
+        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
+        await tdbWithdrawTeam(id, t);
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-select-tournament') {
