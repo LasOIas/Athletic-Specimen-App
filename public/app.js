@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2374,6 +2374,41 @@ function buildPublicLiveCourtsHTML() {
   }).join('');
 }
 
+// NF-7: the live tournament's in-progress games, as public court rows for the Scores board. Tournament
+// matches are scheduled->final atomically (SC-1: no running score), so "live" = the current unplayed game
+// per net (pool) / the playable matchups (bracket). Public-safe: team names only, "Playing", never a score.
+function buildPublicTournamentLiveHTML() {
+  const t = publicLiveTournament();
+  if (!t || (t.status !== 'pools' && t.status !== 'bracket')) return '';
+  const teams = state.tournamentTeams || [];
+  const matches = state.tournamentMatches || [];
+  const row = (label, m) => `<div class="court-row">
+      <div class="court-row-info"><div class="court-row-name">${escapeHTML(label)}</div>
+        <div class="court-row-sub">${escapeHTML(teamNameById(teams, m.team_a_id))} vs ${escapeHTML(teamNameById(teams, m.team_b_id))}</div></div>
+      <span class="court-stat is-live">Playing</span>
+    </div>`;
+  let rows = '';
+  if (t.status === 'pools') {
+    // current game per net = lowest queue_order unplayed match on that net (mirrors the admin net board)
+    const live = matches.filter((m) => m.phase === 'pool' && m.status !== 'final' && m.net && m.team_a_id && m.team_b_id);
+    const byNet = {};
+    live.forEach((m) => { (byNet[m.net] = byNet[m.net] || []).push(m); });
+    rows = Object.keys(byNet).map(Number).sort((a, b) => a - b).map((net) => {
+      const up = byNet[net].slice().sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0))[0];
+      return row('Net ' + net, up);
+    }).join('');
+  } else {
+    // bracket: every playable matchup (both teams known, not final). Label by net if assigned, else round.
+    const live = matches.filter((m) => m.phase === 'main' && m.status !== 'final' && m.team_a_id && m.team_b_id);
+    rows = live.slice().sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0)).map((m) => {
+      const label = m.net ? ('Net ' + m.net) : ((m.round_label || '').replace(/ M\d+$/, '') || 'Bracket');
+      return row(label, m);
+    }).join('');
+  }
+  if (!rows) return '';
+  return `<div class="ph-sec">${escapeHTML(t.name || 'Tournament')} &middot; live now</div>${rows}`;
+}
+
 // C32: the public-facing "live" tournament (the one the public Bracket tab follows), or null.
 function publicLiveTournament() {
   const list = state.tournaments || [];
@@ -2454,7 +2489,8 @@ function publicHomeHTML() {
 function publicScoresHTML() {
   const liveData = getPublicLiveData();
   const courtsHTML = buildPublicLiveCourtsHTML();
-  if (!courtsHTML) {
+  const tourneyHTML = buildPublicTournamentLiveHTML(); // NF-7: live tournament games on the Scores board
+  if (!courtsHTML && !tourneyHTML) {
     // C48.6 (Option A): empty state is vertically centered in the available #app-content height
     // (the .idle-center wrapper fills the absolutely-positioned .tab-panel and flex-centers).
     // Subtle line-icon mark (bar-chart, currentColor=--accent), not neon, no emoji.
@@ -2475,8 +2511,9 @@ function publicScoresHTML() {
     ? `<p class="ph-legend">Teams are numbered for tonight &middot; nets are numbered by play order &middot; live games show the winner, not the score.</p>`
     : '';
   return `<div class="home-screen">
-    <div class="ph-brand">Live scores ${liveData.liveCount > 0 ? `<span class="ph-live"><span class="ph-dot"></span>${liveData.liveCount} playing</span>` : `<span class="ph-done">Round complete &middot; next round coming up</span>`}</div>
+    <div class="ph-brand">Live scores ${liveData.liveCount > 0 ? `<span class="ph-live"><span class="ph-dot"></span>${liveData.liveCount} playing</span>` : (courtsHTML ? `<span class="ph-done">Round complete &middot; next round coming up</span>` : '')}</div>
     ${courtsHTML}
+    ${tourneyHTML}
     ${upNext}
     ${legend}
   </div>`;
