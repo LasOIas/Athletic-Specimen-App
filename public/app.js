@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3345,6 +3345,19 @@ async function tdbSubmitResult(match, scoreA, scoreB) {
   return Array.isArray(data) ? data[0] : data;
 }
 
+// NF-4: edit a FINALIZED match's score in place (no cascade) via the edit_match_score RPC (migration
+// 0027). Same-winner corrections only — the RPC refuses a winner flip (that needs Clear, which re-opens
+// the next round). Used by the result modal's edit mode for a final match.
+async function tdbEditMatchScore(match, scoreA, scoreB) {
+  if (!supabaseClient || !match) throw new Error('No match.');
+  const { sa, sb } = validateScores(scoreA, scoreB);
+  const { data, error } = await supabaseClient.rpc('edit_match_score', {
+    p_match: match.id, p_version: match.version || 0, p_score_a: sa, p_score_b: sb
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
+}
+
 async function tdbClearResult(match) {
   if (!supabaseClient || !match) return;
   const { data, error } = await supabaseClient.from('matches')
@@ -3678,7 +3691,7 @@ function buildMatchRowHTML(m, teams, isAdmin) {
         <span style="flex:0 0 auto;font-weight:700;">${escapeHTML(String(m.score_a))} - ${escapeHTML(String(m.score_b))}</span>
         <span style="flex:1;text-align:right;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--live)' : 'inherit'};">${bn}</span>
       </div>
-      ${isAdmin ? `<button type="button" class="secondary" data-role="tv2-clear-result" data-id="${escapeHTML(m.id)}" style="margin-top:4px;font-size:12px;padding:4px 8px;">Clear</button>` : ''}
+      ${isAdmin ? `<div class="row" style="gap:6px;margin-top:4px;"><button type="button" class="secondary" data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}" style="font-size:12px;padding:4px 8px;">Edit</button><button type="button" class="secondary" data-role="tv2-clear-result" data-id="${escapeHTML(m.id)}" style="font-size:12px;padding:4px 8px;">Clear</button></div>` : ''}
     </div>`;
   }
   // Not final: C53 — tap the matchup to enter the result via the shared tap-the-winner pop-up
@@ -3766,7 +3779,7 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds) {
         <span class="bt-sc">${haveScores ? escapeHTML(String(id === m.team_a_id ? m.score_a : m.score_b)) : (win ? 'W' : '')}</span>
       </div>`;
     body = row(aName, m.team_a_id, aWin) + row(bName, m.team_b_id, !aWin)
-      + (state.isAdmin ? `<div class="bt-act"><button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}">Clear</button></div>` : '');
+      + (state.isAdmin ? `<div class="bt-act"><button type="button" class="secondary" data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}">Edit score</button><button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}">Clear</button></div>` : '');
   } else if (aKnown && bKnown) {
     // Both teams set: a matchup. If you can score it, the whole card opens the result pop-up.
     body = `<div class="bt-row"><span class="bt-name">${aName}</span></div>
@@ -3787,23 +3800,24 @@ function openBracketResultModal(matchId) {
   if (!m || !m.team_a_id || !m.team_b_id) return;
   const aName = teamNameById(state.tournamentTeams, m.team_a_id);
   const bName = teamNameById(state.tournamentTeams, m.team_b_id);
-  const title = (m.round_label || 'Match').replace(/ M\d+$/, '') + (m.net ? ' · Net ' + m.net : '');
+  const isFinal = m.status === 'final'; // NF-4: a final match opens in EDIT mode (fix the score, same winner only)
+  const title = (isFinal ? 'Edit · ' : '') + (m.round_label || 'Match').replace(/ M\d+$/, '') + (m.net ? ' · Net ' + m.net : '');
   const overlay = document.createElement('div');
   overlay.className = 'popup-overlay brm-overlay';
   // Anyone can enter a result (Mike's "everyone scores on their own phone" model; the admin's Clear
   // is the backstop). The write goes through the anon-allowed submit_match_score RPC.
   overlay.innerHTML = `<div class="popup-card brm-card" role="dialog" aria-modal="true" aria-label="Enter match result">
     <div class="brm-title">${escapeHTML(title)}</div>
-    <p class="brm-sub">Tap the winner and enter the final score.</p>
+    <p class="brm-sub">${isFinal ? 'Fix the score (same winner). To change who won, use Clear instead.' : 'Tap the winner and enter the final score.'}</p>
     <button type="button" class="brm-team" data-w="a"><span class="brm-name">${escapeHTML(aName)}</span><span class="brm-pick" aria-hidden="true"></span></button>
     <button type="button" class="brm-team" data-w="b"><span class="brm-name">${escapeHTML(bName)}</span><span class="brm-pick" aria-hidden="true"></span></button>
     <div class="brm-scores">
-      <input type="number" inputmode="numeric" min="0" id="brm-a" placeholder="–" aria-label="${escapeHTML(aName)} score" />
+      <input type="number" inputmode="numeric" min="0" id="brm-a" ${isFinal && m.score_a != null ? `value="${escapeHTML(String(m.score_a))}"` : 'placeholder="–"'} aria-label="${escapeHTML(aName)} score" />
       <span class="brm-dash">–</span>
-      <input type="number" inputmode="numeric" min="0" id="brm-b" placeholder="–" aria-label="${escapeHTML(bName)} score" />
+      <input type="number" inputmode="numeric" min="0" id="brm-b" ${isFinal && m.score_b != null ? `value="${escapeHTML(String(m.score_b))}"` : 'placeholder="–"'} aria-label="${escapeHTML(bName)} score" />
     </div>
     <p class="brm-opt">Final score</p>
-    <button type="button" class="brm-forfeit" id="brm-forfeit">No-show? Tap the team that showed, then here for a forfeit</button>
+    ${isFinal ? '' : '<button type="button" class="brm-forfeit" id="brm-forfeit">No-show? Tap the team that showed, then here for a forfeit</button>'}
     <div class="brm-err" id="brm-err" hidden></div>
     <div class="brm-actions">
       <button type="button" class="secondary" id="brm-cancel">Cancel</button>
@@ -3832,6 +3846,13 @@ function openBracketResultModal(matchId) {
       if (loseInput) loseInput.focus();
     };
   });
+  // NF-4: in edit mode the current winner is pre-selected (score boxes are pre-filled). The user only
+  // adjusts the numbers; the edit RPC refuses a winner flip (that needs Clear, which re-opens the bracket).
+  if (isFinal) {
+    winner = m.winner_team_id === m.team_a_id ? 'a' : 'b';
+    const wb = overlay.querySelector(`.brm-team[data-w="${winner}"]`);
+    if (wb) wb.classList.add('win');
+  }
   // tdbSubmitBracketResult takes the tapped winner + optional scores; it validates that any
   // entered scores agree with the tap (and caps them), and advances the bracket server-side.
   // Wave 1e: in-flight guard — a double-tap on Save/Forfeit fired two submit_match_score calls (the 2nd
@@ -3852,7 +3873,9 @@ function openBracketResultModal(matchId) {
     submitting = true;
     try {
       if (!(await confirmBigMargin(sa, sb))) return; // restored: catch a fat-finger blowout before it saves
-      if (m.phase === 'pool') {
+      if (isFinal) {
+        await tdbEditMatchScore(m, sa, sb); // NF-4: edit in place; the RPC refuses a winner flip
+      } else if (m.phase === 'pool') {
         // C53 pools derive the winner from scores — but the tap must still agree with them (parity with the
         // bracket path), else a transposed score would silently record the team you DIDN'T tap.
         const w = decideWinner(Number(sa), Number(sb));
@@ -3867,7 +3890,8 @@ function openBracketResultModal(matchId) {
   };
   // C50 forfeit/no-show: a small win (cap / cap-2) for the team that showed, so a no-show doesn't
   // stall the net queue or the bracket. The winner is the tapped team; the score is auto-filled.
-  overlay.querySelector('#brm-forfeit').onclick = async () => {
+  const forfeitBtn = overlay.querySelector('#brm-forfeit');
+  if (forfeitBtn) forfeitBtn.onclick = async () => {
     if (submitting) return;
     if (!winner) return fail('Tap the team that showed up first — they win the forfeit.');
     const t = tournOf();
