@@ -1,6 +1,9 @@
-// C24 item 11: keep SW_VERSION in lockstep with APP_VERSION in app.js (bump both in the same edit) so
-// the cache name versions correctly and stale shells stop shipping.
-const SW_VERSION = '2026.06.26.4';
+// NF-18 (2026-06-26): SINGLE SOURCE OF TRUTH for the version. app.js registers this worker as
+// `/sw.js?v=<APP_VERSION>` (updateViaCache:'none'), so the SW URL already carries the app version and a
+// bump activates a new worker. Derive the cache name from that ?v= param instead of a second hand-edited
+// const — so APP_VERSION (app.js, ~line 27) is the ONLY place to bump and the cache name can never drift
+// (kills the old "forgot to bump SW_VERSION → same cache name → stale precache served" bug).
+const SW_VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
 const CACHE_NAME = 'athletic-specimen-cache-' + SW_VERSION;
 const ASSETS = [
   '/',
