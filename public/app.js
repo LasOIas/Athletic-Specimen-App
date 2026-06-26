@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.15'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.16'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3726,11 +3726,42 @@ function buildTeamListHTML(teams, isAdmin) {
   if (!teams || !teams.length) {
     return '<p class="small" style="color:var(--muted);margin:0;">No teams yet.</p>';
   }
+  // C69 (Mike): tap a team to see its players in a popup card.
   return teams.map((tm, i) => `
     <div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
-      <span style="flex:1;">${escapeHTML(String(i + 1))}. ${escapeHTML(tm.name || '')}</span>
+      <span class="tlist-name" data-role="tv2-team-card" data-id="${escapeHTML(tm.id)}" role="button" tabindex="0" style="flex:1;cursor:pointer;color:var(--accent);font-weight:600;">${escapeHTML(String(i + 1))}. ${escapeHTML(tm.name || '')}</span>
       ${isAdmin ? `<button type="button" class="danger" data-role="tv2-delete-team" data-id="${escapeHTML(tm.id)}">Remove</button>` : ''}
     </div>`).join('');
+}
+
+// C69 (Mike, 2026-06-26): initials for a roster avatar — first letters of the first two words.
+function nameInitials(name) {
+  return String(name || '').trim().split(/\s+/).slice(0, 2).map((p) => p.charAt(0).toUpperCase()).join('') || '?';
+}
+
+// C69 (§38 Option A — avatar list): public "tap a registered team -> see its players" popup card. Roster
+// names are already public on the register list; this just surfaces them in a clean card. Reuses the shared
+// .popup-overlay/.popup-card. Read-only, no writes.
+function openTeamRosterCard(teamId) {
+  const team = (state.tournamentTeams || []).find((t) => t.id === teamId);
+  if (!team) return;
+  const roster = (Array.isArray(team.roster) ? team.roster : []).filter((n) => String(n || '').trim());
+  const overlay = document.createElement('div');
+  overlay.className = 'popup-overlay';
+  overlay.style.display = 'flex';
+  const rows = roster.length
+    ? roster.map((n) => `<div class="pl-row"><span class="pl-av">${escapeHTML(nameInitials(n))}</span><span class="pl-name">${escapeHTML(String(n))}</span></div>`).join('')
+    : '<p class="small" style="color:var(--muted);margin:8px 0 0;">No players listed.</p>';
+  overlay.innerHTML = `<div class="popup-card card tc-card" role="dialog" aria-modal="true" aria-label="Team roster">
+    <div class="tc-h"><span class="tc-name">${escapeHTML(team.name || 'Team')}</span>${team.paid ? '<span class="tc-paid">paid</span>' : ''}</div>
+    <div class="tc-sub">${roster.length} ${roster.length === 1 ? 'player' : 'players'}</div>
+    <div class="tc-roster">${rows}</div>
+    <button type="button" class="tc-close" data-role="tc-close">Close</button>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('[data-role="tc-close"]').onclick = close;
 }
 
 function teamNameById(teams, id) {
@@ -3987,7 +4018,7 @@ function openBracketResultModal(matchId) {
         <button type="button" class="brm-step" data-team="${team}" data-d="1" aria-label="${escapeHTML(name)} plus one">+</button>
       </div>
     </div>`;
-  overlay.innerHTML = `<div class="popup-card brm-card" role="dialog" aria-modal="true" aria-label="Enter match result">
+  overlay.innerHTML = `<div class="popup-card card brm-card" role="dialog" aria-modal="true" aria-label="Enter match result">
     <div class="brm-title">${escapeHTML(title)}</div>
     ${hintText ? `<div class="brm-hint"><span class="brm-hdot" aria-hidden="true"></span>${escapeHTML(hintText)}</div>` : ''}
     ${isFinal ? '<p class="brm-sub">Fix the score (same winner). To change who won, use Clear instead.</p>' : ''}
@@ -4321,7 +4352,7 @@ function buildPublicRegisterHTML(t, teams) {
     : `<label class="reg-check" style="margin-top:6px;"><input type="checkbox" id="reg-paid" /> We paid${buyIn ? ' (' + escapeHTMLText(buyIn) + ')' : ''}</label>`;
   const registered = count
     ? `<div class="card" style="margin-top:12px;"><div class="reg-label">Registered (${count})</div>${
-        (teams || []).map((tm) => `<div class="reg-regrow"><span>${escapeHTMLText(tm.name || '')}</span>${tm.paid ? '<span class="reg-paidtag">paid</span>' : ''}</div>`).join('')
+        (teams || []).map((tm) => `<div class="reg-regrow" data-role="tv2-team-card" data-id="${escapeHTMLText(tm.id)}" role="button" tabindex="0"><span>${escapeHTMLText(tm.name || '')}</span>${tm.paid ? '<span class="reg-paidtag">paid</span>' : ''}<span class="reg-regchev" aria-hidden="true">&rsaquo;</span></div>`).join('')
       }</div>`
     : '';
   return `<div class="reg-screen">
@@ -7687,6 +7718,8 @@ function bindTournamentTabV2() {
         state.bracketRound = null;
         btResetView(); // C57: show the newly-selected side fit to screen
         partialRenderTournament();
+      } else if (role === 'tv2-team-card') {
+        openTeamRosterCard(id); // C69: tap a team -> popup card with its players
       } else if (role === 'tv2-bracket-open') {
         openBracketResultModal(id); // pop-up handles auth (scores it, or tells you how to)
       } else if (role === 'tv2-bracket-clear') {

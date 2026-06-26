@@ -2805,5 +2805,22 @@ body.copilot-typing #bottom-nav { display: none; }
 .ppl-more > summary::before { content: '\25B8  '; color: var(--faint); }
 .ppl-more[open] > summary::before { content: '\25BE  '; }
 .ppl-more-body { padding-top: 6px; }
+
+/* C69 — tap a registered team -> roster popup card (§38 Option A: avatar list). */
+.reg-regrow { cursor: pointer; }
+.reg-regrow > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.reg-regchev { flex: 0 0 auto; color: var(--faint); font-weight: 800; font-size: 16px; }
+.tc-card { width: min(360px, 94vw); padding: 20px; text-align: left; }
+.tc-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tc-name { font-family: 'Sora','Inter',sans-serif; font-size: 21px; font-weight: 800; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tc-paid { flex: 0 0 auto; font-size: 11px; font-weight: 800; color: var(--live); background: var(--live-soft); border-radius: 999px; padding: 3px 10px; }
+.tc-sub { font-size: 12.5px; color: var(--muted); margin: 3px 0 12px; }
+.tc-roster { display: flex; flex-direction: column; }
+.pl-row { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--border); }
+.pl-row:first-child { border-top: none; }
+.pl-av { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+.pl-name { font-size: 16px; font-weight: 600; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tc-close { display: block; width: 100%; margin-top: 18px; min-height: 46px; border-radius: var(--r-md); background: var(--accent); color: #fff; border: none; font-size: 15px; font-weight: 600; }
+.tc-close:hover, .tc-close:active { background: var(--brand-dark); }
 .bt-act { display: flex; justify-content: flex-end; padding: 4px 8px 8px; }
 .bt-act button { min-height: 28px; padding: 3px 10px; font-size: 12px; }
