@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.11'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.12'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3819,10 +3819,13 @@ function championPathIds(main, champ) {
 
 // One bracket match = a node in the tree. A match you can score (admin, or your picked team) is a
 // TAP TARGET (tv2-bracket-open) that opens the result pop-up — no cramped inputs inside the box.
-function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds) {
+function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam) {
+  const seeds = seedByTeam || {};
+  // C75: a small seed number before a known team's name (no seed for TBD / source placeholders).
+  const seedTag = (id) => (id && seeds[id]) ? `<span class="bt-seed" style="display:inline-block;min-width:1.3em;font-size:10px;font-weight:700;color:var(--faint);">${seeds[id]}</span>` : '';
   const aKnown = !!m.team_a_id, bKnown = !!m.team_b_id;
-  const aName = aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : escapeHTML(m.source_a || 'TBD');
-  const bName = bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : escapeHTML(m.source_b || 'TBD');
+  const aName = (aKnown ? seedTag(m.team_a_id) : '') + (aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : escapeHTML(m.source_a || 'TBD'));
+  const bName = (bKnown ? seedTag(m.team_b_id) : '') + (bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : escapeHTML(m.source_b || 'TBD'));
   const meta = `<div class="bt-meta">${escapeHTML((m.round_label || '').replace(/ M\d+$/, ''))}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
   // Any unplayed matchup is tappable for EVERYONE — the pop-up either lets you score it (admin /
   // your picked team) or tells you how to (log in / pick your team). A silent dead tap was the bug.
@@ -3950,18 +3953,14 @@ function openBracketResultModal(matchId) {
   const fail = (msg) => { err.textContent = msg; err.hidden = false; };
   let winner = null;
   const tournOf = () => (state.tournaments || []).find((x) => x.id === m.tournament_id) || {};
-  // NF-1: auto-fill the winner's box to the PHASE target (pool vs bracket), falling back to legacy match_cap.
-  const capOf = () => { const r = scoringRulesFor(m.phase, tournOf()); return r.target || Number(tournOf().match_cap) || 25; };
   overlay.querySelectorAll('.brm-team').forEach((btn) => {
     btn.onclick = () => {
       winner = btn.getAttribute('data-w');
       overlay.querySelectorAll('.brm-team').forEach((b) => b.classList.toggle('win', b === btn));
       err.hidden = true;
-      // C52: auto-fill the winner's score to the cap (you only type the loser's score), then focus it.
+      // C73 (Mike, 2026-06-26): NO auto-fill — the winner isn't always at the cap; enter both scores fresh.
       const winInput = overlay.querySelector(winner === 'a' ? '#brm-a' : '#brm-b');
-      const loseInput = overlay.querySelector(winner === 'a' ? '#brm-b' : '#brm-a');
-      if (winInput && winInput.value === '') winInput.value = String(capOf());
-      if (loseInput) loseInput.focus();
+      if (winInput) winInput.focus();
     };
   });
   // NF-4: in edit mode the current winner is pre-selected (score boxes are pre-filled). The user only
@@ -4035,6 +4034,10 @@ function buildBracketHTML(tournament, matches, teams) {
   const main = (matches || []).filter((m) => m.phase === 'main');
   if (!main.length) return '<div class="card"><p class="small" style="color:var(--muted);margin:0;">No bracket yet.</p></div>';
 
+  // C75 (Mike, 2026-06-26): show each team's pool seed (1..N) on its bracket node so it's readable at a glance.
+  const seedByTeam = {};
+  computeSeeding(teams, (matches || []).filter((m) => m.phase === 'pool')).forEach((r) => { seedByTeam[r.teamId] = r.seed; });
+
   const champ = computeChampion(main, teams);
   const pathIds = championPathIds(main, champ);
   const champBanner = champ ? `<div class="bt-champ">
@@ -4067,7 +4070,7 @@ function buildBracketHTML(tournament, matches, teams) {
     const rm = sideMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
     return `<div class="bt-col">
       <div class="bt-rlabel">${escapeHTML(roundLabelFor(r))}</div>
-      ${rm.map((m) => buildBracketNodeHTML(m, main, teams, true, pathIds)).join('')}
+      ${rm.map((m) => buildBracketNodeHTML(m, main, teams, true, pathIds, seedByTeam)).join('')}
     </div>`;
   }).join('');
 
@@ -6429,6 +6432,7 @@ function renderPublicShell() {
   return `
 <div id="app-shell">
   <header id="app-header">
+    <span class="app-header-mode" style="font-weight:800;font-size:11px;letter-spacing:0.06em;color:var(--accent);">PUBLIC</span>
     <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
     <span class="app-header-version">v${APP_VERSION}</span>
   </header>
@@ -6875,6 +6879,7 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
   return `
 <div id="app-shell">
   <header id="app-header">
+    <span class="app-header-mode" style="font-weight:800;font-size:11px;letter-spacing:0.06em;color:var(--danger);">ADMIN</span>
     <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
     <span class="app-header-version">v${APP_VERSION}</span>
     <button type="button" id="btn-logout" class="app-header-logout">Log out</button>
