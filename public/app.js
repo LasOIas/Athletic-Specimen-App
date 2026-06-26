@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.25.26';
+const APP_VERSION = '2026.06.26.1';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2987,13 +2987,20 @@ async function tdbListTournaments() {
   return data || [];
 }
 
-async function tdbCreateTournament({ name, match_cap, pool_count, net_count }) {
+async function tdbCreateTournament({ name, pool_count, net_count, preset }) {
   if (!supabaseClient) throw new Error('No database connection.');
+  const p = preset || {};
+  const bracketTarget = Number(p.bracket_target) || 25;
   const row = {
     name: String(name || '').trim() || 'Untitled Tournament',
-    match_cap: Number(match_cap) || 25,
+    match_cap: bracketTarget,            // back-compat: legacy readers + the result-modal auto-fill use the bracket target
     pool_count: Number(pool_count) || 4,
-    net_count: Number(net_count) || 10
+    net_count: Number(net_count) || 10,
+    pool_target: Number(p.pool_target) || 15,
+    pool_cap: (p.pool_cap == null || p.pool_cap === '') ? 20 : Number(p.pool_cap),
+    bracket_target: bracketTarget,
+    bracket_cap: (p.bracket_cap == null || p.bracket_cap === '') ? null : Number(p.bracket_cap),
+    win_by_2: p.win_by_2 == null ? true : !!p.win_by_2
   };
   const { data, error } = await supabaseClient
     .from('tournaments').insert([row]).select().single();
@@ -3005,6 +3012,82 @@ async function tdbDeleteTournament(id) {
   if (!supabaseClient || !id) return;
   const { error } = await supabaseClient.from('tournaments').delete().eq('id', id);
   if (error) { console.error('tdbDeleteTournament', error); throw error; }
+}
+
+// NF-1 (Option C+): saveable scoring formats (admin-managed, persist until deleted; migration 0026).
+async function tdbListScoringPresets() {
+  if (!supabaseClient) return [];
+  const { data, error } = await supabaseClient
+    .from('scoring_presets').select('*').order('created_at', { ascending: true });
+  if (error) { console.error('tdbListScoringPresets', error); return []; }
+  return data || [];
+}
+
+async function tdbCreateScoringPreset(p) {
+  if (!supabaseClient) throw new Error('No database connection.');
+  const name = String((p && p.name) || '').trim();
+  const bt = Number(p && p.bracket_target);
+  if (!name) throw new Error('Name the format.');
+  if (!bt) throw new Error('Set the bracket target.');
+  const row = {
+    name,
+    pool_target: Number(p.pool_target) || 15,
+    pool_cap: (p.pool_cap == null || p.pool_cap === '') ? null : Number(p.pool_cap),
+    bracket_target: bt,
+    bracket_cap: (p.bracket_cap == null || p.bracket_cap === '') ? null : Number(p.bracket_cap),
+    win_by_2: p.win_by_2 == null ? true : !!p.win_by_2
+  };
+  const { data, error } = await supabaseClient
+    .from('scoring_presets').insert([row]).select().single();
+  if (error) { console.error('tdbCreateScoringPreset', error); throw error; }
+  return data;
+}
+
+async function tdbDeleteScoringPreset(id) {
+  if (!supabaseClient || !id) return;
+  const { error } = await supabaseClient.from('scoring_presets').delete().eq('id', id);
+  if (error) { console.error('tdbDeleteScoringPreset', error); throw error; }
+}
+
+// The create-form "Game format" picker: saved formats (pick / delete) + an inline "new format" form.
+// Rendered into #tv2-format-picker; handlers update that container surgically (never a full render())
+// so the typed tournament name + any open new-format fields are never wiped.
+function buildFormatPickerHTML() {
+  const presets = state.scoringPresets || [];
+  const selId = state.selectedFormatId;
+  const desc = (p) => `Pool to ${p.pool_target}${p.pool_cap != null ? ' (cap ' + p.pool_cap + ')' : ''} · Bracket to ${p.bracket_target}${p.win_by_2 ? ' · win by 2' : ''}`;
+  const rows = presets.length
+    ? presets.map((p) => {
+        const sel = p.id === selId;
+        return `<div data-role="tv2-pick-format" data-id="${escapeHTML(p.id)}" style="display:flex;align-items:center;gap:8px;padding:12px 14px;border:${sel ? '2px solid var(--accent)' : '1px solid var(--border)'};border-radius:12px;background:${sel ? 'var(--accent-soft)' : 'var(--surface)'};cursor:pointer;">
+          <div style="flex:1;min-width:0;">
+            <div data-fmt-name style="font-weight:700;font-size:15px;color:${sel ? 'var(--accent)' : 'var(--text)'};">${escapeHTML(p.name || '')}</div>
+            <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">${escapeHTML(desc(p))}</div>
+          </div>
+          <button type="button" data-role="tv2-delete-format" data-id="${escapeHTML(p.id)}" title="Delete format" aria-label="Delete format" style="border:none;background:transparent;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;padding:0 4px;">×</button>
+        </div>`;
+      }).join('')
+    : '<p class="small" style="color:var(--muted);margin:0;">No saved formats yet — add one below.</p>';
+  const form = state.newFormatOpen
+    ? `<div style="border:1px dashed var(--accent);border-radius:12px;padding:14px;background:var(--surface);">
+        <div style="font-weight:700;font-size:14px;color:var(--accent);margin-bottom:10px;">+ New saved format</div>
+        <input type="text" id="nf-name" placeholder="Format name (e.g. Summer Slam)" style="width:100%;margin-bottom:10px;" />
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);">Pool to<input type="number" id="nf-ptarget" value="15" min="1" inputmode="numeric" style="width:100%;" /></label>
+          <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);">Pool cap<input type="number" id="nf-pcap" value="20" min="1" inputmode="numeric" style="width:100%;" /></label>
+          <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);">Bracket to<input type="number" id="nf-btarget" placeholder="25" min="1" inputmode="numeric" style="width:100%;" /></label>
+        </div>
+        <div id="nf-winby" data-role="tv2-winby" data-on="1" role="switch" aria-checked="true" tabindex="0" style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer;margin-bottom:12px;user-select:none;">
+          <span style="width:38px;height:22px;border-radius:999px;background:var(--accent);position:relative;display:inline-block;flex:0 0 auto;"><span style="position:absolute;top:2px;left:18px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .12s;"></span></span>
+          Win by 2
+        </div>
+        <div id="nf-msg" class="small" style="color:var(--danger);margin-bottom:8px;display:none;"></div>
+        <button type="button" class="primary" data-role="tv2-save-format" style="width:100%;">Save format</button>
+        <div class="small" style="color:var(--muted);margin-top:6px;text-align:center;">Saved formats stay until you delete them</div>
+      </div>`
+    : `<button type="button" data-role="tv2-newformat-toggle" style="width:100%;padding:11px;border:1px dashed var(--accent);border-radius:12px;background:transparent;color:var(--accent);font-weight:600;font-size:14px;cursor:pointer;">+ New saved format</button>`;
+  return `<div style="font-size:13px;color:var(--muted);margin-bottom:8px;">Game format <span style="color:var(--danger);font-weight:600;">— pick a saved format</span></div>
+    <div style="display:flex;flex-direction:column;gap:8px;">${rows}${form}</div>`;
 }
 
 async function tdbListTeams(tournamentId) {
@@ -3363,6 +3446,10 @@ async function tdbClearBracketResult(match) {
 // Reload tournament list (+ active tournament's teams/pools/matches) into state. No render.
 async function tdbRefreshTournaments() {
   state.tournaments = await tdbListTournaments();
+  state.scoringPresets = await tdbListScoringPresets();
+  if (!(state.scoringPresets || []).some((p) => p.id === state.selectedFormatId)) {
+    state.selectedFormatId = state.scoringPresets[0] ? state.scoringPresets[0].id : null;
+  }
   // Public viewers auto-follow the LIVE/finished tournament (never a fresh 'setup' draft),
   // and a stale follow (deleted tournament) is re-validated.
   if (!state.isAdmin) {
@@ -3691,7 +3778,9 @@ function openBracketResultModal(matchId) {
   const err = overlay.querySelector('#brm-err');
   const fail = (msg) => { err.textContent = msg; err.hidden = false; };
   let winner = null;
-  const capOf = () => { const t = (state.tournaments || []).find((x) => x.id === m.tournament_id) || {}; return Number(t.match_cap) || 25; };
+  const tournOf = () => (state.tournaments || []).find((x) => x.id === m.tournament_id) || {};
+  // NF-1: auto-fill the winner's box to the PHASE target (pool vs bracket), falling back to legacy match_cap.
+  const capOf = () => { const r = scoringRulesFor(m.phase, tournOf()); return r.target || Number(tournOf().match_cap) || 25; };
   overlay.querySelectorAll('.brm-team').forEach((btn) => {
     btn.onclick = () => {
       winner = btn.getAttribute('data-w');
@@ -3715,6 +3804,12 @@ function openBracketResultModal(matchId) {
     if (!winner) return fail('Tap the team that won.');
     const sa = overlay.querySelector('#brm-a').value, sb = overlay.querySelector('#brm-b').value;
     if (sa === '' || sb === '') return fail('Enter both scores.'); // scores are required (Mike)
+    // NF-1: client-side per-phase rule pre-check (gated to the new model; the RPC enforces server-side regardless).
+    const tRules = tournOf();
+    if ((m.phase === 'main' ? tRules.bracket_target : tRules.pool_target) != null) {
+      const st = gameScoreStatus(Number(sa), Number(sb), scoringRulesFor(m.phase, tRules));
+      if (!st.valid) return fail(st.reason);
+    }
     submitting = true;
     try {
       if (!(await confirmBigMargin(sa, sb))) return; // restored: catch a fat-finger blowout before it saves
@@ -3736,9 +3831,10 @@ function openBracketResultModal(matchId) {
   overlay.querySelector('#brm-forfeit').onclick = async () => {
     if (submitting) return;
     if (!winner) return fail('Tap the team that showed up first — they win the forfeit.');
-    const t = (state.tournaments || []).find((x) => x.id === m.tournament_id) || {};
-    const cap = Number(t.match_cap) || 25;
-    const winS = cap, loseS = Math.max(0, cap - 2);
+    const t = tournOf();
+    // NF-1: forfeit auto-score must stay VALID under the new enforcement → win at the phase target by 2.
+    const winS = scoringRulesFor(m.phase, t).target || (Number(t.match_cap) || 25);
+    const loseS = Math.max(0, winS - 2);
     const sa = winner === 'a' ? winS : loseS, sb = winner === 'a' ? loseS : winS;
     overlay.querySelector('#brm-a').value = String(sa);
     overlay.querySelector('#brm-b').value = String(sb);
@@ -4059,10 +4155,8 @@ function buildTournamentTabHTML() {
     <div class="card">
       <h3 style="margin:0 0 8px;">New Tournament</h3>
       <input type="text" id="tv2-name" placeholder="Tournament name (e.g. Summer Slam 6s)" />
-      <div style="display:flex;gap:8px;margin-top:8px;">
-        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);">Game to
-          <input type="number" id="tv2-cap" value="25" min="1" inputmode="numeric" style="width:100%;flex:0 0 auto;" />
-        </label>
+      <div id="tv2-format-picker" style="margin-top:12px;">${buildFormatPickerHTML()}</div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
         <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);">Pools
           <input type="number" id="tv2-pools" value="4" min="1" inputmode="numeric" style="width:100%;flex:0 0 auto;" />
         </label>
@@ -7093,13 +7187,66 @@ function bindTournamentTabV2() {
       state.tournamentTabError = '';
       if (role === 'tv2-create-tournament') {
         const val = (sel) => (document.getElementById(sel) || {}).value || '';
+        const preset = (state.scoringPresets || []).find((p) => p.id === state.selectedFormatId);
+        if (!preset) { state.tournamentTabError = 'Pick a saved format first.'; render(); return; }
         const created = await tdbCreateTournament({
-          name: val('tv2-name'), match_cap: val('tv2-cap'),
-          pool_count: val('tv2-pools'), net_count: val('tv2-nets')
+          name: val('tv2-name'), pool_count: val('tv2-pools'), net_count: val('tv2-nets'), preset
         });
         state.activeTournamentId = created.id;
         await tdbRefreshTournaments();
         render();
+      } else if (role === 'tv2-pick-format') {
+        // surgical: only restyle the rows so the typed tournament name + any open new-format form survive
+        state.selectedFormatId = id;
+        const picker = document.getElementById('tv2-format-picker');
+        if (picker) picker.querySelectorAll('[data-role="tv2-pick-format"]').forEach((row) => {
+          const sel = row.getAttribute('data-id') === id;
+          row.style.border = sel ? '2px solid var(--accent)' : '1px solid var(--border)';
+          row.style.background = sel ? 'var(--accent-soft)' : 'var(--surface)';
+          const nm = row.querySelector('[data-fmt-name]'); if (nm) nm.style.color = sel ? 'var(--accent)' : 'var(--text)';
+        });
+      } else if (role === 'tv2-newformat-toggle') {
+        state.newFormatOpen = !state.newFormatOpen;
+        const picker = document.getElementById('tv2-format-picker');
+        if (picker) picker.innerHTML = buildFormatPickerHTML();
+      } else if (role === 'tv2-winby') {
+        // surgical toggle (no re-render → the typed new-format fields survive); read at save time
+        const on = el.getAttribute('data-on') === '1';
+        el.setAttribute('data-on', on ? '0' : '1');
+        el.setAttribute('aria-checked', on ? 'false' : 'true');
+        const track = el.querySelector('span'); const knob = track && track.querySelector('span');
+        if (track) track.style.background = on ? 'var(--border)' : 'var(--accent)';
+        if (knob) knob.style.left = on ? '2px' : '18px';
+      } else if (role === 'tv2-save-format') {
+        const gv = (i) => ((document.getElementById(i) || {}).value || '').trim();
+        const msg = document.getElementById('nf-msg');
+        const fail = (t) => { if (msg) { msg.textContent = t; msg.style.display = 'block'; } };
+        const name = gv('nf-name'); const bt = Number(gv('nf-btarget'));
+        if (!name) { fail('Name the format.'); return; }
+        if (!bt) { fail('Set the bracket target.'); return; }
+        const winEl = document.getElementById('nf-winby');
+        const win_by_2 = !winEl || winEl.getAttribute('data-on') === '1';
+        el.setAttribute('disabled', 'true');
+        try {
+          const createdP = await tdbCreateScoringPreset({ name, pool_target: gv('nf-ptarget'), pool_cap: gv('nf-pcap'), bracket_target: bt, win_by_2 });
+          state.scoringPresets = [...(state.scoringPresets || []), createdP];
+          state.selectedFormatId = createdP.id;
+          state.newFormatOpen = false;
+          const picker = document.getElementById('tv2-format-picker');
+          if (picker) picker.innerHTML = buildFormatPickerHTML();
+        } catch (err) {
+          el.removeAttribute('disabled');
+          fail((err && err.message) || 'Could not save the format.');
+        }
+      } else if (role === 'tv2-delete-format') {
+        const preset = (state.scoringPresets || []).find((p) => p.id === id);
+        if (!preset) return;
+        if (!(await appConfirm({ message: `Delete the "${preset.name}" format?`, confirmText: 'Delete', danger: true }))) return;
+        await tdbDeleteScoringPreset(id);
+        state.scoringPresets = (state.scoringPresets || []).filter((p) => p.id !== id);
+        if (state.selectedFormatId === id) state.selectedFormatId = state.scoringPresets[0] ? state.scoringPresets[0].id : null;
+        const picker = document.getElementById('tv2-format-picker');
+        if (picker) picker.innerHTML = buildFormatPickerHTML();
       } else if (role === 'tv2-register-team') {
         // PUBLIC: a team signs itself up (replaces the Google Form). Errors shown inline in #reg-msg.
         const fv = (fid) => ((document.getElementById(fid) || {}).value || '').trim();

@@ -15,6 +15,7 @@
 - **§38 gate:** any edit to `public/{app.js,*.html,*.css}` is hard-blocked until cleared. The create-form UI change (Task 4) needs **3 distinct localhost layouts** shown OR an exempt mark; `pure.js` + `sw.js` + migrations are NOT §38-blocked.
 - **No emoji; direction-A tokens; mobile-first.** Auth deferred — the RPC stays the only anon write path (SECURITY DEFINER under locked RLS).
 - **RPC has NO automated test harness (OUT-10):** verify the migration on a SYNTHETIC tournament against the prod DB, then clean it up. Never run against real tournament data.
+- **LEGACY GATING (safety — added during build):** enforcement (target/cap/win-by-2) applies ONLY to tournaments created with the NEW model (the relevant `pool_target`/`bracket_target` column is set). Legacy tournaments (only `match_cap`) keep the OLD behavior — NO retroactive win-by-2 — so an in-flight legacy event's scoring never changes underneath it. Applies in BOTH the RPC (Task 2) and the client pre-check (Task 3).
 
 ## File Structure
 - `public/pure.js` — add `gameScoreStatus()` + `scoringRulesFor(phase, tournament)` (pure, vitest-tested). The one rule both the client and (mirrored) the RPC enforce.
@@ -165,7 +166,7 @@ create or replace function public.submit_match_score(
 ) returns public.matches language plpgsql security definer set search_path=public as $$
 declare m public.matches; t public.tournaments; updated public.matches; side text; win uuid; lose uuid; col text;
         is_gf boolean; wb_won_gf boolean; decisive boolean;
-        v_target int; v_cap int; v_winby int; w int; l int; legacy int;
+        v_target int; v_cap int; v_winby int; w int; l int;
 begin
   select * into m from public.matches where id = p_match;
   if not found then raise exception 'match not found'; end if;
@@ -176,19 +177,19 @@ begin
   if p_score_a is not null and p_score_b is not null then
     if p_score_a < 0 or p_score_b < 0 then raise exception 'scores must be >= 0'; end if;
     if p_score_a = p_score_b then raise exception 'ties are not allowed'; end if;
-    -- NF-1: enforce per-phase target / cap / win-by-2
-    legacy   := coalesce(t.match_cap, 25);
-    v_winby  := case when coalesce(t.win_by_2, true) then 2 else 1 end;
-    if coalesce(m.phase,'') = 'main' then
-      v_target := coalesce(t.bracket_target, legacy); v_cap := t.bracket_cap;
-    else
-      v_target := coalesce(t.pool_target, legacy);    v_cap := t.pool_cap;
-    end if;
-    w := greatest(p_score_a, p_score_b); l := least(p_score_a, p_score_b);
-    if v_cap is not null and w > v_cap then raise exception 'above the cap of %', v_cap; end if;
-    if not (v_cap is not null and w = v_cap) then
-      if w < v_target then raise exception 'the winner must reach %', v_target; end if;
-      if (w - l) < v_winby then raise exception 'must win by %', v_winby; end if;
+    -- NF-1: enforce per-phase target / cap / win-by-2 — ONLY when the new model is set for this phase
+    -- (v_target not null). Legacy rows (match_cap only) skip enforcement = old behavior, so an
+    -- in-flight legacy tournament's scoring never changes under the migration.
+    if coalesce(m.phase,'') = 'main' then v_target := t.bracket_target; v_cap := t.bracket_cap;
+    else v_target := t.pool_target; v_cap := t.pool_cap; end if;
+    if v_target is not null then
+      v_winby := case when coalesce(t.win_by_2, true) then 2 else 1 end;
+      w := greatest(p_score_a, p_score_b); l := least(p_score_a, p_score_b);
+      if v_cap is not null and w > v_cap then raise exception 'above the cap of %', v_cap; end if;
+      if not (v_cap is not null and w = v_cap) then
+        if w < v_target then raise exception 'the winner must reach %', v_target; end if;
+        if (w - l) < v_winby then raise exception 'must win by %', v_winby; end if;
+      end if;
     end if;
     side := case when p_score_a > p_score_b then 'a' else 'b' end;
     if p_winner_side is not null and lower(p_winner_side) <> side then
@@ -245,7 +246,7 @@ grant execute on function public.submit_match_score(uuid,int,int,int,text) to an
 
 - [ ] **Step 2: Apply + verify on a synthetic tournament**
 
-Apply via Supabase MCP `apply_migration` (name `0025_nf1_per_phase_scoring`). Then on a SYNTHETIC tournament (create one, do NOT touch `Friday Night 6s (TEST)` or real data): assert `submit_match_score` rejects 15-14 pool (must win by 2), accepts 15-13, rejects 21-19 pool (above cap 20), accepts 20-19 pool (at cap); for a bracket-to-21 match rejects 21-20, accepts 21-19 and 25-23. Confirm advancement still works on a valid score. Clean up the synthetic tournament.
+Apply via Supabase MCP `apply_migration` (name `0025_nf1_per_phase_scoring`). Then on a SYNTHETIC tournament with the NEW columns set (create one, do NOT touch `Friday Night 6s (TEST)` or real data): assert `submit_match_score` rejects 15-14 pool (must win by 2), accepts 15-13, rejects 21-19 pool (above cap 20), accepts 20-19 pool (at cap); for a bracket-to-21 match rejects 21-20, accepts 21-19 and 25-23. Confirm advancement still works on a valid score. **LEGACY CHECK (critical):** also assert a LEGACY-shaped synthetic tournament (only `match_cap`, target columns NULL) still scores the OLD way — e.g. a 15-14 pool game is ACCEPTED — proving enforcement does NOT apply retroactively. Clean up all synthetic tournaments.
 
 - [ ] **Step 3: Commit**
 
@@ -264,7 +265,7 @@ git commit -m "feat(scoring): NF-1 migration 0025 — per-phase columns + RPC en
 **Interfaces:**
 - Consumes: `scoringRulesFor`, `gameScoreStatus` (Task 1), the new columns (Task 2).
 
-- [ ] **Step 1:** In `openBracketResultModal`, replace `capOf` and the auto-fill so the winner's box pre-fills to the phase target (not the old single cap), and add a client-side `gameScoreStatus` check before submit that calls `fail(status.reason)` when `!status.valid` (so the user sees "Must win by 2" before the RPC round-trip). Keep the existing tap-agrees-with-scores check.
+- [ ] **Step 1:** In `openBracketResultModal`, replace `capOf` and the auto-fill so the winner's box pre-fills to the phase target (not the old single cap), and add a client-side `gameScoreStatus` check before submit that calls `fail(status.reason)` when `!status.valid` (so the user sees "Must win by 2" before the RPC round-trip). Keep the existing tap-agrees-with-scores check. **Gating (mirror the RPC):** apply the `gameScoreStatus` enforcement ONLY when the phase's target column is set on the tournament (`bracket_target`/`pool_target` not null); for legacy tournaments keep the existing validation (no win-by-2). The winner-box auto-fill uses `scoringRulesFor(phase, t).target` (which falls back to `match_cap` for legacy).
 
 - [ ] **Step 2:** `tdbCreateTournament` — accept + persist `pool_target, pool_cap, bracket_target, bracket_cap, win_by_2` (passed from Task 4's form); keep writing `match_cap` (= `bracket_target`) for back-compat with anything still reading it.
 
@@ -296,3 +297,22 @@ git commit -m "feat(scoring): NF-1 migration 0025 — per-phase columns + RPC en
 - **Placeholder scan:** none — real test code, real impl, real SQL, exact files/lines.
 - **Type consistency:** `gameScoreStatus`/`scoringRulesFor` signatures match between Task 1 (def), Task 3 (client use), Task 2 (PL/pgSQL mirror). `{target, cap, winBy2}` consistent.
 - **Risk:** the RPC change is the delicate part (no test harness, OUT-10) → verified on a synthetic tournament before any real use; back-compat via `match_cap` fallback so existing tournaments still score.
+
+---
+
+## Option C+ extension — saveable scoring FORMATS (Mike, 2026-06-26)
+Mike chose §38 Option C (format presets) and asked to "create custom presets that save forever until deleted." This replaces the bare bracket-target picker with a **saved-formats** picker in the create form.
+
+**DB — DONE + verified (migration `0026_nf1_scoring_presets`, commit pending push):** `scoring_presets` (id, name, pool_target default 15, pool_cap, bracket_target NOT NULL, bracket_cap, win_by_2 default true, created_at). RLS = `c21 anon read` (SELECT/anon) + `c21 admin all` (ALL/authenticated) — admin writes via the authenticated session (same path as creating a tournament; no new anon RPC). Seeded one **"Standard"** (pool 15/cap 20, bracket 25, win-by-2). Verified on prod.
+
+**Remaining app.js build (the careful part — surgical updates, no full render() in the picker):**
+1. **tdb layer** (after `tdbDeleteTournament` ~3008): `tdbListScoringPresets()` (select * order by created_at asc), `tdbCreateScoringPreset(p)` (validate name + bracket_target required; null-safe caps), `tdbDeleteScoringPreset(id)`.
+2. **Load:** in `tdbRefreshTournaments` (after `state.tournaments=...` line 3365) add `state.scoringPresets = await tdbListScoringPresets();`. State: `state.selectedFormatId` (default first preset), `state.newFormatOpen`.
+3. **`tdbCreateTournament`** (line 2990): change signature to `({name, pool_count, net_count, preset})`; persist `pool_target/pool_cap/bracket_target/bracket_cap/win_by_2` from `preset` + `match_cap = preset.bracket_target` (back-compat).
+4. **Create-form UI** (lines 4058-4078): replace the "Game to" label with `<div id="tv2-format-picker">${buildFormatPickerHTML()}</div>` (keep Pools/Nets + the name input OUTSIDE the picker). `buildFormatPickerHTML()` = the preset rows (selected highlight + `tv2-delete-format` ×) + a `tv2-newformat-toggle` → an inline new-format form (name, pool to/cap, bracket to, a `tv2-winby` toggle, `tv2-save-format`).
+5. **Handlers** (extend the delegated `tv2-*` listener ~7087): `tv2-pick-format` (set selectedFormatId; **surgically** toggle row highlight — NO render); `tv2-delete-format` (appConfirm; delete; re-render the picker container only); `tv2-newformat-toggle` (toggle state.newFormatOpen; re-render picker container only — safe, nothing typed yet); `tv2-winby` (**surgical** data-attr toggle, read at save — NO render so the typed fields survive); `tv2-save-format` (read fields + win-by from DOM; validate; create; select new; close form; re-render picker container only). **CRITICAL:** only ever set `#tv2-format-picker`.innerHTML (never full render) so the typed tournament name + open new-format fields are never wiped.
+6. **Create handler** (`tv2-create-tournament` ~7094): pass `preset` = the selected `state.scoringPresets.find(p=>p.id===state.selectedFormatId)`; block if none selected.
+7. **Result-modal wiring (Task 3):** `openBracketResultModal` auto-fill → `scoringRulesFor(m.phase, t).target`; pre-submit `gameScoreStatus` check **gated** on the new model present (`t.pool_target`/`t.bracket_target` not null).
+8. Ship: §38 marked (3-options-shown, done) · bump `APP_VERSION` 2026.06.25.26 → **2026.06.26.1** (app.js:27) + `SW_VERSION` lockstep (sw.js:3) · `node --check` · `vitest run` · **live-verify on localhost** (create form shows formats, pick → create → scoring cols set + enforcement fires, save a new format → persists + appears, delete → gone; tournament name survives a format pick) · push.
+
+**Verify before push (the gate):** localhost end-to-end on the real connected browser — never push the create-flow change unverified.
