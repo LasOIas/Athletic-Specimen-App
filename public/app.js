@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.16'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.17'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2382,11 +2382,17 @@ function buildPublicTournamentLiveHTML() {
   if (!t || (t.status !== 'pools' && t.status !== 'bracket')) return '';
   const teams = state.tournamentTeams || [];
   const matches = state.tournamentMatches || [];
-  const row = (label, m) => `<div class="court-row">
+  const row = (label, m) => {
+    // C72: a game being live-scored shows its running score instead of just "Playing".
+    const stat = m.status === 'live'
+      ? ((m.score_a != null ? m.score_a : 0) + '–' + (m.score_b != null ? m.score_b : 0))
+      : 'Playing';
+    return `<div class="court-row">
       <div class="court-row-info"><div class="court-row-name">${escapeHTML(label)}</div>
         <div class="court-row-sub">${escapeHTML(teamNameById(teams, m.team_a_id))} vs ${escapeHTML(teamNameById(teams, m.team_b_id))}</div></div>
-      <span class="court-stat is-live">Playing</span>
+      <span class="court-stat is-live">${escapeHTML(String(stat))}</span>
     </div>`;
+  };
   let rows = '';
   if (t.status === 'pools') {
     // current game per net = lowest queue_order unplayed match on that net (mirrors the admin net board)
@@ -3383,6 +3389,21 @@ async function tdbSubmitResult(match, scoreA, scoreB) {
   return Array.isArray(data) ? data[0] : data;
 }
 
+// C72: write the RUNNING live score (a spectator tapping +1/-1) via the anon set_live_score RPC
+// (migration 0030) — sets status='live' + the running score, last-write-wins. Finalizing the game is the
+// existing submit_match_score path (fired from the live scorer's game-over confirm). Optimistic: the UI
+// updates instantly; this persists in the background + broadcasts to everyone via realtime.
+async function tdbSetLiveScore(match, a, b) {
+  if (!supabaseClient || !match) throw new Error('No match.');
+  const sa = Math.max(0, Math.floor(Number(a) || 0));
+  const sb = Math.max(0, Math.floor(Number(b) || 0));
+  const { data, error } = await supabaseClient.rpc('set_live_score', {
+    p_match: match.id, p_score_a: sa, p_score_b: sb
+  });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] : data;
+}
+
 // NF-4: edit a FINALIZED match's score in place (no cascade) via the edit_match_score RPC (migration
 // 0027). Same-winner corrections only — the RPC refuses a winner flip (that needs Clear, which re-opens
 // the next round). Used by the result modal's edit mode for a final match.
@@ -3841,10 +3862,14 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
           </div>`;
         }
         const isCur = g.id === curId;
-        return `<div class="ppg${isCur ? ' is-now' : ''}" data-role="tv2-bracket-open" data-id="${escapeHTML(g.id)}" role="button" tabindex="0">
+        const isLive = g.status === 'live'; // C72: a game being live-scored shows its running score + a LIVE pill
+        const rightSide = isLive
+          ? `<span class="ppg-livescore">${escapeHTML(String(g.score_a != null ? g.score_a : 0))}–${escapeHTML(String(g.score_b != null ? g.score_b : 0))}</span><span class="ppg-livetag">LIVE</span>`
+          : (isCur ? '<span class="ppg-now">Now</span>' : '<span class="ppg-cta" aria-hidden="true">Score &rsaquo;</span>');
+        return `<div class="ppg${isCur ? ' is-now' : ''}${isLive ? ' is-live' : ''}" data-role="tv2-bracket-open" data-id="${escapeHTML(g.id)}" role="button" tabindex="0">
           <span class="ppg-n">${order}</span>
           <span class="ppg-m">${aN} <span class="ppg-vs">vs</span> ${bN}</span>
-          <span class="ppg-r">${isCur ? '<span class="ppg-now">Now</span>' : '<span class="ppg-cta" aria-hidden="true">Score &rsaquo;</span>'}</span>
+          <span class="ppg-r">${rightSide}</span>
         </div>`;
       }).join('');
       return `<div class="ppl-ng"><div class="ppl-nglabel">Net ${net}</div>${rows}</div>`;
@@ -3984,6 +4009,132 @@ function openTournamentSettingsModal(tournamentId) {
       render();
     } catch (e) { saving = false; fail((e && e.message) || 'Could not save settings.'); }
   };
+}
+
+// C72 (Mike): tap a game -> choose how to score it. A final game goes straight to the edit modal; otherwise
+// a small chooser: "Score live" (the point-by-point live scorer) or "Enter final score" (the C71 modal).
+function openMatchActionChooser(matchId) {
+  const m = (state.tournamentMatches || []).find((x) => x.id === matchId);
+  if (!m || !m.team_a_id || !m.team_b_id) return;
+  if (m.status === 'final') return openBracketResultModal(matchId); // editing a final result -> straight in
+  const aName = teamNameById(state.tournamentTeams, m.team_a_id);
+  const bName = teamNameById(state.tournamentTeams, m.team_b_id);
+  const title = (m.round_label || 'Match').replace(/ M\d+$/, '') + (m.net ? ' · Net ' + m.net : '');
+  const live = m.status === 'live';
+  const overlay = document.createElement('div');
+  overlay.className = 'popup-overlay';
+  overlay.style.display = 'flex';
+  overlay.innerHTML = `<div class="popup-card card mac-card" role="dialog" aria-modal="true" aria-label="Score this game">
+    <div class="mac-title">${escapeHTML(title)}</div>
+    <div class="mac-teams">${escapeHTML(aName)} <span class="mac-vs">vs</span> ${escapeHTML(bName)}</div>
+    <button type="button" class="mac-opt mac-live" data-role="mac-live">
+      <span class="mac-opt-t">${live ? 'Resume live score' : 'Score live'}</span>
+      <span class="mac-opt-s">Tap the score point-by-point as the game plays — everyone watching sees it</span>
+    </button>
+    <button type="button" class="mac-opt" data-role="mac-final">
+      <span class="mac-opt-t">Enter final score</span>
+      <span class="mac-opt-s">Already have the final? Enter it directly</span>
+    </button>
+    <button type="button" class="mac-cancel" data-role="mac-cancel">Cancel</button>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay || e.target.closest('[data-role="mac-cancel"]')) return close();
+    if (e.target.closest('[data-role="mac-live"]')) { close(); return openLiveScorer(matchId); }
+    if (e.target.closest('[data-role="mac-final"]')) { close(); return openBracketResultModal(matchId); }
+  });
+}
+
+// C72 (§38 Option A — "tap the team"): the live point-by-point scorer. A spectator taps a team's whole
+// panel for +1 (small −1 to fix); the running score writes via tdbSetLiveScore (optimistic + persisted,
+// broadcast to everyone) and the leader's panel glows. When gameScoreStatus says the game is won, a
+// confirm card appears ("X win a-b — finish?"); finishing finalizes through the existing submit path
+// (tdbSubmitResult for pool / tdbSubmitBracketResult for bracket) and advances. Leaving keeps it 'live'.
+function openLiveScorer(matchId) {
+  const m = (state.tournamentMatches || []).find((x) => x.id === matchId);
+  if (!m || !m.team_a_id || !m.team_b_id) return;
+  const aName = teamNameById(state.tournamentTeams, m.team_a_id);
+  const bName = teamNameById(state.tournamentTeams, m.team_b_id);
+  const tournOf = () => (state.tournaments || []).find((x) => x.id === m.tournament_id) || {};
+  const rules = scoringRulesFor(m.phase, tournOf());
+  const ruleText = 'First to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ' (cap ' + rules.cap + ')' : '');
+  const title = (m.round_label || 'Match').replace(/ M\d+$/, '') + (m.net ? ' · Net ' + m.net : '');
+  let a = Math.max(0, Number(m.score_a) || 0);
+  let b = Math.max(0, Number(m.score_b) || 0);
+  let submitting = false, finished = false, confirmEl = null;
+  const overlay = document.createElement('div');
+  overlay.className = 'live-overlay';
+  overlay.innerHTML = `<div class="lsc">
+    <div class="lsc-h">
+      <button type="button" class="lsc-back" data-role="ls-back" aria-label="Back">&lsaquo;</button>
+      <div class="lsc-htext"><div class="lsc-title">${escapeHTML(title)}</div><div class="lsc-rule">${escapeHTML(ruleText)}</div></div>
+      <span class="lsc-livetag"><span class="lsc-dot" aria-hidden="true"></span>LIVE</span>
+    </div>
+    <div class="lsc-panels">
+      <button type="button" class="lsc-panel" data-role="ls-plus" data-team="a">
+        <span class="lsc-name">${escapeHTML(aName)}</span><span class="lsc-score" id="ls-a">${a}</span><span class="lsc-tap">TAP TO +1</span>
+      </button>
+      <button type="button" class="lsc-panel" data-role="ls-plus" data-team="b">
+        <span class="lsc-name">${escapeHTML(bName)}</span><span class="lsc-score" id="ls-b">${b}</span><span class="lsc-tap">TAP TO +1</span>
+      </button>
+    </div>
+    <div class="lsc-minus">
+      <button type="button" class="lsc-minusbtn" data-role="ls-minus" data-team="a">&minus;1 ${escapeHTML(aName)}</button>
+      <button type="button" class="lsc-minusbtn" data-role="ls-minus" data-team="b">&minus;1 ${escapeHTML(bName)}</button>
+    </div>
+    <div class="lsc-err" id="lsc-err" hidden></div>
+    <div class="lsc-f"><button type="button" class="lsc-final" data-role="ls-final">Enter the final score instead</button></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  const elA = overlay.querySelector('#ls-a'), elB = overlay.querySelector('#ls-b');
+  const panA = overlay.querySelector('.lsc-panel[data-team="a"]'), panB = overlay.querySelector('.lsc-panel[data-team="b"]');
+  const err = overlay.querySelector('#lsc-err');
+  const syncUI = () => { elA.textContent = a; elB.textContent = b; panA.classList.toggle('lead', a > b); panB.classList.toggle('lead', b > a); };
+  const persist = () => { tdbSetLiveScore(m, a, b).catch((e) => { err.textContent = (e && e.message) || 'Could not save the live score.'; err.hidden = false; }); };
+  const maybeGameOver = () => {
+    if (confirmEl) { confirmEl.remove(); confirmEl = null; }
+    const st = gameScoreStatus(a, b, rules);
+    if (!st.valid) return;
+    const winName = a > b ? aName : bName;
+    confirmEl = document.createElement('div');
+    confirmEl.className = 'lsc-confirm';
+    confirmEl.innerHTML = `<div class="lsc-confirm-card">
+      <div class="lsc-confirm-t">${escapeHTML(winName)} win ${a}–${b}</div>
+      <div class="lsc-confirm-s">Finish the game?</div>
+      <div class="lsc-confirm-btns">
+        <button type="button" class="secondary" data-role="lsc-keep">Keep scoring</button>
+        <button type="button" class="primary" data-role="lsc-finish">Finish game</button>
+      </div>
+    </div>`;
+    overlay.appendChild(confirmEl);
+    confirmEl.querySelector('[data-role="lsc-keep"]').onclick = () => { if (confirmEl) { confirmEl.remove(); confirmEl = null; } };
+    confirmEl.querySelector('[data-role="lsc-finish"]').onclick = async () => {
+      if (submitting) return;
+      submitting = true;
+      try {
+        if (!(await confirmBigMargin(String(a), String(b)))) { submitting = false; return; }
+        if (m.phase === 'pool') await tdbSubmitResult(m, String(a), String(b));
+        else await tdbSubmitBracketResult(m, a > b ? 'a' : 'b', String(a), String(b));
+        await tdbRefreshTournaments();
+        finished = true; close(); render();
+      } catch (e) { err.textContent = (e && e.message) || 'Could not finish the game.'; err.hidden = false; submitting = false; }
+    };
+  };
+  const bump = (team, d) => {
+    if (finished) return;
+    if (team === 'a') a = Math.max(0, a + d); else b = Math.max(0, b + d);
+    err.hidden = true; syncUI(); persist(); maybeGameOver();
+  };
+  overlay.addEventListener('click', (e) => {
+    if (e.target.closest('[data-role="ls-back"]')) return close();
+    if (e.target.closest('[data-role="ls-final"]')) { close(); return openBracketResultModal(matchId); }
+    const plus = e.target.closest('[data-role="ls-plus"]'); if (plus) return bump(plus.getAttribute('data-team'), 1);
+    const minus = e.target.closest('[data-role="ls-minus"]'); if (minus) return bump(minus.getAttribute('data-team'), -1);
+  });
+  syncUI();
+  maybeGameOver(); // re-opened at a game-over score -> show the confirm right away
 }
 
 function openBracketResultModal(matchId) {
@@ -7721,7 +7872,7 @@ function bindTournamentTabV2() {
       } else if (role === 'tv2-team-card') {
         openTeamRosterCard(id); // C69: tap a team -> popup card with its players
       } else if (role === 'tv2-bracket-open') {
-        openBracketResultModal(id); // pop-up handles auth (scores it, or tells you how to)
+        openMatchActionChooser(id); // C72: tap a game -> Score live / Enter final (a final goes straight to edit)
       } else if (role === 'tv2-bracket-clear') {
         const m = (state.tournamentMatches || []).find((x) => x.id === id);
         await tdbClearBracketResult(m);
