@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.3';
+const APP_VERSION = '2026.06.26.4';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2435,7 +2435,9 @@ function publicHomeHTML() {
         <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><b>${escapeHTML(state.currentSession.time || '')}</b></div>
         <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>${escapeHTML(state.currentSession.location || '')}</div>
       </div>`
-    : `<div class="ph-card ph-sescard ph-empty">No session scheduled yet — check back soon.</div>`;
+    : state.loaded
+      ? `<div class="ph-card ph-sescard ph-empty">No session scheduled yet — check back soon.</div>`
+      : `<div class="ph-card ph-sescard ph-empty">Loading…</div>`; // NF-8: don't flash "No session" pre-sync
   return `<div class="home-screen">
     <div class="ph-brand">Athletic Specimen</div>
     ${tilesHTML}
@@ -5288,6 +5290,23 @@ async function saveSession(date, time, location) {
   }
 }
 
+// NF-12: clear/unschedule the session so the public "Next session" card stops advertising a stale
+// date forever. Deletes the single sessions row (id=1) -> loadSession reads null -> currentSession=null
+// -> the public card + the admin preview hide until a new session is saved.
+async function clearSession() {
+  state.currentSession = null;
+  saveLocal();
+  if (!supabaseClient) return true; // local-only mode
+  try {
+    const { error } = await supabaseClient.from('sessions').delete().eq('id', 1);
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.warn('clearSession error', err);
+    return false;
+  }
+}
+
 async function reconcileToSupabaseAuthority(contextLabel = '') {
   if (!supabaseClient || !SUPABASE_AUTHORITATIVE) return false;
   const synced = await syncFromSupabase();
@@ -6677,6 +6696,7 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
               <div class="session-form-actions">
                 <button id="btn-save-session" class="primary">Save session</button>
                 <button id="btn-share-session" class="secondary" ${state.currentSession ? '' : 'disabled title="Save the session first"'}>Share QR / link</button>
+                ${state.currentSession ? '<button id="btn-clear-session" class="secondary">Clear session</button>' : ''}
               </div>
               <div id="session-save-msg" style="display:none; margin-top:8px; font-size:13px; color:var(--live);"></div>
               ${state.currentSession ? `
@@ -7755,6 +7775,9 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
         if (!name) { showCheckinToast('Type your name first'); checkinSearch.focus(); return; }
         // C47: require a real first AND last name (each >= 2 chars) — single names cause "who is who" mix-ups.
         if (!isValidFullName(name)) { showCheckinToast('Enter your full first and last name'); checkinSearch.focus(); return; }
+        // NF-8: don't register before the roster has loaded — state.players is empty pre-sync, so the
+        // "already in history?" check below would miss an existing person and create a DUPLICATE.
+        if (!state.loaded) { showCheckinToast('Still loading — one second, then tap again'); return; }
 
         // Already in history? Treat the kiosk "new" tap as a check-in for that existing player.
         const exists = state.players.find((p) => normalize(p.name) === normalize(name));
@@ -8120,6 +8143,29 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
   const btnShareSession = document.getElementById('btn-share-session');
   if (btnShareSession) {
     btnShareSession.addEventListener('click', () => openQrModal());
+  }
+
+  // NF-12: clear the scheduled session (hides the public "Next session" card until a new one is set).
+  const btnClearSession = document.getElementById('btn-clear-session');
+  if (btnClearSession) {
+    btnClearSession.addEventListener('click', async () => {
+      if (!(await appConfirm({
+        title: 'Clear session',
+        message: 'Remove the scheduled session? Players will stop seeing the "Next session" card until you set a new one.',
+        confirmText: 'Clear',
+        danger: true,
+      }))) return;
+      btnClearSession.disabled = true;
+      const ok = await clearSession();
+      btnClearSession.disabled = false;
+      const msg = document.getElementById('session-save-msg');
+      if (msg) {
+        msg.style.color = ok ? 'var(--success)' : 'var(--danger)';
+        msg.textContent = ok ? 'Session cleared' : 'Clear failed — check connection';
+        msg.style.display = 'block';
+      }
+      if (ok) render();
+    });
   }
 }
 
