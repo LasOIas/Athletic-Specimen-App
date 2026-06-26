@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.2';
+const APP_VERSION = '2026.06.26.3';
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7429,6 +7429,24 @@ function activateMainTab(tab) {
   if (tab === 'tournament') layoutBracketTree(); // C32 #9: fit the bracket tree when switching into the tab
 }
 
+// NF-13: count the "Won" results recorded in the current casual round. A re-roll (Generate / a team-size
+// button) rebuilds the teams + court order and clears liveMatchResults — so if any result is recorded we
+// confirm first instead of silently destroying the round's standings.
+function recordedLiveResultCount() {
+  const r = state.liveMatchResults || {};
+  return Object.keys(r).filter((k) => Number(r[k]) > 0).length;
+}
+async function confirmReRollIfResultsRecorded() {
+  const n = recordedLiveResultCount();
+  if (n === 0) return true;
+  return await appConfirm({
+    title: 'Re-roll teams?',
+    message: `This clears the ${n} game result${n === 1 ? '' : 's'} recorded this round.`,
+    confirmText: 'Re-roll',
+    danger: true,
+  });
+}
+
 function attachHandlers() {
   // --- Bottom nav ---
   const bottomNav = document.getElementById('bottom-nav');
@@ -7923,7 +7941,8 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
 
   const generateBtn = document.getElementById('btn-generate-teams');
   if (generateBtn) {
-    generateBtn.addEventListener('click', () => {
+    generateBtn.addEventListener('click', async () => {
+      if (!(await confirmReRollIfResultsRecorded())) return; // NF-13: don't silently wipe recorded results
       state.lastTeamSize = null; // manual "Teams: N" = Auto / as-equal mode
       // C31 #1: pass the current teams so a re-roll moves the most players to new teammates (varied but fair).
       const generated = generateBalancedGroups(state.players, state.checkedIn, state.groupCount, state.generatedTeams);
@@ -7940,9 +7959,10 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
   // Team-SIZE buttons (2s/3s/4s/6s): teams of the chosen size, count = floor(checkedIn/size).
   // Remainder players ride along (the balancer spreads them +1 per team) so everyone plays.
   document.querySelectorAll('[data-team-size]').forEach((btn) => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const size = Number(btn.getAttribute('data-team-size'));
       if (!size) return;
+      if (!(await confirmReRollIfResultsRecorded())) return; // NF-13: don't silently wipe recorded results
       const numTeams = Math.max(2, Math.floor(state.checkedIn.length / size));
       state.groupCount = numTeams;
       state.lastTeamSize = size;
