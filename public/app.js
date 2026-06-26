@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.9'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3659,6 +3659,18 @@ function tournamentStatusLabel(status) {
 // Round-robin via the circle method: every unordered pair exactly once.
 // Odd team counts get a rotating bye (no match generated for it).
 
+// SC-2: buy-in reconciliation summary for the admin — "N of M paid · $X collected · K unpaid".
+// buy_in is free text (e.g. "$80 per team"); parse the first number for the $ total, omit it if none.
+function buildPaymentSummaryHTML(teams, tournament) {
+  const list = teams || [];
+  if (!list.length) return '';
+  const paid = list.filter((t) => t.paid).length;
+  const unpaid = list.length - paid;
+  const amt = parseFloat(String((tournament && tournament.buy_in) || '').replace(/[^0-9.]/g, ''));
+  const money = amt > 0 ? ` · $${(paid * amt).toLocaleString()} collected` : '';
+  return `<div class="small" style="margin:2px 0 6px;font-weight:600;color:${unpaid ? 'var(--danger)' : 'var(--live, #16a34a)'};">${paid} of ${list.length} paid${money}${unpaid ? ` · ${unpaid} unpaid` : ''}</div>`;
+}
+
 function buildTeamListHTML(teams, isAdmin) {
   if (!teams || !teams.length) {
     return '<p class="small" style="color:var(--muted);margin:0;">No teams yet.</p>';
@@ -4321,7 +4333,7 @@ function buildTournamentTabHTML() {
     <input type="text" id="tv2-buyin" class="reg-input" placeholder="$80 per team" value="${escapeHTMLText(active.buy_in || '')}" />
     <button type="button" class="secondary" data-role="tv2-save-registration" style="width:100%;">Save</button>
     ${active.registration_open ? '<button type="button" class="secondary" data-role="tv2-share-registration" style="width:100%;margin-top:8px;">Copy registration link</button>' : ''}
-    ${teams.length ? `<div style="margin-top:12px;"><div class="reg-label">Registered (${teams.length})</div>${teams.map((tm) => {
+    ${teams.length ? `<div style="margin-top:12px;"><div class="reg-label">Registered (${teams.length})</div>${buildPaymentSummaryHTML(teams, active)}${teams.map((tm) => {
       const rost = Array.isArray(tm.roster) ? tm.roster : [];
       return `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
         <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
@@ -7464,6 +7476,9 @@ function bindTournamentTabV2() {
         render();
       } else if (role === 'tv2-start-pools') {
         const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
+        // SC-2: warn before locking teams in if any haven't paid the buy-in (the operator's #1 concern).
+        const unpaidCt = (state.tournamentTeams || []).filter((tm) => !tm.paid).length;
+        if (unpaidCt > 0 && !(await appConfirm({ title: 'Unpaid teams', message: `${unpaidCt} team${unpaidCt === 1 ? '' : 's'} not marked paid. Start pool play anyway?`, confirmText: 'Start anyway' }))) return;
         await tdbStartPoolPlay(t);
         await tdbRefreshTournaments();
         render();
