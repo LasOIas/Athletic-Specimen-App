@@ -768,6 +768,45 @@ function publicHubStatus(input) {
   return { here, liveTile, liveCount: liveCourtCount, tournamentLive };
 }
 
+// ── Pool-play net assignment (C70, Mike, 2026-06-26) ─────────────────────────
+// Each pool OWNS a contiguous block of nets so the board can show "Pool A on Nets 1-2" instead of
+// nets shared globally across all pools. splitNetsAcrossPools divides 1..netCount into one contiguous
+// block per pool, as even as possible; every pool gets >=1 net (when nets < pools, pools round-robin a
+// single shared net so none gets zero).
+function splitNetsAcrossPools(netCount, poolCount) {
+  const N = Math.max(1, Math.floor(Number(netCount) || 1));
+  const P = Math.max(0, Math.floor(Number(poolCount) || 0));
+  if (P === 0) return [];
+  if (N < P) return Array.from({ length: P }, (_, i) => [(i % N) + 1]);
+  const base = Math.floor(N / P), extra = N % P; // first `extra` pools get one more net
+  const out = [];
+  let next = 1;
+  for (let i = 0; i < P; i++) {
+    const size = base + (i < extra ? 1 : 0);
+    const nets = [];
+    for (let j = 0; j < size; j++) nets.push(next++);
+    out.push(nets);
+  }
+  return out;
+}
+
+// Spread `gameCount` games across a pool's nets round-robin, with a per-net queue (1,2,3...). Returns
+// [{net, queue_order}] aligned to the pool's game order — game i goes to nets[i % len]. "Current on a net"
+// is then the lowest-queue_order unplayed game on it; as games finish the next one surfaces automatically
+// (the auto-advance — it's just render-time derivation, no extra writes).
+function distributeGamesOnNets(gameCount, nets) {
+  const list = (nets && nets.length) ? nets.slice() : [1];
+  const perNet = {};
+  const out = [];
+  const n = Math.max(0, Math.floor(Number(gameCount) || 0));
+  for (let i = 0; i < n; i++) {
+    const net = list[i % list.length];
+    perNet[net] = (perNet[net] || 0) + 1;
+    out.push({ net, queue_order: perNet[net] });
+  }
+  return out;
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -779,6 +818,7 @@ if (typeof module !== "undefined" && module.exports) {
     copilotRosterNames, copilotUpNextByNet, buildCopilotContext,
     resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
     resolveTournamentMatch, publicHubStatus,
-    scoringRulesFor, gameScoreStatus
+    scoringRulesFor, gameScoreStatus,
+    splitNetsAcrossPools, distributeGamesOnNets
   };
 }

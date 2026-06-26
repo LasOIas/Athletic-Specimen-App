@@ -15,6 +15,7 @@ const {
   resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
   resolveTournamentMatch, publicHubStatus,
   scoringRulesFor, gameScoreStatus,
+  splitNetsAcrossPools, distributeGamesOnNets,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -616,5 +617,51 @@ describe('resolveTournamentMatch (C28 Slice 2 — submit_score match resolution 
     const r = resolveTournamentMatch(teams, matches, 'Red', 'red');
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('same');
+  });
+});
+
+describe('splitNetsAcrossPools (C70 — each pool owns a contiguous net block)', () => {
+  it('splits evenly with the remainder going to the first pools', () => {
+    expect(splitNetsAcrossPools(10, 4)).toEqual([[1, 2, 3], [4, 5, 6], [7, 8], [9, 10]]);
+  });
+  it('splits cleanly when divisible', () => {
+    expect(splitNetsAcrossPools(8, 4)).toEqual([[1, 2], [3, 4], [5, 6], [7, 8]]);
+  });
+  it('gives every pool at least one net when nets < pools (shared, round-robin)', () => {
+    expect(splitNetsAcrossPools(2, 4)).toEqual([[1], [2], [1], [2]]);
+  });
+  it('one pool gets all the nets', () => {
+    expect(splitNetsAcrossPools(3, 1)).toEqual([[1, 2, 3]]);
+  });
+  it('no pools -> empty', () => {
+    expect(splitNetsAcrossPools(10, 0)).toEqual([]);
+  });
+  it('covers every net exactly once, contiguously, when nets >= pools', () => {
+    const flat = splitNetsAcrossPools(10, 3).flat();
+    expect(flat).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]); // contiguous + complete
+  });
+  it('guards bad input (>=1 net, >=0 pools)', () => {
+    expect(splitNetsAcrossPools(0, 2)).toEqual([[1], [1]]); // 0 nets -> treated as 1, shared
+  });
+});
+
+describe('distributeGamesOnNets (C70 — pool games round-robin onto its nets, auto-advance queue)', () => {
+  it('round-robins games across the pool nets with a per-net queue', () => {
+    expect(distributeGamesOnNets(6, [1, 2])).toEqual([
+      { net: 1, queue_order: 1 }, { net: 2, queue_order: 1 },
+      { net: 1, queue_order: 2 }, { net: 2, queue_order: 2 },
+      { net: 1, queue_order: 3 }, { net: 2, queue_order: 3 },
+    ]);
+  });
+  it('single net -> a sequential queue', () => {
+    expect(distributeGamesOnNets(3, [5])).toEqual([
+      { net: 5, queue_order: 1 }, { net: 5, queue_order: 2 }, { net: 5, queue_order: 3 },
+    ]);
+  });
+  it('falls back to net 1 when no nets are given', () => {
+    expect(distributeGamesOnNets(2, [])).toEqual([{ net: 1, queue_order: 1 }, { net: 1, queue_order: 2 }]);
+  });
+  it('zero games -> empty', () => {
+    expect(distributeGamesOnNets(0, [1, 2])).toEqual([]);
   });
 });

@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.14'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.15'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3324,22 +3324,24 @@ async function tdbStartPoolPlay(tournament) {
   const { error: delErr } = await supabaseClient.from('matches').delete().eq('tournament_id', tournament.id).eq('phase', 'pool');
   if (delErr) throw delErr;
   const netCount = Math.max(1, Number(tournament.net_count) || 1);
+  // C70 (Mike, 2026-06-26): each pool OWNS a contiguous block of nets (split as evenly as possible across
+  // pools) instead of nets shared globally — so a player opens their phone and sees their pool on its own
+  // courts. Each pool's games round-robin across ITS nets with a per-net queue; "current on a net" = the
+  // lowest-queue unplayed game on it, so scoring auto-advances to the next matchup (render-time derivation).
+  const netBlocks = splitNetsAcrossPools(netCount, pools.length);
   const rows = [];
-  const queuePerNet = {};
-  let k = 0;
-  for (const pool of pools) {
+  pools.forEach((pool, pi) => {
     const ids = teams.filter((t) => t.pool_id === pool.id).map((t) => t.id);
-    for (const pair of generateRoundRobin(ids)) {
-      const net = (k % netCount) + 1;
-      queuePerNet[net] = (queuePerNet[net] || 0) + 1;
+    const pairs = generateRoundRobin(ids);
+    const slots = distributeGamesOnNets(pairs.length, netBlocks[pi] || [pi + 1]);
+    pairs.forEach((pair, gi) => {
       rows.push({
         tournament_id: tournament.id, phase: 'pool', pool_id: pool.id,
         team_a_id: pair[0], team_b_id: pair[1], status: 'scheduled',
-        net, queue_order: queuePerNet[net], version: 0
+        net: slots[gi].net, queue_order: slots[gi].queue_order, version: 0
       });
-      k++;
-    }
-  }
+    });
+  });
   if (!rows.length) throw new Error('No pool games to schedule — each pool needs at least 2 teams.');
   const { error } = await supabaseClient.from('matches').insert(rows);
   if (error) throw error;
@@ -3405,6 +3407,29 @@ async function tdbClearResult(match) {
   if (error) throw error;
   if (!data || data.length === 0) throw new Error('Another device just updated this match — refreshing.');
   return data[0];
+}
+
+// C70 (Mike, "auto-split, then editable"): re-assign which nets a pool plays on. The pool's UNPLAYED games
+// are re-distributed across the new nets (round-robin, fresh per-net queue); finished games keep their net
+// (history). Net assignment is DERIVED from the matches, so this update is the source of truth — no schema
+// change. Each row uses the same version-CAS as tdbClearResult so a concurrent edit fails cleanly.
+async function tdbSetPoolNets(pool, newNets, matches) {
+  if (!supabaseClient || !pool) throw new Error('No pool.');
+  const nets = [...new Set((newNets || []).map(Number).filter((n) => Number.isInteger(n) && n >= 1))].sort((a, b) => a - b);
+  if (!nets.length) throw new Error('Enter at least one net (e.g. 1, 2).');
+  const unplayed = (matches || [])
+    .filter((m) => m.pool_id === pool.id && m.phase === 'pool' && m.status !== 'final')
+    .sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
+  const slots = distributeGamesOnNets(unplayed.length, nets);
+  for (let i = 0; i < unplayed.length; i++) {
+    const m = unplayed[i];
+    const { data, error } = await supabaseClient.from('matches')
+      .update({ net: slots[i].net, queue_order: slots[i].queue_order, version: (m.version || 0) + 1, updated_at: new Date().toISOString() })
+      .eq('id', m.id).eq('version', m.version || 0).select();
+    if (error) throw error;
+    if (!data || data.length === 0) throw new Error('Another device just updated a game — refreshing.');
+  }
+  return nets;
 }
 
 // Seed from pool standings + generate + persist a double-elimination bracket.
@@ -3739,72 +3764,83 @@ function buildStandingsTableHTML(poolTeams, poolMatches) {
   </table>`;
 }
 
-function buildMatchRowHTML(m, teams, isAdmin) {
-  const an = escapeHTML(teamNameById(teams, m.team_a_id));
-  const bn = escapeHTML(teamNameById(teams, m.team_b_id));
-  if (m.status === 'final') {
-    const aWin = m.winner_team_id === m.team_a_id;
-    return `<div style="padding:8px 0;border-bottom:1px solid var(--border);">
-      <div class="small" style="color:var(--muted);">Net ${escapeHTML(String(m.net || '-'))} · Final</div>
-      <div class="row" style="justify-content:space-between;gap:8px;align-items:center;">
-        <span style="flex:1;font-weight:${aWin ? '700' : '400'};color:${aWin ? 'var(--live)' : 'inherit'};">${an}</span>
-        <span style="flex:0 0 auto;font-weight:700;">${escapeHTML(String(m.score_a))} - ${escapeHTML(String(m.score_b))}</span>
-        <span style="flex:1;text-align:right;font-weight:${!aWin ? '700' : '400'};color:${!aWin ? 'var(--live)' : 'inherit'};">${bn}</span>
-      </div>
-      ${isAdmin ? `<div class="row" style="gap:6px;margin-top:4px;"><button type="button" class="secondary" data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}" style="font-size:12px;padding:4px 8px;">Edit</button><button type="button" class="secondary" data-role="tv2-clear-result" data-id="${escapeHTML(m.id)}" style="font-size:12px;padding:4px 8px;">Clear</button></div>` : ''}
-    </div>`;
+// C70 (Mike, 2026-06-26): collapse a pool's nets into a readable label — "1-2" for a contiguous block,
+// "1, 3, 5" otherwise. Drives the "Pool A · Nets 1-2" line on the player board.
+function formatNetList(nets) {
+  if (!nets || !nets.length) return '';
+  const parts = [];
+  let s = nets[0], p = nets[0];
+  for (let i = 1; i < nets.length; i++) {
+    if (nets[i] === p + 1) { p = nets[i]; continue; }
+    parts.push(s === p ? String(s) : (s + '-' + p));
+    s = p = nets[i];
   }
-  // Not final: C53 — tap the matchup to enter the result via the shared tap-the-winner pop-up
-  // (anyone can score, like the bracket). Only tappable once both teams are known.
-  const known = !!m.team_a_id && !!m.team_b_id;
-  const tap = known ? ` data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}" role="button" tabindex="0" style="padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer;"` : ' style="padding:8px 0;border-bottom:1px solid var(--border);"';
-  return `<div${tap}>
-    <div class="small" style="color:var(--muted);">Net ${escapeHTML(String(m.net || '-'))}</div>
-    <div class="row" style="justify-content:space-between;gap:8px;">
-      <span style="flex:1;min-width:0;">${an}</span>
-      <span style="flex:0 0 auto;color:var(--faint);">vs</span>
-      <span style="flex:1;min-width:0;text-align:right;">${bn}</span>
-    </div>
-    ${known ? '<div class="small" style="color:var(--accent);font-weight:600;margin-top:2px;">Tap to enter score &rsaquo;</div>' : ''}
-  </div>`;
+  parts.push(s === p ? String(s) : (s + '-' + p));
+  return parts.join(', ');
 }
 
-// "Up next by net" board — the next unplayed match on each net + queue depth.
-function buildNetBoardHTML(matches, teams) {
-  const live = (matches || []).filter((m) => m.phase === 'pool' && m.status !== 'final' && m.net);
-  if (!live.length) return '';
-  const byNet = {};
-  live.forEach((m) => { (byNet[m.net] = byNet[m.net] || []).push(m); });
-  const nets = Object.keys(byNet).map(Number).sort((a, b) => a - b);
-  const rows = nets.map((net) => {
-    const q = byNet[net].slice().sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
-    const up = q[0];
-    const upTxt = `${escapeHTML(teamNameById(teams, up.team_a_id))} vs ${escapeHTML(teamNameById(teams, up.team_b_id))}`;
-    return `<div class="row" style="justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);">
-      <span style="flex:0 0 auto;font-weight:600;">Net ${net}</span>
-      <span style="flex:1;min-width:0;text-align:right;">${upTxt}${q.length > 1 ? ` <span class="small" style="color:var(--faint);">+${q.length - 1} queued</span>` : ''}</span>
-    </div>`;
-  }).join('');
-  return `<div class="card"><h3 style="margin:0 0 4px;">Up next by net</h3>${rows}</div>`;
-}
-
+// C70 (Mike's spec, §38 Option A + "show every game with a play-order number"): the player-first pool board.
+// Every pool game is auto-generated, so the board shows the WHOLE schedule — per pool → per net → the full
+// NUMBERED list of that net's games in play order (1 plays first), the CURRENT game tagged "Now", finished
+// games showing their score. A player opens their phone, finds their pool + net, and sees every game they'll
+// play and the order. Tap any unplayed game to score it (anyone scores) — finishing one moves "Now" to the
+// next. Standings + admin withdraw sit behind a collapsed toggle. Shared by public AND admin (isAdmin adds
+// Edit/Clear on finished games).
 function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTeamId) {
-  // C53: anyone scores (no pick-team gate); show all pools. Tap a matchup to enter its result.
   const poolCards = pools.map((pool) => {
     const poolTeams = teams.filter((t) => t.pool_id === pool.id);
     const poolMatches = matches.filter((m) => m.pool_id === pool.id);
+    const nets = [...new Set(poolMatches.map((m) => m.net).filter((n) => n != null))].sort((a, b) => a - b);
     const played = poolMatches.filter((m) => m.status === 'final').length;
-    return `<div class="card">
-      <h3 style="margin:0 0 2px;">Pool ${escapeHTML(pool.label)}</h3>
-      <div class="small" style="color:var(--muted);margin:0 0 4px;">${played}/${poolMatches.length} games played</div>
-      ${buildStandingsTableHTML(poolTeams, poolMatches)}
-      ${isAdmin ? buildWithdrawControlsHTML(poolTeams, poolMatches) : ''}
-      <div style="margin-top:4px;">
-        ${poolMatches.length ? poolMatches.map((m) => buildMatchRowHTML(m, teams, isAdmin)).join('') : '<p class="small" style="color:var(--muted);margin:0;">No matches.</p>'}
+    const total = poolMatches.length;
+    const netGroups = nets.map((net) => {
+      const games = poolMatches.filter((m) => m.net === net).sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
+      // "Now" = the first unplayed game on this net; finishing it auto-advances the tag to the next one.
+      const curId = (games.find((g) => g.status !== 'final' && g.team_a_id && g.team_b_id) || {}).id;
+      const rows = games.map((g, i) => {
+        const order = g.queue_order || (i + 1); // the small play-order number Mike asked for
+        const aN = escapeHTML(teamNameById(teams, g.team_a_id));
+        const bN = escapeHTML(teamNameById(teams, g.team_b_id));
+        if (g.status === 'final') {
+          const aWin = g.winner_team_id === g.team_a_id;
+          return `<div class="ppg is-final">
+            <span class="ppg-n">${order}</span>
+            <span class="ppg-m"><span class="${aWin ? 'ppg-w' : ''}">${aN}</span> <span class="ppg-vs">vs</span> <span class="${!aWin ? 'ppg-w' : ''}">${bN}</span></span>
+            <span class="ppg-r"><span class="ppg-score">${escapeHTML(String(g.score_a))}-${escapeHTML(String(g.score_b))}</span>${isAdmin ? `<button type="button" class="ppg-btn" data-role="tv2-bracket-open" data-id="${escapeHTML(g.id)}">Edit</button><button type="button" class="ppg-btn" data-role="tv2-clear-result" data-id="${escapeHTML(g.id)}">Clear</button>` : ''}</span>
+          </div>`;
+        }
+        const isCur = g.id === curId;
+        return `<div class="ppg${isCur ? ' is-now' : ''}" data-role="tv2-bracket-open" data-id="${escapeHTML(g.id)}" role="button" tabindex="0">
+          <span class="ppg-n">${order}</span>
+          <span class="ppg-m">${aN} <span class="ppg-vs">vs</span> ${bN}</span>
+          <span class="ppg-r">${isCur ? '<span class="ppg-now">Now</span>' : '<span class="ppg-cta" aria-hidden="true">Score &rsaquo;</span>'}</span>
+        </div>`;
+      }).join('');
+      return `<div class="ppl-ng"><div class="ppl-nglabel">Net ${net}</div>${rows}</div>`;
+    }).join('');
+    const teamsLine = poolTeams.map((t) => escapeHTML(t.name || '')).filter(Boolean).join(', ');
+    const netsLabel = nets.length ? ('Net' + (nets.length > 1 ? 's' : '') + ' ' + formatNetList(nets)) : '';
+    // Admin can re-assign a pool's nets (Mike's "auto-split, then editable") — tap to edit; it re-nets the
+    // pool's UNPLAYED games onto the chosen nets. The public sees a plain label.
+    const netsEl = isAdmin
+      ? `<button type="button" class="ppl-nets ppl-nets-edit" data-role="tv2-edit-pool-nets" data-id="${escapeHTML(pool.id)}">${escapeHTML(netsLabel || 'Set nets')} <span aria-hidden="true">&#9998;</span></button>`
+      : (netsLabel ? `<span class="ppl-nets">${escapeHTML(netsLabel)}</span>` : '');
+    const standings = `<details class="ppl-more">
+      <summary>Standings</summary>
+      <div class="ppl-more-body">
+        ${buildStandingsTableHTML(poolTeams, poolMatches)}
+        ${isAdmin ? buildWithdrawControlsHTML(poolTeams, poolMatches) : ''}
       </div>
+    </details>`;
+    return `<div class="ppl-pool">
+      <div class="ppl-h"><span class="ppl-name">Pool ${escapeHTML(pool.label)}</span>${netsEl}</div>
+      ${teamsLine ? `<div class="ppl-teams">${teamsLine}</div>` : ''}
+      ${netGroups || '<p class="small" style="color:var(--muted);margin:0;">No games scheduled.</p>'}
+      <div class="ppl-foot"><span class="ppl-prog">${played} of ${total} games done</span></div>
+      ${standings}
     </div>`;
   }).join('');
-  return buildNetBoardHTML(matches, teams) + poolCards;
+  return poolCards;
 }
 
 // ---- Bracket renderer: connected "March Madness" tree (C32 #9, Mike's §38 pick) ----
@@ -7661,6 +7697,18 @@ function bindTournamentTabV2() {
       } else if (role === 'tv2-clear-result') {
         const m = (state.tournamentMatches || []).find((x) => x.id === id);
         await tdbClearResult(m);
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-edit-pool-nets') {
+        // C70: admin re-assigns a pool's nets (auto-split is the default; this is the "editable" half).
+        if (!state.isAdmin) return; // defense-in-depth — the button only renders for admin
+        const pool = (state.tournamentPools || []).find((p) => p.id === id);
+        if (!pool) return;
+        const cur = [...new Set((state.tournamentMatches || []).filter((m) => m.pool_id === pool.id && m.net != null).map((m) => m.net))].sort((a, b) => a - b);
+        const input = await appPrompt({ title: 'Pool ' + pool.label + ' nets', message: 'Which nets does this pool play on? Separate with commas. Re-assigns its unplayed games.', value: cur.join(', '), placeholder: 'e.g. 1, 2', confirmText: 'Save' });
+        if (input == null) return; // cancelled
+        const nets = String(input).split(/[,\s]+/).map((s) => parseInt(s, 10)).filter((n) => !isNaN(n));
+        await tdbSetPoolNets(pool, nets, state.tournamentMatches || []);
         await tdbRefreshTournaments();
         render();
       }
