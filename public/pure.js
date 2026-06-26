@@ -204,6 +204,42 @@ function validateScores(scoreA, scoreB) {
   return { sa, sb };
 }
 
+// NF-1: per-phase scoring rule (pool target + hard cap, bracket target + no cap, win-by-2).
+// Win-by-2 applies UNTIL the cap; AT the cap a 1-point win is allowed (the cap overrides win-by-2).
+// Legacy rows (only match_cap) fall back to it as the target with no cap.
+function scoringRulesFor(phase, tournament) {
+  const t = tournament || {};
+  const legacy = Number(t.match_cap) || 25;
+  const winBy2 = t.win_by_2 == null ? true : !!t.win_by_2;
+  if (phase === 'main') {
+    return { target: Number(t.bracket_target) || legacy, cap: (t.bracket_cap == null ? null : Number(t.bracket_cap)), winBy2 };
+  }
+  return { target: Number(t.pool_target) || legacy, cap: (t.pool_cap == null ? null : Number(t.pool_cap)), winBy2 };
+}
+
+// Given a final score and the phase's rules, report whether the game is a legitimately-completed
+// result. valid=false means the entered score can't end the game (must reach target / win by N / under cap).
+function gameScoreStatus(scoreA, scoreB, rules) {
+  const r = rules || {};
+  const target = Number(r.target) || 0;
+  const cap = (r.cap == null ? null : Number(r.cap));
+  const winBy2 = r.winBy2 == null ? true : !!r.winBy2;
+  const a = Number(scoreA), b = Number(scoreB);
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0) {
+    return { decided: false, valid: false, winner: null, reason: 'Scores must be whole numbers (0 or more).' };
+  }
+  if (a === b) return { decided: false, valid: false, winner: null, reason: 'A game can\'t end in a tie.' };
+  const winner = a > b ? 'A' : 'B';
+  const w = Math.max(a, b), l = Math.min(a, b);
+  const margin = w - l;
+  const needed = winBy2 ? 2 : 1;
+  if (cap != null && w === cap && margin >= 1) return { decided: true, valid: true, winner, reason: '' };
+  if (cap != null && w > cap) return { decided: false, valid: false, winner, reason: 'Above the cap of ' + cap + '. Recheck the score.' };
+  if (w < target) return { decided: false, valid: false, winner, reason: 'The winner must reach ' + target + '.' };
+  if (margin < needed) return { decided: false, valid: false, winner, reason: 'Must win by ' + needed + '.' };
+  return { decided: true, valid: true, winner, reason: '' };
+}
+
 function generateRoundRobin(ids) {
   const list = (ids || []).slice();
   if (list.length < 2) return [];
@@ -742,6 +778,7 @@ if (typeof module !== "undefined" && module.exports) {
     disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName,
     copilotRosterNames, copilotUpNextByNet, buildCopilotContext,
     resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
-    resolveTournamentMatch, publicHubStatus
+    resolveTournamentMatch, publicHubStatus,
+    scoringRulesFor, gameScoreStatus
   };
 }

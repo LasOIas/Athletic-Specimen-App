@@ -14,6 +14,7 @@ const {
   groupRosterPlayersBySection, isValidFullName, buildCopilotContext,
   resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
   resolveTournamentMatch, publicHubStatus,
+  scoringRulesFor, gameScoreStatus,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -57,6 +58,43 @@ const poolGame = (aId, bId, sa, sb) => ({
   team_a_id: aId, team_b_id: bId,
   score_a: sa, score_b: sb,
   winner_team_id: sa > sb ? aId : bId,
+});
+
+describe('gameScoreStatus + scoringRulesFor (NF-1 per-phase scoring)', () => {
+  const pool = { target: 15, cap: 20, winBy2: true };
+  const bracket = { target: 21, cap: null, winBy2: true };
+
+  it('pool: reach target by 2 is valid', () => {
+    expect(gameScoreStatus(15, 13, pool)).toMatchObject({ valid: true, decided: true, winner: 'A' });
+  });
+  it('pool: target reached but only by 1 is NOT valid (must win by 2)', () => {
+    expect(gameScoreStatus(15, 14, pool)).toMatchObject({ valid: false, decided: false });
+  });
+  it('pool: extend past target until win-by-2 within cap is valid', () => {
+    expect(gameScoreStatus(17, 15, pool)).toMatchObject({ valid: true, winner: 'A' });
+  });
+  it('pool: at the hard cap a 1-point win is valid (cap overrides win-by-2)', () => {
+    expect(gameScoreStatus(20, 19, pool)).toMatchObject({ valid: true, winner: 'A' });
+  });
+  it('pool: above the hard cap is NOT valid', () => {
+    expect(gameScoreStatus(21, 19, pool)).toMatchObject({ valid: false });
+  });
+  it('pool: below target is NOT valid', () => {
+    expect(gameScoreStatus(14, 5, pool)).toMatchObject({ valid: false });
+  });
+  it('bracket: 21-19 valid, 21-20 invalid, 25-23 valid (no cap)', () => {
+    expect(gameScoreStatus(21, 19, bracket)).toMatchObject({ valid: true, winner: 'A' });
+    expect(gameScoreStatus(21, 20, bracket)).toMatchObject({ valid: false });
+    expect(gameScoreStatus(25, 23, bracket)).toMatchObject({ valid: true, winner: 'A' });
+  });
+  it('tie is never decided', () => {
+    expect(gameScoreStatus(15, 15, pool)).toMatchObject({ decided: false, winner: null });
+  });
+  it('scoringRulesFor reads new columns + legacy fallback', () => {
+    expect(scoringRulesFor('pool', { pool_target: 15, pool_cap: 20, win_by_2: true })).toEqual({ target: 15, cap: 20, winBy2: true });
+    expect(scoringRulesFor('main', { bracket_target: 25, bracket_cap: null, win_by_2: true })).toEqual({ target: 25, cap: null, winBy2: true });
+    expect(scoringRulesFor('main', { match_cap: 21 })).toMatchObject({ target: 21, cap: null });
+  });
 });
 
 describe('validateScores (current behavior — no upper cap yet; item 3 will add one)', () => {
