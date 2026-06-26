@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.12'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.13'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3039,7 +3039,8 @@ async function tdbCreateTournament({ name, pool_count, net_count, preset }) {
     pool_cap: (p.pool_cap == null || p.pool_cap === '') ? 20 : Number(p.pool_cap),
     bracket_target: bracketTarget,
     bracket_cap: (p.bracket_cap == null || p.bracket_cap === '') ? null : Number(p.bracket_cap),
-    win_by_2: p.win_by_2 == null ? true : !!p.win_by_2
+    win_by_2: p.win_by_2 == null ? true : !!p.win_by_2,
+    team_size: Number(p.team_size) || 4 // C68: copy the format's players-per-team onto the tournament
   };
   const { data, error } = await supabaseClient
     .from('tournaments').insert([row]).select().single();
@@ -3074,7 +3075,8 @@ async function tdbCreateScoringPreset(p) {
     pool_cap: (p.pool_cap == null || p.pool_cap === '') ? null : Number(p.pool_cap),
     bracket_target: bt,
     bracket_cap: (p.bracket_cap == null || p.bracket_cap === '') ? null : Number(p.bracket_cap),
-    win_by_2: p.win_by_2 == null ? true : !!p.win_by_2
+    win_by_2: p.win_by_2 == null ? true : !!p.win_by_2,
+    team_size: Number(p.team_size) || 4 // C68: players per team (registration enforces exactly this)
   };
   const { data, error } = await supabaseClient
     .from('scoring_presets').insert([row]).select().single();
@@ -3094,7 +3096,7 @@ async function tdbDeleteScoringPreset(id) {
 function buildFormatPickerHTML() {
   const presets = state.scoringPresets || [];
   const selId = state.selectedFormatId;
-  const desc = (p) => `Pool to ${p.pool_target}${p.pool_cap != null ? ' (cap ' + p.pool_cap + ')' : ''} · Bracket to ${p.bracket_target}${p.win_by_2 ? ' · win by 2' : ''}`;
+  const desc = (p) => `Pool to ${p.pool_target}${p.pool_cap != null ? ' (cap ' + p.pool_cap + ')' : ''} · Bracket to ${p.bracket_target}${p.win_by_2 ? ' · win by 2' : ''}${p.team_size ? ' · ' + p.team_size + '/team' : ''}`;
   const rows = presets.length
     ? presets.map((p) => {
         const sel = p.id === selId;
@@ -3115,6 +3117,7 @@ function buildFormatPickerHTML() {
           <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);">Pool to<input type="number" id="nf-ptarget" value="15" min="1" inputmode="numeric" style="width:100%;" /></label>
           <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);">Pool cap<input type="number" id="nf-pcap" value="20" min="1" inputmode="numeric" style="width:100%;" /></label>
           <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);">Bracket to<input type="number" id="nf-btarget" placeholder="25" min="1" inputmode="numeric" style="width:100%;" /></label>
+          <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);">Per team<input type="number" id="nf-teamsize" value="4" min="1" inputmode="numeric" style="width:100%;" /></label>
         </div>
         <div id="nf-winby" data-role="tv2-winby" data-on="1" role="switch" aria-checked="true" tabindex="0" style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer;margin-bottom:12px;user-select:none;">
           <span style="width:38px;height:22px;border-radius:999px;background:var(--accent);position:relative;display:inline-block;flex:0 0 auto;"><span style="position:absolute;top:2px;left:18px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .12s;"></span></span>
@@ -4265,11 +4268,8 @@ function buildPublicRegisterHTML(t, teams) {
     <div class="card reg-card">
       <label class="reg-label" for="reg-team">Team name</label>
       <input type="text" id="reg-team" class="reg-input" placeholder="e.g. Bumpin Uglies" autocomplete="off" autocapitalize="words" />
-      <div class="reg-label">Players (4)</div>
-      <input type="text" id="reg-p1" class="reg-input" placeholder="Player 1" autocomplete="off" autocapitalize="words" />
-      <input type="text" id="reg-p2" class="reg-input" placeholder="Player 2" autocomplete="off" autocapitalize="words" />
-      <input type="text" id="reg-p3" class="reg-input" placeholder="Player 3" autocomplete="off" autocapitalize="words" />
-      <input type="text" id="reg-p4" class="reg-input" placeholder="Player 4" autocomplete="off" autocapitalize="words" />
+      <div class="reg-label">Players (${Number(t.team_size) || 4})</div>
+      ${Array.from({ length: Number(t.team_size) || 4 }, (_, i) => `<input type="text" id="reg-p${i + 1}" class="reg-input" placeholder="Player ${i + 1}" autocomplete="off" autocapitalize="words" />`).join('')}
       <div class="reg-remind">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4"/></svg>
         <span>Each team needs at least one guy and one girl.</span>
@@ -7462,7 +7462,7 @@ function bindTournamentTabV2() {
         const win_by_2 = !winEl || winEl.getAttribute('data-on') === '1';
         el.setAttribute('disabled', 'true');
         try {
-          const createdP = await tdbCreateScoringPreset({ name, pool_target: gv('nf-ptarget'), pool_cap: gv('nf-pcap'), bracket_target: bt, win_by_2 });
+          const createdP = await tdbCreateScoringPreset({ name, pool_target: gv('nf-ptarget'), pool_cap: gv('nf-pcap'), bracket_target: bt, win_by_2, team_size: gv('nf-teamsize') });
           state.scoringPresets = [...(state.scoringPresets || []), createdP];
           state.selectedFormatId = createdP.id;
           state.newFormatOpen = false;
@@ -7485,11 +7485,12 @@ function bindTournamentTabV2() {
         // PUBLIC: a team signs itself up (replaces the Google Form). Errors shown inline in #reg-msg.
         const fv = (fid) => ((document.getElementById(fid) || {}).value || '').trim();
         const teamName = fv('reg-team');
-        const roster = [fv('reg-p1'), fv('reg-p2'), fv('reg-p3'), fv('reg-p4')].filter(Boolean);
+        const teamSize = Number((state.tournaments.find((x) => x.id === state.activeTournamentId) || {}).team_size) || 4;
+        const roster = Array.from({ length: teamSize }, (_, i) => fv('reg-p' + (i + 1))).filter(Boolean);
         const paid = !!((document.getElementById('reg-paid') || {}).checked);
         const setMsg = (txt, ok) => { const m = document.getElementById('reg-msg'); if (m) { m.textContent = txt; m.style.color = ok ? 'var(--live, #16a34a)' : 'var(--danger)'; } };
         if (!teamName) { setMsg('Enter a team name.', false); return; }
-        if (roster.length < 2) { setMsg('Enter at least 2 players.', false); return; } // NF-3a: no empty/garbage teams seeding the bracket
+        if (roster.length !== teamSize) { setMsg('Enter all ' + teamSize + ' players.', false); return; } // C68: exactly the format's team size (supersedes NF-3 >=2)
         el.setAttribute('disabled', 'true'); // in-flight guard (double-tap)
         try {
           await tdbRegisterTeam(state.activeTournamentId, teamName, roster, null, paid);
