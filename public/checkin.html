@@ -294,10 +294,13 @@
       if (loadRosterInFlight) return; // C24 item 7: guard concurrent focus/visibility/interval fetches
       loadRosterInFlight = true;
       try {
+        // NF-9: load the FULL roster, not just group=CLUB_GROUP. Filtering by group meant anyone stored
+        // under a different/empty/legacy group (or via the `tag` schema) was invisible to this door, so the
+        // existing-player check missed them and they re-registered as a duplicate — the two doors disagreed
+        // on "who exists". New registrants are still tagged into CLUB_GROUP below (p_group: GROUP_NAME).
         const { data, error } = await sb
           .from('players')
           .select('id, name')
-          .eq('group', GROUP_NAME)
           .order('name', { ascending: true });
         if (error) throw error;
         roster = (data || []).filter((p) => p.name && !p.name.startsWith('__'));
