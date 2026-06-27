@@ -16,6 +16,7 @@ const {
   resolveTournamentMatch, publicHubStatus,
   scoringRulesFor, gameScoreStatus,
   splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
+  bracketGameNumbers, bracketSourceLabel,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -699,5 +700,49 @@ describe('pickPoolCurrentGames (C70 fix — no team is "Now" on two nets at once
   it('skips games missing a team (TBD)', () => {
     const net1 = [{ id: 'a', team_a_id: 'A', team_b_id: null }, { id: 'b', team_a_id: 'A', team_b_id: 'B' }];
     expect(pickPoolCurrentGames([net1])).toEqual(['b']);
+  });
+});
+
+describe('bracketGameNumbers (continuous G1..GN: winners -> losers -> grand final)', () => {
+  // intentionally shuffled input to prove the sort
+  const main = [
+    { id: 'gf', side: 'grand_final', round: 1, slot: 0, round_label: 'Grand Final' },
+    { id: 'l2', side: 'losers', round: 2, slot: 0, round_label: 'LB R2 M1' },
+    { id: 'w2', side: 'winners', round: 1, slot: 1, round_label: 'WB R1 M2' },
+    { id: 'w3', side: 'winners', round: 2, slot: 0, round_label: 'WB R2 M1' },
+    { id: 'l1', side: 'losers', round: 1, slot: 0, round_label: 'LB R1 M1' },
+    { id: 'w1', side: 'winners', round: 1, slot: 0, round_label: 'WB R1 M1' },
+  ];
+  it('numbers all winners first (by round, slot), then losers, then the grand final', () => {
+    const { byId } = bracketGameNumbers(main);
+    expect(byId).toEqual({ w1: 1, w2: 2, w3: 3, l1: 4, l2: 5, gf: 6 });
+  });
+  it('maps the FULL stored round_label (incl. M#) so source refs can be rewritten', () => {
+    const { byRoundLabel } = bracketGameNumbers(main);
+    expect(byRoundLabel['WB R1 M1']).toBe(1);
+    expect(byRoundLabel['LB R2 M1']).toBe(5);
+    expect(byRoundLabel['Grand Final']).toBe(6);
+  });
+  it('empty / nullish -> empty maps', () => {
+    expect(bracketGameNumbers([])).toEqual({ byId: {}, byRoundLabel: {} });
+    expect(bracketGameNumbers(null)).toEqual({ byId: {}, byRoundLabel: {} });
+  });
+});
+
+describe('bracketSourceLabel (Winner/Loser of G#)', () => {
+  const byRoundLabel = { 'WB R1 M1': 1, 'WB R1 M2': 2, 'LB R2 M1': 7 };
+  it('rewrites a winner source to its game number', () => {
+    expect(bracketSourceLabel('Winner of WB R1 M1', byRoundLabel)).toBe('Winner of G1');
+  });
+  it('rewrites a loser source to its game number', () => {
+    expect(bracketSourceLabel('Loser of LB R2 M1', byRoundLabel)).toBe('Loser of G7');
+  });
+  it('leaves an unknown reference untouched', () => {
+    expect(bracketSourceLabel('Winner of WB R9 M9', byRoundLabel)).toBe('Winner of WB R9 M9');
+  });
+  it('passes through non-source / empty text', () => {
+    expect(bracketSourceLabel('TBD', byRoundLabel)).toBe('TBD');
+    expect(bracketSourceLabel(null, byRoundLabel)).toBe(null);
+    expect(bracketSourceLabel('', byRoundLabel)).toBe('');
   });
 });

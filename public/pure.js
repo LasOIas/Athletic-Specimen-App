@@ -832,6 +832,35 @@ function pickPoolCurrentGames(netGames) {
   return currentByNet;
 }
 
+// Bracket game numbering (Mike, 2026-06-27): ONE continuous "G" number per bracket match across the whole
+// double-elim — winners bracket first (by round, then slot), then the losers bracket, then the grand final —
+// so games read G1, G2, … GN start to finish. Render-only (no DB): derived from the match list each render.
+// Returns { byId:{matchId:g}, byRoundLabel:{round_label:g} }. byRoundLabel keys keep the FULL stored label
+// (incl. " M#") so the stored source refs ("Winner of WB R1 M1") can be rewritten to "Winner of G{n}".
+function bracketGameNumbers(mainMatches) {
+  const sidePri = (s) => (s === 'winners' ? 0 : s === 'losers' ? 1 : 2);
+  const order = (mainMatches || []).slice().sort((a, b) =>
+    sidePri(a.side) - sidePri(b.side) || (a.round || 0) - (b.round || 0) || (a.slot || 0) - (b.slot || 0));
+  const byId = {}, byRoundLabel = {};
+  order.forEach((m, i) => {
+    const g = i + 1;
+    if (m && m.id != null) byId[m.id] = g;
+    if (m && m.round_label) byRoundLabel[m.round_label] = g;
+  });
+  return { byId, byRoundLabel };
+}
+
+// Rewrite a stored source label ("Winner of WB R1 M1" / "Loser of LB R2 M1") to the continuous game number
+// ("Winner of G3" / "Loser of G7") so a TBD slot reads "extremely clear where you are" (Mike). Returns the
+// original text unchanged if it doesn't match the pattern or the referenced match isn't in the map.
+function bracketSourceLabel(src, byRoundLabel) {
+  if (!src) return src;
+  const m = String(src).match(/^(Winner of|Loser of)\s+(.+)$/);
+  if (!m) return src;
+  const g = (byRoundLabel || {})[m[2]];
+  return g ? (m[1] + ' G' + g) : src;
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -844,6 +873,7 @@ if (typeof module !== "undefined" && module.exports) {
     resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
     resolveTournamentMatch, publicHubStatus,
     scoringRulesFor, gameScoreStatus,
-    splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames
+    splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
+    bracketGameNumbers, bracketSourceLabel
   };
 }

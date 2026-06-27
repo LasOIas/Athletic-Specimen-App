@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2411,10 +2411,11 @@ function buildPublicTournamentLiveHTML() {
       return up ? row('Net ' + net, up) : '';
     }).join('');
   } else {
-    // bracket: every playable matchup (both teams known, not final). Label by net if assigned, else round.
+    // bracket: every playable matchup (both teams known, not final). Label by net if assigned, else game number.
     const live = matches.filter((m) => m.phase === 'main' && m.status !== 'final' && m.team_a_id && m.team_b_id);
+    const gnB = bracketGameNumbers(matches.filter((m) => m.phase === 'main')).byId;
     rows = live.slice().sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0)).map((m) => {
-      const label = m.net ? ('Net ' + m.net) : ((m.round_label || '').replace(/ M\d+$/, '') || 'Bracket');
+      const label = m.net ? ('Net ' + m.net) : ('G' + (gnB[m.id] || '?'));
       return row(label, m);
     }).join('');
   }
@@ -3926,14 +3927,18 @@ function championPathIds(main, champ) {
 
 // One bracket match = a node in the tree. A match you can score (admin, or your picked team) is a
 // TAP TARGET (tv2-bracket-open) that opens the result pop-up — no cramped inputs inside the box.
-function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam) {
+function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam, gn) {
   const seeds = seedByTeam || {};
   // C75: a small seed number before a known team's name (no seed for TBD / source placeholders).
   const seedTag = (id) => (id && seeds[id]) ? `<span class="bt-seed" style="display:inline-block;min-width:1.3em;font-size:10px;font-weight:700;color:var(--faint);">${seeds[id]}</span>` : '';
   const aKnown = !!m.team_a_id, bKnown = !!m.team_b_id;
-  const aName = (aKnown ? seedTag(m.team_a_id) : '') + (aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : escapeHTML(m.source_a || 'TBD'));
-  const bName = (bKnown ? seedTag(m.team_b_id) : '') + (bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : escapeHTML(m.source_b || 'TBD'));
-  const meta = `<div class="bt-meta">${escapeHTML((m.round_label || '').replace(/ M\d+$/, ''))}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
+  const srcA = bracketSourceLabel(m.source_a, gn && gn.byRoundLabel); // "Winner of WB R1 M1" -> "Winner of G3"
+  const srcB = bracketSourceLabel(m.source_b, gn && gn.byRoundLabel);
+  const aName = (aKnown ? seedTag(m.team_a_id) : '') + (aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : escapeHTML(srcA || 'TBD'));
+  const bName = (bKnown ? seedTag(m.team_b_id) : '') + (bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : escapeHTML(srcB || 'TBD'));
+  const gNum = (gn && gn.byId) ? gn.byId[m.id] : null; // continuous bracket game number (Mike, 2026-06-27)
+  const gLbl = gNum ? ('G' + gNum) : (m.round_label || '').replace(/ M\d+$/, '');
+  const meta = `<div class="bt-meta">${escapeHTML(gLbl)}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
   // Any unplayed matchup is tappable for EVERYONE — the pop-up either lets you score it (admin /
   // your picked team) or tells you how to (log in / pick your team). A silent dead tap was the bug.
   const openable = aKnown && bKnown && m.status !== 'final';
@@ -4035,13 +4040,23 @@ function openTournamentSettingsModal(tournamentId) {
 
 // C72 (Mike): tap a game -> choose how to score it. A final game goes straight to the edit modal; otherwise
 // a small chooser: "Score live" (the point-by-point live scorer) or "Enter final score" (the C71 modal).
+// Shared modal-title label for a match: bracket -> "G{n}" (continuous game number, Mike 2026-06-27),
+// pool -> the old round_label / "Match". Used by the chooser, live scorer, and result modal.
+function bracketLabelPart(m) {
+  if (m && m.phase === 'main') {
+    const byId = bracketGameNumbers((state.tournamentMatches || []).filter((x) => x.phase === 'main')).byId;
+    if (byId[m.id]) return 'G' + byId[m.id];
+  }
+  return ((m && m.round_label) || 'Match').replace(/ M\d+$/, '');
+}
+
 function openMatchActionChooser(matchId) {
   const m = (state.tournamentMatches || []).find((x) => x.id === matchId);
   if (!m || !m.team_a_id || !m.team_b_id) return;
   if (m.status === 'final') return openBracketResultModal(matchId); // editing a final result -> straight in
   const aName = teamNameById(state.tournamentTeams, m.team_a_id);
   const bName = teamNameById(state.tournamentTeams, m.team_b_id);
-  const title = (m.round_label || 'Match').replace(/ M\d+$/, '') + (m.net ? ' · Net ' + m.net : '');
+  const title = bracketLabelPart(m) + (m.net ? ' · Net ' + m.net : '');
   const live = m.status === 'live';
   const overlay = document.createElement('div');
   overlay.className = 'popup-overlay';
@@ -4081,7 +4096,7 @@ function openLiveScorer(matchId) {
   const tournOf = () => (state.tournaments || []).find((x) => x.id === m.tournament_id) || {};
   const rules = scoringRulesFor(m.phase, tournOf());
   const ruleText = 'First to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ' (cap ' + rules.cap + ')' : '');
-  const title = (m.round_label || 'Match').replace(/ M\d+$/, '') + (m.net ? ' · Net ' + m.net : '');
+  const title = bracketLabelPart(m) + (m.net ? ' · Net ' + m.net : '');
   let a = Math.max(0, Number(m.score_a) || 0);
   let b = Math.max(0, Number(m.score_b) || 0);
   let submitting = false, finished = false, confirmEl = null;
@@ -4165,7 +4180,7 @@ function openBracketResultModal(matchId) {
   const aName = teamNameById(state.tournamentTeams, m.team_a_id);
   const bName = teamNameById(state.tournamentTeams, m.team_b_id);
   const isFinal = m.status === 'final'; // NF-4: a final match opens in EDIT mode (fix the score, same winner only)
-  const title = (isFinal ? 'Edit · ' : '') + (m.round_label || 'Match').replace(/ M\d+$/, '') + (m.net ? ' · Net ' + m.net : '');
+  const title = (isFinal ? 'Edit · ' : '') + bracketLabelPart(m) + (m.net ? ' · Net ' + m.net : '');
   const tournOf = () => (state.tournaments || []).find((x) => x.id === m.tournament_id) || {};
   // C71 (Mike, 2026-06-26 — §38 Option C): the score-entry modal is two big number tiles, each a real
   // input you can TAP TO TYPE (so a full game is one keystroke set, not 25 stepper taps) with +/- steppers
@@ -4307,6 +4322,7 @@ function buildBracketHTML(tournament, matches, teams) {
   const seedByTeam = {};
   computeSeeding(teams, (matches || []).filter((m) => m.phase === 'pool')).forEach((r) => { seedByTeam[r.teamId] = r.seed; });
 
+  const gn = bracketGameNumbers(main); // continuous "G" game numbers across the whole bracket (Mike, 2026-06-27)
   const champ = computeChampion(main, teams);
   const pathIds = championPathIds(main, champ);
   const champBanner = champ ? `<div class="bt-champ">
@@ -4331,15 +4347,18 @@ function buildBracketHTML(tournament, matches, teams) {
   // Columns left-to-right = rounds; connector lines between them are drawn post-render.
   const sideMatches = main.filter((m) => m.side === side);
   const rounds = Array.from(new Set(sideMatches.map((m) => m.round))).sort((a, b) => a - b);
+  // Column header = the continuous game-number RANGE for that round (e.g. "G1–G8"), reading with the per-node
+  // "G7" labels — replaces the old "WB R1"/"LB R1" (Mike, 2026-06-27). Within a round the G numbers are contiguous.
   const roundLabelFor = (r) => {
-    const sample = sideMatches.find((m) => m.round === r);
-    return sample ? (sample.round_label || ('R' + r)).replace(/ M\d+$/, '') : ('R' + r);
+    const gs = sideMatches.filter((m) => m.round === r).map((m) => gn.byId[m.id]).filter((x) => x != null).sort((a, b) => a - b);
+    if (!gs.length) return 'G?';
+    return gs.length === 1 ? ('G' + gs[0]) : ('G' + gs[0] + '–G' + gs[gs.length - 1]);
   };
   const cols = rounds.map((r) => {
     const rm = sideMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
     return `<div class="bt-col">
       <div class="bt-rlabel">${escapeHTML(roundLabelFor(r))}</div>
-      ${rm.map((m) => buildBracketNodeHTML(m, main, teams, true, pathIds, seedByTeam)).join('')}
+      ${rm.map((m) => buildBracketNodeHTML(m, main, teams, true, pathIds, seedByTeam, gn)).join('')}
     </div>`;
   }).join('');
 
