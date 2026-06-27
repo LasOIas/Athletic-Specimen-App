@@ -19,9 +19,18 @@ A **tournament mode** for admins with its own bottom nav and two tabs.
   `tournamentMode = true`, focus the active/in-progress tournament, land on **Manage**.
 - While on: bottom nav = **Home · Manage · Live · Co-pilot** (Home + Co-pilot shared with the normal
   admin nav; Players/Courts are swapped out for Manage/Live).
-- Exiting: tap **Home** → `tournamentMode = false` → normal admin Home (nav reverts to
-  Home · Players · Courts · Co-pilot). Co-pilot keeps tournament mode (shared).
+- **Return to normal AS view (Mike, 2026-06-27):** there MUST be an unmistakable way out. Tapping
+  **Home** exits (`tournamentMode = false` → normal admin Home, nav reverts to
+  Home · Players · Courts · Co-pilot) AND an explicit **"Exit tournament view"** control sits in the
+  Manage/Live header (so it's never a trap). Co-pilot is shared (keeps the tournament nav).
 - Public + non-tournament admin surfaces unchanged.
+
+### Manage tab LAYOUT = Option C (Mike's §38 pick, teams-first + toolbar)
+- Compact top toolbar: tournament name + small **⚙ Settings · ＋ Add team · Run** (Draw pools / Generate
+  bracket, phase-aware) + the **Exit tournament view** control.
+- **Teams dominate** as cards: each shows seed · name · roster preview · paid pill, with **inline
+  Edit roster · Mark paid/unpaid · Remove**. **＋ Add team** expands an inline form (name + team_size
+  player inputs) → `tdbRegisterTeam`.
 
 ### Manage tab (everything editable, at EVERY phase: setup / pools / bracket / completed)
 - No active tournament → the create form + tournament list (as today).
