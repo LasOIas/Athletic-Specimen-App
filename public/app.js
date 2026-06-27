@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.9'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.10'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3594,13 +3594,16 @@ async function tdbRefreshTournaments() {
   if (!(state.scoringPresets || []).some((p) => p.id === state.selectedFormatId)) {
     state.selectedFormatId = state.scoringPresets[0] ? state.scoringPresets[0].id : null;
   }
-  // Public viewers auto-follow the LIVE/finished tournament (never a fresh 'setup' draft),
-  // and a stale follow (deleted tournament) is re-validated.
+  // Clear a STALE active tournament (deleted / no longer in the list) for EVERYONE, not just public
+  // (2026-06-27): an admin whose active tournament was deleted kept a dead activeTournamentId, so the
+  // tournament view rendered controls (Edit settings, etc.) pointing at a gone tournament and they
+  // silently no-op'd — "editing settings did nothing". Clearing it falls the view back to the list.
+  if (state.activeTournamentId && !state.tournaments.some((t) => t.id === state.activeTournamentId)) {
+    state.activeTournamentId = null;
+    state.tournamentPickedTeamId = null;
+  }
+  // Public viewers also auto-follow the LIVE/finished tournament (never a fresh 'setup' draft).
   if (!state.isAdmin) {
-    if (state.activeTournamentId && !state.tournaments.some((t) => t.id === state.activeTournamentId)) {
-      state.activeTournamentId = null;
-      state.tournamentPickedTeamId = null;
-    }
     if (!state.activeTournamentId && state.tournaments.length) {
       const live = state.tournaments.find((t) => t.status === 'pools')
         || state.tournaments.find((t) => t.status === 'bracket')
