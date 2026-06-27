@@ -2710,6 +2710,9 @@ body.copilot-typing #bottom-nav { display: none; }
 .bt-name.bt-tbd { color: var(--faint); font-style: italic; }
 .bt-sc { flex: 0 0 auto; font-family: 'Sora','Inter',sans-serif; font-size: 15px; color: var(--faint); }
 .bt-row.win .bt-sc { color: var(--live); font-weight: 700; }
+/* C72: live-scored bracket match — running score + LIVE pill (mirrors the pool board's .ppg-live*). */
+.bt-sc.bt-livesc { color: var(--live); font-weight: 800; }
+.bt-livetag { font-size: 9px; font-weight: 800; letter-spacing: .05em; color: #fff; background: var(--live); border-radius: 999px; padding: 2px 7px; }
 /* A scorable match card is a tap target that opens the result pop-up. */
 .bt-node.tappable { cursor: pointer; }
 .bt-node.tappable:active { background: var(--accent-soft); }
@@ -2828,7 +2831,7 @@ body.copilot-typing #bottom-nav { display: none; }
 .mac-title { font-family: 'Sora','Inter',sans-serif; font-size: 18px; font-weight: 800; color: var(--ink); }
 .mac-teams { font-size: 14px; color: var(--muted); margin: 4px 0 16px; }
 .mac-teams .mac-vs { color: var(--faint); }
-.mac-opt { display: block; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--card); border-radius: var(--r-md); padding: 14px; margin-bottom: 10px; cursor: pointer; }
+.mac-opt { display: block; width: 100%; text-align: left; white-space: normal; border: 1px solid var(--border); background: var(--card); border-radius: var(--r-md); padding: 14px; margin-bottom: 10px; cursor: pointer; }
 .mac-opt:hover { background: var(--surface-3); }
 .mac-live { border-color: var(--live); background: var(--live-soft); }
 .mac-live:hover { background: var(--live-soft); }

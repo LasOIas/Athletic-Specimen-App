@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.18'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3938,6 +3938,16 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam)
       </div>`;
     body = row(aName, m.team_a_id, aWin) + row(bName, m.team_b_id, !aWin)
       + (state.isAdmin ? `<div class="bt-act"><button type="button" class="secondary" data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}">Edit score</button><button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}">Clear</button></div>` : '');
+  } else if (aKnown && bKnown && m.status === 'live') {
+    // C72: a live-scored bracket match shows its running score + a LIVE pill — mirrors the pool board so the
+    // live scorer reads the same on every surface (was rendered identically to an unplayed match).
+    const sa = m.score_a != null ? m.score_a : 0;
+    const sb = m.score_b != null ? m.score_b : 0;
+    const lrow = (name, sc) => `<div class="bt-row"><span class="bt-name">${name}</span><span class="bt-sc bt-livesc">${escapeHTML(String(sc))}</span></div>`;
+    body = lrow(aName, sa)
+      + `<div class="bt-vs"><span class="bt-livetag">LIVE</span></div>`
+      + lrow(bName, sb)
+      + (openable ? '<div class="bt-enter">Tap to update score &rsaquo;</div>' : '');
   } else if (aKnown && bKnown) {
     // Both teams set: a matchup. If you can score it, the whole card opens the result pop-up.
     body = `<div class="bt-row"><span class="bt-name">${aName}</span></div>
@@ -4606,11 +4616,16 @@ function buildTournamentTabHTML() {
   const teams = state.tournamentTeams || [];
   const pools = state.tournamentPools || [];
   const matches = state.tournamentMatches || [];
+  // Phase-aware target: pool play shows the POOL target (e.g. "to 15 (cap 20)"), bracket shows the bracket
+  // target ("to 25"). Was always match_cap (the bracket target), which misread "to 25" during pool play.
+  const targetLabel = (active.status === 'bracket' || active.status === 'completed')
+    ? 'to ' + escapeHTML(String(active.bracket_target != null ? active.bracket_target : active.match_cap))
+    : 'to ' + escapeHTML(String(active.pool_target != null ? active.pool_target : active.match_cap)) + (active.pool_cap != null ? ' (cap ' + escapeHTML(String(active.pool_cap)) + ')' : '');
   const headerCard = `<div class="card">
     <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
       <div style="flex:1;min-width:0;">
         <h3 style="margin:0;">${escapeHTML(active.name || '')}</h3>
-        <p class="small" style="color:var(--muted);margin:2px 0 0;">${escapeHTML(tournamentStatusLabel(active.status))} · ${teams.length} ${teams.length === 1 ? 'team' : 'teams'} · to ${escapeHTML(String(active.match_cap))} · ${escapeHTML(String(active.pool_count))} pools · ${escapeHTML(String(active.net_count))} nets</p>
+        <p class="small" style="color:var(--muted);margin:2px 0 0;">${escapeHTML(tournamentStatusLabel(active.status))} · ${teams.length} ${teams.length === 1 ? 'team' : 'teams'} · ${targetLabel} · ${escapeHTML(String(active.pool_count))} pools · ${escapeHTML(String(active.net_count))} nets</p>
       </div>
       ${(active.status === 'setup' || active.status === 'pools') ? `<button type="button" class="secondary" data-role="tv2-edit-settings" data-id="${escapeHTML(active.id)}">Edit</button>` : ''}
       <button type="button" class="secondary" data-role="tv2-back">All</button>
@@ -6733,7 +6748,9 @@ function adminDashboardHTML() {
   const teamCount = Array.isArray(state.generatedTeams) ? state.generatedTeams.length : 0;
   const tourActive = (state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket');
   const sessLabel = state.currentSession?.date ? formatSessionDate(state.currentSession.date) : 'Not set yet';
-  const courtsHTML = buildPublicLiveCourtsHTML();
+  // Include live TOURNAMENT games too (mirror the public Scores board) — the admin home was casual-only,
+  // so it showed "No courts live yet" during a live tournament while its own Tournament tile said "in progress".
+  const courtsHTML = buildPublicLiveCourtsHTML() + buildPublicTournamentLiveHTML();
   const liveSection = courtsHTML
     ? `<div class="ad-sec">On the courts now</div>${courtsHTML}`
     : `<div class="ad-sec">On the courts now</div><div class="ad-live-empty">No courts live yet — generate teams to start a round.</div>`;
