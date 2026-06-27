@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.15'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.16'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4018,7 +4018,10 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam,
       <div class="bt-row"><span class="bt-name bt-tbd">${bName}</span></div>`;
   }
   const openAttrs = openable ? ` data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}" role="button" tabindex="0"` : '';
-  return `<div class="bt-node${pathIds.has(m.id) ? ' path' : ''}${openable ? ' tappable' : ''}" data-mid="${escapeHTML(m.id)}"${openAttrs}>${meta}${body}</div>`;
+  // data-next = the match this winner advances to — layoutBracketTree reads it off the DOM to draw the
+  // connector line, so it works for BOTH the live bracket and the teamless format preview.
+  const nextAttr = m.winner_next_match_id ? ` data-next="${escapeHTML(String(m.winner_next_match_id))}"` : '';
+  return `<div class="bt-node${pathIds.has(m.id) ? ' path' : ''}${openable ? ' tappable' : ''}" data-mid="${escapeHTML(m.id)}"${nextAttr}${openAttrs}>${meta}${body}</div>`;
 }
 
 // The result pop-up: tap a match -> big teams + a score box each + Submit. Winner = higher score.
@@ -4479,12 +4482,16 @@ function layoutBracketTree() {
   canvas.querySelectorAll('.bt-node').forEach((n) => {
     pos[n.getAttribute('data-mid')] = { x: n.offsetLeft, y: n.offsetTop, w: n.offsetWidth, h: n.offsetHeight, path: n.classList.contains('path') };
   });
-  const main = (state.tournamentMatches || []).filter((m) => m.phase === 'main');
+  // Draw connectors from the RENDERED nodes (data-mid -> data-next) rather than state.tournamentMatches —
+  // this works for the live bracket AND the teamless format preview (whose rows aren't in state).
   let paths = '';
-  main.forEach((m) => {
-    const from = pos[m.id];
-    const to = m.winner_next_match_id ? pos[m.winner_next_match_id] : null;
-    if (!from || !to) return;
+  canvas.querySelectorAll('.bt-node').forEach((n) => {
+    const fromId = n.getAttribute('data-mid');
+    const nextId = n.getAttribute('data-next');
+    if (!nextId) return;
+    const from = pos[fromId];
+    const to = pos[nextId];
+    if (!from || !to) return; // winner advances to another side (not in this view) -> no line here
     const x1 = from.x + from.w, y1 = from.y + from.h / 2, x2 = to.x, y2 = to.y + to.h / 2;
     const mx = x1 + Math.max(12, (x2 - x1) / 2);
     const onPath = from.path && to.path;
@@ -4997,6 +5004,9 @@ function buildBracketPreviewRows(n, netCount, reset) {
     id: 'preview-' + m.key, phase: 'main', side: m.side, round: m.round, slot: m.slot,
     round_label: labelOf(m.key), net: netInfo[m.key].net, queue_order: netInfo[m.key].queue_order,
     team_a_id: null, team_b_id: null, source_a: srcLabel(m.aSource), source_b: srcLabel(m.bSource),
+    // carry the winner-advances-to pointer (mapped to preview ids) so layoutBracketTree draws the
+    // connector lines between games for the preview too — same field name as the real bracket row.
+    winner_next_match_id: m.winnerNext ? ('preview-' + m.winnerNext.key) : null,
     status: 'scheduled',
   }));
 }
