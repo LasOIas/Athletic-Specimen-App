@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.10'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.11'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3217,6 +3217,15 @@ async function tdbRenameTeam(teamId, newName) {
   if (error) { console.error('tdbRenameTeam', error); throw error; }
 }
 
+// Admin: replace a team's roster (edit its players post-registration). Mirrors tdbRenameTeam (direct authed
+// update). Powers tournament-mode "Edit roster" (Mike, 2026-06-27).
+async function tdbSetTeamRoster(teamId, roster) {
+  if (!supabaseClient || !teamId) throw new Error('No team.');
+  const clean = (roster || []).map((n) => String(n || '').trim()).filter(Boolean);
+  const { error } = await supabaseClient.from('teams').update({ roster: clean }).eq('id', teamId);
+  if (error) { console.error('tdbSetTeamRoster', error); throw error; }
+}
+
 // SC-7: withdraw a team mid-pool by FORFEITING its remaining unplayed pool games (the opponent wins by
 // the pool target). This keeps computeStandings/seeding fair — a withdrawn team's unplayed games no longer
 // stay 'scheduled' and silently distort everyone else's records. Reuses the scored-result path (C50 forfeit
@@ -4777,6 +4786,105 @@ function buildTournamentTabHTML() {
     ${buildTeamListHTML(teams, true)}
   </div>
   ${poolSetup}`;
+}
+
+// ── Tournament MODE (Mike, 2026-06-27): tap the admin Tournament card → a focused mode with its own bottom
+// nav (Home · Manage · Live · Co-pilot) + a clear way back to normal AS. MANAGE = everything editable at
+// EVERY phase (§38 layout C: teams-first + toolbar). LIVE = the read-first board/bracket + seeding. Additive
+// + gated behind state.tournamentMode; reuses the existing tv2-* roles + helpers (only new write = roster edit).
+function tournamentTargetLabel(t) {
+  if (!t) return '';
+  return (t.status === 'bracket' || t.status === 'completed')
+    ? 'to ' + escapeHTML(String(t.bracket_target != null ? t.bracket_target : t.match_cap))
+    : 'to ' + escapeHTML(String(t.pool_target != null ? t.pool_target : t.match_cap)) + (t.pool_cap != null ? ' (cap ' + escapeHTML(String(t.pool_cap)) + ')' : '');
+}
+function buildTournamentModeBarHTML(active) {
+  const sub = active ? `${escapeHTML(tournamentStatusLabel(active.status))} · ${escapeHTML(String((active.team_size) || 4))}/team · ${tournamentTargetLabel(active)}` : '';
+  return `<div class="tm-bar">
+    <div class="tm-bar-id"><div class="tm-bar-nm">${active ? escapeHTML(active.name || 'Tournament') : 'Tournament'}</div>${sub ? `<div class="tm-bar-sub">${sub}</div>` : ''}</div>
+    <button type="button" class="tm-exit" data-role="tv2-exit-mode">&lsaquo; Exit tournament view</button>
+  </div>`;
+}
+function buildManageTabHTML() {
+  const list = state.tournaments || [];
+  const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
+  if (!active) {
+    return `${buildTournamentModeBarHTML(null)}
+      <div class="card"><p class="small" style="color:var(--muted);margin:0 0 10px;">No tournament selected — exit to pick or create one.</p>
+      <button type="button" class="primary" data-role="tv2-exit-mode" style="width:100%;">Go to tournaments</button></div>`;
+  }
+  const teams = state.tournamentTeams || [];
+  const pools = state.tournamentPools || [];
+  const matches = state.tournamentMatches || [];
+  const status = active.status;
+  const teamSize = Number(active.team_size) || 4;
+  const seedByTeam = {};
+  computeSeeding(teams, matches.filter((m) => m.phase === 'pool')).forEach((r) => { seedByTeam[r.teamId] = r.seed; });
+  const poolMatches = matches.filter((m) => m.phase === 'pool');
+  const poolsDone = poolMatches.length > 0 && poolMatches.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
+  // phase-aware "run" action
+  let runBtn = '';
+  if (status === 'setup' && teams.length >= 2) runBtn = pools.length
+    ? `<button type="button" class="tm-tool" data-role="tv2-start-pools">Start pools</button>`
+    : `<button type="button" class="tm-tool" data-role="tv2-draw-pools">Draw pools</button>`;
+  else if (status === 'pools') runBtn = poolsDone
+    ? `<button type="button" class="tm-tool" data-role="tv2-generate-bracket">Generate bracket</button>`
+    : `<button type="button" class="tm-tool" data-role="tv2-reset-pools">Reset pools</button>`;
+  const toolbar = `<div class="tm-toolbar">
+    <button type="button" class="tm-tool" data-role="tv2-edit-settings" data-id="${escapeHTML(active.id)}">Settings</button>
+    <button type="button" class="tm-tool tm-tool-accent" data-role="tv2-toggle-addteam">+ Add team</button>
+    ${runBtn}
+    <button type="button" class="tm-tool" data-role="tv2-toggle-registration">${active.registration_open ? 'Close reg' : 'Open reg'}</button>
+  </div>`;
+  // add-team form (collapsed) — reuses the public register ids + the tv2-register-team handler
+  const addForm = `<div class="card tm-addform" id="tm-addform" hidden>
+    <div class="sd-h" style="font-size:14px;margin:0 0 8px;">Add a team (${teamSize} players)</div>
+    <input type="text" id="reg-team" class="reg-input" placeholder="Team name" autocomplete="off" autocapitalize="words" />
+    <div class="tm-pgrid">${Array.from({ length: teamSize }, (_, i) => `<input type="text" id="reg-p${i + 1}" class="reg-input" placeholder="Player ${i + 1}" autocomplete="off" autocapitalize="words" />`).join('')}</div>
+    <label class="reg-check" style="margin:6px 0;"><input type="checkbox" id="reg-paid" /> Paid</label>
+    <button type="button" class="primary" data-role="tv2-register-team" style="width:100%;">Add team</button>
+    <p class="reg-teamspill" id="reg-msg"></p>
+  </div>`;
+  const paySummary = teams.length ? `<div class="card tm-pay">${buildPaymentSummaryHTML(teams, active)}</div>` : '';
+  const removeBtn = (tm) => status === 'setup'
+    ? `<button type="button" class="tm-mini tm-mini-dang" data-role="tv2-delete-team" data-id="${escapeHTML(tm.id)}">Remove</button>`
+    : `<button type="button" class="tm-mini tm-mini-dang" data-role="tv2-withdraw-team" data-id="${escapeHTML(tm.id)}" data-name="${escapeHTMLText(tm.name || '')}">Withdraw</button>`;
+  const teamCards = teams.length ? teams.map((tm) => {
+    const seed = seedByTeam[tm.id];
+    const rost = Array.isArray(tm.roster) ? tm.roster : [];
+    return `<div class="card tm-team">
+      <div class="tm-team-top">
+        <div class="tm-team-id"><div class="tm-team-nm">${seed ? `<span class="tm-seed">${seed}</span>` : ''}${escapeHTML(tm.name || '')}</div>
+          <div class="tm-team-pl">${rost.length ? rost.map((n) => escapeHTML(String(n))).join(', ') : '<span style="color:var(--faint);">no players</span>'}</div></div>
+        <span class="${tm.paid ? 'reg-paidtag' : 'reg-unpaidtag'}">${tm.paid ? 'paid' : 'unpaid'}</span>
+      </div>
+      <div class="tm-team-acts">
+        <button type="button" class="tm-mini" data-role="tv2-rename-team" data-id="${escapeHTML(tm.id)}" data-name="${escapeHTMLText(tm.name || '')}">Rename</button>
+        <button type="button" class="tm-mini" data-role="tv2-edit-roster" data-id="${escapeHTML(tm.id)}" data-name="${escapeHTMLText(tm.name || '')}">Edit roster</button>
+        <button type="button" class="tm-mini" data-role="tv2-toggle-paid" data-id="${escapeHTML(tm.id)}">${tm.paid ? 'Mark unpaid' : 'Mark paid'}</button>
+        ${removeBtn(tm)}
+      </div>
+    </div>`;
+  }).join('') : `<div class="card"><p class="small" style="color:var(--muted);margin:0;">No teams yet — tap “+ Add team”.</p></div>`;
+  return `${buildTournamentModeBarHTML(active)}
+    ${toolbar}
+    ${addForm}
+    ${paySummary}
+    <div class="tm-sec">Teams (${teams.length})</div>
+    ${teamCards}
+    ${buildSeedingTableHTML(teams, matches)}`;
+}
+function buildLiveTabHTML() {
+  const active = state.activeTournamentId ? (state.tournaments || []).find((x) => x.id === state.activeTournamentId) : null;
+  if (!active) return `${buildTournamentModeBarHTML(null)}<div class="card"><p class="small" style="color:var(--muted);margin:0;">No tournament selected.</p></div>`;
+  const teams = state.tournamentTeams || [];
+  const pools = state.tournamentPools || [];
+  const matches = state.tournamentMatches || [];
+  let body;
+  if (active.status === 'bracket' || active.status === 'completed') body = buildBracketHTML(active, matches, teams);
+  else if (active.status === 'pools') body = buildPoolPlayHTML(active, pools, teams, matches, true, state.tournamentPickedTeamId);
+  else body = `<div class="card"><p class="small" style="color:var(--muted);margin:0;">Pool play hasn’t started yet. Add teams + draw pools on the Manage tab.</p></div>`;
+  return `${buildTournamentModeBarHTML(active)}${body}${buildSeedingTableHTML(teams, matches)}`;
 }
 
 function formatLastSharedSyncLabel() {
@@ -7282,6 +7390,24 @@ function copilotAttachUndo(msgId, undos) {
   el.appendChild(btn);
 }
 
+// Admin bottom nav — normal (Home · Players · Courts · Co-pilot) or, in tournament mode (Mike, 2026-06-27),
+// Home · Manage · Live · Co-pilot. Home + Co-pilot are shared; tapping Home exits tournament mode.
+function buildAdminBottomNavHTML() {
+  const nb = (tab, label, svg) => `<button class="nav-btn" data-nav-tab="${tab}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svg}</svg><span>${label}</span></button>`;
+  const home = nb('dashboard', 'Home', '<path d="M3 11l9-8 9 8M5 10v10h14V10"/>');
+  const copilot = nb('copilot', 'Co-pilot', '<path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9z"/>');
+  if (state.tournamentMode) {
+    return home
+      + nb('manage', 'Manage', '<path d="M3 6h18M3 12h18M3 18h12"/>')
+      + nb('live', 'Live', '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5l5 2.5-5 2.5z"/>')
+      + copilot;
+  }
+  return home
+    + nb('players', 'Players', '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>')
+    + nb('teams', 'Courts', '<path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/>')
+    + copilot;
+}
+
 function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
   return `
@@ -7367,28 +7493,18 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
         ${buildTournamentTabHTML()}
       </div>
     </div>
+    ${state.tournamentMode ? `
+    <div id="tab-manage" class="tab-panel">
+      <div class="container">${buildManageTabHTML()}</div>
+    </div>
+    <div id="tab-live" class="tab-panel">
+      <div class="container">${buildLiveTabHTML()}</div>
+    </div>` : ''}
     <div id="tab-copilot" class="tab-panel">
       ${adminCopilotHTML()}
     </div>
   </div>
-  <nav id="bottom-nav">
-    <button class="nav-btn" data-nav-tab="dashboard">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>
-      <span>Home</span>
-    </button>
-    <button class="nav-btn" data-nav-tab="players">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      <span>Players</span>
-    </button>
-    <button class="nav-btn" data-nav-tab="teams">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
-      <span>Courts</span>
-    </button>
-    <button class="nav-btn" data-nav-tab="copilot">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9z"/></svg>
-      <span>Co-pilot</span>
-    </button>
-  </nav>
+  <nav id="bottom-nav">${buildAdminBottomNavHTML()}</nav>
 </div>
   `;
 }
@@ -7965,6 +8081,25 @@ function bindTournamentTabV2() {
       } else if (role === 'tv2-edit-settings') {
         if (!state.isAdmin) return;
         openTournamentSettingsModal(id); // NF-10: edit name/nets/scoring after create (no delete+rebuild)
+      } else if (role === 'tv2-exit-mode') {
+        exitTournamentMode(); // tournament-mode: explicit "Exit tournament view" → back to normal AS
+        return;
+      } else if (role === 'tv2-toggle-addteam') {
+        const f = document.getElementById('tm-addform'); // tournament-mode Manage: expand/collapse the add-team form
+        if (f) { f.hidden = !f.hidden; if (!f.hidden) { const n = document.getElementById('reg-team'); if (n) n.focus(); } }
+        return;
+      } else if (role === 'tv2-edit-roster') {
+        if (!state.isAdmin) return; // tournament-mode Manage: edit a team's players post-registration
+        const tm = (state.tournamentTeams || []).find((x) => x.id === id);
+        const teamSize = Number((state.tournaments.find((x) => x.id === state.activeTournamentId) || {}).team_size) || 4;
+        const cur = (tm && Array.isArray(tm.roster)) ? tm.roster.join(', ') : '';
+        const next = await appPrompt({ title: 'Edit roster', message: teamSize + ' players, comma-separated', value: cur, confirmText: 'Save', placeholder: 'Player 1, Player 2, …' });
+        if (next == null) return;
+        const roster = String(next).split(',').map((s) => s.trim()).filter(Boolean);
+        if (roster.length !== teamSize) throw new Error('Enter exactly ' + teamSize + ' players.');
+        await tdbSetTeamRoster(id, roster);
+        await tdbRefreshTournaments();
+        render();
       } else if (role === 'tv2-back') {
         state.activeTournamentId = null;
         state.tournamentTeams = [];
@@ -8099,6 +8234,8 @@ function bindTournamentTabV2() {
 }
 
 function activateMainTab(tab) {
+  // Tournament-mode tabs (manage/live) only exist while in the mode — fall back if stale (e.g. after a reload).
+  if ((tab === 'manage' || tab === 'live') && !state.tournamentMode) tab = 'dashboard';
   activeMainTab = tab;
   sessionStorage.setItem(currentTabKey(), tab);
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
@@ -8121,7 +8258,21 @@ function activateMainTab(tab) {
     else b.removeAttribute('aria-current');
   });
   window.dispatchEvent(new Event('as-tab-changed')); // C25 item 5: refresh back-to-top visibility for the new panel
-  if (tab === 'tournament') layoutBracketTree(); // C32 #9: fit the bracket tree when switching into the tab
+  if (tab === 'tournament' || tab === 'live') layoutBracketTree(); // C32 #9: fit the bracket tree when switching into the tab
+}
+
+// Tournament MODE enter/exit (Mike, 2026-06-27). Entering swaps the bottom nav (Home·Manage·Live·Co-pilot)
+// and lands on Manage; exiting (Home or the explicit "Exit tournament view") returns to the normal admin
+// shell + nav. render() rebuilds the shell with the right nav + panels, then re-activates the tab.
+function enterTournamentMode() {
+  state.tournamentMode = true;
+  render();                  // rebuild the shell first (creates the Manage/Live panels + swaps the nav)
+  activateMainTab('manage'); // then show Manage (render re-derives the tab from storage, so set it after)
+}
+function exitTournamentMode() {
+  state.tournamentMode = false;
+  render();
+  activateMainTab('dashboard');
 }
 
 // NF-13: count the "Won" results recorded in the current casual round. A re-roll (Generate / a team-size
@@ -8148,7 +8299,10 @@ function attachHandlers() {
   if (bottomNav) {
     bottomNav.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-nav-tab]');
-      if (btn) activateMainTab(btn.dataset.navTab);
+      if (!btn) return;
+      const tab = btn.dataset.navTab;
+      if (state.tournamentMode && tab === 'dashboard') { exitTournamentMode(); return; } // Home exits tournament mode
+      activateMainTab(tab);
     });
   }
   // C26 item 3a: in-content [data-nav-tab] navigation (e.g. the Home "Check In" CTA).
@@ -8164,7 +8318,7 @@ function attachHandlers() {
         const a = qa.dataset.qa;
         if (a === 'checkin') openQrModal();
         else if (a === 'generate') activateMainTab('teams');
-        else if (a === 'tournament') activateMainTab('tournament');
+        else if (a === 'tournament') enterTournamentMode();
         else if (a === 'session') activateMainTab('session');
         return;
       }
