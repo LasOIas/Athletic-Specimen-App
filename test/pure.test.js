@@ -15,7 +15,7 @@ const {
   resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
   resolveTournamentMatch, publicHubStatus,
   scoringRulesFor, gameScoreStatus,
-  splitNetsAcrossPools, distributeGamesOnNets,
+  splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -663,5 +663,41 @@ describe('distributeGamesOnNets (C70 — pool games round-robin onto its nets, a
   });
   it('zero games -> empty', () => {
     expect(distributeGamesOnNets(0, [1, 2])).toEqual([]);
+  });
+});
+
+describe('pickPoolCurrentGames (C70 fix — no team is "Now" on two nets at once)', () => {
+  it('the conflict case: a team current on two nets gets de-conflicted to a disjoint set', () => {
+    // The real bug (Pool A): Block Stars finished net1 q1, so net1 current = (BlockStars,NetGains);
+    // net2 current (lowest unplayed) = (Diggers,NetGains) -> NetGains on BOTH nets. The fix skips net2 to
+    // its next free game (PancakeHouse,Diggers) so both nets stay busy with disjoint teams.
+    const net1 = [{ id: 'g2', team_a_id: 'BlockStars', team_b_id: 'NetGains' }, { id: 'g3', team_a_id: 'BlockStars', team_b_id: 'Diggers' }];
+    const net2 = [{ id: 'g4', team_a_id: 'Diggers', team_b_id: 'NetGains' }, { id: 'g5', team_a_id: 'PancakeHouse', team_b_id: 'Diggers' }, { id: 'g6', team_a_id: 'NetGains', team_b_id: 'PancakeHouse' }];
+    const cur = pickPoolCurrentGames([net1, net2]);
+    expect(cur).toEqual(['g2', 'g5']); // net1 keeps g2; net2 skips g4 (NetGains busy) -> g5 (both free)
+    // never the same team on both current games
+    const teams = ['BlockStars', 'NetGains', 'PancakeHouse', 'Diggers'];
+    expect(new Set(['g2', 'g5']).size).toBe(2);
+  });
+  it('no conflict -> each net keeps its lowest-queue game', () => {
+    const net1 = [{ id: 'a', team_a_id: 'A', team_b_id: 'B' }];
+    const net2 = [{ id: 'b', team_a_id: 'C', team_b_id: 'D' }];
+    expect(pickPoolCurrentGames([net1, net2])).toEqual(['a', 'b']);
+  });
+  it('a net with only conflicting games waits (null)', () => {
+    const net1 = [{ id: 'a', team_a_id: 'A', team_b_id: 'B' }];
+    const net2 = [{ id: 'b', team_a_id: 'A', team_b_id: 'C' }]; // A busy -> no free game
+    expect(pickPoolCurrentGames([net1, net2])).toEqual(['a', null]);
+  });
+  it('single net -> its first unplayed game', () => {
+    expect(pickPoolCurrentGames([[{ id: 'x', team_a_id: 'A', team_b_id: 'B' }, { id: 'y', team_a_id: 'A', team_b_id: 'C' }]])).toEqual(['x']);
+  });
+  it('empty / all-played nets -> nulls', () => {
+    expect(pickPoolCurrentGames([[], []])).toEqual([null, null]);
+    expect(pickPoolCurrentGames([])).toEqual([]);
+  });
+  it('skips games missing a team (TBD)', () => {
+    const net1 = [{ id: 'a', team_a_id: 'A', team_b_id: null }, { id: 'b', team_a_id: 'A', team_b_id: 'B' }];
+    expect(pickPoolCurrentGames([net1])).toEqual(['b']);
   });
 });

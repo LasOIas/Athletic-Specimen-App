@@ -807,6 +807,31 @@ function distributeGamesOnNets(gameCount, nets) {
   return out;
 }
 
+// C70 fix (2026-06-27): pick the games that are actually playable RIGHT NOW for one pool — a DISJOINT set
+// across the pool's nets, so a team is never shown "Now" on two nets at once (the net-split puts a team's
+// games on one net, and independent per-net advance could otherwise surface the same team as current on two
+// nets). Greedy in net order: each net takes its lowest-queue unplayed game whose BOTH teams are still free;
+// if that game's teams are busy on another net, it skips to the net's next unplayed game that IS free, so
+// both nets stay busy. Render-only — the schedule / queue_order / DB are unchanged; this only decides the
+// "Now" tag + which game auto-advances. Input: one entry per net (in net order) = that net's unplayed games
+// {id, team_a_id, team_b_id} in queue order. Output: the current game id per net (or null), aligned to input.
+function pickPoolCurrentGames(netGames) {
+  const used = new Set();
+  const currentByNet = [];
+  (netGames || []).forEach((games) => {
+    let pick = null;
+    for (let i = 0; i < (games || []).length; i++) {
+      const g = games[i];
+      if (!g || !g.team_a_id || !g.team_b_id) continue;
+      if (used.has(g.team_a_id) || used.has(g.team_b_id)) continue;
+      pick = g; break;
+    }
+    if (pick) { used.add(pick.team_a_id); used.add(pick.team_b_id); }
+    currentByNet.push(pick ? pick.id : null);
+  });
+  return currentByNet;
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -819,6 +844,6 @@ if (typeof module !== "undefined" && module.exports) {
     resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
     resolveTournamentMatch, publicHubStatus,
     scoringRulesFor, gameScoreStatus,
-    splitNetsAcrossPools, distributeGamesOnNets
+    splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames
   };
 }

@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2441,7 +2441,7 @@ function publicHomeHTML() {
     ? `<div class="ph-tile is-live"><div class="ph-tile-num"><span class="ph-dot"></span></div><div class="ph-tile-lab">tournament live</div></div>`
     : `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">no games yet</div></div>`;
   const tilesHTML = `<div class="ph-tiles" id="ph-tiles">
-    <div class="ph-tile is-here"><div class="ph-tile-num">${st.here}</div><div class="ph-tile-lab">Checked In</div></div>
+    <div class="ph-tile is-here"><div class="ph-tile-num">${st.here}</div><div class="ph-tile-lab">checked in</div></div>
     ${liveTile}
   </div>`;
   const courtsSection = courtsHTML
@@ -3847,10 +3847,15 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
     const nets = [...new Set(poolMatches.map((m) => m.net).filter((n) => n != null))].sort((a, b) => a - b);
     const played = poolMatches.filter((m) => m.status === 'final').length;
     const total = poolMatches.length;
+    // C70 fix (2026-06-27): the pool's "Now" games are a DISJOINT set across its nets (pickPoolCurrentGames),
+    // so a team is never tagged current on two nets at once; if a net's lowest-queue game conflicts it skips
+    // to its next free game so both nets stay busy. Render-only — schedule / queue_order / DB are unchanged.
+    const netUnplayed = nets.map((net) => poolMatches
+      .filter((m) => m.net === net && m.status !== 'final' && m.team_a_id && m.team_b_id)
+      .sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0)));
+    const currentIds = new Set(pickPoolCurrentGames(netUnplayed).filter(Boolean));
     const netGroups = nets.map((net) => {
       const games = poolMatches.filter((m) => m.net === net).sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
-      // "Now" = the first unplayed game on this net; finishing it auto-advances the tag to the next one.
-      const curId = (games.find((g) => g.status !== 'final' && g.team_a_id && g.team_b_id) || {}).id;
       const rows = games.map((g, i) => {
         const order = g.queue_order || (i + 1); // the small play-order number Mike asked for
         const aN = escapeHTML(teamNameById(teams, g.team_a_id));
@@ -3863,7 +3868,7 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
             <span class="ppg-r"><span class="ppg-score">${escapeHTML(String(g.score_a))}-${escapeHTML(String(g.score_b))}</span>${isAdmin ? `<button type="button" class="ppg-btn" data-role="tv2-bracket-open" data-id="${escapeHTML(g.id)}">Edit</button><button type="button" class="ppg-btn" data-role="tv2-clear-result" data-id="${escapeHTML(g.id)}">Clear</button>` : ''}</span>
           </div>`;
         }
-        const isCur = g.id === curId;
+        const isCur = currentIds.has(g.id);
         const isLive = g.status === 'live'; // C72: a game being live-scored shows its running score + a LIVE pill
         const rightSide = isLive
           ? `<span class="ppg-livescore">${escapeHTML(String(g.score_a != null ? g.score_a : 0))}–${escapeHTML(String(g.score_b != null ? g.score_b : 0))}</span><span class="ppg-livetag">LIVE</span>`
