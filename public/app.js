@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -8665,12 +8665,21 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       const ok = await saveSession(date, time, location);
       btnSaveSession.disabled = false;
       btnSaveSession.textContent = 'Save session';
-      const msg = document.getElementById('session-save-msg');
-      if (msg) {
-        msg.style.color = ok ? 'var(--success)' : 'var(--danger)';
-        msg.textContent  = ok ? 'Session saved' : 'Save failed — check connection';
-        msg.style.display = 'block';
-        if (ok) { setTimeout(() => { msg.style.display = 'none'; }, 2500); render(); }
+      if (ok) {
+        // 2026-06-27: render() rebuilds the whole shell (the preview / Clear / Share controls appear), which
+        // would destroy this #session-save-msg node BEFORE the browser paints — so the green "Session saved"
+        // was never actually seen. Render FIRST, then set the confirmation on the freshly-rendered element.
+        render();
+        const fresh = document.getElementById('session-save-msg');
+        if (fresh) {
+          fresh.style.color = 'var(--success)';
+          fresh.textContent = 'Session saved';
+          fresh.style.display = 'block';
+          setTimeout(() => { const m = document.getElementById('session-save-msg'); if (m) m.style.display = 'none'; }, 2500);
+        }
+      } else {
+        const msg = document.getElementById('session-save-msg');
+        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'Save failed — check connection'; msg.style.display = 'block'; }
       }
     });
   }
@@ -8693,13 +8702,21 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       btnClearSession.disabled = true;
       const ok = await clearSession();
       btnClearSession.disabled = false;
-      const msg = document.getElementById('session-save-msg');
-      if (msg) {
-        msg.style.color = ok ? 'var(--success)' : 'var(--danger)';
-        msg.textContent = ok ? 'Session cleared' : 'Clear failed — check connection';
-        msg.style.display = 'block';
+      if (ok) {
+        // render FIRST (it rebuilds the shell + drops the now-stale Clear button), then show the confirmation
+        // on the freshly-rendered #session-save-msg (a render() afterwards would have destroyed it before paint).
+        render();
+        const fresh = document.getElementById('session-save-msg');
+        if (fresh) {
+          fresh.style.color = 'var(--success)';
+          fresh.textContent = 'Session cleared';
+          fresh.style.display = 'block';
+          setTimeout(() => { const m = document.getElementById('session-save-msg'); if (m) m.style.display = 'none'; }, 2500);
+        }
+      } else {
+        const msg = document.getElementById('session-save-msg');
+        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'Clear failed — check connection'; msg.style.display = 'block'; }
       }
-      if (ok) render();
     });
   }
 }
