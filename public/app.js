@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.26.17'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.26.18'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3046,7 +3046,9 @@ async function tdbCreateTournament({ name, pool_count, net_count, preset }) {
     bracket_target: bracketTarget,
     bracket_cap: (p.bracket_cap == null || p.bracket_cap === '') ? null : Number(p.bracket_cap),
     win_by_2: p.win_by_2 == null ? true : !!p.win_by_2,
-    team_size: Number(p.team_size) || 4 // C68: copy the format's players-per-team onto the tournament
+    team_size: Number(p.team_size) || 4, // C68: copy the format's players-per-team onto the tournament
+    registration_open: true // you create a tournament so teams can register — open it immediately (admin
+    // can Close it anytime). Without this it defaulted CLOSED, so the public had no Register tab/screen.
   };
   const { data, error } = await supabaseClient
     .from('tournaments').insert([row]).select().single();
