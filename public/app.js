@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.12'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.14'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4017,6 +4017,47 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam,
 // NF-10: edit a tournament's settings after create (name, nets, pool/bracket targets + cap, win-by-2) so
 // "created to 25, played to 21" no longer means delete+rebuild. Saves via the guarded tdbSetTournamentFields;
 // match_cap is kept = bracket_target (NF-1 back-compat). Shown in setup/pools (moot once the bracket runs).
+// Edit a team's roster in a proper modal — per-player inputs (pre-filled), upgrading the comma-prompt
+// (Mike, 2026-06-27). Saves via tdbSetTeamRoster (enforces exactly team_size). Reuses .popup-card + .card.
+function openEditRosterModal(teamId) {
+  const tm = (state.tournamentTeams || []).find((x) => x.id === teamId);
+  if (!tm) return;
+  const active = (state.tournaments || []).find((x) => x.id === state.activeTournamentId) || {};
+  const teamSize = Number(active.team_size) || 4;
+  const roster = Array.isArray(tm.roster) ? tm.roster : [];
+  const overlay = document.createElement('div');
+  overlay.className = 'popup-overlay';
+  overlay.style.display = 'flex';
+  overlay.innerHTML = `<div class="popup-card card er-card" role="dialog" aria-modal="true" aria-label="Edit roster">
+    <div class="brm-title">Edit roster — ${escapeHTML(tm.name || 'team')}</div>
+    <p class="small" style="color:var(--muted);margin:0 0 10px;">${teamSize} players</p>
+    <div class="tm-pgrid">${Array.from({ length: teamSize }, (_, i) => `<input type="text" class="reg-input er-p" placeholder="Player ${i + 1}" autocomplete="off" autocapitalize="words" value="${escapeHTMLText(roster[i] || '')}" />`).join('')}</div>
+    <div id="er-err" hidden style="color:var(--danger);margin-top:8px;font-size:13px;"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button type="button" class="secondary" id="er-cancel" style="flex:1;">Cancel</button>
+      <button type="button" class="primary" id="er-save" style="flex:1;">Save roster</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector('#er-cancel').onclick = close;
+  let saving = false;
+  overlay.querySelector('#er-save').onclick = async () => {
+    if (saving) return;
+    const vals = [...overlay.querySelectorAll('.er-p')].map((i) => i.value.trim()).filter(Boolean);
+    const err = overlay.querySelector('#er-err');
+    if (vals.length !== teamSize) { err.textContent = 'Enter exactly ' + teamSize + ' players.'; err.hidden = false; return; }
+    saving = true;
+    try {
+      await tdbSetTeamRoster(teamId, vals);
+      await tdbRefreshTournaments();
+      close();
+      render();
+    } catch (e) { saving = false; err.textContent = (e && e.message) || 'Could not save the roster.'; err.hidden = false; }
+  };
+}
+
 function openTournamentSettingsModal(tournamentId) {
   const t = (state.tournaments || []).find((x) => x.id === tournamentId);
   if (!t) return;
@@ -4912,13 +4953,70 @@ function managePoolsPageHTML(active, teams, pools) {
   return `<div class="card"><p class="small" style="color:var(--muted);margin:0 0 8px;">Pool play is running — score games on the <strong>Live</strong> tab (each pool's nets are editable there).</p>
     <button type="button" class="danger" data-role="tv2-reset-pools" style="width:100%;">Reset pools (clear results)</button></div>`;
 }
+// Bracket FORMAT preview (Mike, 2026-06-27): show what the bracket games will look like BEFORE pools end —
+// the structure only, no teams (slots read "Seed N" in round 1, then "Winner of G#"/"Loser of G#"). Teams
+// drop in when pools finish + the real bracket is generated. Teamless rows from generateDoubleElim, reusing
+// the same labels/nets/queue logic as tdbGenerateBracket so the G-numbers match the eventual real bracket.
+function buildBracketPreviewRows(n, netCount, reset) {
+  if (!n || n < 2) return [];
+  const gen = generateDoubleElim(n, !!reset);
+  const real = gen.realMatches;
+  const labelOf = (key) => {
+    const m = real.find((x) => x.key === key);
+    if (!m) return key;
+    if (m.side === 'grand_final') return m.isReset ? 'Grand Final (reset)' : 'Grand Final';
+    return `${m.side === 'winners' ? 'WB' : 'LB'} R${m.round} M${m.slot + 1}`;
+  };
+  const srcLabel = (s) => {
+    if (!s) return null;
+    if (s.seed) return 'Seed ' + s.seed;
+    return (s.type === 'winner' ? 'Winner of ' : 'Loser of ') + labelOf(s.of);
+  };
+  const nc = Math.max(1, Number(netCount) || 1);
+  const sidePri = (s) => (s === 'winners' ? 0 : s === 'losers' ? 1 : 2);
+  const maxRound = real.reduce((mx, m) => Math.max(mx, m.round || 0), 0);
+  const playRound = (m) => (m.side === 'grand_final' ? maxRound + m.round : m.round);
+  const netInfo = {}; const perRound = {}; let q = 0;
+  real.slice().sort((a, b) => playRound(a) - playRound(b) || sidePri(a.side) - sidePri(b.side) || a.slot - b.slot)
+    .forEach((m) => {
+      if (m.side === 'grand_final') { netInfo[m.key] = { net: null, queue_order: q++ }; return; }
+      const rk = m.side + ':' + m.round; perRound[rk] = perRound[rk] || 0;
+      netInfo[m.key] = { net: (perRound[rk] % nc) + 1, queue_order: q++ }; perRound[rk]++;
+    });
+  return real.map((m) => ({
+    id: 'preview-' + m.key, phase: 'main', side: m.side, round: m.round, slot: m.slot,
+    round_label: labelOf(m.key), net: netInfo[m.key].net, queue_order: netInfo[m.key].queue_order,
+    team_a_id: null, team_b_id: null, source_a: srcLabel(m.aSource), source_b: srcLabel(m.bSource),
+    status: 'scheduled',
+  }));
+}
+function manageBracketPreviewHTML(active, n) {
+  const rows = buildBracketPreviewRows(n, active.net_count, active.grand_final_reset);
+  if (!rows.length) return '';
+  const gn = bracketGameNumbers(rows);
+  const sideLabel = { winners: 'Winners bracket', losers: 'Losers bracket', grand_final: 'Final' };
+  let html = '';
+  ['winners', 'losers', 'grand_final'].forEach((side) => {
+    const sideRows = rows.filter((r) => r.side === side).sort((a, b) => (gn.byId[a.id] || 0) - (gn.byId[b.id] || 0));
+    if (!sideRows.length) return;
+    html += `<div class="tm-sec">${sideLabel[side]}</div>`;
+    html += sideRows.map((r) => {
+      const a = bracketSourceLabel(r.source_a, gn.byRoundLabel) || 'TBD';
+      const b = bracketSourceLabel(r.source_b, gn.byRoundLabel) || 'TBD';
+      return `<div class="card bp-row"><span class="bp-g">G${gn.byId[r.id]}</span><span class="bp-m">${escapeHTML(a)} <span class="bp-vs">vs</span> ${escapeHTML(b)}</span>${r.net ? `<span class="bp-net">Net ${escapeHTML(String(r.net))}</span>` : ''}</div>`;
+    }).join('');
+  });
+  return html;
+}
 function manageBracketPageHTML(active, teams, matches) {
   if (active.status === 'setup' || active.status === 'pools') {
     const poolMatches = matches.filter((m) => m.phase === 'pool');
     const done = poolMatches.length > 0 && poolMatches.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
-    return `<div class="card">${done
-      ? '<p class="small" style="color:var(--muted);margin:0 0 8px;">All pool games are final — generate the bracket.</p><button type="button" class="primary" data-role="tv2-generate-bracket" style="width:100%;">Generate bracket</button>'
-      : '<p class="small" style="color:var(--muted);margin:0;">Finish all pool games (on Live) to generate the bracket.</p>'}</div>`;
+    const genCard = `<div class="card">${done
+      ? '<p class="small" style="color:var(--muted);margin:0 0 8px;">All pool games are final — generate the bracket (teams seed from the pool standings).</p><button type="button" class="primary" data-role="tv2-generate-bracket" style="width:100%;">Generate bracket</button>'
+      : '<p class="small" style="color:var(--muted);margin:0;">Pools aren’t finished yet. Below is the bracket FORMAT — the games it’ll be; teams drop in once pool play ends.</p>'}</div>`;
+    if (teams.length < 2) return genCard;
+    return `${genCard}<div class="tm-sec" style="margin-top:12px;">Bracket format — ${teams.length} teams</div>${manageBracketPreviewHTML(active, teams.length)}`;
   }
   return `<div class="card"><p class="small" style="color:var(--muted);margin:0;">The bracket is generated — view + score it on the <strong>Live</strong> tab.</p></div>${buildSeedingTableHTML(teams, matches)}`;
 }
@@ -8196,17 +8294,9 @@ function bindTournamentTabV2() {
         if (f) { f.hidden = !f.hidden; if (!f.hidden) { const n = document.getElementById('reg-team'); if (n) n.focus(); } }
         return;
       } else if (role === 'tv2-edit-roster') {
-        if (!state.isAdmin) return; // tournament-mode Manage: edit a team's players post-registration
-        const tm = (state.tournamentTeams || []).find((x) => x.id === id);
-        const teamSize = Number((state.tournaments.find((x) => x.id === state.activeTournamentId) || {}).team_size) || 4;
-        const cur = (tm && Array.isArray(tm.roster)) ? tm.roster.join(', ') : '';
-        const next = await appPrompt({ title: 'Edit roster', message: teamSize + ' players, comma-separated', value: cur, confirmText: 'Save', placeholder: 'Player 1, Player 2, …' });
-        if (next == null) return;
-        const roster = String(next).split(',').map((s) => s.trim()).filter(Boolean);
-        if (roster.length !== teamSize) throw new Error('Enter exactly ' + teamSize + ' players.');
-        await tdbSetTeamRoster(id, roster);
-        await tdbRefreshTournaments();
-        render();
+        if (!state.isAdmin) return; // tournament-mode Manage: edit a team's players in a per-player modal
+        openEditRosterModal(id);
+        return;
       } else if (role === 'tv2-manage-nav') {
         state.manageView = el.getAttribute('data-view') || 'hub'; // Manage hub → open a sub-page
         render();
