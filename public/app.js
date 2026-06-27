@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2395,13 +2395,20 @@ function buildPublicTournamentLiveHTML() {
   };
   let rows = '';
   if (t.status === 'pools') {
-    // current game per net = lowest queue_order unplayed match on that net (mirrors the admin net board)
+    // C70 fix (2026-06-27, v.27.5): the "live now" game per net is a DISJOINT set across nets
+    // (pickPoolCurrentGames) so a team is never shown playing on two nets at once — mirrors the pool board.
+    // The previous lowest-queue-per-net-independently pick double-booked a team (the M1 bug) on this strip,
+    // which feeds the admin dashboard AND the public Scores board. Teams belong to one pool, so deduping
+    // globally across all nets == per-pool dedup. Render-only: schedule / queue_order / DB unchanged.
     const live = matches.filter((m) => m.phase === 'pool' && m.status !== 'final' && m.net && m.team_a_id && m.team_b_id);
-    const byNet = {};
-    live.forEach((m) => { (byNet[m.net] = byNet[m.net] || []).push(m); });
-    rows = Object.keys(byNet).map(Number).sort((a, b) => a - b).map((net) => {
-      const up = byNet[net].slice().sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0))[0];
-      return row('Net ' + net, up);
+    const nets = [...new Set(live.map((m) => m.net))].sort((a, b) => a - b);
+    const netUnplayed = nets.map((net) => live.filter((m) => m.net === net).sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0)));
+    const currentIds = pickPoolCurrentGames(netUnplayed);
+    rows = nets.map((net, i) => {
+      const id = currentIds[i];
+      if (!id) return '';
+      const up = live.find((m) => m.id === id);
+      return up ? row('Net ' + net, up) : '';
     }).join('');
   } else {
     // bracket: every playable matchup (both teams known, not final). Label by net if assigned, else round.
