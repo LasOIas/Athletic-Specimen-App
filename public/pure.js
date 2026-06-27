@@ -847,9 +847,17 @@ function pickPoolCurrentGames(netGames) {
 // Returns { byId:{matchId:g}, byRoundLabel:{round_label:g} }. byRoundLabel keys keep the FULL stored label
 // (incl. " M#") so the stored source refs ("Winner of WB R1 M1") can be rewritten to "Winner of G{n}".
 function bracketGameNumbers(mainMatches) {
+  // Number games in the actual PLAY ORDER, not all-winners-then-all-losers. The winners + losers brackets run
+  // CONCURRENTLY (interleaved by round in time), so a player's game number should tell them WHEN they play —
+  // losers Game 1 plays near the start (alongside an early winners round), and the grand final (championship)
+  // is genuinely the LAST/highest number. This mirrors the queue_order/net assignment the app already uses
+  // (sort by play-round, winners-before-losers within a round, then slot), so G# tracks the net-call order.
+  const list = (mainMatches || []).slice();
   const sidePri = (s) => (s === 'winners' ? 0 : s === 'losers' ? 1 : 2);
-  const order = (mainMatches || []).slice().sort((a, b) =>
-    sidePri(a.side) - sidePri(b.side) || (a.round || 0) - (b.round || 0) || (a.slot || 0) - (b.slot || 0));
+  const maxRound = list.reduce((mx, m) => Math.max(mx, (m && m.side !== 'grand_final') ? (m.round || 0) : 0), 0);
+  const playRound = (m) => (m.side === 'grand_final' ? maxRound + (m.round || 0) : (m.round || 0)); // GF (+ reset) sort last
+  const order = list.sort((a, b) =>
+    playRound(a) - playRound(b) || sidePri(a.side) - sidePri(b.side) || (a.slot || 0) - (b.slot || 0));
   const byId = {}, byRoundLabel = {};
   order.forEach((m, i) => {
     const g = i + 1;

@@ -766,7 +766,7 @@ describe('pickPoolCurrentGames (C70 fix — no team is "Now" on two nets at once
   });
 });
 
-describe('bracketGameNumbers (continuous G1..GN: winners -> losers -> grand final)', () => {
+describe('bracketGameNumbers (continuous G1..GN in PLAY ORDER: winners+losers interleaved by round, grand final last)', () => {
   // intentionally shuffled input to prove the sort
   const main = [
     { id: 'gf', side: 'grand_final', round: 1, slot: 0, round_label: 'Grand Final' },
@@ -776,14 +776,19 @@ describe('bracketGameNumbers (continuous G1..GN: winners -> losers -> grand fina
     { id: 'l1', side: 'losers', round: 1, slot: 0, round_label: 'LB R1 M1' },
     { id: 'w1', side: 'winners', round: 1, slot: 0, round_label: 'WB R1 M1' },
   ];
-  it('numbers all winners first (by round, slot), then losers, then the grand final', () => {
+  it('numbers in play order: round 1 (WB then LB), round 2 (WB then LB), grand final last', () => {
     const { byId } = bracketGameNumbers(main);
-    expect(byId).toEqual({ w1: 1, w2: 2, w3: 3, l1: 4, l2: 5, gf: 6 });
+    // round 1: w1,w2 (winners) then l1 (losers) -> 1,2,3 ; round 2: w3 then l2 -> 4,5 ; GF last -> 6
+    expect(byId).toEqual({ w1: 1, w2: 2, l1: 3, w3: 4, l2: 5, gf: 6 });
+  });
+  it('the grand final (championship) is the LAST / highest game number', () => {
+    const { byId } = bracketGameNumbers(main);
+    expect(byId.gf).toBe(Math.max(...Object.values(byId)));
   });
   it('maps the FULL stored round_label (incl. M#) so source refs can be rewritten', () => {
     const { byRoundLabel } = bracketGameNumbers(main);
     expect(byRoundLabel['WB R1 M1']).toBe(1);
-    expect(byRoundLabel['LB R2 M1']).toBe(5);
+    expect(byRoundLabel['LB R1 M1']).toBe(3);
     expect(byRoundLabel['Grand Final']).toBe(6);
   });
   it('empty / nullish -> empty maps', () => {
