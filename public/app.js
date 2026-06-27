@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7965,8 +7965,17 @@ function activateMainTab(tab) {
   // Reliability fix (2026-06-20): expose the current tab to assistive tech, not just a visual .active
   // class (this is the single place nav active state is set — first paint via activateMainTab(activeMainTab)
   // and on click — so aria-current stays correct everywhere).
-  document.querySelectorAll('#bottom-nav .nav-btn').forEach((b) => {
-    const isActive = b.dataset.navTab === tab;
+  // 2026-06-27: Tournament + Session are reached from Dashboard quick-actions and have NO bottom-nav button
+  // of their own, so without this the nav goes fully blank when they open (no "you are here") — the root
+  // cause of "Tournament feels missing". Anchor an orphan tab to its parent (dashboard) ONLY when it has no
+  // own nav button, so surfaces where the tab DOES have a button (the public Bracket = 'tournament') are
+  // unchanged and still highlight themselves.
+  const navButtons = document.querySelectorAll('#bottom-nav .nav-btn');
+  const hasOwnButton = Array.prototype.some.call(navButtons, (b) => b.dataset.navTab === tab);
+  const NAV_ANCHOR = { tournament: 'dashboard', session: 'dashboard' };
+  const navActive = hasOwnButton ? tab : (NAV_ANCHOR[tab] || tab);
+  navButtons.forEach((b) => {
+    const isActive = b.dataset.navTab === navActive;
     b.classList.toggle('active', isActive);
     if (isActive) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
