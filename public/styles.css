@@ -2920,5 +2920,13 @@ body.copilot-typing #bottom-nav { display: none; }
 .tm-mini { font-size: 12px; font-weight: 700; color: var(--muted); background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; }
 .tm-mini:active { background: var(--surface-3); }
 .tm-mini.tm-mini-dang { color: var(--danger); }
+/* Manage HUB — tile grid (§38 layout B); each tile opens its own page. */
+.tm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tm-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; text-align: center; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 18px 12px; min-height: 104px; }
+.tm-tile:active { background: var(--surface-3); }
+.tm-tile-ic { width: 24px; height: 24px; color: var(--accent); }
+.tm-tile-lb { font-size: 14px; font-weight: 700; color: var(--ink); line-height: 1.15; }
+.tm-tile-st { font-size: 11px; color: var(--muted); }
+.tm-pagetitle { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 16px; color: var(--ink); }
 .bt-act { display: flex; justify-content: flex-end; padding: 4px 8px 8px; }
 .bt-act button { min-height: 28px; padding: 3px 10px; font-size: 12px; }
