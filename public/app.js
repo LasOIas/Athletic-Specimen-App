@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3826,6 +3826,30 @@ function buildStandingsTableHTML(poolTeams, poolMatches) {
   </table>`;
 }
 
+// Seeding list (Mike, 2026-06-27, §38 option B): the cross-pool seed order (computeSeeding — seed 1..N by
+// win% then point differential, the SAME ranking that sets the bracket). Shown on the public Bracket tab +
+// the admin tournament view once any pool game is final (provisional during pools, final once pools end).
+// Read-only; no skill shown. Returns '' when there are no finished pool games yet.
+function buildSeedingTableHTML(teams, matches) {
+  const poolMatches = (matches || []).filter((m) => m.phase === 'pool');
+  if (!poolMatches.some((m) => m.status === 'final')) return '';
+  const rows = computeSeeding(teams || [], poolMatches);
+  if (!rows.length) return '';
+  return `<div class="card sd-card">
+    <div class="sd-h">Seeding</div>
+    <div class="sd-sub">${rows.length} teams · by win% then point differential</div>
+    <table class="sd-tbl">
+      <thead><tr><th>Seed</th><th>Team</th><th class="r">W-L</th><th class="r">Diff</th></tr></thead>
+      <tbody>${rows.map((r) => `<tr${r.seed === 1 ? ' class="top"' : ''}>
+        <td class="sd-seed">${r.seed}</td>
+        <td class="sd-nm">${escapeHTML(r.name)}</td>
+        <td class="r">${r.wins}-${r.losses}</td>
+        <td class="r ${r.pointDiff > 0 ? 'sd-pos' : r.pointDiff < 0 ? 'sd-neg' : ''}">${r.pointDiff > 0 ? '+' : ''}${r.pointDiff}</td>
+      </tr>`).join('')}</tbody>
+    </table>
+  </div>`;
+}
+
 // C70 (Mike, 2026-06-26): collapse a pool's nets into a readable label — "1-2" for a contiguous block,
 // "1, 3, 5" otherwise. Drives the "Pool A · Nets 1-2" line on the player board.
 function formatNetList(nets) {
@@ -4590,13 +4614,15 @@ function buildTournamentTabHTML() {
       return `<div class="card">
         <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
         <p class="small" style="color:var(--muted);margin:0;">Pool play — submit your game results below.</p>
-      </div>` + buildPoolPlayHTML(active, state.tournamentPools || [], teams, state.tournamentMatches || [], false, state.tournamentPickedTeamId);
+      </div>` + buildPoolPlayHTML(active, state.tournamentPools || [], teams, state.tournamentMatches || [], false, state.tournamentPickedTeamId)
+        + buildSeedingTableHTML(teams, state.tournamentMatches || []);
     }
     if (active && (show.status === 'bracket' || show.status === 'completed')) {
       return `<div class="card">
         <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
         <p class="small" style="color:var(--muted);margin:0;">Bracket</p>
-      </div>` + buildBracketHTML(active, state.tournamentMatches || [], teams);
+      </div>` + buildBracketHTML(active, state.tournamentMatches || [], teams)
+        + buildSeedingTableHTML(teams, state.tournamentMatches || []);
     }
     return `<div class="card">
       <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
@@ -4663,7 +4689,7 @@ function buildTournamentTabHTML() {
 
   // Bracket stage: single-round-focus renderer (mockup #1).
   if (active.status === 'bracket' || active.status === 'completed') {
-    return `${err}${headerCard}${buildBracketHTML(active, matches, teams)}`;
+    return `${err}${headerCard}${buildBracketHTML(active, matches, teams)}${buildSeedingTableHTML(teams, matches)}`;
   }
 
   // Pool-play stage: standings + matches + override + generate bracket when done.
@@ -4672,6 +4698,7 @@ function buildTournamentTabHTML() {
     const allDone = poolMatches.length > 0 && poolMatches.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
     return `${err}${headerCard}
       ${buildPoolPlayHTML(active, pools, teams, matches, true, state.tournamentPickedTeamId)}
+      ${buildSeedingTableHTML(teams, matches)}
       <div class="card">
         ${allDone
           ? '<button type="button" class="primary" data-role="tv2-generate-bracket" style="width:100%;margin-bottom:8px;">Generate Bracket</button>'

@@ -2882,5 +2882,20 @@ body.copilot-typing #bottom-nav { display: none; }
 .ppg.is-live .ppg-n { background: var(--live); color: #fff; }
 .ppg-livescore { font-family: 'Sora','Inter',sans-serif; font-size: 16px; font-weight: 800; color: var(--live); }
 .ppg-livetag { font-size: 9px; font-weight: 800; letter-spacing: .05em; color: #fff; background: var(--live); border-radius: 999px; padding: 2px 7px; }
+
+/* Seeding list (Mike, 2026-06-27, §38 option B — table): cross-pool seed order on the bracket/tournament views. */
+.sd-card { margin-top: 12px; }
+.sd-h { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 16px; margin: 0 0 2px; color: var(--ink); }
+.sd-sub { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+.sd-tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+.sd-tbl th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; padding: 6px 6px; border-bottom: 1px solid var(--border); }
+.sd-tbl th.r, .sd-tbl td.r { text-align: right; }
+.sd-tbl td { padding: 8px 6px; border-bottom: 1px solid var(--border); color: var(--ink); }
+.sd-tbl tr:last-child td { border-bottom: none; }
+.sd-tbl td.sd-seed { font-family: 'Sora','Inter',sans-serif; font-weight: 800; color: var(--muted); width: 1%; white-space: nowrap; }
+.sd-tbl td.sd-nm { font-weight: 700; }
+.sd-tbl tr.top td.sd-seed { color: var(--accent); }
+.sd-tbl td.sd-pos { color: var(--live); font-weight: 700; }
+.sd-tbl td.sd-neg { color: var(--danger); font-weight: 700; }
 .bt-act { display: flex; justify-content: flex-end; padding: 4px 8px 8px; }
 .bt-act button { min-height: 28px; padding: 3px 10px; font-size: 12px; }
