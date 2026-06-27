@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3864,14 +3864,13 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
     const netGroups = nets.map((net) => {
       const games = poolMatches.filter((m) => m.net === net).sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
       const rows = games.map((g, i) => {
-        const order = g.queue_order || (i + 1); // the small play-order number Mike asked for
+        const order = g.queue_order || (i + 1); // play-order, rendered as a "game N" eyebrow label (Mike, 2026-06-27)
         const aN = escapeHTML(teamNameById(teams, g.team_a_id));
         const bN = escapeHTML(teamNameById(teams, g.team_b_id));
         if (g.status === 'final') {
           const aWin = g.winner_team_id === g.team_a_id;
           return `<div class="ppg is-final">
-            <span class="ppg-n">${order}</span>
-            <span class="ppg-m"><span class="${aWin ? 'ppg-w' : ''}">${aN}</span> <span class="ppg-vs">vs</span> <span class="${!aWin ? 'ppg-w' : ''}">${bN}</span></span>
+            <span class="ppg-m"><span class="ppg-kick">game ${order}</span><span class="ppg-mr"><span class="${aWin ? 'ppg-w' : ''}">${aN}</span> <span class="ppg-vs">vs</span> <span class="${!aWin ? 'ppg-w' : ''}">${bN}</span></span></span>
             <span class="ppg-r"><span class="ppg-score">${escapeHTML(String(g.score_a))}-${escapeHTML(String(g.score_b))}</span>${isAdmin ? `<button type="button" class="ppg-btn" data-role="tv2-bracket-open" data-id="${escapeHTML(g.id)}">Edit</button><button type="button" class="ppg-btn" data-role="tv2-clear-result" data-id="${escapeHTML(g.id)}">Clear</button>` : ''}</span>
           </div>`;
         }
@@ -3881,8 +3880,7 @@ function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTea
           ? `<span class="ppg-livescore">${escapeHTML(String(g.score_a != null ? g.score_a : 0))}–${escapeHTML(String(g.score_b != null ? g.score_b : 0))}</span><span class="ppg-livetag">LIVE</span>`
           : (isCur ? '<span class="ppg-now">Now</span>' : '<span class="ppg-cta" aria-hidden="true">Score &rsaquo;</span>');
         return `<div class="ppg${isCur ? ' is-now' : ''}${isLive ? ' is-live' : ''}" data-role="tv2-bracket-open" data-id="${escapeHTML(g.id)}" role="button" tabindex="0">
-          <span class="ppg-n">${order}</span>
-          <span class="ppg-m">${aN} <span class="ppg-vs">vs</span> ${bN}</span>
+          <span class="ppg-m"><span class="ppg-kick">game ${order}</span><span class="ppg-mr">${aN} <span class="ppg-vs">vs</span> ${bN}</span></span>
           <span class="ppg-r">${rightSide}</span>
         </div>`;
       }).join('');

@@ -2788,7 +2788,10 @@ body.copilot-typing #bottom-nav { display: none; }
 .ppg[role="button"] { cursor: pointer; }
 .ppg[role="button"]:hover .ppg-m, .ppg[role="button"]:active .ppg-m { color: var(--accent); }
 .ppg-n { flex: 0 0 24px; width: 24px; height: 24px; border-radius: 50%; background: var(--surface-3); color: var(--muted); font-family: 'Sora','Inter',sans-serif; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
-.ppg-m { flex: 1; min-width: 0; font-size: 16px; font-weight: 700; color: var(--ink); line-height: 1.3; }
+.ppg-m { flex: 1; min-width: 0; font-size: 16px; font-weight: 700; color: var(--ink); line-height: 1.3; display: flex; flex-direction: column; gap: 2px; }
+/* "game N" eyebrow label above each matchup (Mike, 2026-06-27; §38 option C of 3). */
+.ppg-kick { font-family: 'Sora','Inter',sans-serif; font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--faint); line-height: 1; }
+.ppg.is-now .ppg-kick, .ppg.is-live .ppg-kick { color: var(--live); }
 .ppg-vs { color: var(--faint); font-weight: 600; font-size: 12px; }
 .ppg-w { color: var(--live); }
 .ppg-r { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
