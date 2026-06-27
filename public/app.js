@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.14'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.15'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3642,6 +3642,14 @@ async function tdbRefreshTournaments() {
 function partialRenderTournament() {
   const c = document.querySelector('#tab-tournament .container');
   if (c) c.innerHTML = buildTournamentTabHTML();
+  // tournament-mode dashboard surfaces the same data on the Manage + Live panels — keep them in sync so a
+  // side-tab switch (tv2-bracket-side) on the Manage bracket preview re-renders the right panel.
+  if (state.tournamentMode) {
+    const mc = document.querySelector('#tab-manage .container');
+    if (mc) mc.innerHTML = buildManageTabHTML();
+    const lc = document.querySelector('#tab-live .container');
+    if (lc) lc.innerHTML = buildLiveTabHTML();
+  }
   layoutBracketTree(); // draw connectors + fit/zoom the bracket tree (no-op if no tree present)
   maybeAutoGenerateBracket(); // C54: prompt to generate the bracket the moment pools finish
 }
@@ -4391,7 +4399,7 @@ function openBracketResultModal(matchId) {
   }
 }
 
-function buildBracketHTML(tournament, matches, teams) {
+function buildBracketHTML(tournament, matches, teams, opts = {}) {
   const main = (matches || []).filter((m) => m.phase === 'main');
   if (!main.length) return '<div class="card"><p class="small" style="color:var(--muted);margin:0;">No bracket yet.</p></div>';
 
@@ -4419,7 +4427,7 @@ function buildBracketHTML(tournament, matches, teams) {
 
   // C57: map-style bracket — pinch to zoom, drag any direction to pan (gestures handle it, no zoom buttons).
   // Mike removed the [- Fit +] control; keep a one-line hint so scoring stays discoverable.
-  const zoomToggle = `<div class="bt-bar"><span class="bt-hint">tap a match to enter its score</span></div>`;
+  const zoomToggle = `<div class="bt-bar"><span class="bt-hint">${opts.preview ? 'Bracket format — teams seed in once pools finish' : 'tap a match to enter its score'}</span></div>`;
 
   // Columns left-to-right = rounds; connector lines between them are drawn post-render.
   const sideMatches = main.filter((m) => m.side === side);
@@ -4454,7 +4462,9 @@ function buildBracketHTML(tournament, matches, teams) {
 // direction to pan. Called after every render of the tournament tab + on resize + on tab-in. No-op
 // when no bracket tree is present or the tab is hidden (offsetParent null), so background syncs don't misfire.
 function layoutBracketTree() {
-  const pan = document.querySelector('[data-role="bt-pan"]');
+  // pick the VISIBLE bracket pan — there can be more than one in the DOM (e.g. the tournament-mode Manage
+  // preview vs the Live bracket); the hidden ones have offsetParent null.
+  const pan = [...document.querySelectorAll('[data-role="bt-pan"]')].find((p) => p.offsetParent) || document.querySelector('[data-role="bt-pan"]');
   if (!pan || !pan.offsetParent) return;
   const canvas = pan.querySelector('[data-role="bt-canvas"]');
   const svg = pan.querySelector('[data-role="bt-links"]');
@@ -4990,33 +5000,18 @@ function buildBracketPreviewRows(n, netCount, reset) {
     status: 'scheduled',
   }));
 }
-function manageBracketPreviewHTML(active, n) {
-  const rows = buildBracketPreviewRows(n, active.net_count, active.grand_final_reset);
-  if (!rows.length) return '';
-  const gn = bracketGameNumbers(rows);
-  const sideLabel = { winners: 'Winners bracket', losers: 'Losers bracket', grand_final: 'Final' };
-  let html = '';
-  ['winners', 'losers', 'grand_final'].forEach((side) => {
-    const sideRows = rows.filter((r) => r.side === side).sort((a, b) => (gn.byId[a.id] || 0) - (gn.byId[b.id] || 0));
-    if (!sideRows.length) return;
-    html += `<div class="tm-sec">${sideLabel[side]}</div>`;
-    html += sideRows.map((r) => {
-      const a = bracketSourceLabel(r.source_a, gn.byRoundLabel) || 'TBD';
-      const b = bracketSourceLabel(r.source_b, gn.byRoundLabel) || 'TBD';
-      return `<div class="card bp-row"><span class="bp-g">G${gn.byId[r.id]}</span><span class="bp-m">${escapeHTML(a)} <span class="bp-vs">vs</span> ${escapeHTML(b)}</span>${r.net ? `<span class="bp-net">Net ${escapeHTML(String(r.net))}</span>` : ''}</div>`;
-    }).join('');
-  });
-  return html;
-}
 function manageBracketPageHTML(active, teams, matches) {
   if (active.status === 'setup' || active.status === 'pools') {
     const poolMatches = matches.filter((m) => m.phase === 'pool');
     const done = poolMatches.length > 0 && poolMatches.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
     const genCard = `<div class="card">${done
       ? '<p class="small" style="color:var(--muted);margin:0 0 8px;">All pool games are final — generate the bracket (teams seed from the pool standings).</p><button type="button" class="primary" data-role="tv2-generate-bracket" style="width:100%;">Generate bracket</button>'
-      : '<p class="small" style="color:var(--muted);margin:0;">Pools aren’t finished yet. Below is the bracket FORMAT — the games it’ll be; teams drop in once pool play ends.</p>'}</div>`;
+      : '<p class="small" style="color:var(--muted);margin:0;">Pools aren’t finished yet. Below is the bracket FORMAT — the exact games + structure; teams drop into their seeds once pool play ends.</p>'}</div>`;
     if (teams.length < 2) return genCard;
-    return `${genCard}<div class="tm-sec" style="margin-top:12px;">Bracket format — ${teams.length} teams</div>${manageBracketPreviewHTML(active, teams.length)}`;
+    // Render the REAL bracket tree (same component as Live) with teamless rows so admins see the actual
+    // shape — cols, connectors, side tabs, "Seed N" / "Winner of G#" / "Loser of G#" — not a flat list.
+    const previewRows = buildBracketPreviewRows(teams.length, active.net_count, active.grand_final_reset);
+    return `${genCard}<div class="tm-sec" style="margin-top:12px;">Bracket format — ${teams.length} teams</div>${buildBracketHTML(active, previewRows, [], { preview: true })}`;
   }
   return `<div class="card"><p class="small" style="color:var(--muted);margin:0;">The bracket is generated — view + score it on the <strong>Live</strong> tab.</p></div>${buildSeedingTableHTML(teams, matches)}`;
 }
@@ -8482,7 +8477,9 @@ function activateMainTab(tab) {
     else b.removeAttribute('aria-current');
   });
   window.dispatchEvent(new Event('as-tab-changed')); // C25 item 5: refresh back-to-top visibility for the new panel
-  if (tab === 'tournament' || tab === 'live') layoutBracketTree(); // C32 #9: fit the bracket tree when switching into the tab
+  // C32 #9: fit the bracket tree when switching into a tab that shows one — the public/admin Bracket tab,
+  // the tournament-mode Live tab, and the Manage > Bracket preview (the real tree, teamless, pre-pools).
+  if (tab === 'tournament' || tab === 'live' || (tab === 'manage' && state.manageView === 'bracket')) layoutBracketTree();
 }
 
 // Tournament MODE enter/exit (Mike, 2026-06-27). Entering swaps the bottom nav (Home·Manage·Live·Co-pilot)

@@ -215,6 +215,56 @@ describe('generateDoubleElim — bracket wiring and advancement pointers', () =>
   });
 });
 
+describe('generateDoubleElim — EVERY tournament size is fully playable (Mike, 2026-06-27)', () => {
+  // The bracket must be set up correctly for ANY number of teams (the current tournament's actual count —
+  // not just powers of two). Simulate a full run for each N: seat seeds, play every game (lower seed wins),
+  // advance via winnerNext/loserNext, and assert one champion, every team plays, every match resolves.
+  const simulate = (N, reset) => {
+    const { realMatches } = generateDoubleElim(N, reset);
+    const byKey = {}; realMatches.forEach((m) => { byKey[m.key] = m; });
+    const slots = {};
+    realMatches.forEach((m) => {
+      slots[m.key] = {
+        a: m.aSource && m.aSource.seed ? m.aSource.seed : null,
+        b: m.bSource && m.bSource.seed ? m.bSource.seed : null,
+      };
+    });
+    const winnerOf = {}; const played = new Set(); const teamsPlayed = new Set();
+    let progressed = true; let guard = 0;
+    while (progressed && guard++ < 100000) {
+      progressed = false;
+      for (const m of realMatches) {
+        if (played.has(m.key)) continue;
+        const s = slots[m.key];
+        if (s.a == null || s.b == null) continue;
+        teamsPlayed.add(s.a); teamsPlayed.add(s.b);
+        const w = Math.min(s.a, s.b); const l = Math.max(s.a, s.b);
+        winnerOf[m.key] = w; played.add(m.key); progressed = true;
+        if (m.winnerNext) slots[m.winnerNext.key][m.winnerNext.slot] = w;
+        if (m.loserNext) slots[m.loserNext.key][m.loserNext.slot] = l;
+      }
+    }
+    const gf = realMatches.filter((m) => m.side === 'grand_final').sort((a, b) => b.round - a.round)[0];
+    return { realMatches, played, teamsPlayed, champ: gf ? winnerOf[gf.key] : null };
+  };
+
+  for (const reset of [false, true]) {
+    for (let N = 2; N <= 24; N++) {
+      it(`N=${N} (reset ${reset ? 'on' : 'off'}): single champion, every team plays, every match resolves`, () => {
+        const r = simulate(N, reset);
+        // every real match resolved (none stuck waiting on an unfilled slot)
+        expect(r.played.size).toBe(r.realMatches.length);
+        // every team 1..N actually plays at least one game
+        for (let t = 1; t <= N; t++) expect(r.teamsPlayed.has(t)).toBe(true);
+        // the top seed can win out (bracket is correctly wired end-to-end)
+        expect(r.champ).toBe(1);
+        // textbook double-elim game count: 2N-2 (or 2N-1 with a bracket reset)
+        expect(r.realMatches.length).toBe(reset ? 2 * N - 1 : 2 * N - 2);
+      });
+    }
+  }
+});
+
 describe('computeChampion', () => {
   const teams = [{ id: 'w', name: 'Winners' }, { id: 'l', name: 'Losers' }];
   it('returns the GF winner when the winners-bracket team takes it without a reset', () => {
