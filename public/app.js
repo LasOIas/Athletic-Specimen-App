@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.16'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.17'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4506,7 +4506,10 @@ function layoutBracketTree() {
   const vh = Math.max(320, Math.round((window.innerHeight || 800) * 0.64));
   const fit = (avail > 0 && W > 0 && H > 0) ? Math.min(1, avail / W, vh / H) : 1;
   pan.style.height = vh + 'px';
-  btView = { W, H, vw: avail, vh, fit, max: Math.max(fit * 4, 1.8) };
+  // Max zoom: enough to read/reach ANY single game card. The old `fit*4` PENALISED big brackets (small fit →
+  // low ceiling, exactly when you need to zoom IN more), so a 18-team bracket capped at 1.8×. Raise the floor
+  // to 2.8× (a 176px card → ~490px, fills a phone) and the multiplier so small brackets can still zoom far.
+  btView = { W, H, vw: avail, vh, fit, max: Math.max(fit * 6, 2.8) };
   if (btScale == null) { btScale = fit; btX = (avail - W * fit) / 2; btY = (vh - H * fit) / 2; }
   btClampApply(canvas);
   wireBracketGestures(pan, canvas);
@@ -4522,8 +4525,12 @@ function btClampApply(canvas) {
   const { W, H, vw, vh, fit, max } = btView;
   btScale = Math.min(max, Math.max(fit, btScale));
   const cw = W * btScale, ch = H * btScale;
-  btX = cw <= vw ? (vw - cw) / 2 : Math.min(0, Math.max(vw - cw, btX));
-  btY = ch <= vh ? (vh - ch) / 2 : Math.min(0, Math.max(vh - ch, btY));
+  // Allow half-a-viewport of overscroll past each edge so ANY card — including the corner ones — can be
+  // dragged to the CENTRE of the screen and zoomed on (the old clamp pinned edge cards to the screen edge,
+  // so you could never centre them). When the content is smaller than the viewport, keep it centred.
+  const ox = vw * 0.5, oy = vh * 0.5;
+  btX = cw <= vw ? (vw - cw) / 2 : Math.min(ox, Math.max(vw - cw - ox, btX));
+  btY = ch <= vh ? (vh - ch) / 2 : Math.min(oy, Math.max(vh - ch - oy, btY));
   canvas.style.transform = `translate(${btX}px, ${btY}px) scale(${btScale})`;
 }
 function btZoomAround(canvas, nextScale, px, py) {
