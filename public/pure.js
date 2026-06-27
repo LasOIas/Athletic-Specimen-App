@@ -721,6 +721,7 @@ function resolvePlayerByName(players, name) {
 var COPILOT_TOOL_POLICY = {
   check_in: 'instant', check_out: 'instant', make_teams: 'instant',
   submit_score: 'confirm', setup_tournament: 'confirm', generate_bracket: 'confirm',
+  create_tournament: 'confirm', register_team: 'confirm',
 };
 
 function validateCopilotToolArgs(tool, args) {
@@ -735,6 +736,14 @@ function validateCopilotToolArgs(tool, args) {
   if (tool === 'setup_tournament') {
     return String(a.name || '').trim() && Array.isArray(a.teams) && a.teams.length >= 2
       ? { ok: true } : { ok: false, error: 'a tournament name and at least 2 team names are required' };
+  }
+  if (tool === 'create_tournament') {
+    return String(a.name || '').trim() ? { ok: true } : { ok: false, error: 'a tournament name is required' };
+  }
+  if (tool === 'register_team') {
+    if (!String(a.team_name || '').trim()) return { ok: false, error: 'a team name is required' };
+    if (!Array.isArray(a.players) || !a.players.length) return { ok: false, error: 'the team needs at least one player' };
+    return { ok: true };
   }
   return { ok: true }; // submit_score / generate_bracket validated at execution against live state
 }

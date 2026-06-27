@@ -552,6 +552,19 @@ describe('C28 Slice 2 — co-pilot acting pure helpers', () => {
     expect(validateCopilotToolArgs('setup_tournament', { name: 'Cup', teams: ['A'] }).ok).toBe(false);
     expect(validateCopilotToolArgs('setup_tournament', { name: '', teams: ['A', 'B'] }).ok).toBe(false);
   });
+  it('COPILOT_TOOL_POLICY: create_tournament + register_team confirm (2026-06-27)', () => {
+    expect(COPILOT_TOOL_POLICY.create_tournament).toBe('confirm');
+    expect(COPILOT_TOOL_POLICY.register_team).toBe('confirm');
+  });
+  it('validateCopilotToolArgs: create_tournament needs a name', () => {
+    expect(validateCopilotToolArgs('create_tournament', { name: 'Sunday Slam' }).ok).toBe(true);
+    expect(validateCopilotToolArgs('create_tournament', { name: '  ' }).ok).toBe(false);
+  });
+  it('validateCopilotToolArgs: register_team needs a team name + >=1 player', () => {
+    expect(validateCopilotToolArgs('register_team', { team_name: 'Spikers', players: ['A', 'B'] }).ok).toBe(true);
+    expect(validateCopilotToolArgs('register_team', { team_name: 'Spikers', players: [] }).ok).toBe(false);
+    expect(validateCopilotToolArgs('register_team', { team_name: '', players: ['A'] }).ok).toBe(false);
+  });
 });
 
 describe('publicHubStatus (C32 — public hub tile logic)', () => {

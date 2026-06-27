@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.9'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6907,6 +6907,20 @@ function copilotTournamentInput() {
   return { name: active.name, status: active.status, teams: state.tournamentTeams || [], matches: state.tournamentMatches || [] };
 }
 
+// Tournaments OPEN for registration (status 'setup') — so the co-pilot can SEE where to register teams +
+// each tournament's team_size (copilotTournamentInput only surfaces pools/bracket/completed). The active
+// tournament's current team names are included; others list count only (their rosters aren't loaded).
+function copilotOpenTournamentsInput() {
+  return (state.tournaments || [])
+    .filter((t) => t.status === 'setup')
+    .map((t) => ({
+      name: t.name || '',
+      registration_open: !!t.registration_open,
+      team_size: t.team_size || 4,
+      teams: (state.activeTournamentId === t.id ? (state.tournamentTeams || []) : []).map((x) => x.name),
+    }));
+}
+
 let copilotMsgSeq = 0;
 function copilotNextId() { copilotMsgSeq += 1; return 'cm' + copilotMsgSeq; }
 
@@ -7020,6 +7034,21 @@ const COPILOT_TOOLS = [
       required: ['name', 'teams'] } },
   { name: 'generate_bracket', description: 'Generate the playoff bracket for the active tournament once every pool game is final. Confirms first.',
     input_schema: { type: 'object', properties: {}, required: [] } },
+  { name: 'create_tournament', description: "Create a tournament that is OPEN for registration and does NOT start pool play (unlike setup_tournament). Optionally include teams with their players to register them right away. Use this when the admin wants to set up a tournament and enter teams/players. Each team must have exactly team_size players (default 4). Confirms first.",
+    input_schema: { type: 'object', properties: {
+      name: { type: 'string', description: 'tournament name' },
+      team_size: { type: 'integer', description: 'players per team (optional; default 4)' },
+      pool_count: { type: 'integer', description: 'number of pools (optional; default 4)' },
+      net_count: { type: 'integer', description: 'number of nets/courts (optional; default 10)' },
+      teams: { type: 'array', description: 'optional teams to register now',
+        items: { type: 'object', properties: { name: { type: 'string' }, players: { type: 'array', items: { type: 'string' } } }, required: ['name', 'players'] } } },
+      required: ['name'] } },
+  { name: 'register_team', description: "Add ONE team and its players to a tournament that is open for registration. Use this to enter a team with its roster. The team must have exactly the tournament's team_size players. Targets the open tournament named, or the one currently open if only one. Confirms first.",
+    input_schema: { type: 'object', properties: {
+      team_name: { type: 'string', description: 'the team name' },
+      players: { type: 'array', items: { type: 'string' }, description: "the team's player names (exactly team_size of them)" },
+      tournament_name: { type: 'string', description: 'which open tournament (optional if only one is open)' } },
+      required: ['team_name', 'players'] } },
 ];
 
 // Persist a check-in/out the SAME way the kiosk does: local state already set optimistically; write via the
@@ -7109,6 +7138,53 @@ const copilotExecutors = {
     await tdbRefreshTournaments(); render();
     return { args: { tournament: t.name }, result: `Bracket generated for "${t.name}".` };
   },
+  // Create a tournament OPEN for registration (does NOT start pools) + optionally register its teams with
+  // players in one shot. Reuses tdbCreateTournament (registration_open=true) + tdbRegisterTeam (the same
+  // RPC public self-registration uses — enforces team_size, stores the roster, dup-guard).
+  async create_tournament(args) {
+    const name = String(args.name || '').trim();
+    if (!name) return { is_error: true, args, result: 'A tournament name is required.' };
+    const teamSize = Number(args.team_size) > 0 ? Number(args.team_size) : 4;
+    const t = await tdbCreateTournament({ name, pool_count: args.pool_count, net_count: args.net_count, preset: { team_size: teamSize } });
+    const teams = Array.isArray(args.teams) ? args.teams : [];
+    const done = [], failed = [];
+    for (const tm of teams) {
+      const tn = String((tm && tm.name) || '').trim();
+      const roster = Array.isArray(tm && tm.players) ? tm.players : [];
+      if (!tn) continue;
+      try { await tdbRegisterTeam(t.id, tn, roster, null, false); done.push(tn); }
+      catch (e) { failed.push(`${tn} (${(e && e.message) || 'error'})`); }
+    }
+    state.activeTournamentId = t.id;
+    await tdbRefreshTournaments(); render();
+    let result = `Created "${name}" — open for registration, ${teamSize} players/team.`;
+    if (done.length) result += ` Registered ${done.length} team${done.length === 1 ? '' : 's'}: ${done.join(', ')}.`;
+    if (failed.length) result += ` Could not register: ${failed.join('; ')}.`;
+    return { args: { name, team_size: teamSize, registered: done.length }, result };
+  },
+  // Add ONE team + its players to a tournament that's open for registration (named, the active one if it's
+  // open, or the only open one). tdbRegisterTeam enforces the team_size + roster rules server-side.
+  async register_team(args) {
+    const teamName = String(args.team_name || '').trim();
+    const roster = Array.isArray(args.players) ? args.players : [];
+    if (!teamName) return { is_error: true, args, result: 'A team name is required.' };
+    const open = (state.tournaments || []).filter((t) => t.status === 'setup');
+    const wanted = String(args.tournament_name || '').trim().toLowerCase();
+    let target = null;
+    if (wanted) target = open.find((t) => String(t.name || '').trim().toLowerCase() === wanted) || null;
+    else target = (state.activeTournamentId && open.find((t) => t.id === state.activeTournamentId)) || (open.length === 1 ? open[0] : null);
+    if (!target) {
+      if (!open.length) return { is_error: true, args, result: 'No tournament is open for registration. Create one first.' };
+      return { is_error: true, args, result: `Which tournament? Open for registration: ${open.map((t) => t.name).join(', ')}.` };
+    }
+    if (!target.registration_open) return { is_error: true, args, result: `Registration is closed for "${target.name}". Open it first.` };
+    try { await tdbRegisterTeam(target.id, teamName, roster, null, false); }
+    catch (e) { return { is_error: true, args, result: `Couldn't register "${teamName}": ${(e && e.message) || 'error'}.` }; }
+    state.activeTournamentId = target.id;
+    await tdbRefreshTournaments(); render();
+    return { args: { team_name: teamName, players: roster.length, tournament: target.name },
+      result: `Registered "${teamName}" (${roster.length} player${roster.length === 1 ? '' : 's'}) to "${target.name}".` };
+  },
 };
 
 // Task 5 confirm card: reuse the existing styled appConfirm modal (C49) — a per-tool preview of exactly
@@ -7126,6 +7202,15 @@ async function copilotConfirmCard(tool, input) {
     title = 'Generate bracket'; confirmText = 'Generate';
     const t = (state.tournaments || []).find((x) => x.id === state.activeTournamentId);
     message = `Generate the bracket${t ? ` for "${t.name}"` : ''}? This seeds from the pool standings.`;
+  } else if (tool === 'create_tournament') {
+    title = 'Create tournament'; confirmText = 'Create';
+    const n = Array.isArray(input.teams) ? input.teams.length : 0;
+    const ts = Number(input.team_size) > 0 ? Number(input.team_size) : 4;
+    message = `Create "${String(input.name || '').trim()}" open for registration (${ts} players/team)${n ? `, and register ${n} team${n === 1 ? '' : 's'}` : ''}? Pool play is NOT started.`;
+  } else if (tool === 'register_team') {
+    title = 'Register team'; confirmText = 'Register';
+    const np = Array.isArray(input.players) ? input.players.length : 0;
+    message = `Register "${String(input.team_name || '').trim()}" with ${np} player${np === 1 ? '' : 's'}${input.tournament_name ? ` to "${String(input.tournament_name).trim()}"` : ''}?`;
   }
   return await appConfirm({ title, message, confirmText });
 }
@@ -7153,6 +7238,7 @@ async function executeCopilotTool(name, input, requestText) {
 async function runCopilotTurn(userText) {
   const ctx = buildCopilotContext({ players: state.players, generatedTeams: state.generatedTeams,
     liveData: getPublicLiveData(), tournament: copilotTournamentInput() });
+  ctx.openTournaments = copilotOpenTournamentsInput(); // so the co-pilot can target a tournament open for registration
   const messages = [{ role: 'user', content: `Current state:\n${JSON.stringify(ctx)}\n\n${userText}` }];
   const undos = [];
   for (let i = 0; i < 8; i++) {
