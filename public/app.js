@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.20'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.28.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3666,7 +3666,13 @@ function partialRenderTournament() {
     // typing, so a Save then persists the OLD values ("I edit a setting but nothing saves", Mike 2026-06-27).
     // Only refresh it on a sync when it's the input-free BRACKET PREVIEW (which the tv2-bracket-side switch
     // also routes through here); every manage action that changes data calls render() directly afterward.
-    if (state.manageView === 'bracket') {
+    // Refresh #tab-manage on a background sync ONLY when it shows a tap/read BOARD with no in-progress form
+    // input to clobber: the bracket tree/preview (any status), or the RUNNING pool board. NEVER a form page
+    // (pools-draw selects, Settings/Teams/Reg) — a sync would wipe mid-edit (#21/#22). Scoring is a
+    // body-level modal (not in-panel), so a board rebuild can't clobber it.
+    const mActive = state.activeTournamentId ? (state.tournaments || []).find((x) => x.id === state.activeTournamentId) : null;
+    const manageShowsBoard = state.manageView === 'bracket' || (state.manageView === 'pools' && mActive && mActive.status !== 'setup');
+    if (manageShowsBoard) {
       const mc = document.querySelector('#tab-manage .container');
       if (mc) mc.innerHTML = buildManageTabHTML();
     }
@@ -4932,7 +4938,7 @@ function buildManageTabHTML() {
   const backBar = `<div class="tm-bar"><button type="button" class="tm-exit" data-role="tv2-manage-back">&lsaquo; Manage</button><div class="tm-pagetitle">${escapeHTML(titles[view] || 'Manage')}</div></div>`;
   let body = '';
   if (view === 'teams') body = manageTeamsPageHTML(active, teams, matches);
-  else if (view === 'pools') body = managePoolsPageHTML(active, teams, pools);
+  else if (view === 'pools') body = managePoolsPageHTML(active, teams, pools, matches);
   else if (view === 'bracket') body = manageBracketPageHTML(active, teams, matches);
   else if (view === 'settings') body = manageSettingsPageHTML(active);
   else if (view === 'reg') body = manageRegPageHTML(active, teams);
@@ -4974,7 +4980,7 @@ function manageTeamsPageHTML(active, teams, matches) {
   }).join('') : `<div class="card"><p class="small" style="color:var(--muted);margin:0;">No teams yet — add one above.</p></div>`;
   return `${addForm}<div class="tm-sec">Teams (${teams.length})</div>${teamCards}`;
 }
-function managePoolsPageHTML(active, teams, pools) {
+function managePoolsPageHTML(active, teams, pools, matches) {
   if (active.status === 'setup') {
     if (teams.length < 2) return `<div class="card"><p class="small" style="color:var(--muted);margin:0;">Add at least 2 teams first (Teams page).</p></div>`;
     if (!pools.length) return `<div class="card"><h3 style="margin:0 0 8px;">Pools</h3>
@@ -4993,8 +4999,17 @@ function managePoolsPageHTML(active, teams, pools) {
       <button type="button" class="secondary" data-role="tv2-draw-pools" style="width:100%;margin-bottom:8px;">Re-draw randomly</button>
       <button type="button" class="primary" data-role="tv2-start-pools" style="width:100%;">Start pool play</button></div>`;
   }
-  return `<div class="card"><p class="small" style="color:var(--muted);margin:0 0 8px;">Pool play is running — score games on the <strong>Live</strong> tab (each pool's nets are editable there).</p>
-    <button type="button" class="danger" data-role="tv2-reset-pools" style="width:100%;">Reset pools (clear results)</button></div>`;
+  // Running: the live admin pool board INLINE (Mike 2026-06-28, §38 layout B). Admins score + manage from
+  // Manage itself — no jump to Live. A command bar (live status + Reset) sits above the reused Live board
+  // (buildPoolPlayHTML admin=true, same call as buildLiveTabHTML). The board's only controls are taps that
+  // open a BODY-LEVEL modal (no in-panel inputs), so the background-sync rebuild in partialRenderTournament
+  // is safe here (its guard allows pools-running; per-pool net editing is already a chip on the board).
+  const pm = (matches || []).filter((m) => m.phase === 'pool' && m.team_a_id && m.team_b_id);
+  const poolDone = pm.filter((m) => m.status === 'final').length;
+  return `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <span class="badge">${pools.length} pool${pools.length === 1 ? '' : 's'} · ${poolDone}/${pm.length} games done</span>
+      <button type="button" class="danger" data-role="tv2-reset-pools" style="margin-left:auto;">Reset pools</button>
+    </div>${buildPoolPlayHTML(active, pools, teams, matches, true, state.tournamentPickedTeamId)}`;
 }
 // Bracket FORMAT preview (Mike, 2026-06-27): show what the bracket games will look like BEFORE pools end —
 // the structure only, no teams (slots read "Seed N" in round 1, then "Winner of G#"/"Loser of G#"). Teams
@@ -5049,7 +5064,15 @@ function manageBracketPageHTML(active, teams, matches) {
     const previewRows = buildBracketPreviewRows(teams.length, active.net_count, active.grand_final_reset);
     return `${genCard}<div class="tm-sec" style="margin-top:12px;">Bracket format — ${teams.length} teams</div>${buildBracketHTML(active, previewRows, [], { preview: true })}`;
   }
-  return `<div class="card"><p class="small" style="color:var(--muted);margin:0;">The bracket is generated — view + score it on the <strong>Live</strong> tab.</p></div>${buildSeedingTableHTML(teams, matches)}`;
+  // Generated: the live bracket tree INLINE (Mike 2026-06-28, §38 layout B) — score/clear on the nodes here,
+  // no jump to Live. Same component + call as buildLiveTabHTML; layoutBracketTree fires via activateMainTab
+  // (manage+bracket) and partialRenderTournament. Command bar shows live progress; the tree carries the
+  // champion banner + the admin score/clear rows itself.
+  const bm = (matches || []).filter((m) => m.phase !== 'pool');
+  const bracketDone = bm.filter((m) => m.status === 'final').length;
+  return `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <span class="badge">Bracket · ${bracketDone}/${bm.length} games</span>
+    </div>${buildBracketHTML(active, matches, teams)}${buildSeedingTableHTML(teams, matches)}`;
 }
 function manageSettingsPageHTML(t) {
   const num = (v, d) => (v == null || v === '' ? d : v);
