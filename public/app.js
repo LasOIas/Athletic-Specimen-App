@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.18'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.19'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3642,12 +3642,18 @@ async function tdbRefreshTournaments() {
 function partialRenderTournament() {
   const c = document.querySelector('#tab-tournament .container');
   if (c) c.innerHTML = buildTournamentTabHTML();
-  // tournament-mode dashboard surfaces the same data on the Manage + Live panels — keep them in sync so a
-  // side-tab switch (tv2-bracket-side) on the Manage bracket preview re-renders the right panel.
+  // tournament-mode dashboard surfaces the same data on the Manage + Live panels.
   if (state.tournamentMode) {
-    const mc = document.querySelector('#tab-manage .container');
-    if (mc) mc.innerHTML = buildManageTabHTML();
-    const lc = document.querySelector('#tab-live .container');
+    // The Manage panel is an admin EDITING surface (Settings / Teams / Registration forms). A BACKGROUND
+    // realtime sync must NOT rebuild it from stored values mid-edit — that wipes the admin's in-progress
+    // typing, so a Save then persists the OLD values ("I edit a setting but nothing saves", Mike 2026-06-27).
+    // Only refresh it on a sync when it's the input-free BRACKET PREVIEW (which the tv2-bracket-side switch
+    // also routes through here); every manage action that changes data calls render() directly afterward.
+    if (state.manageView === 'bracket') {
+      const mc = document.querySelector('#tab-manage .container');
+      if (mc) mc.innerHTML = buildManageTabHTML();
+    }
+    const lc = document.querySelector('#tab-live .container'); // Live = read-only board/bracket, safe to refresh
     if (lc) lc.innerHTML = buildLiveTabHTML();
   }
   layoutBracketTree(); // draw connectors + fit/zoom the bracket tree (no-op if no tree present)
