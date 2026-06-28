@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.28.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.28.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3655,6 +3655,12 @@ function tournamentTabIsDirty() {
 }
 
 function partialRenderTournament() {
+  // Preserve the active panel's scroll across the rebuild: iOS Safari RESETS an overflow container's
+  // scrollTop when its innerHTML is replaced, yanking the operator to the top mid-scroll on every 15s
+  // sync / realtime score (Mike's #1 frustration; reintroduced on the Manage board in v2026.06.28.1).
+  // render() already saves+restores this; mirror it for all board panels (manage / live / public tournament).
+  const _scrollPanel = document.getElementById('tab-' + activeMainTab);
+  const _savedScroll = _scrollPanel ? _scrollPanel.scrollTop : 0;
   const c = document.querySelector('#tab-tournament .container');
   // Skip the rewrite when a form on this tab is being filled, so a background sync never wipes a public
   // team's in-progress registration (or a half-typed score). User actions that need a refresh call render().
@@ -3680,6 +3686,9 @@ function partialRenderTournament() {
     if (lc) lc.innerHTML = buildLiveTabHTML();
   }
   layoutBracketTree(); // draw connectors + fit/zoom the bracket tree (no-op if no tree present)
+  // Restore scroll if the rebuild reset it (iOS overflow-container behavior) so a background sync never
+  // yanks the operator off the spot they're scrolled to mid-event.
+  if (_scrollPanel && _savedScroll > 0 && _scrollPanel.scrollTop !== _savedScroll) _scrollPanel.scrollTop = _savedScroll;
   maybeAutoGenerateBracket(); // C54: prompt to generate the bracket the moment pools finish
 }
 
