@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.27.19'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.27.20'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3639,9 +3639,26 @@ async function tdbRefreshTournaments() {
 }
 
 // Surgically re-render only the tournament tab body (preserves other tabs' state).
+// True when the user is mid-edit in a form on the tournament tab — the public team-registration form
+// (#reg-team / #reg-p1.. / the "We paid" checkbox) or a half-typed score. A BACKGROUND sync (15s poll or
+// realtime) must NOT rebuild #tab-tournament while this is true, or it blanks their in-progress input (the
+// "nothing saved" clobber class — confirmed by audit wf_a020d635-d72). Covers focus + any dirty field:
+// non-empty text/number OR a checked checkbox/radio (the old refreshTournamentLive check missed checkboxes,
+// so a ticked "We paid" was silently reset to unpaid on the next sync).
+function tournamentTabIsDirty() {
+  const scope = document.getElementById('tab-tournament');
+  if (!scope) return false;
+  const ae = document.activeElement;
+  if (ae && scope.contains(ae) && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)) return true;
+  return Array.prototype.some.call(scope.querySelectorAll('input, textarea'),
+    (i) => (i.type === 'checkbox' || i.type === 'radio') ? i.checked : String(i.value || '') !== '');
+}
+
 function partialRenderTournament() {
   const c = document.querySelector('#tab-tournament .container');
-  if (c) c.innerHTML = buildTournamentTabHTML();
+  // Skip the rewrite when a form on this tab is being filled, so a background sync never wipes a public
+  // team's in-progress registration (or a half-typed score). User actions that need a refresh call render().
+  if (c && !tournamentTabIsDirty()) c.innerHTML = buildTournamentTabHTML();
   // tournament-mode dashboard surfaces the same data on the Manage + Live panels.
   if (state.tournamentMode) {
     // The Manage panel is an admin EDITING surface (Settings / Teams / Registration forms). A BACKGROUND
@@ -3708,14 +3725,10 @@ async function refreshTournamentLive() {
   }
   const prevNav = tournamentNavVisible();
   if (activeMainTab === 'tournament') {
-    const ae = document.activeElement;
-    if (ae && ae.closest && ae.closest('#tab-tournament') && /INPUT|SELECT|TEXTAREA/.test(ae.tagName)) return;
-    // Don't clobber a half-typed score OR a half-filled team registration even after the field blurs.
-    // (number = score entry; text = the registration form reg-team/reg-p1..4 — a background sync, esp. a
-    // `teams` realtime ping when ANOTHER team registers, must not rebuild the form and wipe what's typed.)
-    const dirty = Array.prototype.some.call(
-      document.querySelectorAll('#tab-tournament input[type=number], #tab-tournament input[type=text]'), (i) => i.value !== '');
-    if (dirty) return;
+    // Don't clobber a half-typed score OR a half-filled team registration (incl. the "We paid" checkbox) even
+    // after the field blurs — a background sync (esp. a `teams` realtime ping when ANOTHER team registers) must
+    // not rebuild the form and wipe what's typed. Shared guard with partialRenderTournament (covers checkboxes).
+    if (tournamentTabIsDirty()) return;
     await tdbRefreshTournaments();
     if (activeMainTab === 'tournament') partialRenderTournament();
   } else {
