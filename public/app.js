@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.30.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.30.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5067,12 +5067,19 @@ function manageTeamsPageHTML(active, teams, matches) {
   const teamSize = Number(active.team_size) || 4;
   const seedByTeam = {};
   computeSeeding(teams, matches.filter((m) => m.phase === 'pool')).forEach((r) => { seedByTeam[r.teamId] = r.seed; });
-  const addForm = `<div class="card">
-    <div class="sd-h" style="font-size:14px;margin:0 0 8px;">Add a team (${teamSize} players)</div>
-    <input type="text" id="reg-team" class="reg-input" placeholder="Team name" autocomplete="off" autocapitalize="words" />
-    <div class="tm-pgrid">${Array.from({ length: teamSize }, (_, i) => `<input type="text" id="reg-p${i + 1}" class="reg-input" placeholder="Player ${i + 1}" autocomplete="off" autocapitalize="words" />`).join('')}</div>
+  // Manage>Teams add card (§38 Option A, Mike 2026-06-30): a Quick (name only) / Full-roster mode toggle.
+  // Quick = name-only via tv2-quick-add-team (closes the audit's #3 "forces a full 4-player roster" friction);
+  // Full = the existing roster path via tv2-register-team. Default = quick (the fast day-of path).
+  const addForm = `<div class="card tm-addcard is-quick" id="tm-addcard">
+    <div class="sd-h" style="font-size:14px;margin:0 0 8px;">Add a team</div>
+    <div class="qa-seg">
+      <button type="button" class="qa-seg-btn is-on" data-role="tv2-add-mode" data-mode="quick">Quick &middot; name only</button>
+      <button type="button" class="qa-seg-btn" data-role="tv2-add-mode" data-mode="full">Full roster (${teamSize})</button>
+    </div>
+    <input type="text" id="reg-team" class="reg-input" placeholder="Team name" autocomplete="off" autocapitalize="words" style="margin-top:8px;" />
+    <div class="tm-pgrid tm-add-roster">${Array.from({ length: teamSize }, (_, i) => `<input type="text" id="reg-p${i + 1}" class="reg-input" placeholder="Player ${i + 1}" autocomplete="off" autocapitalize="words" />`).join('')}</div>
     <label class="reg-check" style="margin:6px 0;"><input type="checkbox" id="reg-paid" /> Paid</label>
-    <button type="button" class="primary" data-role="tv2-register-team" style="width:100%;">Add team</button>
+    <button type="button" class="primary tm-add-submit" data-role="tv2-quick-add-team" style="width:100%;">Add team</button>
     <p class="reg-teamspill" id="reg-msg"></p>
   </div>`;
   const removeBtn = (tm) => status === 'setup'
@@ -8530,6 +8537,34 @@ function bindTournamentTabV2() {
         await tdbAddTeam(state.activeTournamentId, teamName);
         await tdbRefreshTournaments();
         render();
+      } else if (role === 'tv2-add-mode') {
+        // Manage>Teams add card: switch Quick (name only) <-> Full roster WITHOUT a re-render (keeps the
+        // typed name); the roster grid's visibility + the submit button's role follow the mode.
+        const mode = el.getAttribute('data-mode');
+        const card = document.getElementById('tm-addcard');
+        if (card) {
+          card.classList.toggle('is-quick', mode === 'quick');
+          card.querySelectorAll('[data-role="tv2-add-mode"]').forEach((b) => b.classList.toggle('is-on', b.getAttribute('data-mode') === mode));
+          const submit = card.querySelector('.tm-add-submit');
+          if (submit) submit.setAttribute('data-role', mode === 'quick' ? 'tv2-quick-add-team' : 'tv2-register-team');
+        }
+        return;
+      } else if (role === 'tv2-quick-add-team') {
+        // Name-only quick-add (audit #3 day-of friction): a team with just a name (+ optional paid), reusing
+        // tdbAddTeam; players can be filled in later via Edit roster. Admin-only; separate from the shared
+        // (public) tv2-register-team so the public self-registration keeps its full-roster requirement.
+        if (!state.isAdmin) return;
+        const name = ((document.getElementById('reg-team') || {}).value || '').trim();
+        const paid = !!((document.getElementById('reg-paid') || {}).checked);
+        const setMsg = (txt, ok) => { const m = document.getElementById('reg-msg'); if (m) { m.textContent = txt; m.style.color = ok ? 'var(--live, #16a34a)' : 'var(--danger)'; } };
+        if (!name) { setMsg('Enter a team name.', false); return; }
+        if ((state.tournamentTeams || []).some((t) => normalize(t.name) === normalize(name))) { setMsg('A team named "' + name + '" is already in.', false); return; }
+        el.setAttribute('disabled', 'true'); // in-flight guard (double-tap)
+        let team;
+        try { team = await tdbAddTeam(state.activeTournamentId, name); if (paid && team) await tdbSetTeamPaid(team.id, true); }
+        catch (err) { el.removeAttribute('disabled'); setMsg((err && err.message) || 'Could not add — try again.', false); return; }
+        try { await tdbRefreshTournaments(); render(); } catch (_) {} // rebuilds the page: form clears, team + count update
+        return;
       } else if (role === 'tv2-delete-team') {
         const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
         if (t && t.status !== 'setup') throw new Error('Teams are locked once pool play starts.');
