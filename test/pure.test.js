@@ -17,6 +17,7 @@ const {
   scoringRulesFor, gameScoreStatus,
   splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
   bracketGameNumbers, bracketSourceLabel,
+  shouldAutoPromptBracket,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -812,5 +813,55 @@ describe('bracketSourceLabel (Winner/Loser of G#)', () => {
     expect(bracketSourceLabel('TBD', byRoundLabel)).toBe('TBD');
     expect(bracketSourceLabel(null, byRoundLabel)).toBe(null);
     expect(bracketSourceLabel('', byRoundLabel)).toBe('');
+  });
+});
+
+describe('shouldAutoPromptBracket (C54 — revive the dead auto-generate prompt, 2026-06-30)', () => {
+  // The bug: the old inline guard required activeMainTab === 'tournament', which is the PUBLIC Bracket
+  // tab. In the admin tournament-mode dashboard activeMainTab is 'manage'/'live', so the prompt was DEAD
+  // for every admin (Mike, mid-event: "pool play is done but there's no way to generate the bracket").
+  const donePool = [
+    { phase: 'pool', status: 'final', team_a_id: 'a', team_b_id: 'b' },
+    { phase: 'pool', status: 'final', team_a_id: 'c', team_b_id: 'd' },
+  ];
+  const base = {
+    isAdmin: true, tournamentMode: true, activeMainTab: 'manage',
+    status: 'pools', poolMatches: donePool, alreadyPrompted: false,
+  };
+
+  it('THE BUG: fires for an admin in tournament mode (manage tab) with all pool games final', () => {
+    expect(shouldAutoPromptBracket(base)).toBe(true);
+  });
+  it('fires on the Live tab too (tournament mode)', () => {
+    expect(shouldAutoPromptBracket({ ...base, activeMainTab: 'live' })).toBe(true);
+  });
+  it('fires on the legacy public Bracket tab path (admin, not in tournament mode)', () => {
+    expect(shouldAutoPromptBracket({ ...base, tournamentMode: false, activeMainTab: 'tournament' })).toBe(true);
+  });
+  it('treats a bye (missing team) as a completed pool game', () => {
+    const withBye = [...donePool, { phase: 'pool', status: 'scheduled', team_a_id: 'e', team_b_id: null }];
+    expect(shouldAutoPromptBracket({ ...base, poolMatches: withBye })).toBe(true);
+  });
+
+  it('does NOT fire for a non-admin (public viewer)', () => {
+    expect(shouldAutoPromptBracket({ ...base, isAdmin: false })).toBe(false);
+  });
+  it('does NOT fire when an admin is in normal mode on another tab (no spurious prompt)', () => {
+    expect(shouldAutoPromptBracket({ ...base, tournamentMode: false, activeMainTab: 'dashboard' })).toBe(false);
+  });
+  it('does NOT fire when the tournament is not in pools', () => {
+    expect(shouldAutoPromptBracket({ ...base, status: 'bracket' })).toBe(false);
+    expect(shouldAutoPromptBracket({ ...base, status: 'setup' })).toBe(false);
+  });
+  it('does NOT fire when already prompted this session (one-shot)', () => {
+    expect(shouldAutoPromptBracket({ ...base, alreadyPrompted: true })).toBe(false);
+  });
+  it('does NOT fire when a pool game is still unplayed', () => {
+    const unfinished = [...donePool, { phase: 'pool', status: 'scheduled', team_a_id: 'e', team_b_id: 'f' }];
+    expect(shouldAutoPromptBracket({ ...base, poolMatches: unfinished })).toBe(false);
+  });
+  it('does NOT fire when there are no pool games at all', () => {
+    expect(shouldAutoPromptBracket({ ...base, poolMatches: [] })).toBe(false);
+    expect(shouldAutoPromptBracket({ ...base, poolMatches: null })).toBe(false);
   });
 });

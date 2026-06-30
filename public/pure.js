@@ -878,6 +878,25 @@ function bracketSourceLabel(src, byRoundLabel) {
   return g ? (m[1] + ' G' + g) : src;
 }
 
+// C54 fix (2026-06-30): decide whether the admin device should auto-prompt to generate the bracket the
+// moment the last pool game is decided. The OLD inline guard in maybeAutoGenerateBracket required
+// activeMainTab === 'tournament' — but that's the PUBLIC Bracket tab. In the admin tournament-mode
+// dashboard activeMainTab is 'manage'/'live', and a public viewer on 'tournament' fails the isAdmin gate,
+// so the prompt was DEAD for everyone (Mike, mid-event: "pool play is done but there's no way to generate
+// the bracket"). Fire when an ADMIN is viewing the live tournament (tournament mode OR the legacy
+// 'tournament' tab), the active tournament is in pools, every pool game is decided (a bye = missing team
+// counts as done), and we haven't already prompted for this tournament this session.
+function shouldAutoPromptBracket(o) {
+  o = o || {};
+  if (!o.isAdmin) return false;
+  if (!o.tournamentMode && o.activeMainTab !== 'tournament') return false;
+  if (o.status !== 'pools') return false;
+  if (o.alreadyPrompted) return false;
+  const pm = o.poolMatches || [];
+  if (!pm.length) return false;
+  return pm.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -891,6 +910,7 @@ if (typeof module !== "undefined" && module.exports) {
     resolveTournamentMatch, publicHubStatus,
     scoringRulesFor, gameScoreStatus,
     splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
-    bracketGameNumbers, bracketSourceLabel
+    bracketGameNumbers, bracketSourceLabel,
+    shouldAutoPromptBracket
   };
 }

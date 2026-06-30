@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.28.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.30.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1334,8 +1334,16 @@ function partialRender() {
   if (!playersEl && activeMainTab === 'scores') {
     const c = document.querySelector('#tab-scores .container');
     if (c) {
+      // Preserve the spectator's scroll across the rebuild: iOS Safari RESETS an overflow container's
+      // scrollTop when its innerHTML is replaced, yanking a fan scrolled down the live Scores board back
+      // to the top on every 15s sync / realtime score (Mike's #1 frustration class). render() +
+      // partialRenderTournament already save+restore this; this public Scores short-circuit didn't (the
+      // documented latent twin of the 2026-06-28 Manage scroll fix). No-op on desktop (saved === current).
+      const panel = document.getElementById('tab-scores');
+      const saved = panel ? panel.scrollTop : 0;
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
       c.innerHTML = publicScoresHTML();
+      if (panel && saved > 0 && panel.scrollTop !== saved) panel.scrollTop = saved;
       return;
     }
   }
@@ -3697,12 +3705,17 @@ function partialRenderTournament() {
 // tournament per session (the flag is set before the await so re-renders can't double-prompt).
 const _autoGenPrompted = {};
 async function maybeAutoGenerateBracket() {
-  if (!state.isAdmin || activeMainTab !== 'tournament') return;
   const t = (state.tournaments || []).find((x) => x.id === state.activeTournamentId);
-  if (!t || t.status !== 'pools') return;
+  if (!t) return;
   const pm = (state.tournamentMatches || []).filter((m) => m.phase === 'pool');
-  const allDone = pm.length > 0 && pm.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
-  if (!allDone || _autoGenPrompted[t.id]) return;
+  // C54 fix (2026-06-30): the old guard checked activeMainTab === 'tournament' (the PUBLIC Bracket tab),
+  // so in the admin tournament-mode dashboard (activeMainTab 'manage'/'live') the prompt was DEAD — Mike
+  // hit "pool play is done but there's no way to generate the bracket" mid-event. The pure predicate fires
+  // for an admin in tournament mode (or on the legacy 'tournament' tab) when every pool game is decided.
+  if (!shouldAutoPromptBracket({
+    isAdmin: state.isAdmin, tournamentMode: state.tournamentMode, activeMainTab,
+    status: t.status, poolMatches: pm, alreadyPrompted: _autoGenPrompted[t.id],
+  })) return;
   _autoGenPrompted[t.id] = true; // claim the one-shot up front so re-renders during the await can't double-prompt
   try {
     if (await appConfirm({ title: 'All pool games are in', message: 'Generate the playoff bracket now? (the "Generate Bracket" button still works if you want to wait.)', confirmText: 'Generate bracket' })) {
@@ -8383,7 +8396,22 @@ function bindTournamentTabV2() {
         if (!name) return fail('Name is required.');
         if (!(nets >= 1) || !(pt >= 1) || !(bt >= 1)) return fail('Nets, pool target, and bracket target must each be at least 1.');
         if (pc != null && pc < pt) return fail('Pool cap cannot be less than the pool target.');
+        const tBefore = (state.tournaments || []).find((x) => x.id === id);
+        const oldNets = tBefore ? Number(tBefore.net_count) : null;
         await tdbSetTournamentFields(id, { name, net_count: nets, pool_target: pt, pool_cap: pc, bracket_target: bt, match_cap: bt, win_by_2: wb2 });
+        // Data-integrity (2026-06-30): before this, Settings only stored net_count — the `matches` rows still
+        // referenced the OLD nets, the root cause of the pre-event "games on nets 1-10 but net_count=9" mismatch.
+        // When the net count actually CHANGES during pool play, redistribute each pool's UNPLAYED games across
+        // the new net range (the same contiguous-block split the initial draw uses); finished games keep their
+        // net (history). Only on a real change + only in pools, so renaming/other edits don't reshuffle the queue.
+        if (tBefore && tBefore.status === 'pools' && nets !== oldNets) {
+          const pools = [...(state.tournamentPools || [])].sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')));
+          if (pools.length) {
+            const blocks = splitNetsAcrossPools(nets, pools.length);
+            const ms = state.tournamentMatches || [];
+            for (let pi = 0; pi < pools.length; pi++) await tdbSetPoolNets(pools[pi], blocks[pi] || [pi + 1], ms);
+          }
+        }
         await tdbRefreshTournaments();
         state.manageView = 'hub';
         render();
