@@ -2912,6 +2912,12 @@ body.copilot-typing #bottom-nav { display: none; }
 .sd-tbl tr.top td.sd-seed { color: var(--accent); }
 .sd-tbl td.sd-pos { color: var(--live); font-weight: 700; }
 .sd-tbl td.sd-neg { color: var(--danger); font-weight: 700; }
+/* #7 seed override — editable seeding row controls (admin, pre-generate). */
+.sd-tbl td.sd-mv { width: 1%; white-space: nowrap; text-align: right; }
+.sd-mvbtn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--border); background: var(--card); color: var(--ink); border-radius: var(--r-sm); }
+.sd-mvbtn:disabled { opacity: .35; }
+.sd-mvbtn + .sd-mvbtn { margin-left: 4px; }
+.sd-reset { border: none; background: none; padding: 0; color: var(--accent); font-weight: 700; font-size: inherit; cursor: pointer; }
 
 /* Tournament MODE — Manage tab (Mike, 2026-06-27, §38 layout C: teams-first + toolbar). */
 .tm-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; }

@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.30.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.30.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3562,7 +3562,7 @@ async function tdbResetBracket(tournament) {
   if (delErr) { console.error('tdbResetBracket delete', delErr); throw delErr; }
   await tdbSetTournamentFields(tournament.id, { status: 'pools' });
 }
-async function tdbGenerateBracket(tournament) {
+async function tdbGenerateBracket(tournament, seedOrder) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
   // Bracket-wipe race guard (defense-in-depth; the real guard is server-side in generate_bracket_atomic):
   // re-fetch the LIVE status — a second device may have already generated (status -> 'bracket'). Regenerating
@@ -3575,7 +3575,13 @@ async function tdbGenerateBracket(tournament) {
   if (!poolMatches.length) throw new Error('No pool play to seed from.');
   if (!poolMatches.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id)) throw new Error('Finish all pool games first.');
 
-  const seeding = computeSeeding(teams, poolMatches); // ordered seed 1..N
+  let seeding = computeSeeding(teams, poolMatches); // ordered seed 1..N (by win% then point diff)
+  // Seed override (transient, from the admin's manual ▲/▼ reorder): if a valid permutation of the
+  // teams is passed, seed in THAT order instead of the computed ranking. computeSeeding stays the default.
+  if (Array.isArray(seedOrder) && seedOrder.length === seeding.length) {
+    const byId = {}; seeding.forEach((r) => { byId[r.teamId] = r; });
+    if (seedOrder.every((id) => byId[id])) seeding = seedOrder.map((id, i) => ({ ...byId[id], seed: i + 1 }));
+  }
   const N = seeding.length;
   if (N < 2) throw new Error('Need at least 2 teams.');
   const seedToTeam = {};
@@ -3987,21 +3993,44 @@ function buildStandingsTableHTML(poolTeams, poolMatches) {
 // win% then point differential, the SAME ranking that sets the bracket). Shown on the public Bracket tab +
 // the admin tournament view once any pool game is final (provisional during pools, final once pools end).
 // Read-only; no skill shown. Returns '' when there are no finished pool games yet.
-function buildSeedingTableHTML(teams, matches) {
+// `editable` (admin, pre-generate only): render an editable variant with ▲/▼ to reorder the seeds
+// before Generate (a transient manual override held in state.seedOverride; computeSeeding is the
+// default). The public + post-generate views pass editable=false → the read-only table is unchanged.
+function buildSeedingTableHTML(teams, matches, editable) {
   const poolMatches = (matches || []).filter((m) => m.phase === 'pool');
   if (!poolMatches.some((m) => m.status === 'final')) return '';
-  const rows = computeSeeding(teams || [], poolMatches);
+  let rows = computeSeeding(teams || [], poolMatches);
   if (!rows.length) return '';
+  // apply the admin's transient reorder if it's a valid permutation of the current teams
+  let custom = false;
+  if (editable && state.seedOverride && state.seedOverride.id === state.activeTournamentId) {
+    const ov = state.seedOverride.order || [];
+    const byId = {}; rows.forEach((r) => { byId[r.teamId] = r; });
+    if (ov.length === rows.length && ov.every((id) => byId[id])) {
+      rows = ov.map((id, i) => ({ ...byId[id], seed: i + 1 })); custom = true;
+    }
+  }
+  const last = rows.length - 1;
+  const upSvg = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const dnSvg = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const mvCell = (r, i) => editable ? `<td class="sd-mv">
+      <button type="button" class="sd-mvbtn" data-role="tv2-seed-up" data-id="${escapeHTML(r.teamId)}" ${i === 0 ? 'disabled' : ''} aria-label="Move ${escapeHTMLText(r.name)} up">${upSvg}</button>
+      <button type="button" class="sd-mvbtn" data-role="tv2-seed-down" data-id="${escapeHTML(r.teamId)}" ${i === last ? 'disabled' : ''} aria-label="Move ${escapeHTMLText(r.name)} down">${dnSvg}</button>
+    </td>` : '';
+  const sub = editable
+    ? `Reorder for your bracket seeds &middot; ${custom ? 'custom order' : 'by win% then point diff'}${custom ? ' &middot; <button type="button" class="sd-reset" data-role="tv2-seed-reset">reset</button>' : ''}`
+    : `${rows.length} teams &middot; by win% then point differential`;
   return `<div class="card sd-card">
     <div class="sd-h">Seeding</div>
-    <div class="sd-sub">${rows.length} teams · by win% then point differential</div>
+    <div class="sd-sub">${sub}</div>
     <table class="sd-tbl">
-      <thead><tr><th>Seed</th><th>Team</th><th class="r">W-L</th><th class="r">Diff</th></tr></thead>
-      <tbody>${rows.map((r) => `<tr${r.seed === 1 ? ' class="top"' : ''}>
+      <thead><tr><th>Seed</th><th>Team</th><th class="r">W-L</th><th class="r">Diff</th>${editable ? '<th class="r">Move</th>' : ''}</tr></thead>
+      <tbody>${rows.map((r, i) => `<tr${r.seed === 1 ? ' class="top"' : ''}>
         <td class="sd-seed">${r.seed}</td>
         <td class="sd-nm">${escapeHTML(r.name)}</td>
         <td class="r">${r.wins}-${r.losses}</td>
         <td class="r ${r.pointDiff > 0 ? 'sd-pos' : r.pointDiff < 0 ? 'sd-neg' : ''}">${r.pointDiff > 0 ? '+' : ''}${r.pointDiff}</td>
+        ${mvCell(r, i)}
       </tr>`).join('')}</tbody>
     </table>
   </div>`;
@@ -5192,18 +5221,27 @@ function buildBracketPreviewRows(n, netCount, reset) {
     status: 'scheduled',
   }));
 }
+// The current pre-generate seed order (array of teamIds): the admin's transient ▲/▼ override if set
+// for the active tournament, else the computed (computeSeeding) order. Drives the reorder handlers.
+function currentSeedOrder() {
+  if (state.seedOverride && state.seedOverride.id === state.activeTournamentId) return (state.seedOverride.order || []).slice();
+  const teams = state.tournamentTeams || [];
+  const poolMatches = (state.tournamentMatches || []).filter((m) => m.phase === 'pool');
+  return computeSeeding(teams, poolMatches).map((r) => r.teamId);
+}
 function manageBracketPageHTML(active, teams, matches) {
   if (active.status === 'setup' || active.status === 'pools') {
     const poolMatches = matches.filter((m) => m.phase === 'pool');
     const done = poolMatches.length > 0 && poolMatches.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
     const genCard = `<div class="card">${done
-      ? '<p class="small" style="color:var(--muted);margin:0 0 8px;">All pool games are final — generate the bracket (teams seed from the pool standings).</p><button type="button" class="primary" data-role="tv2-generate-bracket" style="width:100%;">Generate bracket</button>'
+      ? '<p class="small" style="color:var(--muted);margin:0 0 8px;">All pool games are final — reorder the seeding above if you want, then generate the bracket.</p><button type="button" class="primary" data-role="tv2-generate-bracket" style="width:100%;">Generate bracket</button>'
       : '<p class="small" style="color:var(--muted);margin:0;">Pools aren’t finished yet. Below is the bracket FORMAT — the exact games + structure; teams drop into their seeds once pool play ends.</p>'}</div>`;
     if (teams.length < 2) return genCard;
+    const seedingEditor = done ? buildSeedingTableHTML(teams, matches, true) : ''; // #7: editable seeds above Generate
     // Render the REAL bracket tree (same component as Live) with teamless rows so admins see the actual
     // shape — cols, connectors, side tabs, "Seed N" / "Winner of G#" / "Loser of G#" — not a flat list.
     const previewRows = buildBracketPreviewRows(teams.length, active.net_count, active.grand_final_reset);
-    return `${genCard}<div class="tm-sec" style="margin-top:12px;">Bracket format — ${teams.length} teams</div>${buildBracketHTML(active, previewRows, [], { preview: true })}`;
+    return `${seedingEditor}${genCard}<div class="tm-sec" style="margin-top:12px;">Bracket format — ${teams.length} teams</div>${buildBracketHTML(active, previewRows, [], { preview: true })}`;
   }
   // Generated: the live bracket tree INLINE (Mike 2026-06-28, §38 layout B) — score/clear on the nodes here,
   // no jump to Live. Same component + call as buildLiveTabHTML; layoutBracketTree fires via activateMainTab
@@ -8628,9 +8666,25 @@ function bindTournamentTabV2() {
         state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null;
         await tdbRefreshTournaments();
         render();
+      } else if (role === 'tv2-seed-up' || role === 'tv2-seed-down') {
+        // #7 seed override (transient): nudge a team up/down one seed in the pre-generate seeding list.
+        if (!state.isAdmin) return;
+        const order = currentSeedOrder();
+        const i = order.indexOf(id);
+        const j = role === 'tv2-seed-up' ? i - 1 : i + 1;
+        if (i < 0 || j < 0 || j >= order.length) return;
+        const tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+        state.seedOverride = { id: state.activeTournamentId, order };
+        render();
+      } else if (role === 'tv2-seed-reset') {
+        if (!state.isAdmin) return;
+        state.seedOverride = null; // back to the computed seeding
+        render();
       } else if (role === 'tv2-generate-bracket') {
         const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
-        await tdbGenerateBracket(t);
+        const seedOrder = (state.seedOverride && state.seedOverride.id === t.id) ? state.seedOverride.order : null; // #7
+        await tdbGenerateBracket(t, seedOrder);
+        state.seedOverride = null; // clear the transient override after generating
         state.tournamentPickedTeamId = null;
         state.bracketSide = null; state.bracketRound = null;
         await tdbRefreshTournaments();
