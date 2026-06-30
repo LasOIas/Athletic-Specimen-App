@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.30.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.30.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2454,6 +2454,12 @@ function publicLiveTournament() {
 // C32: PUBLIC Home = live status hub (layout C — dashboard tiles; chosen from 3 §38 mockups). Read-only
 // except the Check In CTA. Count-only headcount (NEVER names), no skill, no fabricated scores. The hub
 // regions (#ph-tiles / #ph-courts / #ph-tourney) update in place via partialRender (no scroll jump).
+// Shared court legend (Home + Scores) — single source so the two surfaces never drift (S2/H5).
+const PUBLIC_COURT_LEGEND = '<p class="ph-legend">Teams are numbered for tonight &middot; nets are numbered by play order &middot; live games show the winner or running score.</p>';
+// Live-nets collapse caret — an SVG chevron that rotates (CT2: replaces the old up/down triangle text-glyph carets).
+function liveNetsCaretHTML(collapsed) {
+  return `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false" style="vertical-align:-1px;transform:rotate(${collapsed ? 0 : 90}deg);transition:transform .12s ease;"><path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> ${collapsed ? 'Show' : 'Hide'}`;
+}
 function publicHomeHTML() {
   const liveData = getPublicLiveData();
   const courtsHTML = buildPublicLiveCourtsHTML();
@@ -2463,17 +2469,21 @@ function publicHomeHTML() {
     liveCourtCount: liveData.liveCount,
     tournamentStatus: tourney ? tourney.status : null,
   });
-  const liveTile = st.liveTile === 'courts'
+  const liveTile = !state.loaded
+    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">checking&hellip;</div></div>` // H4: no hard-0 flash pre-sync
+    : st.liveTile === 'courts'
     ? `<div class="ph-tile is-live"><div class="ph-tile-num"><span class="ph-dot"></span>${st.liveCount}</div><div class="ph-tile-lab">${st.liveCount === 1 ? 'court live now' : 'courts live now'}</div></div>`
     : st.liveTile === 'tournament'
     ? `<div class="ph-tile is-live"><div class="ph-tile-num"><span class="ph-dot"></span></div><div class="ph-tile-lab">tournament live</div></div>`
+    : courtsHTML
+    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">round complete</div></div>` // H1: a finished round still on the board
     : `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">no games yet</div></div>`;
   const tilesHTML = `<div class="ph-tiles" id="ph-tiles">
-    <div class="ph-tile is-here"><div class="ph-tile-num">${st.here}</div><div class="ph-tile-lab">checked in</div></div>
+    <div class="ph-tile is-here"><div class="ph-tile-num">${state.loaded ? st.here : '&mdash;'}</div><div class="ph-tile-lab">checked in</div></div>
     ${liveTile}
   </div>`;
   const courtsSection = courtsHTML
-    ? `<div id="ph-courts"><div class="ph-sec">On the courts</div>${courtsHTML}</div>`
+    ? `<div id="ph-courts"><div class="ph-sec">On the courts</div>${courtsHTML}${PUBLIC_COURT_LEGEND}</div>` // H5: match the Scores legend
     : '<div id="ph-courts"></div>';
   // When nothing is live, surface an open-registration tournament as a "Sign up" banner so a shared
   // GroupMe link lands on a clear CTA (not a cold Home). Reuses the .ph-tourney accent banner.
@@ -2538,15 +2548,23 @@ function publicScoresHTML() {
   }
   const upNext = (liveData.waitingTeams || []).length
     ? `<div class="ph-sec">Up next &middot; rotating onto a net</div>
-       <div class="court-row"><div class="court-row-info"><div class="court-row-sub">${liveData.waitingTeams.map((t) => 'Team ' + Number(t)).join(', ')}</div></div></div>`
+       <div class="court-row"><div class="court-row-info"><div class="court-row-name">Next up</div><div class="court-row-sub">${liveData.waitingTeams.map((t) => 'Team ' + Number(t)).join(', ')}</div></div></div>` // S4: give the row a name like every other
     : '';
-  // C60: legend so a spectator isn't guessing at "Net N" / "Team N" / why no score shows.
-  const legend = courtsHTML
-    ? `<p class="ph-legend">Teams are numbered for tonight &middot; nets are numbered by play order &middot; live games show the winner, not the score.</p>`
+  // C60: legend so a spectator isn't guessing at "Net N" / "Team N" / what a live game shows (S2: shared, tournament too).
+  const legend = (courtsHTML || tourneyHTML) ? PUBLIC_COURT_LEGEND : '';
+  // S1: the live badge lights for a tournament-only live night too (not just casual courts).
+  const liveBadge = liveData.liveCount > 0
+    ? `<span class="ph-live"><span class="ph-dot"></span>${liveData.liveCount} playing</span>`
+    : tourneyHTML
+    ? `<span class="ph-live"><span class="ph-dot"></span>live now</span>`
+    : courtsHTML
+    ? `<span class="ph-done">Round complete &middot; next round coming up</span>`
     : '';
+  // S3: casual court rows get an "On the courts" heading (tournament rows already carry their own).
+  const courtsSection = courtsHTML ? `<div class="ph-sec">On the courts</div>${courtsHTML}` : '';
   return `<div class="home-screen">
-    <div class="ph-brand">Live scores ${liveData.liveCount > 0 ? `<span class="ph-live"><span class="ph-dot"></span>${liveData.liveCount} playing</span>` : (courtsHTML ? `<span class="ph-done">Round complete &middot; next round coming up</span>` : '')}</div>
-    ${courtsHTML}
+    <div class="ph-brand">Live scores ${liveBadge}</div>
+    ${courtsSection}
     ${tourneyHTML}
     ${upNext}
     ${legend}
@@ -4083,7 +4101,7 @@ function championPathIds(main, champ) {
 function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam, gn) {
   const seeds = seedByTeam || {};
   // C75: a small seed number before a known team's name (no seed for TBD / source placeholders).
-  const seedTag = (id) => (id && seeds[id]) ? `<span class="bt-seed" style="display:inline-block;min-width:1.3em;font-size:10px;font-weight:700;color:var(--faint);">${seeds[id]}</span>` : '';
+  const seedTag = (id) => (id && seeds[id]) ? `<span class="bt-seed">${seeds[id]}</span>` : ''; // D3: styles moved to CSS
   const aKnown = !!m.team_a_id, bKnown = !!m.team_b_id;
   const srcA = bracketSourceLabel(m.source_a, gn && gn.byRoundLabel); // "Winner of WB R1 M1" -> "Winner of G3"
   const srcB = bracketSourceLabel(m.source_b, gn && gn.byRoundLabel);
@@ -4531,7 +4549,7 @@ function buildBracketHTML(tournament, matches, teams, opts = {}) {
   const champ = computeChampion(main, teams);
   const pathIds = championPathIds(main, champ);
   const champBanner = champ ? `<div class="bt-champ">
-    <span class="bt-cup" aria-hidden="true">&#9733;</span>
+    <span class="bt-cup" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2.3l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.7l1.1-6.5L2.6 9.1l6.5-.9z"/></svg></span>
     <span><span class="bt-champ-lbl">CHAMPION</span><span class="bt-champ-nm">${escapeHTML(champ.name)}</span></span>
   </div>` : '';
 
@@ -4762,7 +4780,7 @@ function buildPublicRegisterHTML(t, teams) {
     : `<label class="reg-check" style="margin-top:6px;"><input type="checkbox" id="reg-paid" /> We paid${buyIn ? ' (' + escapeHTMLText(buyIn) + ')' : ''}</label>`;
   const registered = count
     ? `<div class="card" style="margin-top:12px;"><div class="reg-label">Registered (${count})</div>${
-        (teams || []).map((tm) => `<div class="reg-regrow" data-role="tv2-team-card" data-id="${escapeHTMLText(tm.id)}" role="button" tabindex="0"><span>${escapeHTMLText(tm.name || '')}</span>${tm.paid ? '<span class="reg-paidtag">paid</span>' : ''}<span class="reg-regchev" aria-hidden="true">&rsaquo;</span></div>`).join('')
+        (teams || []).map((tm) => `<div class="reg-regrow" data-role="tv2-team-card" data-id="${escapeHTMLText(tm.id)}" role="button" tabindex="0"><span>${escapeHTMLText(tm.name || '')}</span>${tm.paid ? '<span class="reg-paidtag">paid</span>' : ''}<svg class="reg-regchev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`).join('')
       }</div>`
     : '';
   return `<div class="reg-screen">
@@ -4803,6 +4821,13 @@ function buildTournamentTabHTML() {
     // Registration open (pre-pools) → the public self-registration screen (replaces the Google Form).
     if (active && show.registration_open && show.status === 'setup') {
       return buildPublicRegisterHTML(show, teams);
+    }
+    if (active && !show.registration_open && show.status === 'setup') {
+      // R2: registration explicitly closed (pre-pools) — say so instead of a cold generic "Setup" view.
+      return `<div class="card" style="text-align:center;padding:1.5rem;">
+        <h3 style="margin:0 0 6px;">${escapeHTML(show.name || '')}</h3>
+        <p style="color:var(--muted);margin:0;">Registration is closed &middot; teams are set. Check back when pool play starts.</p>
+      </div>` + buildTeamListHTML(teams, false);
     }
     if (active && show.status === 'pools') {
       return `<div class="card">
@@ -6764,7 +6789,7 @@ function adminTeamsHTML(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
   ${liveMatchupsHTML ? `<div class="live-nets-collapsible">
     <button type="button" class="live-nets-toggle" data-role="toggle-live-nets" aria-expanded="${liveNetsCollapsed ? 'false' : 'true'}">
       <span>Live Nets</span>
-      <span class="live-nets-caret">${liveNetsCollapsed ? '▸ Show' : '▾ Hide'}</span>
+      <span class="live-nets-caret">${liveNetsCaretHTML(liveNetsCollapsed)}</span>
     </button>
     <div class="live-nets-body${liveNetsCollapsed ? ' is-collapsed' : ''}">
       ${liveMatchupsHTML}
@@ -7032,6 +7057,7 @@ function buildKioskResultsHTML(query) {
     const p = state.players.find((pl) => String(pl.id) === String(row.id));
     return p ? { ...row, checkedIn: inSet.has(playerIdentityKey(p)) } : row;
   });
+  if (!state.loaded && (query || '').trim()) return '<p class="cik-none">Loading roster&hellip;</p>'; // C1: don't flash "No match" pre-sync
   return list.length
     ? list.map(renderCheckinButton).join('')
     : ((query || '').trim() ? '<p class="cik-none">No match &mdash; tap &ldquo;I&rsquo;m new&rdquo; to add yourself.</p>' : '');
@@ -7055,6 +7081,7 @@ function syncKioskIdleState(resultsHTML) {
 let kioskConfirmCb = null;
 function kioskNameInitials(name) {
   const w = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (w.length === 1) return ((w[0] || '')[0] || '').toUpperCase(); // C2: single-word name → one initial (matches the button glyph)
   return (((w[0] || '')[0] || '') + ((w[w.length - 1] || '')[0] || '')).toUpperCase();
 }
 function ensureKioskConfirmModal() {
@@ -7156,12 +7183,12 @@ function publicCheckinHTML() {
     <h2 class="cik-h">Check in</h2>
     <p class="cik-sub">Type your name, then tap it</p>
     <div class="cik-search">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input id="checkin-search" type="text" placeholder="Start typing your name&hellip;" autocapitalize="words" autocomplete="off" spellcheck="false" aria-label="Type your name" />
     </div>
     <div id="checkin-results"></div>
     <button class="cik-new" id="btn-checkin-new" type="button">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       I'm new &mdash; add me
     </button>
     <div id="checkin-toast" class="cik-toast" role="status" aria-live="polite" hidden></div>
@@ -7180,15 +7207,15 @@ function publicCheckinHTML() {
 function buildPublicNavInnerHTML() {
   return `
     <button class="nav-btn" data-nav-tab="home">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>
       <span>Home</span>
     </button>
     <button class="nav-btn" data-nav-tab="players">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg>
       <span>Check In</span>
     </button>
     <button class="nav-btn" data-nav-tab="scores">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
       <span>Scores</span>
     </button>
     ${(() => {
@@ -7198,7 +7225,7 @@ function buildPublicNavInnerHTML() {
       if (!live && !reg) return '';
       const label = (!live && reg) ? 'Register' : 'Bracket'; // pre-pools registration → "Register", else "Bracket"
       return `<button class="nav-btn" data-nav-tab="tournament">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg>
       <span>${label}</span>
     </button>`;
     })()}`;
@@ -7209,9 +7236,8 @@ function renderPublicShell() {
   return `
 <div id="app-shell">
   <header id="app-header">
-    <span class="app-header-mode" style="font-weight:800;font-size:11px;letter-spacing:0.06em;color:var(--accent);">PUBLIC</span>
+    <span class="app-header-mode">PUBLIC</span>
     <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
-    <span class="app-header-version">v${APP_VERSION}</span>
   </header>
   <div id="app-content">
     <div id="tab-home" class="tab-panel">
@@ -7274,25 +7300,25 @@ function adminDashboardHTML() {
 <div class="container">
   <div class="ad-screen">
     <div class="ad-top">
-      <div class="ad-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'} <span class="ad-badge">ADMIN</span></div>
+      <div class="ad-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'}</div>
     </div>
     <div class="ad-statcard" id="js-dashboard-stat">${buildDashboardStatHTML()}</div>
     <div class="ad-sec">Quick actions</div>
     <div class="ad-qgrid">
       <button type="button" class="ad-qa" data-qa="checkin">
-        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg></div>
+        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg></div>
         <div class="ad-qt">Check-in mode</div><div class="ad-qs">${inCount ? inCount + ' checked in' : 'door kiosk / QR'}</div>
       </button>
       <button type="button" class="ad-qa" data-qa="generate">
-        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3 20c0-3 2.7-5 6-5s6 2 6 5M15.5 20c0-2 1-3.4 3-3.8"/></svg></div>
+        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3 20c0-3 2.7-5 6-5s6 2 6 5M15.5 20c0-2 1-3.4 3-3.8"/></svg></div>
         <div class="ad-qt">Generate teams</div><div class="ad-qs">${teamCount ? teamCount + ' teams ready' : (inCount ? 'balanced' : 'needs check-ins')}</div>
       </button>
       <button type="button" class="ad-qa" data-qa="tournament">
-        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg></div>
+        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg></div>
         <div class="ad-qt">Tournament</div><div class="ad-qs">${tourActive ? 'in progress' : 'pools + bracket'}</div>
       </button>
       <button type="button" class="ad-qa" data-qa="session">
-        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></div>
+        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></div>
         <div class="ad-qt">Session</div><div class="ad-qs">${escapeHTML(sessLabel)}</div>
       </button>
     </div>
@@ -7339,7 +7365,7 @@ function copilotBubbleHTML(m) {
 
 function adminCopilotHTML() {
   const msgs = Array.isArray(state.copilotMessages) ? state.copilotMessages : [];
-  const greeting = `<div class="cop-msg cop-bot cop-greet">Ask me what's going on tonight — tap a suggestion below or type a question.</div>`;
+  const greeting = `<div class="cop-msg cop-bot cop-greet">Ask me what's going on tonight, or to check players in, build teams, and record scores — tap a suggestion or type a question.</div>`;
   const thread = msgs.length ? msgs.map(copilotBubbleHTML).join('') : greeting;
   const chips = COPILOT_CHIPS
     .map((c) => `<button type="button" class="cop-chip" data-cop-chip="${escapeHTMLText(c)}">${escapeHTMLText(c)}</button>`)
@@ -7347,7 +7373,7 @@ function adminCopilotHTML() {
   return `
 <div class="container">
   <div class="ad-cop-screen cop-screen">
-    <div class="ad-cop-head"><svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.9" width="18" height="18"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9z"/></svg> Co-pilot</div>
+    <div class="ad-cop-head"><svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" width="18" height="18"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9z"/></svg> Co-pilot</div>
     <div id="copilot-thread" class="cop-thread">${thread}</div>
     <div class="cop-chips">${chips}</div>
     <div class="ad-inbar cop-inbar">
@@ -7549,8 +7575,9 @@ const copilotExecutors = {
       undo: async () => { if (checkInPlayer(player)) await copilotPersistCheck('check_in', player); render(); } };
   },
   async make_teams(args) {
-    const count = Number(args.count);
-    if (!(state.checkedIn || []).length) return { is_error: true, args, result: "No one is checked in yet, so I can't make teams." };
+    const playerCount = (state.checkedIn || []).length;
+    if (playerCount < 2) return { is_error: true, args, result: "Need at least 2 checked-in players to make teams." };
+    const count = Math.max(2, Math.min(playerCount, Math.floor(Number(args.count)) || 2)); // CT1: clamp to player count so we never make empty "Team of 0" nets
     const prev = { teams: state.generatedTeams, order: state.liveCourtOrder, results: state.liveMatchResults,
       snaps: state.liveMatchSkillSnapshots, summary: state.generatedTeamsSummary, groupCount: state.groupCount, lastTeamSize: state.lastTeamSize };
     const gen = generateBalancedGroups(state.players, state.checkedIn, count, state.generatedTeams);
@@ -7762,7 +7789,7 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
   return `
 <div id="app-shell">
   <header id="app-header">
-    <span class="app-header-mode" style="font-weight:800;font-size:11px;letter-spacing:0.06em;color:var(--danger);">ADMIN</span>
+    <span class="app-header-mode is-admin">ADMIN</span>
     <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
     <span class="app-header-version">v${APP_VERSION}</span>
     <button type="button" id="btn-logout" class="app-header-logout">Log out</button>
@@ -9226,7 +9253,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       body.classList.toggle('is-collapsed', nowCollapsed);
       state.liveNetsCollapsed = nowCollapsed;
       const caret = liveNetsToggle.querySelector('.live-nets-caret');
-      if (caret) caret.textContent = nowCollapsed ? '▸ Show' : '▾ Hide';
+      if (caret) caret.innerHTML = liveNetsCaretHTML(nowCollapsed);
       liveNetsToggle.setAttribute('aria-expanded', nowCollapsed ? 'false' : 'true');
       saveLocal();
     });
