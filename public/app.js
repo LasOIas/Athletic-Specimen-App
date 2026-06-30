@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.30.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.30.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1293,11 +1293,16 @@ function partialRender() {
       && checkinSearchEl
       && (document.activeElement === checkinSearchEl || ((checkinSearchEl.value || '').trim() !== ''));
     if (checkinResultsEl && kioskActive) {
+      // Scroll-jump fix (2026-06-30, F6): #tab-players is the overflow container; iOS resets its scrollTop when
+      // #checkin-results innerHTML is replaced, snapping a kiosk user scrolling a long name list to the top.
+      const kPanel = document.getElementById('tab-players');
+      const kSaved = kPanel ? kPanel.scrollTop : 0;
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
       if (statsEl) statsEl.innerHTML = buildCheckinStatsHTML();
       const kioskHTML = buildKioskResultsHTML(checkinSearchEl.value);
       checkinResultsEl.innerHTML = kioskHTML;
       syncKioskIdleState(kioskHTML); // C48.6: keep the centered/top-aligned state in lockstep on background syncs
+      if (kPanel && kSaved > 0 && kPanel.scrollTop !== kSaved) kPanel.scrollTop = kSaved;
       return;
     }
   }
@@ -1374,12 +1379,19 @@ function partialRender() {
   const dashStatEl = document.getElementById('js-dashboard-stat');
   if (dashStatEl) dashStatEl.innerHTML = buildDashboardStatHTML();
 
+  // Scroll-jump fix (2026-06-30, F5): #tab-players is the overflow scroll container; iOS resets its scrollTop
+  // when .players innerHTML is replaced, yanking the admin to the top of the ~215-row roster on every 15s poll
+  // + every cross-device check-in. render() saves+restores this; this background path must too. Most-polled
+  // admin surface (mid-check-in). captureTransientInteractionState preserves focus/selection only, not scroll.
+  const playersPanel = document.getElementById('tab-players');
+  const playersSaved = playersPanel ? playersPanel.scrollTop : 0;
   const snapshot = captureTransientInteractionState();
   playersEl.innerHTML = renderFilteredPlayers();
   bindPlayerRowHandlers();
   bindSelectionHandlers();
   updateBulkBarVisibility();
   restoreTransientInteractionState(snapshot);
+  if (playersPanel && playersSaved > 0 && playersPanel.scrollTop !== playersSaved) playersPanel.scrollTop = playersSaved;
   refreshAzStripAvailability();
 }
 
@@ -3480,6 +3492,21 @@ async function tdbSetPoolNets(pool, newNets, matches) {
   return nets;
 }
 
+// Data-integrity (2026-06-30): when an admin changes the net count DURING pool play, the matches table must
+// be re-netted to match — otherwise net_count and matches.net drift ("games on nets 1-10 but net_count=9").
+// Shared by BOTH settings save paths: the Manage Settings PAGE (tv2-save-settings-page) and the classic
+// Tournament-tab Edit MODAL (openTournamentSettingsModal). Re-nets each pool's UNPLAYED games across the new
+// contiguous net blocks (finished games keep their net = history). Fetches FRESH pool rows so the version-CAS
+// uses current versions (a concurrent score won't dead-lock a retry — F2). Callers run this BEFORE writing
+// net_count, so a mid-loop failure leaves net_count unchanged (no half-applied drift) rather than the reverse.
+async function renetPoolsForNetCount(tournamentId, pools, newNets) {
+  const ordered = [...(pools || [])].sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')));
+  if (!ordered.length) return;
+  const ms = await tdbListMatches(tournamentId, 'pool'); // fresh versions for the CAS in tdbSetPoolNets
+  const blocks = splitNetsAcrossPools(newNets, ordered.length);
+  for (let pi = 0; pi < ordered.length; pi++) await tdbSetPoolNets(ordered[pi], blocks[pi] || [pi + 1], ms);
+}
+
 // Seed from pool standings + generate + persist a double-elimination bracket.
 async function tdbGenerateBracket(tournament) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
@@ -3752,13 +3779,22 @@ async function refreshTournamentLive() {
     return;
   }
   const prevNav = tournamentNavVisible();
-  if (activeMainTab === 'tournament') {
+  // F3 (2026-06-30): the admin tournament-mode board lives on the manage/live tabs, NOT activeMainTab==='tournament'
+  // (that's the PUBLIC Bracket tab). Without including tournament mode here, a background sync took the else-branch
+  // and the inline Manage/Live board never auto-updated from another device's scoring (stale all event). Treat
+  // tournament mode (manage/live) as a live tournament surface too.
+  const onTournamentSurface = () => activeMainTab === 'tournament'
+    || (state.tournamentMode && (activeMainTab === 'manage' || activeMainTab === 'live'));
+  if (onTournamentSurface()) {
     // Don't clobber a half-typed score OR a half-filled team registration (incl. the "We paid" checkbox) even
     // after the field blurs — a background sync (esp. a `teams` realtime ping when ANOTHER team registers) must
     // not rebuild the form and wipe what's typed. Shared guard with partialRenderTournament (covers checkboxes).
+    // The manage FORM pages are additionally protected by partialRenderTournament's manageShowsBoard guard
+    // (it only rebuilds #tab-manage when it shows a board, never a Settings/Teams/Reg form). This path also
+    // re-arms the C54 auto-generate prompt cross-device (partialRenderTournament -> maybeAutoGenerateBracket).
     if (tournamentTabIsDirty()) return;
     await tdbRefreshTournaments();
-    if (activeMainTab === 'tournament') partialRenderTournament();
+    if (onTournamentSurface()) partialRenderTournament();
   } else {
     // Off the tab: keep the list fresh so the Tournament nav appears/disappears as events go live.
     state.tournaments = await tdbListTournaments();
@@ -4162,6 +4198,12 @@ function openTournamentSettingsModal(tournamentId) {
     if (pc != null && pc < pt) return fail('Pool cap cannot be less than the pool target.');
     saving = true;
     try {
+      // Data-integrity (2026-06-30): this MODAL is the second net_count save path (the Manage Settings page is
+      // the other). Re-net the pools FIRST when the count changes during pools, then write net_count — same
+      // shared helper + ordering as the page handler, so matches.net never drifts from net_count (F7 fix).
+      const tBeforeM = (state.tournaments || []).find((x) => x.id === tournamentId);
+      const oldNetsM = tBeforeM ? Number(tBeforeM.net_count) : null;
+      if (tBeforeM && tBeforeM.status === 'pools' && nets !== oldNetsM) await renetPoolsForNetCount(tournamentId, state.tournamentPools, nets);
       await tdbSetTournamentFields(tournamentId, {
         name, net_count: nets, pool_target: pt, pool_cap: pc,
         bracket_target: bt, match_cap: bt, win_by_2: wb2,
@@ -8398,20 +8440,12 @@ function bindTournamentTabV2() {
         if (pc != null && pc < pt) return fail('Pool cap cannot be less than the pool target.');
         const tBefore = (state.tournaments || []).find((x) => x.id === id);
         const oldNets = tBefore ? Number(tBefore.net_count) : null;
+        // Data-integrity (2026-06-30): keep matches.net consistent with net_count. Re-net the pools FIRST (only
+        // on a real change during pool play, so renaming/other edits don't reshuffle the live queue), THEN write
+        // net_count — so if the re-net throws (e.g. a concurrent score), net_count stays unchanged (no drift)
+        // rather than half-applied. Shared with the classic Edit modal via renetPoolsForNetCount (F2/F7 fix).
+        if (tBefore && tBefore.status === 'pools' && nets !== oldNets) await renetPoolsForNetCount(id, state.tournamentPools, nets);
         await tdbSetTournamentFields(id, { name, net_count: nets, pool_target: pt, pool_cap: pc, bracket_target: bt, match_cap: bt, win_by_2: wb2 });
-        // Data-integrity (2026-06-30): before this, Settings only stored net_count — the `matches` rows still
-        // referenced the OLD nets, the root cause of the pre-event "games on nets 1-10 but net_count=9" mismatch.
-        // When the net count actually CHANGES during pool play, redistribute each pool's UNPLAYED games across
-        // the new net range (the same contiguous-block split the initial draw uses); finished games keep their
-        // net (history). Only on a real change + only in pools, so renaming/other edits don't reshuffle the queue.
-        if (tBefore && tBefore.status === 'pools' && nets !== oldNets) {
-          const pools = [...(state.tournamentPools || [])].sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')));
-          if (pools.length) {
-            const blocks = splitNetsAcrossPools(nets, pools.length);
-            const ms = state.tournamentMatches || [];
-            for (let pi = 0; pi < pools.length; pi++) await tdbSetPoolNets(pools[pi], blocks[pi] || [pi + 1], ms);
-          }
-        }
         await tdbRefreshTournaments();
         state.manageView = 'hub';
         render();
@@ -8538,14 +8572,15 @@ function bindTournamentTabV2() {
   });
 
   // C32 #9: the bracket is one responsive connected tree now — re-fit it on resize (no width branch).
-  window.addEventListener('resize', debounce(() => {
-    if (activeMainTab === 'tournament') layoutBracketTree();
-  }, 150));
+  // F4 (2026-06-30): dropped the `activeMainTab === 'tournament'` guard — that's the PUBLIC Bracket tab, so in
+  // tournament MODE the Live-tab bracket + Manage>Bracket connectors never re-fit on rotate/resize/late-font.
+  // layoutBracketTree is a no-op when no tree is present, so calling it unconditionally is safe on every surface.
+  window.addEventListener('resize', debounce(() => { layoutBracketTree(); }, 150));
   // Connectors depend on text metrics: re-fit once fonts finish loading + after full page load.
   if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(() => { if (activeMainTab === 'tournament') layoutBracketTree(); });
+    document.fonts.ready.then(() => { layoutBracketTree(); });
   }
-  window.addEventListener('load', () => { if (activeMainTab === 'tournament') layoutBracketTree(); });
+  window.addEventListener('load', () => { layoutBracketTree(); });
 }
 
 function activateMainTab(tab) {
