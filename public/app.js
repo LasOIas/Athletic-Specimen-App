@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.30.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.30.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3552,6 +3552,16 @@ async function tdbApplyNetCountChange(tournamentId, newNetCount, assignments) {
 }
 
 // Seed from pool standings + generate + persist a double-elimination bracket.
+// #6 (Mike 2026-06-30): undo the bracket WITHOUT touching pool results — delete only the bracket
+// (phase 'main') matches and drop status back to 'pools', so the admin can re-generate. Mirrors the
+// authenticated direct-write pattern of tdbDrawPools (RLS allows admin match writes); pool matches +
+// their scores are untouched. Delete first (recoverable on a mid-failure), then flip the status.
+async function tdbResetBracket(tournament) {
+  if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  const { error: delErr } = await supabaseClient.from('matches').delete().eq('tournament_id', tournament.id).eq('phase', 'main');
+  if (delErr) { console.error('tdbResetBracket delete', delErr); throw delErr; }
+  await tdbSetTournamentFields(tournament.id, { status: 'pools' });
+}
 async function tdbGenerateBracket(tournament) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
   // Bracket-wipe race guard (defense-in-depth; the real guard is server-side in generate_bracket_atomic):
@@ -5130,7 +5140,14 @@ function managePoolsPageHTML(active, teams, pools, matches) {
   // is safe here (its guard allows pools-running; per-pool net editing is already a chip on the board).
   const pm = (matches || []).filter((m) => m.phase === 'pool' && m.team_a_id && m.team_b_id);
   const poolDone = pm.filter((m) => m.status === 'final').length;
-  return `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+  // #5 (Mike 2026-06-30, §38 Option B): when every real pool game is final, a prominent green CTA banner
+  // above the board so the admin can't miss "generate the bracket" (the mid-event discoverability gap —
+  // the only Generate button used to be buried on Manage>Bracket). Reuses the existing tv2-generate-bracket.
+  const allFinal = pm.length > 0 && poolDone === pm.length;
+  const genBanner = allFinal
+    ? `<div class="card gen-banner"><span class="gen-banner-t">All pool games are final</span><button type="button" class="primary" data-role="tv2-generate-bracket">Generate bracket &rarr;</button></div>`
+    : '';
+  return `${genBanner}<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <span class="badge">${pools.length} pool${pools.length === 1 ? '' : 's'} · ${poolDone}/${pm.length} games done</span>
       <button type="button" class="danger" data-role="tv2-reset-pools" style="margin-left:auto;">Reset pools</button>
     </div>${buildPoolPlayHTML(active, pools, teams, matches, true, state.tournamentPickedTeamId)}`;
@@ -5196,6 +5213,7 @@ function manageBracketPageHTML(active, teams, matches) {
   const bracketDone = bm.filter((m) => m.status === 'final').length;
   return `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
       <span class="badge">Bracket · ${bracketDone}/${bm.length} games</span>
+      <button type="button" class="danger" data-role="tv2-reset-bracket" style="margin-left:auto;">Reset bracket</button>
     </div>${buildBracketHTML(active, matches, teams)}${buildSeedingTableHTML(teams, matches)}`;
 }
 function manageSettingsPageHTML(t) {
@@ -8598,6 +8616,16 @@ function bindTournamentTabV2() {
         await tdbSetTournamentFields(t.id, { status: 'setup' });
         delete _autoGenPrompted[t.id]; // re-arm the auto-generate prompt for the re-played pools
         await tdbDrawPools(t);
+        await tdbRefreshTournaments();
+        render();
+      } else if (role === 'tv2-reset-bracket') {
+        // #6: clear the bracket and go back to pools (pool games + scores kept) so the admin can re-generate.
+        if (!state.isAdmin) return;
+        if (!(await appConfirm({ title: 'Reset bracket', message: 'Clear the bracket and go back to pools? Pool games and scores are kept — you can re-generate the bracket.', confirmText: 'Reset bracket', danger: true }))) return;
+        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
+        await tdbResetBracket(t);
+        delete _autoGenPrompted[t.id]; // re-arm the auto-generate prompt (pools are already final)
+        state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null;
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-generate-bracket') {
