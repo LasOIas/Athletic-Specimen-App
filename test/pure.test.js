@@ -17,7 +17,7 @@ const {
   scoringRulesFor, gameScoreStatus,
   splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
   bracketGameNumbers, bracketSourceLabel,
-  shouldAutoPromptBracket,
+  shouldAutoPromptBracket, assignBracketNets,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -863,5 +863,44 @@ describe('shouldAutoPromptBracket (C54 — revive the dead auto-generate prompt,
   it('does NOT fire when there are no pool games at all', () => {
     expect(shouldAutoPromptBracket({ ...base, poolMatches: [] })).toBe(false);
     expect(shouldAutoPromptBracket({ ...base, poolMatches: null })).toBe(false);
+  });
+});
+
+describe('assignBracketNets (re-net a bracket when net_count changes — mirrors tdbGenerateBracket, 2026-06-30)', () => {
+  // Small double-elim: winners R1 (2 games), winners R2 = WB final (1), losers R1 (1), grand final (1).
+  const bracket = [
+    { id: 'w1a', side: 'winners', round: 1, slot: 0, phase: 'main' },
+    { id: 'w1b', side: 'winners', round: 1, slot: 1, phase: 'main' },
+    { id: 'w2',  side: 'winners', round: 2, slot: 0, phase: 'main' }, // WB final
+    { id: 'l1',  side: 'losers',  round: 1, slot: 0, phase: 'main' },
+    { id: 'gf',  side: 'grand_final', round: 1, slot: 0, phase: 'main' },
+  ];
+
+  it('spreads each round across nets (net_count 2): position-in-round % nc + 1', () => {
+    // winners:1 has 2 games -> nets 1,2; losers:1 single -> 1; WB final single -> 1; GF carries WB-final net -> 1
+    expect(assignBracketNets(bracket, 2)).toEqual({ w1a: 1, w1b: 2, w2: 1, l1: 1, gf: 1 });
+  });
+  it('collapses everything to net 1 when net_count is 1', () => {
+    expect(assignBracketNets(bracket, 1)).toEqual({ w1a: 1, w1b: 1, w2: 1, l1: 1, gf: 1 });
+  });
+  it('with more nets than a round needs, the round still only uses as many as it has games', () => {
+    expect(assignBracketNets(bracket, 5)).toEqual({ w1a: 1, w1b: 2, w2: 1, l1: 1, gf: 1 });
+  });
+  it('the grand final always shares the WB-final court', () => {
+    const nets = assignBracketNets(bracket, 2);
+    expect(nets.gf).toBe(nets.w2);
+  });
+  it('ignores non-bracket (pool) matches passed in', () => {
+    const mixed = [...bracket, { id: 'p1', side: null, phase: 'pool', round: 0, slot: 0 }];
+    const r = assignBracketNets(mixed, 2);
+    expect(r.p1).toBeUndefined();
+    expect(Object.keys(r).sort()).toEqual(['gf', 'l1', 'w1a', 'w1b', 'w2']);
+  });
+  it('empty / nullish -> empty map', () => {
+    expect(assignBracketNets([], 3)).toEqual({});
+    expect(assignBracketNets(null, 3)).toEqual({});
+  });
+  it('clamps a bad net_count to >= 1', () => {
+    expect(assignBracketNets(bracket, 0)).toEqual({ w1a: 1, w1b: 1, w2: 1, l1: 1, gf: 1 });
   });
 });

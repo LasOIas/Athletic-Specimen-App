@@ -897,6 +897,35 @@ function shouldAutoPromptBracket(o) {
   return pm.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
 }
 
+// Re-net a bracket when net_count changes (2026-06-30, F8). Returns { matchId: net } for every bracket match.
+// MIRRORS the net scheme baked at generation in tdbGenerateBracket (app.js): order by play-round (winners
+// then losers within a round, grand final last), then within a side:round spread across nets by position
+// (pos % netCount + 1); the grand final shares the winners-final court. queue_order is NOT changed by a
+// net-count change (it's the play order, independent of court count), so this returns net only. Keep this in
+// sync with tdbGenerateBracket's net logic if that scheme ever changes.
+function assignBracketNets(matches, netCount) {
+  const nc = Math.max(1, Math.floor(Number(netCount) || 1));
+  const list = (matches || []).filter((m) => m && (m.side === 'winners' || m.side === 'losers' || m.side === 'grand_final'));
+  const sidePri = (s) => (s === 'winners' ? 0 : s === 'losers' ? 1 : 2);
+  const maxRound = list.reduce((mx, m) => Math.max(mx, m.side !== 'grand_final' ? (m.round || 0) : 0), 0);
+  const playRound = (m) => (m.side === 'grand_final' ? maxRound + (m.round || 0) : (m.round || 0));
+  const order = list.slice().sort((a, b) =>
+    playRound(a) - playRound(b) || sidePri(a.side) - sidePri(b.side) || (a.slot || 0) - (b.slot || 0));
+  const byId = {}; const perRound = {};
+  order.forEach((m) => {
+    if (m.side === 'grand_final') { byId[m.id] = null; return; } // carried to the WB-final court below
+    const rk = m.side + ':' + m.round;
+    perRound[rk] = perRound[rk] || 0;
+    byId[m.id] = (perRound[rk] % nc) + 1;
+    perRound[rk]++;
+  });
+  const wbFinal = list.filter((m) => m.side === 'winners')
+    .sort((a, b) => (b.round || 0) - (a.round || 0) || (b.slot || 0) - (a.slot || 0))[0];
+  const gfNet = (wbFinal && byId[wbFinal.id]) || 1;
+  list.filter((m) => m.side === 'grand_final').forEach((m) => { byId[m.id] = gfNet; });
+  return byId;
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -911,6 +940,6 @@ if (typeof module !== "undefined" && module.exports) {
     scoringRulesFor, gameScoreStatus,
     splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
     bracketGameNumbers, bracketSourceLabel,
-    shouldAutoPromptBracket
+    shouldAutoPromptBracket, assignBracketNets
   };
 }

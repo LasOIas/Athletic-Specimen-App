@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.30.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.06.30.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3492,19 +3492,45 @@ async function tdbSetPoolNets(pool, newNets, matches) {
   return nets;
 }
 
-// Data-integrity (2026-06-30): when an admin changes the net count DURING pool play, the matches table must
-// be re-netted to match — otherwise net_count and matches.net drift ("games on nets 1-10 but net_count=9").
-// Shared by BOTH settings save paths: the Manage Settings PAGE (tv2-save-settings-page) and the classic
-// Tournament-tab Edit MODAL (openTournamentSettingsModal). Re-nets each pool's UNPLAYED games across the new
-// contiguous net blocks (finished games keep their net = history). Fetches FRESH pool rows so the version-CAS
-// uses current versions (a concurrent score won't dead-lock a retry — F2). Callers run this BEFORE writing
-// net_count, so a mid-loop failure leaves net_count unchanged (no half-applied drift) rather than the reverse.
-async function renetPoolsForNetCount(tournamentId, pools, newNets) {
-  const ordered = [...(pools || [])].sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')));
-  if (!ordered.length) return;
-  const ms = await tdbListMatches(tournamentId, 'pool'); // fresh versions for the CAS in tdbSetPoolNets
-  const blocks = splitNetsAcrossPools(newNets, ordered.length);
-  for (let pi = 0; pi < ordered.length; pi++) await tdbSetPoolNets(ordered[pi], blocks[pi] || [pi + 1], ms);
+// Data-integrity (2026-06-30): when an admin changes the net count DURING pool play OR the bracket, the matches
+// table must be re-netted to match — otherwise net_count and matches.net drift ("games on nets 1-10 but
+// net_count=9"). computeNetAssignments derives the new net (and, for pools, queue_order) of every UNPLAYED
+// match using the SAME pure helpers the draw/generate use; tdbApplyNetCountChange then writes net_count + every
+// match in ONE transaction (migration 0031) with a per-row version-CAS, so a concurrent score either succeeds
+// cleanly or rolls the WHOLE change back (true atomicity — no half-applied drift). Used by BOTH settings save
+// paths: the Manage Settings PAGE (tv2-save-settings-page) and the classic Tournament-tab Edit MODAL.
+function computeNetAssignments(status, pools, matches, newNets) {
+  const ms = matches || [];
+  const out = [];
+  if (status === 'pools') {
+    // Each pool's UNPLAYED games spread across its new contiguous net block (net + queue_order both change).
+    const ordered = [...(pools || [])].sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')));
+    const blocks = splitNetsAcrossPools(newNets, ordered.length);
+    ordered.forEach((pool, pi) => {
+      const unplayed = ms.filter((m) => m.pool_id === pool.id && m.phase === 'pool' && m.status !== 'final')
+        .sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
+      const slots = distributeGamesOnNets(unplayed.length, blocks[pi] || [pi + 1]);
+      unplayed.forEach((m, i) => out.push({ match_id: m.id, version: m.version || 0, net: slots[i].net, queue_order: slots[i].queue_order }));
+    });
+  } else if (status === 'bracket') {
+    // Bracket: assignBracketNets recomputes the positional net for the new count; queue_order (play order) is
+    // unchanged. Only emit games whose net actually changes + that aren't final (a final game keeps its court).
+    const bracket = ms.filter((m) => m.phase === 'main');
+    const netById = assignBracketNets(bracket, newNets);
+    bracket.filter((m) => m.status !== 'final').forEach((m) => {
+      if (netById[m.id] != null && netById[m.id] !== m.net) out.push({ match_id: m.id, version: m.version || 0, net: netById[m.id] });
+    });
+  }
+  return out;
+}
+
+async function tdbApplyNetCountChange(tournamentId, newNetCount, assignments) {
+  if (!supabaseClient || !tournamentId) throw new Error('No tournament.');
+  const { data, error } = await supabaseClient.rpc('apply_net_count_change', {
+    p_tournament_id: tournamentId, p_net_count: newNetCount, p_assignments: assignments || [],
+  });
+  if (error) throw error;
+  return data;
 }
 
 // Seed from pool standings + generate + persist a double-elimination bracket.
@@ -4198,16 +4224,18 @@ function openTournamentSettingsModal(tournamentId) {
     if (pc != null && pc < pt) return fail('Pool cap cannot be less than the pool target.');
     saving = true;
     try {
-      // Data-integrity (2026-06-30): this MODAL is the second net_count save path (the Manage Settings page is
-      // the other). Re-net the pools FIRST when the count changes during pools, then write net_count — same
-      // shared helper + ordering as the page handler, so matches.net never drifts from net_count (F7 fix).
+      // Data-integrity (2026-06-30): this MODAL is the second net_count save path. Same ATOMIC re-net as the
+      // page handler (migration 0031) — a net-count change during pools OR bracket re-nets every match in one
+      // transaction so matches.net never drifts from net_count (F7/F8).
       const tBeforeM = (state.tournaments || []).find((x) => x.id === tournamentId);
       const oldNetsM = tBeforeM ? Number(tBeforeM.net_count) : null;
-      if (tBeforeM && tBeforeM.status === 'pools' && nets !== oldNetsM) await renetPoolsForNetCount(tournamentId, state.tournamentPools, nets);
-      await tdbSetTournamentFields(tournamentId, {
-        name, net_count: nets, pool_target: pt, pool_cap: pc,
-        bracket_target: bt, match_cap: bt, win_by_2: wb2,
-      });
+      if (tBeforeM && nets !== oldNetsM && (tBeforeM.status === 'pools' || tBeforeM.status === 'bracket')) {
+        const freshM = await tdbListMatches(tournamentId);
+        await tdbApplyNetCountChange(tournamentId, nets, computeNetAssignments(tBeforeM.status, state.tournamentPools, freshM, nets));
+        await tdbSetTournamentFields(tournamentId, { name, pool_target: pt, pool_cap: pc, bracket_target: bt, match_cap: bt, win_by_2: wb2 });
+      } else {
+        await tdbSetTournamentFields(tournamentId, { name, net_count: nets, pool_target: pt, pool_cap: pc, bracket_target: bt, match_cap: bt, win_by_2: wb2 });
+      }
       await tdbRefreshTournaments();
       close();
       render();
@@ -8440,12 +8468,17 @@ function bindTournamentTabV2() {
         if (pc != null && pc < pt) return fail('Pool cap cannot be less than the pool target.');
         const tBefore = (state.tournaments || []).find((x) => x.id === id);
         const oldNets = tBefore ? Number(tBefore.net_count) : null;
-        // Data-integrity (2026-06-30): keep matches.net consistent with net_count. Re-net the pools FIRST (only
-        // on a real change during pool play, so renaming/other edits don't reshuffle the live queue), THEN write
-        // net_count — so if the re-net throws (e.g. a concurrent score), net_count stays unchanged (no drift)
-        // rather than half-applied. Shared with the classic Edit modal via renetPoolsForNetCount (F2/F7 fix).
-        if (tBefore && tBefore.status === 'pools' && nets !== oldNets) await renetPoolsForNetCount(id, state.tournamentPools, nets);
-        await tdbSetTournamentFields(id, { name, net_count: nets, pool_target: pt, pool_cap: pc, bracket_target: bt, match_cap: bt, win_by_2: wb2 });
+        // Data-integrity (2026-06-30): a net-count change during pools OR bracket re-nets the matches ATOMICALLY
+        // (migration 0031) so net_count + matches.net never drift. Compute the new assignments client-side (same
+        // pure scheme as draw/generate), apply net_count + all match nets in ONE transaction, then the other
+        // fields. No change / setup phase -> a plain field write incl. net_count. Shared with the Edit modal.
+        if (tBefore && nets !== oldNets && (tBefore.status === 'pools' || tBefore.status === 'bracket')) {
+          const fresh = await tdbListMatches(id);
+          await tdbApplyNetCountChange(id, nets, computeNetAssignments(tBefore.status, state.tournamentPools, fresh, nets));
+          await tdbSetTournamentFields(id, { name, pool_target: pt, pool_cap: pc, bracket_target: bt, match_cap: bt, win_by_2: wb2 });
+        } else {
+          await tdbSetTournamentFields(id, { name, net_count: nets, pool_target: pt, pool_cap: pc, bracket_target: bt, match_cap: bt, win_by_2: wb2 });
+        }
         await tdbRefreshTournaments();
         state.manageView = 'hub';
         render();
