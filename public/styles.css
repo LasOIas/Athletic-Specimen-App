@@ -470,6 +470,15 @@ select:focus {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* DT1 (Mike: Option B, 2026-06-30) — on desktop keep the header + bottom-nav as
+   full-bleed bars but CENTER their content so the nav items don't maroon at the screen
+   edges; the content stays the 900px .container column. Desktop-only; mobile untouched. */
+@media (min-width: 1024px) {
+  #app-header { justify-content: center; }
+  #bottom-nav { justify-content: center; }
+  #bottom-nav .nav-btn { flex: 0 0 150px; }
+}
+
 .nav-btn {
   flex: 1;
   display: flex;
@@ -1870,7 +1879,7 @@ select:focus {
   font-weight: 500;
 }
 .court-row-sub {
-  font-size: 11.5px;
+  font-size: 12.5px; /* S5: was 11.5px — the matchup was the faintest/smallest text in the row */
   color: var(--faint);
   margin-top: 2px;
 }
