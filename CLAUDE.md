@@ -1,11 +1,23 @@
 # Athletic Specimen App — Claude Instructions
 
+## MANDATORY — FIRST ACTION OF EVERY SESSION
+
+**Invoke `lasolas-skill` via the Skill tool before reading anything else.** It loads
+the cross-project rulebook at `C:\Ai Master\LasOlas\` (start at `rulebook.md`, the
+index) and activates the pre-flight checklist that runs at the top of every turn.
+The `LasOlas\projects\athletic-specimen.md` addendum carries this project's rules
+(admin-only skill ratings, deploy hygiene, tournament spec, §51 no-neon, §52
+numbered order).
+
+If lasolas-skill isn't available, read `C:\Ai Master\LasOlas\rulebook.md` directly.
+
 ## Session Start (required, every session)
 Primary brain is the master vault at `C:\Ai Master\Projects\Athletic Specimen\`
 (12-region layout). Read these in order before doing anything else:
-1. `C:\Ai Master\Projects\Athletic Specimen\README.md`
-2. `C:\Ai Master\Projects\Athletic Specimen\02-identity\overview.md`
-3. `C:\Ai Master\Projects\Athletic Specimen\01-state\current.md`
+1. `C:\Ai Master\Projects\Athletic Specimen\01-state\NOW.md` (revive surface — FIRST)
+2. `C:\Ai Master\Projects\Athletic Specimen\README.md`
+3. `C:\Ai Master\Projects\Athletic Specimen\02-identity\overview.md`
+4. `C:\Ai Master\Projects\Athletic Specimen\01-state\current.md`
 4. `C:\Ai Master\Projects\Athletic Specimen\01-state\log.md` (newest entries at top)
 5. `C:\Ai Master\Projects\Athletic Specimen\02-identity\mike-preferences.md`
 
