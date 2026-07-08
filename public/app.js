@@ -22,7 +22,11 @@
 // code re-login (server-verified) is the intended way back in. autoRefreshToken keeps a long
 // active session alive in-tab.
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: false, autoRefreshToken: true },
+  // Identity (2026-07-08, Mike's call): remember REAL sign-ins across reloads (persistSession) + complete
+  // the magic-link/OAuth redirect (detectSessionInUrl). The legacy `nlvb2025` code-login stays EPHEMERAL —
+  // a restored `.local` code session is signed out on load (see onAuthStateChange), so admin gating is
+  // unchanged this slice. autoRefreshToken keeps a real session alive.
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
 const APP_VERSION = '2026.07.08.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
