@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A.S Public Dashboard — 3 shapes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg: oklch(0.985 0.003 75); --card: oklch(0.97 0.003 75); --border: oklch(0.90 0.005 75);
+  --ink: oklch(0.18 0.005 75); --muted: oklch(0.50 0.005 75); --faint: oklch(0.62 0.005 75);
+  --accent: oklch(0.55 0.07 240); --accent-soft: oklch(0.96 0.015 240);
+  --live: oklch(0.55 0.09 150); --live-soft: oklch(0.96 0.03 150);
+  --warn: oklch(0.58 0.10 70); --surface-3: oklch(0.95 0.004 75);
+  --shadow: 0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
+  --shadow-sm: 0 1px 2px oklch(0.18 0.005 75 / .06);
+  --r-sm:8px; --r-md:13px; --r-lg:16px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0;}
+body{font-family:'Inter',system-ui,sans-serif;background:#e8e6e2;color:var(--ink);padding:30px 24px 40px;}
+.stage{display:flex;gap:34px;justify-content:center;align-items:flex-start;flex-wrap:nowrap;}
+.col{width:360px;}
+.cap{font-family:'Sora',sans-serif;font-weight:800;font-size:16px;letter-spacing:-.3px;color:#1b1a18;margin-bottom:3px;}
+.cap .k{color:var(--accent);}
+.capsub{font-size:12.5px;color:#6b6862;line-height:1.42;margin-bottom:14px;min-height:36px;}
+.phone{width:360px;height:772px;background:var(--surface-3);border-radius:38px;border:8px solid #cfccc6;
+  box-shadow:0 14px 34px rgba(0,0,0,.16);overflow:hidden;position:relative;display:flex;flex-direction:column;}
+.scr{flex:1;display:flex;flex-direction:column;background:var(--surface-3);overflow:hidden;}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 9px;}
+.brand{font-family:'Sora',sans-serif;font-weight:800;font-size:14.5px;letter-spacing:-.3px;color:var(--ink);}
+.sportpill{display:flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--border);
+  border-radius:999px;padding:5px 9px 5px 11px;font-size:12.5px;font-weight:600;color:var(--ink);}
+.sportpill svg{width:12px;height:12px;color:var(--muted);}
+.body{flex:1;overflow:hidden;padding:5px 14px 12px;}
+.eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:12px 13px;margin-bottom:11px;}
+.livehead{display:flex;align-items:center;gap:7px;margin-bottom:6px;}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--live);box-shadow:0 0 0 3px var(--live-soft);}
+.here{margin-left:auto;font-size:12px;color:var(--muted);font-weight:600;}
+.game{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid var(--border);}
+.game.first{border-top:none;}
+.gL{display:flex;flex-direction:column;gap:2px;}
+.gnet{font-size:10.5px;color:var(--muted);font-weight:600;}
+.gt{font-size:13px;font-weight:600;color:var(--ink);}
+.gR{display:flex;align-items:center;gap:8px;}
+.gsc{font-family:'Sora',sans-serif;font-weight:700;font-size:15px;color:var(--ink);letter-spacing:-.3px;}
+.livetag{font-size:9px;font-weight:800;letter-spacing:.4px;color:var(--live);background:var(--live-soft);border-radius:5px;padding:2px 5px;}
+.finaltag{font-size:9px;font-weight:800;letter-spacing:.4px;color:var(--muted);background:var(--surface-3);border:1px solid var(--border);border-radius:5px;padding:2px 5px;}
+.nextrow{display:flex;align-items:center;gap:8px;margin-top:9px;padding-top:10px;border-top:1px solid var(--border);font-size:12.5px;color:var(--ink);font-weight:600;}
+.nextrow .chev{margin-left:auto;color:var(--faint);display:flex;}
+.nextrow .chev svg{width:15px;height:15px;}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.tile{background:var(--card);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow-sm);padding:12px 12px 13px;display:flex;flex-direction:column;gap:7px;}
+.ti{width:31px;height:31px;border-radius:9px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;color:var(--accent);}
+.ti svg{width:17px;height:17px;}
+.tt{font-family:'Sora',sans-serif;font-weight:700;font-size:13.5px;color:var(--ink);}
+.ts{font-size:10.5px;color:var(--muted);margin-top:-3px;line-height:1.3;}
+.strip{display:flex;align-items:center;gap:8px;background:var(--live-soft);border:1px solid oklch(0.88 0.05 150);border-radius:var(--r-md);padding:10px 12px;margin-bottom:11px;}
+.strip .t{font-size:12.5px;font-weight:700;color:oklch(0.40 0.09 150);}
+.strip .chev{margin-left:auto;color:oklch(0.45 0.07 150);display:flex;}
+.strip .chev svg{width:15px;height:15px;}
+.strow{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--border);}
+.strow.first{border-top:none;}
+.rk{width:16px;color:var(--muted);font-weight:700;font-size:12px;}
+.tn{font-weight:600;color:var(--ink);font-size:13px;}
+.wl{margin-left:auto;font-family:'Sora',sans-serif;font-weight:700;color:var(--muted);font-size:12.5px;}
+.cta{display:flex;align-items:center;justify-content:center;gap:7px;background:var(--accent);color:#fff;font-weight:700;font-size:14px;border-radius:12px;padding:12px;margin-top:2px;}
+.cta svg{width:17px;height:17px;}
+.sess{display:flex;align-items:center;gap:10px;}
+.sess .ic{width:34px;height:34px;border-radius:10px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;}
+.sess .ic svg{width:18px;height:18px;}
+.sess .l1{font-family:'Sora',sans-serif;font-weight:700;font-size:13.5px;color:var(--ink);}
+.sess .l2{font-size:11.5px;color:var(--muted);}
+.nav{display:flex;border-top:1px solid var(--border);background:var(--card);padding:9px 6px 12px;}
+.nav a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:600;color:var(--faint);text-decoration:none;}
+.nav a svg{width:22px;height:22px;}
+.nav a.on{color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- ============ OPTION A — HYBRID ============ -->
+  <div class="col">
+    <div class="cap">Option A <span class="k">— Hybrid: live top + tiles</span></div>
+    <div class="capsub">Live/now state at the top, then a tile grid for everything else. Slim 3-item nav. Best of both worlds.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr">
+        <div class="brand">Athletic Specimen</div>
+        <div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="body">
+        <div class="card">
+          <div class="livehead"><span class="dot"></span><span class="eyebrow">Live now</span><span class="here">12 here</span></div>
+          <div class="game first"><div class="gL"><span class="gnet">Net 1</span><span class="gt">Ballin &nbsp;vs&nbsp; T &amp; D</span></div><div class="gR"><span class="gsc">21 – 18</span><span class="livetag">LIVE</span></div></div>
+          <div class="game"><div class="gL"><span class="gnet">Net 2</span><span class="gt">Pancake House &nbsp;vs&nbsp; Diggers</span></div><div class="gR"><span class="gsc">15 – 15</span><span class="livetag">LIVE</span></div></div>
+          <div class="nextrow">Your next game: Net 2<span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span></div>
+        </div>
+        <div class="grid">
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/></svg></div><div class="tt">Standings</div><div class="ts">Ballin leads 4–0</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/></svg></div><div class="tt">Bracket</div><div class="ts">Round of 8</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 6.6a3 3 0 0 1 0 5.8"/><path d="M18 20a5.5 5.5 0 0 0-3-4.9"/></svg></div><div class="tt">My Team</div><div class="ts">You're on Diggers</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div><div class="tt">History</div><div class="ts">Past champions</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 9v6"/><path d="M9 12h6"/></svg></div><div class="tt">Register</div><div class="ts">Open · $40/team</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></div><div class="tt">Rules</div><div class="ts">To 15, win by 2</div></div>
+        </div>
+      </div>
+      <div class="nav">
+        <a class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>Home</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>Check In</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Live</a>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ============ OPTION B — LIVE-FIRST ============ -->
+  <div class="col">
+    <div class="cap">Option B <span class="k">— Live-first, slim nav</span></div>
+    <div class="capsub">Home is purely the live/now state (courts, scores, your next game). Everything else lives in a 4-item nav.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr">
+        <div class="brand">Athletic Specimen</div>
+        <div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="body">
+        <div style="display:flex;align-items:baseline;gap:8px;padding:2px 2px 10px;">
+          <span class="eyebrow">Tonight</span><span style="font-size:12.5px;color:var(--muted);font-weight:600;">12 here now</span>
+        </div>
+        <div class="card">
+          <div class="livehead"><span class="dot"></span><span class="eyebrow">On the courts</span></div>
+          <div class="game first"><div class="gL"><span class="gnet">Net 1</span><span class="gt">Ballin &nbsp;vs&nbsp; T &amp; D</span></div><div class="gR"><span class="gsc">21 – 18</span><span class="livetag">LIVE</span></div></div>
+          <div class="game"><div class="gL"><span class="gnet">Net 2</span><span class="gt">Pancake House &nbsp;vs&nbsp; Diggers</span></div><div class="gR"><span class="gsc">15 – 15</span><span class="livetag">LIVE</span></div></div>
+          <div class="game"><div class="gL"><span class="gnet">Net 3</span><span class="gt">Lawn &amp; Order &nbsp;vs&nbsp; Dinks</span></div><div class="gR"><span class="gsc">25 – 20</span><span class="finaltag">FINAL</span></div></div>
+        </div>
+        <div class="card">
+          <div class="livehead"><span class="eyebrow">Your next game</span></div>
+          <div class="nextrow" style="margin-top:0;padding-top:0;border-top:none;">Net 2 · Diggers · starts ~10 min<span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span></div>
+        </div>
+        <div class="card">
+          <div class="sess">
+            <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18"/><path d="M8 2.5v4"/><path d="M16 2.5v4"/></svg></div>
+            <div><div class="l1">Next session · Sun 1:00 PM</div><div class="l2">Woodman Valley Park</div></div>
+          </div>
+          <div class="cta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>Check in</div>
+        </div>
+      </div>
+      <div class="nav">
+        <a class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>Home</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>Check In</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Live</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/></svg>You</a>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ============ OPTION C — PURE TILE HUB ============ -->
+  <div class="col">
+    <div class="cap">Option C <span class="k">— Pure tile hub</span></div>
+    <div class="capsub">Home is an all-tile front door (like your admin hub) with a thin live strip on top. Maximum "find anything".</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr">
+        <div class="brand">Athletic Specimen</div>
+        <div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="body">
+        <div class="strip"><span class="dot"></span><span class="t">2 nets live now · 12 here</span><span class="chev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span></div>
+        <div class="grid">
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg></div><div class="tt">Check In</div><div class="ts">Tap your name</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 5v14"/><path d="M7 9.5v5"/><path d="M17 9.5v5"/></svg></div><div class="tt">Scores</div><div class="ts">2 live now</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/></svg></div><div class="tt">Standings</div><div class="ts">Ballin 4–0</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/></svg></div><div class="tt">Bracket</div><div class="ts">Round of 8</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 6.6a3 3 0 0 1 0 5.8"/><path d="M18 20a5.5 5.5 0 0 0-3-4.9"/></svg></div><div class="tt">My Team</div><div class="ts">Diggers</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div><div class="tt">History</div><div class="ts">Past champions</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 9v6"/><path d="M9 12h6"/></svg></div><div class="tt">Register</div><div class="ts">Open</div></div>
+          <div class="tile"><div class="ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg></div><div class="tt">Rules</div><div class="ts">To 15, win by 2</div></div>
+        </div>
+      </div>
+      <div class="nav">
+        <a class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>Home</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Live</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5.5 21a6.5 6.5 0 0 1 13 0"/></svg>You</a>
+      </div>
+    </div></div>
+  </div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A.S — My Team page (3 shapes)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg: oklch(0.985 0.003 75); --card: oklch(0.97 0.003 75); --border: oklch(0.90 0.005 75);
+  --ink: oklch(0.18 0.005 75); --muted: oklch(0.50 0.005 75); --faint: oklch(0.62 0.005 75);
+  --accent: oklch(0.55 0.07 240); --accent-soft: oklch(0.96 0.015 240); --accent-bd: oklch(0.86 0.03 240);
+  --live: oklch(0.55 0.09 150); --live-soft: oklch(0.96 0.03 150); --live-ink: oklch(0.40 0.09 150);
+  --surface-3: oklch(0.95 0.004 75);
+  --shadow: 0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
+  --shadow-sm: 0 1px 2px oklch(0.18 0.005 75 / .06);
+  --r-sm:8px; --r-md:13px; --r-lg:16px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0;}
+body{font-family:'Inter',system-ui,sans-serif;background:#e8e6e2;color:var(--ink);padding:30px 24px 40px;}
+.stage{display:flex;gap:34px;justify-content:center;align-items:flex-start;flex-wrap:nowrap;}
+.col{width:360px;}
+.cap{font-family:'Sora',sans-serif;font-weight:800;font-size:16px;letter-spacing:-.3px;color:#1b1a18;margin-bottom:3px;}
+.cap .k{color:var(--accent);}
+.capsub{font-size:12.5px;color:#6b6862;line-height:1.42;margin-bottom:14px;min-height:52px;}
+.phone{width:360px;height:772px;background:var(--surface-3);border-radius:38px;border:8px solid #cfccc6;
+  box-shadow:0 14px 34px rgba(0,0,0,.16);overflow:hidden;position:relative;display:flex;flex-direction:column;}
+.scr{flex:1;display:flex;flex-direction:column;background:var(--surface-3);overflow:hidden;position:relative;}
+.hdr{display:flex;align-items:center;gap:11px;padding:15px 16px 10px;}
+.back{width:30px;height:30px;border-radius:9px;background:var(--card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);}
+.back svg{width:16px;height:16px;}
+.htitle{font-family:'Sora',sans-serif;font-weight:800;font-size:15px;color:var(--ink);}
+.sportpill{margin-left:auto;display:flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--border);border-radius:999px;padding:5px 9px 5px 11px;font-size:12px;font-weight:600;color:var(--ink);}
+.sportpill svg{width:11px;height:11px;color:var(--muted);}
+.body{flex:1;overflow:hidden;padding:6px 15px 14px;}
+.eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:13px 14px;margin-bottom:11px;}
+.teamhero{background:var(--accent-soft);border:1px solid var(--accent-bd);border-radius:var(--r-lg);padding:14px 15px;margin-bottom:11px;}
+.th-eye{font-size:10.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--accent);}
+.th-name{font-family:'Sora',sans-serif;font-weight:800;font-size:23px;letter-spacing:-.5px;color:var(--ink);margin-top:4px;line-height:1.05;}
+.th-sub{font-size:12px;color:var(--muted);margin-top:3px;}
+.th-rec{margin-left:auto;font-family:'Sora',sans-serif;font-weight:800;font-size:15px;color:var(--live-ink);background:var(--live-soft);border-radius:8px;padding:3px 10px;}
+.row{display:flex;align-items:center;}
+.upnext{display:flex;align-items:center;gap:10px;background:var(--accent);color:#fff;border-radius:12px;padding:11px 13px;margin-top:12px;}
+.upnext svg{width:17px;height:17px;flex:none;}
+.upnext .t{font-weight:700;font-size:13.5px;}
+.upnext .s{font-size:11px;opacity:.86;margin-top:1px;}
+.upnext .c{margin-left:auto;display:flex;}
+.upnext .c svg{width:16px;height:16px;}
+.stats{display:flex;gap:9px;margin-bottom:11px;}
+.stat{flex:1;background:var(--card);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow-sm);padding:11px 8px;text-align:center;}
+.stat .n{font-family:'Sora',sans-serif;font-weight:800;font-size:19px;color:var(--ink);letter-spacing:-.3px;}
+.stat .l{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:2px;}
+.rrow{display:flex;align-items:center;gap:11px;padding:8px 0;border-top:1px solid var(--border);}
+.rrow.first{border-top:none;}
+.rav{width:31px;height:31px;border-radius:50%;background:var(--surface-3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-family:'Sora',sans-serif;font-weight:700;font-size:10.5px;color:var(--muted);flex:none;}
+.rav.you{background:var(--accent-soft);border-color:var(--accent-bd);color:var(--accent);}
+.rname{font-weight:600;font-size:13.5px;color:var(--ink);}
+.youtag{margin-left:auto;font-size:9.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-bd);border-radius:999px;padding:2px 8px;}
+.glog{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border);font-size:12.5px;}
+.glog.first{border-top:none;}
+.gbadge{width:21px;height:21px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-family:'Sora',sans-serif;font-weight:800;font-size:11px;flex:none;}
+.gb-w{background:var(--live-soft);color:var(--live-ink);}
+.gb-l{background:var(--surface-3);color:var(--faint);border:1px solid var(--border);}
+.glog .vs{color:var(--ink);font-weight:600;}
+.glog .sc{margin-left:auto;font-family:'Sora',sans-serif;font-weight:700;color:var(--muted);font-size:12px;}
+.seg{display:flex;background:var(--surface-3);border:1px solid var(--border);border-radius:11px;padding:3px;margin-bottom:11px;}
+.seg .s{flex:1;text-align:center;padding:8px;font-size:12.5px;font-weight:700;border-radius:8px;color:var(--muted);}
+.seg .s.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow-sm);}
+/* timeline */
+.tl{position:relative;margin-left:6px;padding-left:19px;}
+.tl::before{content:"";position:absolute;left:4px;top:4px;bottom:8px;width:2px;background:var(--border);}
+.tlrow{position:relative;padding:7px 0;display:flex;align-items:center;gap:9px;}
+.tldot{position:absolute;left:-19px;top:12px;width:11px;height:11px;border-radius:50%;background:var(--border);border:2px solid var(--surface-3);}
+.tldot.win{background:var(--live);}
+.tldot.up{background:var(--accent);}
+.tlmain{font-size:13px;font-weight:600;color:var(--ink);}
+.tlsub{font-size:10.5px;color:var(--muted);}
+.tlsc{margin-left:auto;font-family:'Sora',sans-serif;font-weight:700;font-size:12.5px;color:var(--muted);}
+.tlsc.up{color:var(--accent);}
+.chips{display:flex;flex-wrap:wrap;gap:6px;}
+.chip{display:flex;align-items:center;gap:6px;background:var(--surface-3);border:1px solid var(--border);border-radius:999px;padding:4px 10px 4px 5px;font-size:12px;font-weight:600;color:var(--ink);}
+.chip .d{width:20px;height:20px;border-radius:50%;background:var(--card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-family:'Sora',sans-serif;font-weight:700;font-size:9px;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- A — roster-led stacked -->
+  <div class="col">
+    <div class="cap">A <span class="k">— Roster + games, stacked</span></div>
+    <div class="capsub">Team header + next game, then the full named roster, then your games log. Everything visible on one scroll; simplest.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></div><div class="htitle">My Team</div><div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div></div>
+      <div class="body">
+        <div class="teamhero">
+          <div class="row"><span class="th-eye">June 2026 Tournament</span><span class="th-rec">3–1</span></div>
+          <div class="th-name">Diggers</div>
+          <div class="th-sub">Pool B · Seed 2 · +14 diff</div>
+          <div class="upnext"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><div><div class="t">Up next — Net 2</div><div class="s">vs Ballin · ~10 min</div></div><div class="c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></div></div>
+        </div>
+        <div class="card">
+          <span class="eyebrow">Roster</span>
+          <div class="rrow first"><div class="rav you">MO</div><div class="rname">Mike Olas</div><span class="youtag">You</span></div>
+          <div class="rrow"><div class="rav">JR</div><div class="rname">Jordan Reyes</div></div>
+          <div class="rrow"><div class="rav">SA</div><div class="rname">Sam Achterberg</div></div>
+          <div class="rrow"><div class="rav">AL</div><div class="rname">Alex Lin</div></div>
+        </div>
+        <div class="card">
+          <span class="eyebrow">Your games</span>
+          <div class="glog first"><span class="gbadge gb-w">W</span><span class="vs">vs T &amp; D</span><span class="sc">21 – 15</span></div>
+          <div class="glog"><span class="gbadge gb-w">W</span><span class="vs">vs Pancake House</span><span class="sc">21 – 18</span></div>
+          <div class="glog"><span class="gbadge gb-l">L</span><span class="vs">vs Ballin</span><span class="sc">19 – 21</span></div>
+          <div class="glog"><span class="gbadge gb-w">W</span><span class="vs">vs Dinks</span><span class="sc">21 – 12</span></div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- B — stats hero + toggle -->
+  <div class="col">
+    <div class="cap">B <span class="k">— Stat hero + Games/Roster toggle</span></div>
+    <div class="capsub">A stat row up top (record, diff, seed), next game, then a toggle to flip between Games and Roster. Most compact and app-like.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></div><div class="htitle">Diggers</div><div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div></div>
+      <div class="body">
+        <div class="row" style="padding:2px 2px 10px;"><span class="eyebrow">June 2026 Tournament · Pool B</span></div>
+        <div class="stats">
+          <div class="stat"><div class="n">3–1</div><div class="l">Record</div></div>
+          <div class="stat"><div class="n">+14</div><div class="l">Pt diff</div></div>
+          <div class="stat"><div class="n">#2</div><div class="l">Seed</div></div>
+        </div>
+        <div class="teamhero" style="padding:0;background:none;border:none;margin-bottom:11px;">
+          <div class="upnext" style="margin-top:0;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><div><div class="t">Up next — Net 2 vs Ballin</div><div class="s">starts in ~10 min</div></div><div class="c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></div></div>
+        </div>
+        <div class="seg"><div class="s on">Games</div><div class="s">Roster</div></div>
+        <div class="card">
+          <div class="glog first"><span class="gbadge gb-w">W</span><span class="vs">vs T &amp; D</span><span class="sc">21 – 15</span></div>
+          <div class="glog"><span class="gbadge gb-w">W</span><span class="vs">vs Pancake House</span><span class="sc">21 – 18</span></div>
+          <div class="glog"><span class="gbadge gb-l">L</span><span class="vs">vs Ballin</span><span class="sc">19 – 21</span></div>
+          <div class="glog"><span class="gbadge gb-w">W</span><span class="vs">vs Dinks</span><span class="sc">21 – 12</span></div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- C — timeline -->
+  <div class="col">
+    <div class="cap">C <span class="k">— Game timeline</span></div>
+    <div class="capsub">Your team's night as a timeline: the upcoming game at top, then results in order. Roster as name chips at the bottom. Most story-like.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></div><div class="htitle">My Team</div><div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div></div>
+      <div class="body">
+        <div class="teamhero">
+          <div class="row"><span class="th-eye">June 2026 Tournament · Pool B</span><span class="th-rec">3–1</span></div>
+          <div class="th-name">Diggers</div>
+          <div class="th-sub">Seed 2 · +14 diff</div>
+        </div>
+        <div class="card">
+          <span class="eyebrow">Games</span>
+          <div class="tl" style="margin-top:9px;">
+            <div class="tlrow"><span class="tldot up"></span><div><div class="tlmain">Net 2 · vs Ballin</div><div class="tlsub">up next · ~10 min</div></div><span class="tlsc up">up next</span></div>
+            <div class="tlrow"><span class="tldot win"></span><div><div class="tlmain">vs Dinks</div><div class="tlsub">Net 3</div></div><span class="tlsc">W 21–12</span></div>
+            <div class="tlrow"><span class="tldot"></span><div><div class="tlmain">vs Ballin</div><div class="tlsub">Net 1</div></div><span class="tlsc">L 19–21</span></div>
+            <div class="tlrow"><span class="tldot win"></span><div><div class="tlmain">vs Pancake House</div><div class="tlsub">Net 2</div></div><span class="tlsc">W 21–18</span></div>
+            <div class="tlrow"><span class="tldot win"></span><div><div class="tlmain">vs T &amp; D</div><div class="tlsub">Net 1</div></div><span class="tlsc">W 21–15</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <span class="eyebrow">Roster</span>
+          <div class="chips" style="margin-top:9px;">
+            <div class="chip"><span class="d">MO</span>Mike Olas</div>
+            <div class="chip"><span class="d">JR</span>Jordan Reyes</div>
+            <div class="chip"><span class="d">SA</span>Sam Achterberg</div>
+            <div class="chip"><span class="d">AL</span>Alex Lin</div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+</div>
+</body>
+</html>

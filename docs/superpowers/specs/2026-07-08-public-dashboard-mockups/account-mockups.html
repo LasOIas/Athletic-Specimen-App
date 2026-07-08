@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A.S Tournament entry — accounts + spectator (3 shapes)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg: oklch(0.985 0.003 75); --card: oklch(0.97 0.003 75); --border: oklch(0.90 0.005 75);
+  --ink: oklch(0.18 0.005 75); --muted: oklch(0.50 0.005 75); --faint: oklch(0.62 0.005 75);
+  --accent: oklch(0.55 0.07 240); --accent-soft: oklch(0.96 0.015 240); --accent-bd: oklch(0.86 0.03 240);
+  --live: oklch(0.55 0.09 150); --live-soft: oklch(0.96 0.03 150); --live-ink: oklch(0.40 0.09 150);
+  --surface-3: oklch(0.95 0.004 75);
+  --shadow: 0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
+  --shadow-sm: 0 1px 2px oklch(0.18 0.005 75 / .06);
+  --r-sm:8px; --r-md:13px; --r-lg:16px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0;}
+body{font-family:'Inter',system-ui,sans-serif;background:#e8e6e2;color:var(--ink);padding:30px 24px 40px;}
+.stage{display:flex;gap:34px;justify-content:center;align-items:flex-start;flex-wrap:nowrap;}
+.col{width:360px;}
+.cap{font-family:'Sora',sans-serif;font-weight:800;font-size:16px;letter-spacing:-.3px;color:#1b1a18;margin-bottom:3px;}
+.cap .k{color:var(--accent);}
+.capsub{font-size:12.5px;color:#6b6862;line-height:1.42;margin-bottom:14px;min-height:52px;}
+.phone{width:360px;height:772px;background:var(--surface-3);border-radius:38px;border:8px solid #cfccc6;
+  box-shadow:0 14px 34px rgba(0,0,0,.16);overflow:hidden;position:relative;display:flex;flex-direction:column;}
+.scr{flex:1;display:flex;flex-direction:column;background:var(--surface-3);overflow:hidden;position:relative;}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 10px;}
+.brand{font-family:'Sora',sans-serif;font-weight:800;font-size:14.5px;letter-spacing:-.3px;color:var(--ink);}
+.rgrp{display:flex;align-items:center;gap:8px;}
+.sportpill{display:flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--border);
+  border-radius:999px;padding:5px 9px 5px 11px;font-size:12.5px;font-weight:600;color:var(--ink);}
+.sportpill svg{width:12px;height:12px;color:var(--muted);}
+.signpill{background:var(--card);border:1px solid var(--border);border-radius:999px;padding:6px 12px;font-size:12px;font-weight:700;color:var(--accent);}
+.body{flex:1;overflow:hidden;padding:6px 15px 14px;}
+.bodyc{flex:1;display:flex;flex-direction:column;justify-content:center;padding:8px 18px 22px;}
+.eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:13px 14px;margin-bottom:11px;}
+/* tournament hero */
+.thero .h{font-family:'Sora',sans-serif;font-weight:800;font-size:18px;letter-spacing:-.3px;color:var(--ink);margin-top:3px;}
+.thero .sub{font-size:12px;color:var(--muted);margin-top:2px;}
+.thero .lv{display:flex;align-items:center;gap:6px;margin-top:9px;font-size:11.5px;color:var(--live-ink);font-weight:700;}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--live);box-shadow:0 0 0 3px var(--live-soft);}
+/* doors */
+.door{border-radius:var(--r-lg);padding:16px 15px;margin-bottom:12px;display:flex;flex-direction:column;}
+.door-primary{background:var(--accent-soft);border:1px solid var(--accent-bd);}
+.door-ghost{background:var(--card);border:1px solid var(--border);}
+.di{width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;margin-bottom:9px;}
+.door-primary .di{background:var(--accent);color:#fff;}
+.di svg{width:20px;height:20px;}
+.door-ghost .di{background:var(--surface-3);color:var(--muted);}
+.dt{font-family:'Sora',sans-serif;font-weight:700;font-size:15.5px;color:var(--ink);}
+.ds{font-size:12.5px;color:var(--muted);line-height:1.4;margin-top:2px;}
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;border-radius:12px;padding:12px;font-weight:700;font-size:14px;margin-top:12px;}
+.btn svg{width:16px;height:16px;}
+.btn-accent{background:var(--accent);color:#fff;}
+.btn-outline{background:var(--card);border:1px solid var(--border);color:var(--ink);}
+.btn-ghost{background:transparent;border:1px solid var(--accent-bd);color:var(--accent);}
+.gbadge{font-family:'Sora',sans-serif;font-weight:800;font-size:15px;color:var(--muted);}
+/* live board bits (option 2) */
+.strow{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--border);}
+.strow.first{border-top:none;}
+.rk{width:16px;color:var(--muted);font-weight:700;font-size:12px;}
+.tn{font-weight:600;color:var(--ink);font-size:13px;}
+.wl{margin-left:auto;font-family:'Sora',sans-serif;font-weight:700;color:var(--muted);font-size:12.5px;}
+.game{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid var(--border);}
+.game.first{border-top:none;}
+.gnet{font-size:10.5px;color:var(--muted);font-weight:600;}
+.gt{font-size:13px;font-weight:600;color:var(--ink);}
+.gR{display:flex;align-items:center;gap:8px;}
+.gsc{font-family:'Sora',sans-serif;font-weight:700;font-size:15px;color:var(--ink);letter-spacing:-.3px;}
+.livetag{font-size:9px;font-weight:800;letter-spacing:.4px;color:var(--live);background:var(--live-soft);border-radius:5px;padding:2px 5px;}
+.rowlink{display:flex;align-items:center;padding:11px 1px 2px;font-size:13px;font-weight:600;color:var(--ink);}
+.rowlink .c{margin-left:auto;color:var(--faint);display:flex;}
+.rowlink .c svg{width:15px;height:15px;}
+/* dock (option 2) */
+.dock{position:absolute;left:12px;right:12px;bottom:70px;background:var(--accent);color:#fff;border-radius:13px;
+  padding:13px 15px;display:flex;align-items:center;gap:9px;font-weight:700;font-size:13.5px;box-shadow:0 6px 16px rgba(0,0,0,.16);}
+.dock svg{width:17px;height:17px;}
+.dock .c{margin-left:auto;display:flex;}
+/* auth (option 3) */
+.tchip{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;background:var(--accent-soft);border:1px solid var(--accent-bd);
+  border-radius:999px;padding:5px 11px;font-size:11.5px;font-weight:700;color:var(--accent);margin-bottom:14px;}
+.ah{font-family:'Sora',sans-serif;font-weight:800;font-size:22px;letter-spacing:-.5px;color:var(--ink);}
+.asub{font-size:13px;color:var(--muted);line-height:1.45;margin-top:6px;margin-bottom:16px;}
+.field{width:100%;border:1px solid var(--border);background:#fff;border-radius:12px;padding:13px 14px;font-size:14px;color:var(--faint);}
+.note{font-size:11px;color:var(--faint);text-align:center;margin-top:9px;}
+.divider{display:flex;align-items:center;gap:10px;margin:14px 0;color:var(--faint);font-size:11px;font-weight:600;}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--border);}
+.escape{text-align:center;font-size:13px;color:var(--accent);font-weight:700;margin-top:20px;}
+/* nav */
+.nav{display:flex;border-top:1px solid var(--border);background:var(--card);padding:9px 6px 12px;}
+.nav a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:600;color:var(--faint);text-decoration:none;}
+.nav a svg{width:22px;height:22px;}
+.nav a.on{color:var(--accent);}
+.nav.dim{opacity:.5;}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- ===== OPTION 1 — TWO-DOOR WELCOME ===== -->
+  <div class="col">
+    <div class="cap">Option 1 <span class="k">— Two-door welcome</span></div>
+    <div class="capsub">A tournament welcome screen with two equal, clear paths: sign in to play, or spectate. Nobody's confused; neither door is buried.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="brand">Athletic Specimen</div>
+        <div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="body">
+        <div class="card thero">
+          <span class="eyebrow">Tournament</span>
+          <div class="h">June 2026 Tournament</div>
+          <div class="sub">18 teams · Pools underway</div>
+          <div class="lv"><span class="dot"></span>2 nets live now</div>
+        </div>
+        <div class="door door-primary">
+          <div class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m10 8.4 5.5 3.6L10 15.6z" fill="currentColor" stroke="none"/></svg></div>
+          <div class="dt">Playing in this?</div>
+          <div class="ds">Sign in to register and claim your team — your games and record save to your account.</div>
+          <div class="btn btn-accent">Sign in / Create account</div>
+        </div>
+        <div class="door door-ghost">
+          <div class="di"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg></div>
+          <div class="dt">Just watching?</div>
+          <div class="ds">Spectate live — scores, standings and the bracket, no account needed.</div>
+          <div class="btn btn-ghost">Watch live</div>
+        </div>
+      </div>
+      <div class="nav dim">
+        <a class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>Home</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Live</a>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ===== OPTION 2 — SPECTATE-FIRST ===== -->
+  <div class="col">
+    <div class="cap">Option 2 <span class="k">— Spectate-first, sign-in on action</span></div>
+    <div class="capsub">Opens straight into the live board — zero wall to watch (the audit's A.S-wins move). A docked "claim your team" bar; you only sign in when you tap an action.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="brand">Athletic Specimen</div>
+        <div class="rgrp">
+          <div class="signpill">Sign in</div>
+          <div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+        </div>
+      </div>
+      <div class="body">
+        <div style="display:flex;align-items:center;gap:8px;padding:2px 2px 10px;">
+          <span class="eyebrow">June 2026 Tournament</span><span class="dot"></span><span style="font-size:11.5px;color:var(--live-ink);font-weight:700;">LIVE</span>
+        </div>
+        <div class="card">
+          <span class="eyebrow">Standings</span>
+          <div class="strow first"><span class="rk">1</span><span class="tn">Ballin</span><span class="wl">4–0</span></div>
+          <div class="strow"><span class="rk">2</span><span class="tn">Diggers</span><span class="wl">3–1</span></div>
+          <div class="strow"><span class="rk">3</span><span class="tn">Pancake House</span><span class="wl">2–2</span></div>
+        </div>
+        <div class="card">
+          <span class="eyebrow">On the courts</span>
+          <div class="game first"><div><div class="gnet">Net 1</div><div class="gt">Ballin vs T &amp; D</div></div><div class="gR"><span class="gsc">21 – 18</span><span class="livetag">LIVE</span></div></div>
+          <div class="game"><div><div class="gnet">Net 2</div><div class="gt">Pancake House vs Diggers</div></div><div class="gR"><span class="gsc">15 – 15</span><span class="livetag">LIVE</span></div></div>
+        </div>
+        <div class="rowlink">View bracket · Round of 8<span class="c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span></div>
+      </div>
+      <div class="dock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>Playing in this? Claim your team<span class="c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span></div>
+      <div class="nav">
+        <a class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>Home</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Live</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/></svg>Standings</a>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ===== OPTION 3 — ACCOUNT-FIRST + ESCAPE HATCH ===== -->
+  <div class="col">
+    <div class="cap">Option 3 <span class="k">— Account-first, spectate escape hatch</span></div>
+    <div class="capsub">For a tournament you're expected to play, so account creation is the front door (magic-link / Google), with a clear "just watching?" way out at the bottom.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="brand">Athletic Specimen</div>
+        <div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="bodyc">
+        <span class="tchip"><span class="dot" style="box-shadow:none;"></span>June 2026 Tournament</span>
+        <div class="ah">Create your account</div>
+        <div class="asub">Register and claim your team. Your team, games and record save to you — across every tournament.</div>
+        <input class="field" type="text" value="you@email.com" disabled>
+        <div class="btn btn-accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>Continue with email</div>
+        <div class="note">We'll email you a magic link — no password.</div>
+        <div class="divider">or</div>
+        <div class="btn btn-outline"><span class="gbadge">G</span>Continue with Google</div>
+        <div class="escape">Just spectating? Watch live &nbsp;›</div>
+      </div>
+      <div class="nav dim">
+        <a class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>Home</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Live</a>
+      </div>
+    </div></div>
+  </div>
+
+</div>
+</body>
+</html>

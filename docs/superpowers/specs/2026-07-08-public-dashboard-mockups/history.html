@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A.S — History & records (3 shapes)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg: oklch(0.985 0.003 75); --card: oklch(0.97 0.003 75); --border: oklch(0.90 0.005 75);
+  --ink: oklch(0.18 0.005 75); --muted: oklch(0.50 0.005 75); --faint: oklch(0.62 0.005 75);
+  --accent: oklch(0.55 0.07 240); --accent-soft: oklch(0.96 0.015 240); --accent-bd: oklch(0.86 0.03 240);
+  --live: oklch(0.55 0.09 150); --live-soft: oklch(0.96 0.03 150); --live-ink: oklch(0.40 0.09 150);
+  --gold: oklch(0.62 0.08 78); --gold-soft: oklch(0.92 0.06 85); --gold-bd: oklch(0.82 0.07 85);
+  --surface-3: oklch(0.95 0.004 75);
+  --shadow: 0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
+  --shadow-sm: 0 1px 2px oklch(0.18 0.005 75 / .06);
+  --r-sm:8px; --r-md:13px; --r-lg:16px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0;}
+body{font-family:'Inter',system-ui,sans-serif;background:#e8e6e2;color:var(--ink);padding:30px 24px 40px;}
+.stage{display:flex;gap:34px;justify-content:center;align-items:flex-start;flex-wrap:nowrap;}
+.col{width:360px;}
+.cap{font-family:'Sora',sans-serif;font-weight:800;font-size:16px;letter-spacing:-.3px;color:#1b1a18;margin-bottom:3px;}
+.cap .k{color:var(--accent);}
+.capsub{font-size:12.5px;color:#6b6862;line-height:1.42;margin-bottom:14px;min-height:52px;}
+.phone{width:360px;height:772px;background:var(--surface-3);border-radius:38px;border:8px solid #cfccc6;
+  box-shadow:0 14px 34px rgba(0,0,0,.16);overflow:hidden;position:relative;display:flex;flex-direction:column;}
+.scr{flex:1;display:flex;flex-direction:column;background:var(--surface-3);overflow:hidden;position:relative;}
+.hdr{display:flex;align-items:center;gap:11px;padding:15px 16px 10px;}
+.back{width:30px;height:30px;border-radius:9px;background:var(--card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);}
+.back svg{width:16px;height:16px;}
+.htitle{font-family:'Sora',sans-serif;font-weight:800;font-size:15px;color:var(--ink);}
+.sportpill{margin-left:auto;display:flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--border);border-radius:999px;padding:5px 9px 5px 11px;font-size:12px;font-weight:600;color:var(--ink);}
+.sportpill svg{width:11px;height:11px;color:var(--muted);}
+.body{flex:1;overflow:hidden;padding:6px 15px 14px;}
+.eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:12px 14px;margin-bottom:11px;}
+.seg{display:flex;background:var(--surface-3);border:1px solid var(--border);border-radius:11px;padding:3px;margin-bottom:12px;}
+.seg .s{flex:1;text-align:center;padding:8px 4px;font-size:12px;font-weight:700;border-radius:8px;color:var(--muted);}
+.seg .s.on{background:var(--card);color:var(--ink);box-shadow:var(--shadow-sm);}
+.yourrec{display:flex;align-items:center;gap:13px;background:var(--accent-soft);border:1px solid var(--accent-bd);border-radius:var(--r-lg);padding:13px 15px;margin-bottom:11px;}
+.yourrec .ic{width:38px;height:38px;border-radius:11px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;flex:none;}
+.yourrec .ic svg{width:20px;height:20px;}
+.yourrec .l1{font-family:'Sora',sans-serif;font-weight:700;font-size:14px;color:var(--ink);}
+.yourrec .l2{font-size:11.5px;color:var(--muted);margin-top:2px;}
+.pt{display:flex;align-items:center;gap:11px;padding:10px 0;border-top:1px solid var(--border);}
+.pt.first{border-top:none;}
+.pt .nm{font-weight:600;font-size:13.5px;color:var(--ink);}
+.pt .meta{font-size:11px;color:var(--muted);margin-top:2px;}
+.plc{margin-left:auto;font-size:9.5px;font-weight:800;letter-spacing:.3px;border-radius:999px;padding:3px 9px;flex:none;}
+.plc.champ{background:var(--gold-soft);color:oklch(0.42 0.08 72);border:1px solid var(--gold-bd);}
+.plc.fin{background:var(--surface-3);color:var(--muted);border:1px solid var(--border);}
+.plc.mid{background:var(--surface-3);color:var(--faint);border:1px solid var(--border);}
+.rec2{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--border);}
+.rec2.first{border-top:none;}
+.rec2 .ic{width:32px;height:32px;border-radius:9px;background:var(--gold-soft);color:var(--gold);display:flex;align-items:center;justify-content:center;flex:none;}
+.rec2 .ic svg{width:17px;height:17px;}
+.rec2 .l{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:700;}
+.rec2 .v{font-family:'Sora',sans-serif;font-weight:700;font-size:14px;color:var(--ink);margin-top:1px;}
+.rec2 .n{margin-left:auto;font-family:'Sora',sans-serif;font-weight:800;font-size:18px;color:var(--ink);}
+.cw{display:flex;align-items:center;gap:11px;padding:9px 0;border-top:1px solid var(--border);}
+.cw.first{border-top:none;}
+.cw .dt{font-size:11px;color:var(--muted);width:70px;flex:none;}
+.cw .tr{color:var(--gold);display:flex;flex:none;} .cw .tr svg{width:16px;height:16px;}
+.cw .tm{font-weight:600;font-size:13.5px;color:var(--ink);}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- A — past tournaments chronological -->
+  <div class="col">
+    <div class="cap">A <span class="k">— Past tournaments (your placement)</span></div>
+    <div class="capsub">Your all-time record up top, then a chronological list of past tournaments with each champion and how YOU placed. Personal + scannable.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></div><div class="htitle">History</div><div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div></div>
+      <div class="body">
+        <div class="yourrec"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 4h12v5a6 6 0 0 1-12 0z"/><path d="M18 5h2.5v1.5a2.5 2.5 0 0 1-2.5 2.5"/><path d="M6 5H3.5v1.5A2.5 2.5 0 0 0 6 9.5"/></svg></div><div><div class="l1">You — 8 tournaments</div><div class="l2">1 title · 2 finals · 63% win rate</div></div></div>
+        <div class="card">
+          <span class="eyebrow">Past tournaments</span>
+          <div class="pt first"><div><div class="nm">May 2026 Open</div><div class="meta">Champion · Ballin</div></div><span class="plc mid">3rd</span></div>
+          <div class="pt"><div><div class="nm">April 2026 Slam</div><div class="meta">Champion · Diggers</div></div><span class="plc champ">Champion</span></div>
+          <div class="pt"><div><div class="nm">March 2026 Kickoff</div><div class="meta">Champion · Bump City</div></div><span class="plc mid">5th</span></div>
+          <div class="pt"><div><div class="nm">February 2026</div><div class="meta">Champion · Block Stars</div></div><span class="plc fin">Finalist</span></div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- B — hall of fame / records first -->
+  <div class="col">
+    <div class="cap">B <span class="k">— Hall of Fame first</span></div>
+    <div class="capsub">Leads with all-time records and a champions wall — the prestige. Past tournaments below. Makes the league feel like it has history.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></div><div class="htitle">Records</div><div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div></div>
+      <div class="body">
+        <div class="card">
+          <span class="eyebrow">All-time records</span>
+          <div class="rec2 first"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 4h12v5a6 6 0 0 1-12 0z"/><path d="M18 5h2.5v1.5a2.5 2.5 0 0 1-2.5 2.5"/><path d="M6 5H3.5v1.5A2.5 2.5 0 0 0 6 9.5"/></svg></div><div><div class="l">Most titles</div><div class="v">Ballin</div></div><span class="n">4</span></div>
+          <div class="rec2"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg></div><div><div class="l">Most wins</div><div class="v">Diggers</div></div><span class="n">28</span></div>
+          <div class="rec2"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z" fill="currentColor" stroke="none"/></svg></div><div><div class="l">Longest streak</div><div class="v">Block Stars</div></div><span class="n">9</span></div>
+        </div>
+        <div class="card">
+          <span class="eyebrow">Champions</span>
+          <div class="cw first"><span class="dt">May 2026</span><span class="tr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 4h12v5a6 6 0 0 1-12 0z"/></svg></span><span class="tm">Ballin</span></div>
+          <div class="cw"><span class="dt">Apr 2026</span><span class="tr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 4h12v5a6 6 0 0 1-12 0z"/></svg></span><span class="tm">Diggers</span></div>
+          <div class="cw"><span class="dt">Mar 2026</span><span class="tr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 4h12v5a6 6 0 0 1-12 0z"/></svg></span><span class="tm">Bump City</span></div>
+          <div class="cw"><span class="dt">Feb 2026</span><span class="tr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 4h12v5a6 6 0 0 1-12 0z"/></svg></span><span class="tm">Block Stars</span></div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- C — tabbed -->
+  <div class="col">
+    <div class="cap">C <span class="k">— Tabbed (Tournaments / Leaderboard / Champions)</span></div>
+    <div class="capsub">One screen, three tabs: past tournaments, an all-time leaderboard, and the champions wall. Most comprehensive; everything one tap away.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></div><div class="htitle">History &amp; records</div><div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div></div>
+      <div class="body">
+        <div class="seg"><div class="s on">Tournaments</div><div class="s">Leaderboard</div><div class="s">Champions</div></div>
+        <div class="card">
+          <div class="pt first"><div><div class="nm">May 2026 Open</div><div class="meta">Champion · Ballin · 16 teams</div></div><span class="plc mid">3rd</span></div>
+          <div class="pt"><div><div class="nm">April 2026 Slam</div><div class="meta">Champion · Diggers · 20 teams</div></div><span class="plc champ">Champion</span></div>
+          <div class="pt"><div><div class="nm">March 2026 Kickoff</div><div class="meta">Champion · Bump City · 12 teams</div></div><span class="plc mid">5th</span></div>
+          <div class="pt"><div><div class="nm">February 2026</div><div class="meta">Champion · Block Stars · 18 teams</div></div><span class="plc fin">Finalist</span></div>
+          <div class="pt"><div><div class="nm">January 2026 Winter</div><div class="meta">Champion · Kill Committee · 14 teams</div></div><span class="plc mid">7th</span></div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+</div>
+</body>
+</html>

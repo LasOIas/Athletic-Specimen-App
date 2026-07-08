@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A.S — sign-in treatment (3 variations on the spectate-first board)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg: oklch(0.985 0.003 75); --card: oklch(0.97 0.003 75); --border: oklch(0.90 0.005 75);
+  --ink: oklch(0.18 0.005 75); --muted: oklch(0.50 0.005 75); --faint: oklch(0.62 0.005 75);
+  --accent: oklch(0.55 0.07 240); --accent-soft: oklch(0.96 0.015 240); --accent-bd: oklch(0.86 0.03 240);
+  --live: oklch(0.55 0.09 150); --live-soft: oklch(0.96 0.03 150); --live-ink: oklch(0.40 0.09 150);
+  --surface-3: oklch(0.95 0.004 75);
+  --shadow: 0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
+  --shadow-sm: 0 1px 2px oklch(0.18 0.005 75 / .06);
+  --r-sm:8px; --r-md:13px; --r-lg:16px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0;}
+body{font-family:'Inter',system-ui,sans-serif;background:#e8e6e2;color:var(--ink);padding:30px 24px 40px;}
+.stage{display:flex;gap:34px;justify-content:center;align-items:flex-start;flex-wrap:nowrap;}
+.col{width:360px;}
+.cap{font-family:'Sora',sans-serif;font-weight:800;font-size:16px;letter-spacing:-.3px;color:#1b1a18;margin-bottom:3px;}
+.cap .k{color:var(--accent);}
+.capsub{font-size:12.5px;color:#6b6862;line-height:1.42;margin-bottom:14px;min-height:52px;}
+.phone{width:360px;height:730px;background:var(--surface-3);border-radius:38px;border:8px solid #cfccc6;
+  box-shadow:0 14px 34px rgba(0,0,0,.16);overflow:hidden;position:relative;display:flex;flex-direction:column;}
+.scr{flex:1;display:flex;flex-direction:column;background:var(--surface-3);overflow:hidden;position:relative;}
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:16px 16px 10px;}
+.brand{font-family:'Sora',sans-serif;font-weight:800;font-size:14.5px;letter-spacing:-.3px;color:var(--ink);}
+.rgrp{display:flex;align-items:center;gap:8px;}
+.sportpill{display:flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--border);
+  border-radius:999px;padding:5px 9px 5px 11px;font-size:12.5px;font-weight:600;color:var(--ink);}
+.sportpill svg{width:12px;height:12px;color:var(--muted);}
+.avic{width:33px;height:33px;border-radius:50%;background:var(--card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--muted);}
+.avic svg{width:18px;height:18px;}
+.body{flex:1;overflow:hidden;padding:6px 15px 14px;}
+.eyebrow{font-size:10.5px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);}
+.titlerow{display:flex;align-items:center;gap:8px;padding:2px 2px 11px;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:13px 14px;margin-bottom:11px;}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--live);box-shadow:0 0 0 3px var(--live-soft);}
+.strow{display:flex;align-items:center;gap:10px;padding:6px 0;border-top:1px solid var(--border);}
+.strow.first{border-top:none;}
+.rk{width:16px;color:var(--muted);font-weight:700;font-size:12px;}
+.tn{font-weight:600;color:var(--ink);font-size:13px;}
+.wl{margin-left:auto;font-family:'Sora',sans-serif;font-weight:700;color:var(--muted);font-size:12.5px;}
+.claimchip{margin-left:auto;font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent-bd);border-radius:999px;padding:3px 9px;}
+.game{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid var(--border);}
+.game.first{border-top:none;}
+.gnet{font-size:10.5px;color:var(--muted);font-weight:600;}
+.gt{font-size:13px;font-weight:600;color:var(--ink);}
+.gR{display:flex;align-items:center;gap:8px;}
+.gsc{font-family:'Sora',sans-serif;font-weight:700;font-size:15px;color:var(--ink);letter-spacing:-.3px;}
+.livetag{font-size:9px;font-weight:800;letter-spacing:.4px;color:var(--live);background:var(--live-soft);border-radius:5px;padding:2px 5px;}
+.rowlink{display:flex;align-items:center;padding:11px 1px 2px;font-size:13px;font-weight:600;color:var(--ink);}
+.rowlink .c{margin-left:auto;color:var(--faint);display:flex;}
+.rowlink .c svg{width:15px;height:15px;}
+/* A — inline soft claim row */
+.claimrow{display:flex;align-items:center;gap:11px;background:var(--card);border:1px solid var(--border);border-radius:var(--r-md);padding:11px 13px;margin-bottom:11px;}
+.claimrow .ic{width:30px;height:30px;border-radius:9px;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;flex:none;}
+.claimrow .ic svg{width:16px;height:16px;}
+.claimrow .t{font-size:12.5px;font-weight:700;color:var(--ink);}
+.claimrow .s{font-size:11px;color:var(--muted);margin-top:1px;}
+.claimrow .c{margin-left:auto;color:var(--faint);display:flex;}
+.claimrow .c svg{width:16px;height:16px;}
+/* C — hero card with integrated claim */
+.thero .h{font-family:'Sora',sans-serif;font-weight:800;font-size:18px;letter-spacing:-.3px;color:var(--ink);margin-top:3px;}
+.thero .sub{font-size:12px;color:var(--muted);margin-top:2px;}
+.thero .claimbtn{display:flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--accent-bd);background:var(--accent-soft);color:var(--accent);
+  border-radius:11px;padding:10px;font-weight:700;font-size:13px;margin-top:12px;}
+.thero .claimbtn svg{width:15px;height:15px;}
+.nav{display:flex;border-top:1px solid var(--border);background:var(--card);padding:9px 6px 12px;}
+.nav a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;font-weight:600;color:var(--faint);text-decoration:none;}
+.nav a svg{width:22px;height:22px;}
+.nav a.on{color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- A — inline soft prompt -->
+  <div class="col">
+    <div class="cap">A <span class="k">— Inline, in the board</span></div>
+    <div class="capsub">No header button, no floating bar. A quiet "claim your team" row sits in the content flow. Present but not pushy.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="brand">Athletic Specimen</div>
+        <div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="body">
+        <div class="titlerow"><span class="eyebrow">June 2026 Tournament</span><span class="dot"></span><span style="font-size:11.5px;color:var(--live-ink);font-weight:700;">LIVE</span></div>
+        <div class="claimrow">
+          <div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg></div>
+          <div><div class="t">Playing tonight?</div><div class="s">Claim your team to follow it</div></div>
+          <div class="c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></div>
+        </div>
+        <div class="card">
+          <span class="eyebrow">Standings</span>
+          <div class="strow first"><span class="rk">1</span><span class="tn">Ballin</span><span class="wl">4–0</span></div>
+          <div class="strow"><span class="rk">2</span><span class="tn">Diggers</span><span class="wl">3–1</span></div>
+          <div class="strow"><span class="rk">3</span><span class="tn">Pancake House</span><span class="wl">2–2</span></div>
+        </div>
+        <div class="card">
+          <span class="eyebrow">On the courts</span>
+          <div class="game first"><div><div class="gnet">Net 1</div><div class="gt">Ballin vs T &amp; D</div></div><div class="gR"><span class="gsc">21 – 18</span><span class="livetag">LIVE</span></div></div>
+          <div class="game"><div><div class="gnet">Net 2</div><div class="gt">Pancake House vs Diggers</div></div><div class="gR"><span class="gsc">15 – 15</span><span class="livetag">LIVE</span></div></div>
+        </div>
+      </div>
+      <div class="nav">
+        <a class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>Home</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Live</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/></svg>Standings</a>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- B — header person icon only -->
+  <div class="col">
+    <div class="cap">B <span class="k">— Just a person icon</span></div>
+    <div class="capsub">The board stays completely pure. Sign-in is a single quiet avatar icon top-right; tap it to sign in / claim. Sign-in gets out of the way entirely.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="brand">Athletic Specimen</div>
+        <div class="rgrp">
+          <div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+          <div class="avic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></div>
+        </div>
+      </div>
+      <div class="body">
+        <div class="titlerow"><span class="eyebrow">June 2026 Tournament</span><span class="dot"></span><span style="font-size:11.5px;color:var(--live-ink);font-weight:700;">LIVE</span></div>
+        <div class="card">
+          <span class="eyebrow">Standings</span>
+          <div class="strow first"><span class="rk">1</span><span class="tn">Ballin</span><span class="wl">4–0</span></div>
+          <div class="strow"><span class="rk">2</span><span class="tn">Diggers</span><span class="wl">3–1</span></div>
+          <div class="strow"><span class="rk">3</span><span class="tn">Pancake House</span><span class="wl">2–2</span></div>
+          <div class="strow"><span class="rk">4</span><span class="tn">T &amp; D</span><span class="wl">2–2</span></div>
+        </div>
+        <div class="card">
+          <span class="eyebrow">On the courts</span>
+          <div class="game first"><div><div class="gnet">Net 1</div><div class="gt">Ballin vs T &amp; D</div></div><div class="gR"><span class="gsc">21 – 18</span><span class="livetag">LIVE</span></div></div>
+          <div class="game"><div><div class="gnet">Net 2</div><div class="gt">Pancake House vs Diggers</div></div><div class="gR"><span class="gsc">15 – 15</span><span class="livetag">LIVE</span></div></div>
+        </div>
+        <div class="rowlink">View bracket · Round of 8<span class="c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span></div>
+      </div>
+      <div class="nav">
+        <a class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>Home</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Live</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/></svg>Standings</a>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- C — claim built into the tournament hero -->
+  <div class="col">
+    <div class="cap">C <span class="k">— In the tournament card</span></div>
+    <div class="capsub">The tournament header card owns the account step: "claim your team" is a soft button inside it, tied to this tournament's context. No header button, no floating bar.</div>
+    <div class="phone"><div class="scr">
+      <div class="hdr"><div class="brand">Athletic Specimen</div>
+        <div class="sportpill">Volleyball <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div>
+      </div>
+      <div class="body">
+        <div class="card thero">
+          <span class="eyebrow">Tournament · Live</span>
+          <div class="h">June 2026 Tournament</div>
+          <div class="sub">18 teams · Pools underway · 2 nets live</div>
+          <div class="claimbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>Playing? Claim your team</div>
+        </div>
+        <div class="card">
+          <span class="eyebrow">Standings</span>
+          <div class="strow first"><span class="rk">1</span><span class="tn">Ballin</span><span class="wl">4–0</span></div>
+          <div class="strow"><span class="rk">2</span><span class="tn">Diggers</span><span class="wl">3–1</span></div>
+          <div class="strow"><span class="rk">3</span><span class="tn">Pancake House</span><span class="wl">2–2</span></div>
+        </div>
+        <div class="card">
+          <span class="eyebrow">On the courts</span>
+          <div class="game first"><div><div class="gnet">Net 1</div><div class="gt">Ballin vs T &amp; D</div></div><div class="gR"><span class="gsc">21 – 18</span><span class="livetag">LIVE</span></div></div>
+          <div class="game"><div><div class="gnet">Net 2</div><div class="gt">Pancake House vs Diggers</div></div><div class="gR"><span class="gsc">15 – 15</span><span class="livetag">LIVE</span></div></div>
+        </div>
+      </div>
+      <div class="nav">
+        <a class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>Home</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Live</a>
+        <a><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/></svg>Standings</a>
+      </div>
+    </div></div>
+  </div>
+
+</div>
+</body>
+</html>
