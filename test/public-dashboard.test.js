@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const pure = require('../public/pure.js');
-const { shapeStandingsByPool } = pure;
+const { shapeStandingsByPool, computeAllTimeLeaderboard } = pure;
 
 describe('shapeStandingsByPool', () => {
   it('ranks teams within their own pool and carries the pool label + derived nets', () => {
@@ -46,5 +46,27 @@ describe('shapeStandingsByPool', () => {
   it('handles empty / null inputs without throwing', () => {
     expect(shapeStandingsByPool([], [], [])).toEqual([]);
     expect(shapeStandingsByPool(null, null, null)).toEqual([]);
+  });
+});
+
+describe('computeAllTimeLeaderboard', () => {
+  it('counts titles per champion team across completed tournaments (most first)', () => {
+    const history = [
+      { champion: { teamId: 'a', name: 'Ballin' } },
+      { champion: { teamId: 'a', name: 'Ballin' } },
+      { champion: { teamId: 'b', name: 'Diggers' } },
+      { champion: null }, // a completed tournament with no recorded champion is ignored
+    ];
+    const out = computeAllTimeLeaderboard(history);
+    expect(out.mostTitles).toEqual({ name: 'Ballin', count: 2 });
+    // wins/streak need per-match history not loaded in this slice — honestly null
+    expect(out.mostWins).toBeNull();
+    expect(out.longestStreak).toBeNull();
+  });
+
+  it('returns null mostTitles when there are no champions', () => {
+    expect(computeAllTimeLeaderboard([]).mostTitles).toBeNull();
+    expect(computeAllTimeLeaderboard(null).mostTitles).toBeNull();
+    expect(computeAllTimeLeaderboard([{ champion: null }]).mostTitles).toBeNull();
   });
 });

@@ -315,6 +315,23 @@ function shapeStandingsByPool(pools, teams, matches) {
   });
 }
 
+// Slice 1 (2026-07-08): all-time leaderboard for the public History page. Titles ARE fully derivable from
+// the per-tournament champions; wins/streak need per-match history that isn't loaded this slice, so they are
+// returned null (the UI shows an honest "needs full match history" placeholder). Consumed by buildHistoryPageHTML.
+// history: [{ champion: {teamId,name}|null, ... }]
+function computeAllTimeLeaderboard(history) {
+  const titles = {};
+  (history || []).forEach((h) => {
+    if (!h || !h.champion) return;
+    const c = h.champion;
+    titles[c.teamId] = titles[c.teamId] || { name: c.name || '', count: 0 };
+    titles[c.teamId].count += 1;
+  });
+  const ranked = Object.keys(titles).map((k) => titles[k])
+    .sort((x, y) => (y.count - x.count) || String(x.name).localeCompare(String(y.name)));
+  return { mostTitles: ranked[0] || null, mostWins: null, longestStreak: null };
+}
+
 // Re-rank tied groups (same primary key AND same point-diff) by head-to-head record
 // WITHIN the tied set, then point-diff, then deterministic team id. Group resolution
 // (vs a pairwise comparator) stays consistent even in a 3-cycle (A>B>C>A).
@@ -954,6 +971,6 @@ if (typeof module !== "undefined" && module.exports) {
     splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
     bracketGameNumbers, bracketSourceLabel,
     shouldAutoPromptBracket, assignBracketNets,
-    shapeStandingsByPool
+    shapeStandingsByPool, computeAllTimeLeaderboard
   };
 }

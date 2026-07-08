@@ -7418,9 +7418,74 @@ function buildStandingsPageHTML() {
   return `${header}${toggle}${body}`;
 }
 
-// Filled in Task 7.
+// Public History (dashboard remake, Slice 1) — locked mockup Option C: tabbed Tournaments / Leaderboard /
+// Champions. Champions + titles are REAL (per-tournament champion via computeChampion); "most wins / streak"
+// and the personal "your record" card need per-match + claimed-player history from later slices, shown as
+// honest placeholders. Data = loadTournamentHistory() (lazy, read-only anon, cached on state).
+function pdFormatMonthYear(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
+// Lazy, read-only: for each COMPLETED tournament, load its teams + main matches once and derive the champion.
+// Cached on state.tournamentHistory (undefined = not loaded, [] = loaded-empty). Never blocks boot; on any
+// error it degrades to [] so History just shows its empty state.
+async function loadTournamentHistory() {
+  if (state.tournamentHistoryLoading) return;
+  state.tournamentHistoryLoading = true;
+  try {
+    const completed = (state.tournaments || []).filter((t) => t.status === 'completed');
+    const rows = await Promise.all(completed.map(async (t) => {
+      const [teams, main] = await Promise.all([tdbListTeams(t.id), tdbListMatches(t.id, 'main')]);
+      return {
+        id: t.id,
+        name: t.name || 'Tournament',
+        date: t.created_at || t.updated_at || null,
+        teamCount: (teams || []).length,
+        champion: computeChampion(main || [], teams || []),
+      };
+    }));
+    rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))); // newest first
+    state.tournamentHistory = rows;
+  } catch (e) {
+    state.tournamentHistory = [];
+  } finally {
+    state.tournamentHistoryLoading = false;
+  }
+}
+
 function buildHistoryPageHTML() {
-  return '<div class="pd-empty">History will appear here.</div>';
+  const header = pdPageHeaderHTML('History & records');
+  const tab = ['tournaments', 'leaderboard', 'champions'].includes(pdHistoryTab) ? pdHistoryTab : 'tournaments';
+  const seg = `<div class="pd-seg">
+    <button type="button" class="pd-seg-s ${tab === 'tournaments' ? 'pd-on' : ''}" data-pd-history-tab="tournaments">Tournaments</button>
+    <button type="button" class="pd-seg-s ${tab === 'leaderboard' ? 'pd-on' : ''}" data-pd-history-tab="leaderboard">Leaderboard</button>
+    <button type="button" class="pd-seg-s ${tab === 'champions' ? 'pd-on' : ''}" data-pd-history-tab="champions">Champions</button>
+  </div>`;
+  const hist = state.tournamentHistory;
+  if (typeof hist === 'undefined') return `${header}${seg}<div class="pd-empty">Loading&hellip;</div>`;
+  if (!hist.length) return `${header}${seg}<div class="pd-empty">Past tournaments show up here after your first completed tournament.</div>`;
+
+  const TROPHY = '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 4h12v5a6 6 0 0 1-12 0z"/>';
+  let body = '';
+  if (tab === 'tournaments') {
+    body = `<div class="pd-card">${hist.map((h, i) => `<div class="pd-pt ${i === 0 ? 'pd-first' : ''}"><div><div class="pd-nm">${escapeHTML(h.name)}</div><div class="pd-meta">${h.champion ? ('Champion · ' + escapeHTML(h.champion.name || '')) : 'No champion recorded'}${h.teamCount ? (' · ' + h.teamCount + ' teams') : ''}</div></div></div>`).join('')}</div>`;
+  } else if (tab === 'leaderboard') {
+    const lb = computeAllTimeLeaderboard(hist);
+    const titleRow = lb.mostTitles
+      ? `<div class="pd-rec2 pd-first"><div class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${TROPHY}</svg></div><div><div class="pd-l">Most titles</div><div class="pd-v">${escapeHTML(lb.mostTitles.name)}</div></div><span class="pd-n">${lb.mostTitles.count}</span></div>`
+      : '';
+    const soon = (label, first) => `<div class="pd-rec2 ${first ? 'pd-first' : ''}"><div class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg></div><div><div class="pd-l">${escapeHTML(label)}</div><div class="pd-v" style="color:var(--muted);font-weight:600;">Coming soon</div></div><span class="pd-n">&mdash;</span></div>`;
+    body = `<div class="pd-card"><span class="pd-eyebrow">All-time records</span>${titleRow}${soon('Most wins', !titleRow)}${soon('Longest streak', false)}</div>`;
+  } else {
+    const champs = hist.filter((h) => h.champion);
+    body = champs.length
+      ? `<div class="pd-card"><span class="pd-eyebrow">Champions</span>${champs.map((h, i) => `<div class="pd-cw ${i === 0 ? 'pd-first' : ''}"><span class="pd-dt">${escapeHTML(pdFormatMonthYear(h.date))}</span><span class="pd-tr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${TROPHY}</svg></span><span class="pd-tm">${escapeHTML(h.champion.name || '')}</span></div>`).join('')}</div>`
+      : `<div class="pd-empty">No champions recorded yet.</div>`;
+  }
+  return `${header}${seg}${body}`;
 }
 
 function renderPublicShell() {
@@ -8905,6 +8970,15 @@ function activateMainTab(tab) {
   if ((tab === 'manage' || tab === 'live') && !state.tournamentMode) tab = 'dashboard';
   activeMainTab = tab;
   sessionStorage.setItem(currentTabKey(), tab);
+  // Slice 1: lazy-load completed-tournament history the first time History opens (read-only, cached on state).
+  if (tab === 'history' && typeof state.tournamentHistory === 'undefined' && !state.tournamentHistoryLoading) {
+    loadTournamentHistory().then(() => {
+      if (activeMainTab === 'history') {
+        const c = document.querySelector('#tab-history .container');
+        if (c) c.innerHTML = buildHistoryPageHTML();
+      }
+    });
+  }
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
   // Reliability fix (2026-06-20): expose the current tab to assistive tech, not just a visual .active
   // class (this is the single place nav active state is set — first paint via activateMainTab(activeMainTab)
