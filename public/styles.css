@@ -2975,6 +2975,8 @@ body.copilot-typing #bottom-nav { display: none; }
 
 /* -- shared card + eyebrow -- */
 .pd-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 14px 15px; margin-bottom: 12px; }
+/* frosted glass ONLY on Home (so the logo reads through there); other tabs keep solid readable cards */
+.home-screen .pd-card { background: oklch(0.98 0.004 75 / 0.30); -webkit-backdrop-filter: blur(3px) saturate(1.05); backdrop-filter: blur(3px) saturate(1.05); border: 1px solid oklch(1 0 0 / 0.6); }
 .pd-eyebrow { display: block; font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--muted); }
 
 /* -- header pieces (container layout wired in the header task) -- */
@@ -2984,9 +2986,36 @@ body.copilot-typing #bottom-nav { display: none; }
 .pd-avic svg { width: 18px; height: 18px; flex-shrink: 0; }
 .pd-brand { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15.5px; letter-spacing: -.3px; color: var(--ink); }
 /* official A.S logo — the single brand mark everywhere (public header, admin header, check-in) */
-.as-logo { height: 34px; width: auto; display: block; }
+.as-logo { height: 50px; width: auto; display: block; }
 .ad-brand { display: inline-flex; align-items: center; }
 .ad-brand-grp { margin-left: 8px; font-weight: 600; font-size: 13px; color: var(--muted); }
+/* Mike's pick (2026-07-08): full-bleed logo behind a soft gradient scrim + text wordmark header */
+.pd-watermark {
+  position: fixed;
+  display: none;
+  left: 50%; top: -3%;
+  transform: translateX(-50%);
+  height: 82vh; width: auto;
+  opacity: 0.72;
+  z-index: -2;
+  pointer-events: none;
+  -webkit-user-select: none; user-select: none;
+}
+.pd-scrim {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  display: none;
+  background: linear-gradient(180deg,
+    oklch(0.95 0.004 75 / 0.55) 0%,
+    oklch(0.95 0.004 75 / 0.22) 9%,
+    oklch(0.95 0.004 75 / 0.08) 22%,
+    oklch(0.95 0.004 75 / 0.08) 100%);
+}
+/* the Home logo backdrop shows ONLY on Home (body.pd-home-active toggled in activateMainTab); other tabs stay clean + readable */
+body.pd-home-active .pd-watermark { display: block; }
+body.pd-home-active .pd-scrim { display: block; }
+.pd-wordmark { display: flex; flex-direction: column; gap: 2px; }
+.pd-wm-1 { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15px; letter-spacing: .13em; color: var(--ink); line-height: 1; }
+.pd-wm-2 { font-weight: 600; font-size: 9px; letter-spacing: .30em; color: var(--faint); line-height: 1; }
 .pd-hgrp { display: flex; align-items: center; gap: 9px; }
 /* public dashboard header layout — id-qualified so it beats the base #app-header + its @media centering */
 #app-header.pd-header { justify-content: space-between; flex-wrap: wrap; row-gap: 3px; }
@@ -3001,7 +3030,7 @@ body.copilot-typing #bottom-nav { display: none; }
 
 /* -- tile grid (Home) -- */
 .pd-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
-.pd-tile { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-sm); padding: 13px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; }
+.pd-tile { background: oklch(0.98 0.004 75 / 0.30); -webkit-backdrop-filter: blur(3px) saturate(1.05); backdrop-filter: blur(3px) saturate(1.05); border: 1px solid oklch(1 0 0 / 0.6); border-radius: var(--r-md); box-shadow: var(--shadow-sm); padding: 13px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; }
 .pd-tile:active { background: var(--surface-3); }
 .pd-ti { width: 33px; height: 33px; border-radius: 9px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; color: var(--accent); }
 .pd-ti svg { width: 18px; height: 18px; }
