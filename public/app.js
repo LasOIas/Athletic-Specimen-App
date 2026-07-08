@@ -27,6 +27,8 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, 
 const APP_VERSION = '2026.06.30.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
+let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
+let pdHistoryTab = 'tournaments'; // public History page: 'tournaments' | 'leaderboard' | 'champions'
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
 const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
@@ -7365,12 +7367,60 @@ function buildPublicHeaderHTML() {
 }
 
 // Slice 1 sub-pages reached from Home tiles (no bottom-nav button; nav highlight anchors to Home).
-// Stubs — fully implemented in Task 6 (Standings) / Task 7 (History).
-function buildStandingsPageHTML() {
-  return '<div class="pd-empty" style="padding:40px 16px;text-align:center;color:var(--muted);">Standings will appear here.</div>';
+// Shared page header: a back-to-Home chevron + the page title (mirrors the mockup's per-page header).
+function pdPageHeaderHTML(title) {
+  return `<div class="pd-pagehdr">
+    <button type="button" class="pd-back" data-nav-tab="home" aria-label="Back to Home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+    <div class="pd-htitle">${escapeHTML(title)}</div>
+  </div>`;
 }
+
+// Public Standings (dashboard remake, Slice 1) — locked mockup Option A: by-pool ranked mini-tables with a
+// Pools / Overall-seeding toggle. Reuses computeStandings (per pool, via shapeStandingsByPool) + computeSeeding
+// (overall). NO skill, no "You" highlight (a claimed team is the accounts slice). Data = the active tournament.
+function buildStandingsPageHTML() {
+  const pools = state.tournamentPools || [];
+  const teams = state.tournamentTeams || [];
+  const matches = state.tournamentMatches || [];
+  const header = pdPageHeaderHTML('Standings');
+  const anyFinal = matches.some((m) => m.phase === 'pool' && m.status === 'final');
+  if (!pools.length || !anyFinal) {
+    return `${header}<div class="pd-empty">Standings appear once pool games are scored.</div>`;
+  }
+  const view = pdStandingsView === 'overall' ? 'overall' : 'pools';
+  const toggle = `<div class="pd-seg">
+    <button type="button" class="pd-seg-s ${view === 'pools' ? 'pd-on' : ''}" data-pd-standings-view="pools">Pools</button>
+    <button type="button" class="pd-seg-s ${view === 'overall' ? 'pd-on' : ''}" data-pd-standings-view="overall">Overall seeding</button>
+  </div>`;
+  const rowHTML = (r, rankLabel, i) => {
+    const diff = r.pointDiff || 0;
+    const diffStr = (diff > 0 ? '+' : '') + diff;
+    return `<div class="pd-st ${i === 0 ? 'pd-first' : ''}"><span class="pd-rk">${escapeHTML(String(rankLabel))}</span><span class="pd-tm">${escapeHTML(r.name || '')}</span><span class="pd-rec">${r.wins}–${r.losses}</span><span class="pd-df ${diff >= 0 ? 'pd-p' : 'pd-n'}">${diffStr}</span></div>`;
+  };
+  let body = '';
+  if (view === 'pools') {
+    body = shapeStandingsByPool(pools, teams, matches).map((p) => {
+      const netsLabel = p.nets.length ? ('Net' + (p.nets.length > 1 ? 's' : '') + ' ' + formatNetList(p.nets)) : '';
+      return `<div class="pd-card">
+        <div class="pd-ph">Pool ${escapeHTML(p.poolLabel)}${netsLabel ? `<span class="pd-pl">${escapeHTML(netsLabel)}</span>` : ''}</div>
+        <div class="pd-colh"><span class="pd-rk">#</span><span>Team</span><span class="pd-rec">W–L</span><span class="pd-df">Diff</span></div>
+        ${p.rows.map((r, i) => rowHTML(r, r.rank, i)).join('')}
+      </div>`;
+    }).join('');
+  } else {
+    const seeds = computeSeeding(teams, matches);
+    body = `<div class="pd-card">
+      <div class="pd-colh"><span class="pd-rk">Seed</span><span>Team</span><span class="pd-rec">W–L</span><span class="pd-df">Diff</span></div>
+      ${seeds.map((r, i) => rowHTML(r, r.seed, i)).join('')}
+    </div>
+    <div class="pd-foot">Seeded by win %, then point differential — this sets the bracket order.</div>`;
+  }
+  return `${header}${toggle}${body}`;
+}
+
+// Filled in Task 7.
 function buildHistoryPageHTML() {
-  return '<div class="pd-empty" style="padding:40px 16px;text-align:center;color:var(--muted);">History will appear here.</div>';
+  return '<div class="pd-empty">History will appear here.</div>';
 }
 
 function renderPublicShell() {
@@ -8951,6 +9001,22 @@ function attachHandlers() {
       // Slice 1: inert "claim your team" placeholder on the Home gateway (real claim = accounts slice).
       if (e.target.closest('#pd-claim')) {
         appNotice({ title: 'Claiming is coming soon', message: "Accounts are on the way. Once you can sign in, you'll claim your team to follow your games and your record." });
+        return;
+      }
+      // Slice 1: Standings Pools/Overall toggle — state in a module var (survives partialRender), re-render in place.
+      const segStand = e.target.closest('[data-pd-standings-view]');
+      if (segStand) {
+        pdStandingsView = segStand.dataset.pdStandingsView;
+        const c = document.querySelector('#tab-standings .container');
+        if (c) c.innerHTML = buildStandingsPageHTML();
+        return;
+      }
+      // Slice 1: History tab switcher — same pattern.
+      const segHist = e.target.closest('[data-pd-history-tab]');
+      if (segHist) {
+        pdHistoryTab = segHist.dataset.pdHistoryTab;
+        const c = document.querySelector('#tab-history .container');
+        if (c) c.innerHTML = buildHistoryPageHTML();
         return;
       }
       // C26 item 3b: Dashboard quick-actions wire to existing affordances (Tournament + Session
