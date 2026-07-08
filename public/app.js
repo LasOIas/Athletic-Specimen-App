@@ -24,9 +24,11 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.06.30.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.08.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
+let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
+let pdHistoryTab = 'tournaments'; // public History page: 'tournaments' | 'leaderboard' | 'champions'
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
 const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
@@ -1307,27 +1309,19 @@ function partialRender() {
     }
   }
 
-  // C32: public live-hub Home updates in place (no full render → no scroll jump) when the viewer is on
-  // the Home tab. Mirrors the kiosk short-circuit above. The public shell has no `.players`, so without
-  // this a background sync would fall through to a full render() and yank a spectator to the top.
+  // Public Home updates IN PLACE (no full render -> no scroll jump) when the viewer is on the Home tab.
+  // The public shell has no `.players`, so without this a background sync would fall through to a full
+  // render() and yank a spectator to the top. Slice 1: full #tab-home .container rebuild + scrollTop
+  // preservation (Home has no text inputs; popups live on document.body) — mirrors the Scores short-circuit.
   if (!playersEl && activeMainTab === 'home') {
-    const tilesEl = document.getElementById('ph-tiles');
-    const courtsEl = document.getElementById('ph-courts');
-    const tourneyEl = document.getElementById('ph-tourney');
-    if (tilesEl && courtsEl && tourneyEl) {
-      const fresh = document.createElement('div');
-      fresh.innerHTML = publicHomeHTML();
-      const pick = (id) => fresh.querySelector('#' + id);
-      const nextTiles = pick('ph-tiles');
-      const nextCourts = pick('ph-courts');
-      const nextTourney = pick('ph-tourney');
-      if (nextTiles && nextCourts && nextTourney) {
-        if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
-        tilesEl.replaceWith(nextTiles);
-        courtsEl.replaceWith(nextCourts);
-        tourneyEl.replaceWith(nextTourney);
-        return;
-      }
+    const panel = document.getElementById('tab-home');
+    const c = panel ? panel.querySelector('.container') : null;
+    if (c) {
+      const saved = panel.scrollTop;
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      c.innerHTML = publicHomeHTML();
+      if (saved > 0 && panel.scrollTop !== saved) panel.scrollTop = saved;
+      return;
     }
   }
 
@@ -1349,6 +1343,22 @@ function partialRender() {
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
       c.innerHTML = publicScoresHTML();
       if (panel && saved > 0 && panel.scrollTop !== saved) panel.scrollTop = saved;
+      return;
+    }
+  }
+
+  // Slice 1 (2026-07-08): public Standings + History sub-tabs update IN PLACE on a background sync,
+  // mirroring the Scores short-circuit — rebuild only the panel container (recomputes live standings /
+  // history; the segmented-toggle state lives in a module var so it survives) and preserve the
+  // spectator's scrollTop (iOS resets it on innerHTML replace).
+  if (!playersEl && (activeMainTab === 'standings' || activeMainTab === 'history')) {
+    const panel = document.getElementById('tab-' + activeMainTab);
+    const c = panel ? panel.querySelector('.container') : null;
+    if (c) {
+      const saved = panel.scrollTop;
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      c.innerHTML = activeMainTab === 'standings' ? buildStandingsPageHTML() : buildHistoryPageHTML();
+      if (saved > 0 && panel.scrollTop !== saved) panel.scrollTop = saved;
       return;
     }
   }
@@ -2451,62 +2461,92 @@ function publicLiveTournament() {
     : list.find((t) => t.status === 'pools' || t.status === 'bracket') || null;
 }
 
-// C32: PUBLIC Home = live status hub (layout C — dashboard tiles; chosen from 3 §38 mockups). Read-only
-// except the Check In CTA. Count-only headcount (NEVER names), no skill, no fabricated scores. The hub
-// regions (#ph-tiles / #ph-courts / #ph-tourney) update in place via partialRender (no scroll jump).
-// Shared court legend (Home + Scores) — single source so the two surfaces never drift (S2/H5).
-const PUBLIC_COURT_LEGEND = '<p class="ph-legend">Teams are numbered for tonight &middot; nets are numbered by play order &middot; live games show the winner or running score.</p>';
+// PUBLIC Home (dashboard remake, Slice 1): tournament-live -> spectator dashboard (gateway claim-in-hero +
+// live board + Standings/Bracket/History tiles); no tournament -> casual state (headcount + courts + next
+// session + Check In). Read-only except the Check In CTA. Count-only headcount (NEVER names), no skill, no
+// fabricated scores. Updated IN PLACE via a full #tab-home .container rebuild in partialRender (no scroll jump).
+// Shared court legend (Home + Scores) — single source so the two surfaces never drift. No "tonight" (vocab rule).
+const PUBLIC_COURT_LEGEND = '<p class="ph-legend">Teams are numbered &middot; nets are numbered by play order &middot; live games show the winner or running score.</p>';
 // Live-nets collapse caret — an SVG chevron that rotates (CT2: replaces the old up/down triangle text-glyph carets).
 function liveNetsCaretHTML(collapsed) {
   return `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false" style="vertical-align:-1px;transform:rotate(${collapsed ? 0 : 90}deg);transition:transform .12s ease;"><path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> ${collapsed ? 'Show' : 'Hide'}`;
 }
 function publicHomeHTML() {
+  const tourney = publicLiveTournament();
+  const tileSVG = {
+    standings: '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/>',
+    bracket: '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  };
+  const tile = (tab, icon, title, sub) => `<button type="button" class="pd-tile" data-nav-tab="${tab}">
+      <span class="pd-ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${tileSVG[icon]}</svg></span>
+      <span class="pd-tt">${escapeHTML(title)}</span>
+      <span class="pd-ts">${escapeHTML(sub)}</span>
+    </button>`;
+
+  // ----- Tournament live: the spectator dashboard (gateway claim-in-hero + live board + tiles). The personal
+  // hero + My Team tile are deferred to the accounts slice; "claim your team" is inert here (opens a note). -----
+  if (tourney) {
+    const teamCount = (state.tournamentTeams || []).length;
+    const liveNets = new Set((state.tournamentMatches || []).filter((m) => m.status === 'live' && m.net).map((m) => m.net)).size;
+    const bits = [
+      teamCount ? (teamCount + ' teams') : '',
+      tourney.status === 'bracket' ? 'Bracket underway' : 'Pools underway',
+      liveNets ? (liveNets + (liveNets === 1 ? ' net live' : ' nets live')) : '',
+    ].filter(Boolean).join(' · ');
+    const boardHTML = buildPublicTournamentLiveHTML(); // carries its own "<name> · live now" header
+    const standings = computeStandings(state.tournamentTeams || [], state.tournamentMatches || []);
+    const anyFinal = (state.tournamentMatches || []).some((m) => m.phase === 'pool' && m.status === 'final');
+    const standingsSub = (anyFinal && standings[0]) ? ('Leader: ' + (standings[0].name || '—')) : 'By pool';
+    return `<div class="home-screen">
+      <div class="pd-card pd-thero">
+        <span class="pd-eyebrow">Tournament · Live</span>
+        <div class="pd-h">${escapeHTML(tourney.name || 'Tournament')}</div>
+        <div class="pd-sub">${escapeHTML(bits)}</div>
+        <button type="button" class="pd-claimbtn" id="pd-claim">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>
+          Playing? Claim your team
+        </button>
+      </div>
+      ${boardHTML ? `<div class="pd-card">${boardHTML}</div>` : ''}
+      <div class="pd-tiles">
+        ${tile('standings', 'standings', 'Standings', standingsSub)}
+        ${tile('tournament', 'bracket', 'Bracket', tourney.status === 'bracket' ? 'In progress' : 'After pools')}
+        ${tile('history', 'clock', 'History', 'Past tournaments')}
+      </div>
+    </div>`;
+  }
+
+  // ----- No live tournament: casual pickup state (headcount + live courts + next session + Check In). -----
   const liveData = getPublicLiveData();
   const courtsHTML = buildPublicLiveCourtsHTML();
-  const tourney = publicLiveTournament();
   const st = publicHubStatus({
     checkedInCount: (state.checkedIn || []).length,
     liveCourtCount: liveData.liveCount,
-    tournamentStatus: tourney ? tourney.status : null,
+    tournamentStatus: null,
   });
   const liveTile = !state.loaded
-    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">checking&hellip;</div></div>` // H4: no hard-0 flash pre-sync
+    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">checking&hellip;</div></div>` // no hard-0 flash pre-sync
     : st.liveTile === 'courts'
     ? `<div class="ph-tile is-live"><div class="ph-tile-num"><span class="ph-dot"></span>${st.liveCount}</div><div class="ph-tile-lab">${st.liveCount === 1 ? 'court live now' : 'courts live now'}</div></div>`
-    : st.liveTile === 'tournament'
-    ? `<div class="ph-tile is-live"><div class="ph-tile-num"><span class="ph-dot"></span></div><div class="ph-tile-lab">tournament live</div></div>`
     : courtsHTML
-    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">round complete</div></div>` // H1: a finished round still on the board
+    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">round complete</div></div>`
     : `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">no games yet</div></div>`;
   const tilesHTML = `<div class="ph-tiles" id="ph-tiles">
     <div class="ph-tile is-here"><div class="ph-tile-num">${state.loaded ? st.here : '&mdash;'}</div><div class="ph-tile-lab">checked in</div></div>
     ${liveTile}
   </div>`;
   const courtsSection = courtsHTML
-    ? `<div id="ph-courts"><div class="ph-sec">On the courts</div>${courtsHTML}${PUBLIC_COURT_LEGEND}</div>` // H5: match the Scores legend
-    : '<div id="ph-courts"></div>';
-  // When nothing is live, surface an open-registration tournament as a "Sign up" banner so a shared
-  // GroupMe link lands on a clear CTA (not a cold Home). Reuses the .ph-tourney accent banner.
-  const regTourney = tourney ? null : (state.tournaments || []).find((t) => t.registration_open && t.status === 'setup');
-  const tourneyStrip = tourney
-    ? `<button type="button" class="ph-tourney" data-nav-tab="tournament" id="ph-tourney">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4a2 2 0 0 1-2-2V5h4M18 9h2a2 2 0 0 0 2-2V5h-4M6 5h12v3a6 6 0 0 1-12 0Z"/><path d="M9 18h6M10 21h4M12 14v4"/></svg>
-        <span class="ph-tourney-mid">
-          <span class="ph-tourney-live"><span class="ph-dot"></span>${tourney.status === 'bracket' ? 'Bracket live' : 'Pool play live'}</span>
-          <span class="ph-tourney-t">${escapeHTML(tourney.name || 'Tournament')}</span>
-        </span>
-        <span class="ph-tourney-go">View &rarr;</span>
+    ? `<div id="ph-courts"><div class="ph-sec">On the courts</div>${courtsHTML}${PUBLIC_COURT_LEGEND}</div>`
+    : '';
+  const regTourney = (state.tournaments || []).find((t) => t.registration_open && t.status === 'setup');
+  const regGateway = regTourney
+    ? `<button type="button" class="pd-claimrow" data-nav-tab="tournament">
+        <span class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 14l2 2 4-4"/></svg></span>
+        <span><span class="pd-t">Registration open</span><span class="pd-s">${escapeHTML(regTourney.name || 'Tournament')} — tap to register your team</span></span>
+        <span class="pd-c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
       </button>`
-    : regTourney
-    ? `<button type="button" class="ph-tourney" data-nav-tab="tournament" id="ph-tourney">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 14l2 2 4-4"/></svg>
-        <span class="ph-tourney-mid">
-          <span class="ph-tourney-live">Registration open</span>
-          <span class="ph-tourney-t">${escapeHTML(regTourney.name || 'Tournament')}</span>
-        </span>
-        <span class="ph-tourney-go">Sign up &rarr;</span>
-      </button>`
-    : '<span id="ph-tourney"></span>';
+    : '';
   const sessionCard = state.currentSession
     ? `<div class="ph-card ph-sescard">
         <div class="ph-lab">Next session</div>
@@ -2516,16 +2556,20 @@ function publicHomeHTML() {
       </div>`
     : state.loaded
       ? `<div class="ph-card ph-sescard ph-empty">No session scheduled yet — check back soon.</div>`
-      : `<div class="ph-card ph-sescard ph-empty">Loading…</div>`; // NF-8: don't flash "No session" pre-sync
+      : `<div class="ph-card ph-sescard ph-empty">Loading…</div>`; // don't flash "No session" pre-sync
   return `<div class="home-screen">
-    <div class="ph-brand">Athletic Specimen</div>
+    ${regGateway}
     ${tilesHTML}
     ${courtsSection}
     <div class="ph-bottom">
       ${sessionCard}
       <button type="button" class="ph-cta ph-cta-compact" data-nav-tab="players"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 11l3 3L20 6"/><path d="M20 12v7H4V5h11"/></svg>Check In</button>
     </div>
-    ${tourneyStrip}
+    <button type="button" class="pd-claimrow" data-nav-tab="history">
+      <span class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+      <span><span class="pd-t">Past tournaments</span><span class="pd-s">Champions, records &amp; results</span></span>
+      <span class="pd-c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+    </button>
   </div>`;
 }
 
@@ -7211,6 +7255,28 @@ function appConfirm({ title, message, confirmText, cancelText, danger } = {}) {
   });
 }
 
+// A one-button informational notice (reuses the appConfirm modal chrome). For inert "coming soon"
+// placeholders + FYIs where there is nothing to cancel — a plain "Cancel" would read as a bug (§27).
+function appNotice({ title, message, okText } = {}) {
+  return new Promise((resolve) => {
+    const prev = document.getElementById('app-notice-modal');
+    if (prev) prev.remove();
+    const el = document.createElement('div');
+    el.id = 'app-notice-modal';
+    el.className = 'popup-overlay';
+    el.style.display = 'flex';
+    el.innerHTML =
+      '<div class="popup-card card kc-card" role="dialog" aria-modal="true">'
+      + (title ? '<div class="kc-name">' + escapeHTML(title) + '</div>' : '')
+      + '<div class="kc-q">' + escapeHTML(message || '') + '</div>'
+      + '<button type="button" class="kc-confirm" id="app-notice-ok">' + escapeHTML(okText || 'Got it') + '</button>';
+    document.body.appendChild(el);
+    const done = () => { el.remove(); resolve(true); };
+    el.querySelector('#app-notice-ok').addEventListener('click', done);
+    el.addEventListener('click', (ev) => { if (ev.target === el) done(); });
+  });
+}
+
 // A styled text-input dialog (mirrors appConfirm; reuses the .kc-card modal) — resolves to the entered
 // string, or null on cancel. Used for the NF-3 team rename (no native prompt()).
 function appPrompt({ title, message, value, confirmText, placeholder } = {}) {
@@ -7270,36 +7336,165 @@ function publicCheckinHTML() {
 function buildPublicNavInnerHTML() {
   return `
     <button class="nav-btn" data-nav-tab="home">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
       <span>Home</span>
     </button>
     <button class="nav-btn" data-nav-tab="players">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>
       <span>Check In</span>
     </button>
     <button class="nav-btn" data-nav-tab="scores">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
-      <span>Scores</span>
-    </button>
-    ${(() => {
-      const ts = state.tournaments || [];
-      const live = ts.some((t) => ['pools', 'bracket', 'completed'].includes(t.status));
-      const reg = ts.some((t) => t.registration_open && t.status === 'setup');
-      if (!live && !reg) return '';
-      const label = (!live && reg) ? 'Register' : 'Bracket'; // pre-pools registration → "Register", else "Bracket"
-      return `<button class="nav-btn" data-nav-tab="tournament">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg>
-      <span>${label}</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+      <span>Live</span>
     </button>`;
-    })()}`;
+}
+
+// Public header (dashboard remake, Slice 1): brand + inert sport-switcher pill + spectator account icon.
+// The sport pill and account action are placeholders this slice — SportPack + Supabase Auth are later tracks.
+// The sync notice stays in the shell (partialRender depends on #js-sync-notice).
+function buildPublicHeaderHTML() {
+  return `
+    <div class="pd-brand">Athletic Specimen</div>
+    <div class="pd-hgrp">
+      <button type="button" class="pd-sportpill" id="pd-sport" aria-label="Sport: Volleyball">
+        Volleyball
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <button type="button" class="pd-avic" id="pd-account" aria-label="Account">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
+      </button>
+    </div>`;
+}
+
+// Slice 1 sub-pages reached from Home tiles (no bottom-nav button; nav highlight anchors to Home).
+// Shared page header: a back-to-Home chevron + the page title (mirrors the mockup's per-page header).
+function pdPageHeaderHTML(title) {
+  return `<div class="pd-pagehdr">
+    <button type="button" class="pd-back" data-nav-tab="home" aria-label="Back to Home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+    <div class="pd-htitle">${escapeHTML(title)}</div>
+  </div>`;
+}
+
+// Public Standings (dashboard remake, Slice 1) — locked mockup Option A: by-pool ranked mini-tables with a
+// Pools / Overall-seeding toggle. Reuses computeStandings (per pool, via shapeStandingsByPool) + computeSeeding
+// (overall). NO skill, no "You" highlight (a claimed team is the accounts slice). Data = the active tournament.
+function buildStandingsPageHTML() {
+  const pools = state.tournamentPools || [];
+  const teams = state.tournamentTeams || [];
+  const matches = state.tournamentMatches || [];
+  const header = pdPageHeaderHTML('Standings');
+  const anyFinal = matches.some((m) => m.phase === 'pool' && m.status === 'final');
+  if (!pools.length || !anyFinal) {
+    return `${header}<div class="pd-empty">Standings appear once pool games are scored.</div>`;
+  }
+  const view = pdStandingsView === 'overall' ? 'overall' : 'pools';
+  const toggle = `<div class="pd-seg">
+    <button type="button" class="pd-seg-s ${view === 'pools' ? 'pd-on' : ''}" data-pd-standings-view="pools">Pools</button>
+    <button type="button" class="pd-seg-s ${view === 'overall' ? 'pd-on' : ''}" data-pd-standings-view="overall">Overall seeding</button>
+  </div>`;
+  const rowHTML = (r, rankLabel, i) => {
+    const diff = r.pointDiff || 0;
+    const diffStr = (diff > 0 ? '+' : '') + diff;
+    return `<div class="pd-st ${i === 0 ? 'pd-first' : ''}"><span class="pd-rk">${escapeHTML(String(rankLabel))}</span><span class="pd-tm">${escapeHTML(r.name || '')}</span><span class="pd-rec">${r.wins}–${r.losses}</span><span class="pd-df ${diff >= 0 ? 'pd-p' : 'pd-n'}">${diffStr}</span></div>`;
+  };
+  let body = '';
+  if (view === 'pools') {
+    body = shapeStandingsByPool(pools, teams, matches).map((p) => {
+      const netsLabel = p.nets.length ? ('Net' + (p.nets.length > 1 ? 's' : '') + ' ' + formatNetList(p.nets)) : '';
+      return `<div class="pd-card">
+        <div class="pd-ph">Pool ${escapeHTML(p.poolLabel)}${netsLabel ? `<span class="pd-pl">${escapeHTML(netsLabel)}</span>` : ''}</div>
+        <div class="pd-colh"><span class="pd-rk">#</span><span>Team</span><span class="pd-rec">W–L</span><span class="pd-df">Diff</span></div>
+        ${p.rows.map((r, i) => rowHTML(r, r.rank, i)).join('')}
+      </div>`;
+    }).join('');
+  } else {
+    const seeds = computeSeeding(teams, matches);
+    body = `<div class="pd-card">
+      <div class="pd-colh"><span class="pd-rk">Seed</span><span>Team</span><span class="pd-rec">W–L</span><span class="pd-df">Diff</span></div>
+      ${seeds.map((r, i) => rowHTML(r, r.seed, i)).join('')}
+    </div>
+    <div class="pd-foot">Seeded by win %, then point differential — this sets the bracket order.</div>`;
+  }
+  return `${header}${toggle}${body}`;
+}
+
+// Public History (dashboard remake, Slice 1) — locked mockup Option C: tabbed Tournaments / Leaderboard /
+// Champions. Champions + titles are REAL (per-tournament champion via computeChampion); "most wins / streak"
+// and the personal "your record" card need per-match + claimed-player history from later slices, shown as
+// honest placeholders. Data = loadTournamentHistory() (lazy, read-only anon, cached on state).
+function pdFormatMonthYear(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+
+// Lazy, read-only: for each COMPLETED tournament, load its teams + main matches once and derive the champion.
+// Cached on state.tournamentHistory (undefined = not loaded, [] = loaded-empty). Never blocks boot; on any
+// error it degrades to [] so History just shows its empty state.
+async function loadTournamentHistory() {
+  if (state.tournamentHistoryLoading) return;
+  state.tournamentHistoryLoading = true;
+  try {
+    const completed = (state.tournaments || []).filter((t) => t.status === 'completed');
+    const rows = await Promise.all(completed.map(async (t) => {
+      const [teams, main] = await Promise.all([tdbListTeams(t.id), tdbListMatches(t.id, 'main')]);
+      return {
+        id: t.id,
+        name: t.name || 'Tournament',
+        date: t.created_at || t.updated_at || null,
+        teamCount: (teams || []).length,
+        champion: computeChampion(main || [], teams || []),
+      };
+    }));
+    rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))); // newest first
+    state.tournamentHistory = rows;
+  } catch (e) {
+    state.tournamentHistory = [];
+  } finally {
+    state.tournamentHistoryLoading = false;
+  }
+}
+
+function buildHistoryPageHTML() {
+  const header = pdPageHeaderHTML('History & records');
+  const tab = ['tournaments', 'leaderboard', 'champions'].includes(pdHistoryTab) ? pdHistoryTab : 'tournaments';
+  const seg = `<div class="pd-seg">
+    <button type="button" class="pd-seg-s ${tab === 'tournaments' ? 'pd-on' : ''}" data-pd-history-tab="tournaments">Tournaments</button>
+    <button type="button" class="pd-seg-s ${tab === 'leaderboard' ? 'pd-on' : ''}" data-pd-history-tab="leaderboard">Leaderboard</button>
+    <button type="button" class="pd-seg-s ${tab === 'champions' ? 'pd-on' : ''}" data-pd-history-tab="champions">Champions</button>
+  </div>`;
+  const hist = state.tournamentHistory;
+  if (typeof hist === 'undefined') return `${header}${seg}<div class="pd-empty">Loading&hellip;</div>`;
+  if (!hist.length) return `${header}${seg}<div class="pd-empty">Past tournaments show up here after your first completed tournament.</div>`;
+
+  const TROPHY = '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 4h12v5a6 6 0 0 1-12 0z"/>';
+  let body = '';
+  if (tab === 'tournaments') {
+    body = `<div class="pd-card">${hist.map((h, i) => `<div class="pd-pt ${i === 0 ? 'pd-first' : ''}"><div><div class="pd-nm">${escapeHTML(h.name)}</div><div class="pd-meta">${h.champion ? ('Champion · ' + escapeHTML(h.champion.name || '')) : 'No champion recorded'}${h.teamCount ? (' · ' + h.teamCount + ' teams') : ''}</div></div></div>`).join('')}</div>`;
+  } else if (tab === 'leaderboard') {
+    const lb = computeAllTimeLeaderboard(hist);
+    const titleRow = lb.mostTitles
+      ? `<div class="pd-rec2 pd-first"><div class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${TROPHY}</svg></div><div><div class="pd-l">Most titles</div><div class="pd-v">${escapeHTML(lb.mostTitles.name)}</div></div><span class="pd-n">${lb.mostTitles.count}</span></div>`
+      : '';
+    const soon = (label, first) => `<div class="pd-rec2 ${first ? 'pd-first' : ''}"><div class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg></div><div><div class="pd-l">${escapeHTML(label)}</div><div class="pd-v" style="color:var(--muted);font-weight:600;">Coming soon</div></div><span class="pd-n">&mdash;</span></div>`;
+    body = `<div class="pd-card"><span class="pd-eyebrow">All-time records</span>${titleRow}${soon('Most wins', !titleRow)}${soon('Longest streak', false)}</div>`;
+  } else {
+    const champs = hist.filter((h) => h.champion);
+    body = champs.length
+      ? `<div class="pd-card"><span class="pd-eyebrow">Champions</span>${champs.map((h, i) => `<div class="pd-cw ${i === 0 ? 'pd-first' : ''}"><span class="pd-dt">${escapeHTML(pdFormatMonthYear(h.date))}</span><span class="pd-tr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${TROPHY}</svg></span><span class="pd-tm">${escapeHTML(h.champion.name || '')}</span></div>`).join('')}</div>`
+      : `<div class="pd-empty">No champions recorded yet.</div>`;
+  }
+  return `${header}${seg}${body}`;
 }
 
 function renderPublicShell() {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
   return `
 <div id="app-shell">
-  <header id="app-header">
+  <header id="app-header" class="pd-header">
     <span class="app-header-mode">PUBLIC</span>
+    ${buildPublicHeaderHTML()}
     <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
   </header>
   <div id="app-content">
@@ -7322,6 +7517,16 @@ function renderPublicShell() {
     <div id="tab-tournament" class="tab-panel">
       <div class="container">
         ${buildTournamentTabHTML()}
+      </div>
+    </div>
+    <div id="tab-standings" class="tab-panel">
+      <div class="container">
+        ${buildStandingsPageHTML()}
+      </div>
+    </div>
+    <div id="tab-history" class="tab-panel">
+      <div class="container">
+        ${buildHistoryPageHTML()}
       </div>
     </div>
   </div>
@@ -8765,6 +8970,15 @@ function activateMainTab(tab) {
   if ((tab === 'manage' || tab === 'live') && !state.tournamentMode) tab = 'dashboard';
   activeMainTab = tab;
   sessionStorage.setItem(currentTabKey(), tab);
+  // Slice 1: lazy-load completed-tournament history the first time History opens (read-only, cached on state).
+  if (tab === 'history' && typeof state.tournamentHistory === 'undefined' && !state.tournamentHistoryLoading) {
+    loadTournamentHistory().then(() => {
+      if (activeMainTab === 'history') {
+        const c = document.querySelector('#tab-history .container');
+        if (c) c.innerHTML = buildHistoryPageHTML();
+      }
+    });
+  }
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
   // Reliability fix (2026-06-20): expose the current tab to assistive tech, not just a visual .active
   // class (this is the single place nav active state is set — first paint via activateMainTab(activeMainTab)
@@ -8776,7 +8990,11 @@ function activateMainTab(tab) {
   // unchanged and still highlight themselves.
   const navButtons = document.querySelectorAll('#bottom-nav .nav-btn');
   const hasOwnButton = Array.prototype.some.call(navButtons, (b) => b.dataset.navTab === tab);
-  const NAV_ANCHOR = { tournament: 'dashboard', session: 'dashboard' };
+  // Public tile-pages have no bottom-nav button of their own -> anchor their highlight to Home.
+  // (Admin keeps tournament/session -> dashboard; the public 'tournament' Bracket button was removed.)
+  const NAV_ANCHOR = state.isAdmin
+    ? { tournament: 'dashboard', session: 'dashboard' }
+    : { tournament: 'home', standings: 'home', history: 'home' };
   const navActive = hasOwnButton ? tab : (NAV_ANCHOR[tab] || tab);
   navButtons.forEach((b) => {
     const isActive = b.dataset.navTab === navActive;
@@ -8835,12 +9053,46 @@ function attachHandlers() {
       activateMainTab(tab);
     });
   }
+  // Public dashboard header (Slice 1): inert placeholders — Accounts + SportPack are later tracks.
+  // Fresh #app-header each full render() so this binds once (mirrors the #bottom-nav pattern). The
+  // pd-* buttons only exist on the public surface, so on the admin header this is a harmless no-op.
+  const appHeaderEl = document.getElementById('app-header');
+  if (appHeaderEl) {
+    appHeaderEl.addEventListener('click', (e) => {
+      if (e.target.closest('#pd-account')) {
+        appNotice({ title: 'Accounts are coming soon', message: 'Sign-in and claiming your team are on the way. For now you can watch everything live without an account.' });
+      } else if (e.target.closest('#pd-sport')) {
+        appNotice({ title: 'More sports are coming', message: 'Athletic Specimen is starting with volleyball. Other sports are on the way.' });
+      }
+    });
+  }
   // C26 item 3a: in-content [data-nav-tab] navigation (e.g. the Home "Check In" CTA).
   // Scoped to #app-content + idempotent so re-renders don't stack listeners.
   const appContent = document.getElementById('app-content');
   if (appContent && !appContent.dataset.navTabBound) {
     appContent.dataset.navTabBound = '1';
     appContent.addEventListener('click', (e) => {
+      // Slice 1: inert "claim your team" placeholder on the Home gateway (real claim = accounts slice).
+      if (e.target.closest('#pd-claim')) {
+        appNotice({ title: 'Claiming is coming soon', message: "Accounts are on the way. Once you can sign in, you'll claim your team to follow your games and your record." });
+        return;
+      }
+      // Slice 1: Standings Pools/Overall toggle — state in a module var (survives partialRender), re-render in place.
+      const segStand = e.target.closest('[data-pd-standings-view]');
+      if (segStand) {
+        pdStandingsView = segStand.dataset.pdStandingsView;
+        const c = document.querySelector('#tab-standings .container');
+        if (c) c.innerHTML = buildStandingsPageHTML();
+        return;
+      }
+      // Slice 1: History tab switcher — same pattern.
+      const segHist = e.target.closest('[data-pd-history-tab]');
+      if (segHist) {
+        pdHistoryTab = segHist.dataset.pdHistoryTab;
+        const c = document.querySelector('#tab-history .container');
+        if (c) c.innerHTML = buildHistoryPageHTML();
+        return;
+      }
       // C26 item 3b: Dashboard quick-actions wire to existing affordances (Tournament + Session
       // left the nav but their panels remain, reachable here).
       const qa = e.target.closest('[data-qa]');

@@ -302,6 +302,36 @@ function computeStandings(teams, matches) {
   return ranked;
 }
 
+// Slice 1 (2026-07-08): per-pool standings for the public Standings page. Each pool ranks its OWN teams
+// (computeStandings on the pool's subset -> rank 1..n within that pool) and carries the pool label + the
+// nets that pool plays on (derived from its matches). Pure; consumed by buildStandingsPageHTML.
+function shapeStandingsByPool(pools, teams, matches) {
+  return (pools || []).map((pool) => {
+    const poolTeams = (teams || []).filter((t) => t.pool_id === pool.id);
+    const poolMatches = (matches || []).filter((m) => m.pool_id === pool.id);
+    const nets = [...new Set(poolMatches.map((m) => m.net).filter((n) => n != null))].sort((a, b) => a - b);
+    const rows = computeStandings(poolTeams, poolMatches);
+    return { poolLabel: pool.label || '', nets, rows };
+  });
+}
+
+// Slice 1 (2026-07-08): all-time leaderboard for the public History page. Titles ARE fully derivable from
+// the per-tournament champions; wins/streak need per-match history that isn't loaded this slice, so they are
+// returned null (the UI shows an honest "needs full match history" placeholder). Consumed by buildHistoryPageHTML.
+// history: [{ champion: {teamId,name}|null, ... }]
+function computeAllTimeLeaderboard(history) {
+  const titles = {};
+  (history || []).forEach((h) => {
+    if (!h || !h.champion) return;
+    const c = h.champion;
+    titles[c.teamId] = titles[c.teamId] || { name: c.name || '', count: 0 };
+    titles[c.teamId].count += 1;
+  });
+  const ranked = Object.keys(titles).map((k) => titles[k])
+    .sort((x, y) => (y.count - x.count) || String(x.name).localeCompare(String(y.name)));
+  return { mostTitles: ranked[0] || null, mostWins: null, longestStreak: null };
+}
+
 // Re-rank tied groups (same primary key AND same point-diff) by head-to-head record
 // WITHIN the tied set, then point-diff, then deterministic team id. Group resolution
 // (vs a pairwise comparator) stays consistent even in a 3-cycle (A>B>C>A).
@@ -940,6 +970,7 @@ if (typeof module !== "undefined" && module.exports) {
     scoringRulesFor, gameScoreStatus,
     splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
     bracketGameNumbers, bracketSourceLabel,
-    shouldAutoPromptBracket, assignBracketNets
+    shouldAutoPromptBracket, assignBracketNets,
+    shapeStandingsByPool, computeAllTimeLeaderboard
   };
 }
