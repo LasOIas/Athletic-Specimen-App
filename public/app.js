@@ -7211,6 +7211,28 @@ function appConfirm({ title, message, confirmText, cancelText, danger } = {}) {
   });
 }
 
+// A one-button informational notice (reuses the appConfirm modal chrome). For inert "coming soon"
+// placeholders + FYIs where there is nothing to cancel — a plain "Cancel" would read as a bug (§27).
+function appNotice({ title, message, okText } = {}) {
+  return new Promise((resolve) => {
+    const prev = document.getElementById('app-notice-modal');
+    if (prev) prev.remove();
+    const el = document.createElement('div');
+    el.id = 'app-notice-modal';
+    el.className = 'popup-overlay';
+    el.style.display = 'flex';
+    el.innerHTML =
+      '<div class="popup-card card kc-card" role="dialog" aria-modal="true">'
+      + (title ? '<div class="kc-name">' + escapeHTML(title) + '</div>' : '')
+      + '<div class="kc-q">' + escapeHTML(message || '') + '</div>'
+      + '<button type="button" class="kc-confirm" id="app-notice-ok">' + escapeHTML(okText || 'Got it') + '</button>';
+    document.body.appendChild(el);
+    const done = () => { el.remove(); resolve(true); };
+    el.querySelector('#app-notice-ok').addEventListener('click', done);
+    el.addEventListener('click', (ev) => { if (ev.target === el) done(); });
+  });
+}
+
 // A styled text-input dialog (mirrors appConfirm; reuses the .kc-card modal) — resolves to the entered
 // string, or null on cancel. Used for the NF-3 team rename (no native prompt()).
 function appPrompt({ title, message, value, confirmText, placeholder } = {}) {
@@ -7294,12 +7316,30 @@ function buildPublicNavInnerHTML() {
     })()}`;
 }
 
+// Public header (dashboard remake, Slice 1): brand + inert sport-switcher pill + spectator account icon.
+// The sport pill and account action are placeholders this slice — SportPack + Supabase Auth are later tracks.
+// The sync notice stays in the shell (partialRender depends on #js-sync-notice).
+function buildPublicHeaderHTML() {
+  return `
+    <div class="pd-brand">Athletic Specimen</div>
+    <div class="pd-hgrp">
+      <button type="button" class="pd-sportpill" id="pd-sport" aria-label="Sport: Volleyball">
+        Volleyball
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <button type="button" class="pd-avic" id="pd-account" aria-label="Account">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
+      </button>
+    </div>`;
+}
+
 function renderPublicShell() {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
   return `
 <div id="app-shell">
-  <header id="app-header">
+  <header id="app-header" class="pd-header">
     <span class="app-header-mode">PUBLIC</span>
+    ${buildPublicHeaderHTML()}
     <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
   </header>
   <div id="app-content">
@@ -8833,6 +8873,19 @@ function attachHandlers() {
       const tab = btn.dataset.navTab;
       if (state.tournamentMode && tab === 'dashboard') { exitTournamentMode(); return; } // Home exits tournament mode
       activateMainTab(tab);
+    });
+  }
+  // Public dashboard header (Slice 1): inert placeholders — Accounts + SportPack are later tracks.
+  // Fresh #app-header each full render() so this binds once (mirrors the #bottom-nav pattern). The
+  // pd-* buttons only exist on the public surface, so on the admin header this is a harmless no-op.
+  const appHeaderEl = document.getElementById('app-header');
+  if (appHeaderEl) {
+    appHeaderEl.addEventListener('click', (e) => {
+      if (e.target.closest('#pd-account')) {
+        appNotice({ title: 'Accounts are coming soon', message: 'Sign-in and claiming your team are on the way. For now you can watch everything live without an account.' });
+      } else if (e.target.closest('#pd-sport')) {
+        appNotice({ title: 'More sports are coming', message: 'Athletic Specimen is starting with volleyball. Other sports are on the way.' });
+      }
     });
   }
   // C26 item 3a: in-content [data-nav-tab] navigation (e.g. the Home "Check In" CTA).

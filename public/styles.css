@@ -2982,6 +2982,12 @@ body.copilot-typing #bottom-nav { display: none; }
 .pd-sportpill svg { width: 12px; height: 12px; color: var(--muted); }
 .pd-avic { width: 35px; height: 35px; border-radius: 50%; background: var(--card); border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
 .pd-avic svg { width: 18px; height: 18px; }
+.pd-brand { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15.5px; letter-spacing: -.3px; color: var(--ink); }
+.pd-hgrp { display: flex; align-items: center; gap: 9px; }
+/* public dashboard header layout — id-qualified so it beats the base #app-header + its @media centering */
+#app-header.pd-header { justify-content: space-between; flex-wrap: wrap; row-gap: 3px; }
+#app-header.pd-header .app-header-mode { display: none; }  /* redundant on the public dashboard; sync notice stays */
+#app-header.pd-header #js-sync-notice { flex-basis: 100%; }
 
 /* -- tile grid (Home) -- */
 .pd-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
