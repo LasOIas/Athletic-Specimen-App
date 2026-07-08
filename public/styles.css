@@ -2984,7 +2984,7 @@ body.copilot-typing #bottom-nav { display: none; }
 .pd-avic svg { width: 18px; height: 18px; flex-shrink: 0; }
 .pd-brand { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15.5px; letter-spacing: -.3px; color: var(--ink); }
 /* official A.S logo — the single brand mark everywhere (public header, admin header, check-in) */
-.as-logo { height: 34px; width: auto; display: block; }
+.as-logo { height: 50px; width: auto; display: block; }
 .ad-brand { display: inline-flex; align-items: center; }
 .ad-brand-grp { margin-left: 8px; font-weight: 600; font-size: 13px; color: var(--muted); }
 .pd-hgrp { display: flex; align-items: center; gap: 9px; }
