@@ -7292,28 +7292,17 @@ function publicCheckinHTML() {
 function buildPublicNavInnerHTML() {
   return `
     <button class="nav-btn" data-nav-tab="home">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
       <span>Home</span>
     </button>
     <button class="nav-btn" data-nav-tab="players">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>
       <span>Check In</span>
     </button>
     <button class="nav-btn" data-nav-tab="scores">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
-      <span>Scores</span>
-    </button>
-    ${(() => {
-      const ts = state.tournaments || [];
-      const live = ts.some((t) => ['pools', 'bracket', 'completed'].includes(t.status));
-      const reg = ts.some((t) => t.registration_open && t.status === 'setup');
-      if (!live && !reg) return '';
-      const label = (!live && reg) ? 'Register' : 'Bracket'; // pre-pools registration → "Register", else "Bracket"
-      return `<button class="nav-btn" data-nav-tab="tournament">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg>
-      <span>${label}</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+      <span>Live</span>
     </button>`;
-    })()}`;
 }
 
 // Public header (dashboard remake, Slice 1): brand + inert sport-switcher pill + spectator account icon.
