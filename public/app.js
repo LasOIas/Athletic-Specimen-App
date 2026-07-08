@@ -1353,6 +1353,22 @@ function partialRender() {
     }
   }
 
+  // Slice 1 (2026-07-08): public Standings + History sub-tabs update IN PLACE on a background sync,
+  // mirroring the Scores short-circuit — rebuild only the panel container (recomputes live standings /
+  // history; the segmented-toggle state lives in a module var so it survives) and preserve the
+  // spectator's scrollTop (iOS resets it on innerHTML replace).
+  if (!playersEl && (activeMainTab === 'standings' || activeMainTab === 'history')) {
+    const panel = document.getElementById('tab-' + activeMainTab);
+    const c = panel ? panel.querySelector('.container') : null;
+    if (c) {
+      const saved = panel.scrollTop;
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      c.innerHTML = activeMainTab === 'standings' ? buildStandingsPageHTML() : buildHistoryPageHTML();
+      if (saved > 0 && panel.scrollTop !== saved) panel.scrollTop = saved;
+      return;
+    }
+  }
+
   // Wave 1b (2026-06-25): public Bracket/Tournament tab updates via partialRenderTournament (rebuilds
   // only #tab-tournament .container + redraws/fits the tree) instead of a full render() that resets the
   // spectator's scroll AND the bracket pan/zoom. maybeAutoGenerateBracket inside it is admin+tournament
@@ -7322,6 +7338,15 @@ function buildPublicHeaderHTML() {
     </div>`;
 }
 
+// Slice 1 sub-pages reached from Home tiles (no bottom-nav button; nav highlight anchors to Home).
+// Stubs — fully implemented in Task 6 (Standings) / Task 7 (History).
+function buildStandingsPageHTML() {
+  return '<div class="pd-empty" style="padding:40px 16px;text-align:center;color:var(--muted);">Standings will appear here.</div>';
+}
+function buildHistoryPageHTML() {
+  return '<div class="pd-empty" style="padding:40px 16px;text-align:center;color:var(--muted);">History will appear here.</div>';
+}
+
 function renderPublicShell() {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
   return `
@@ -7351,6 +7376,16 @@ function renderPublicShell() {
     <div id="tab-tournament" class="tab-panel">
       <div class="container">
         ${buildTournamentTabHTML()}
+      </div>
+    </div>
+    <div id="tab-standings" class="tab-panel">
+      <div class="container">
+        ${buildStandingsPageHTML()}
+      </div>
+    </div>
+    <div id="tab-history" class="tab-panel">
+      <div class="container">
+        ${buildHistoryPageHTML()}
       </div>
     </div>
   </div>
@@ -8805,7 +8840,11 @@ function activateMainTab(tab) {
   // unchanged and still highlight themselves.
   const navButtons = document.querySelectorAll('#bottom-nav .nav-btn');
   const hasOwnButton = Array.prototype.some.call(navButtons, (b) => b.dataset.navTab === tab);
-  const NAV_ANCHOR = { tournament: 'dashboard', session: 'dashboard' };
+  // Public tile-pages have no bottom-nav button of their own -> anchor their highlight to Home.
+  // (Admin keeps tournament/session -> dashboard; the public 'tournament' Bracket button was removed.)
+  const NAV_ANCHOR = state.isAdmin
+    ? { tournament: 'dashboard', session: 'dashboard' }
+    : { tournament: 'home', standings: 'home', history: 'home' };
   const navActive = hasOwnButton ? tab : (NAV_ANCHOR[tab] || tab);
   navButtons.forEach((b) => {
     const isActive = b.dataset.navTab === navActive;
