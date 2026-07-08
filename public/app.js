@@ -1307,27 +1307,19 @@ function partialRender() {
     }
   }
 
-  // C32: public live-hub Home updates in place (no full render → no scroll jump) when the viewer is on
-  // the Home tab. Mirrors the kiosk short-circuit above. The public shell has no `.players`, so without
-  // this a background sync would fall through to a full render() and yank a spectator to the top.
+  // Public Home updates IN PLACE (no full render -> no scroll jump) when the viewer is on the Home tab.
+  // The public shell has no `.players`, so without this a background sync would fall through to a full
+  // render() and yank a spectator to the top. Slice 1: full #tab-home .container rebuild + scrollTop
+  // preservation (Home has no text inputs; popups live on document.body) — mirrors the Scores short-circuit.
   if (!playersEl && activeMainTab === 'home') {
-    const tilesEl = document.getElementById('ph-tiles');
-    const courtsEl = document.getElementById('ph-courts');
-    const tourneyEl = document.getElementById('ph-tourney');
-    if (tilesEl && courtsEl && tourneyEl) {
-      const fresh = document.createElement('div');
-      fresh.innerHTML = publicHomeHTML();
-      const pick = (id) => fresh.querySelector('#' + id);
-      const nextTiles = pick('ph-tiles');
-      const nextCourts = pick('ph-courts');
-      const nextTourney = pick('ph-tourney');
-      if (nextTiles && nextCourts && nextTourney) {
-        if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
-        tilesEl.replaceWith(nextTiles);
-        courtsEl.replaceWith(nextCourts);
-        tourneyEl.replaceWith(nextTourney);
-        return;
-      }
+    const panel = document.getElementById('tab-home');
+    const c = panel ? panel.querySelector('.container') : null;
+    if (c) {
+      const saved = panel.scrollTop;
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      c.innerHTML = publicHomeHTML();
+      if (saved > 0 && panel.scrollTop !== saved) panel.scrollTop = saved;
+      return;
     }
   }
 
@@ -2467,62 +2459,92 @@ function publicLiveTournament() {
     : list.find((t) => t.status === 'pools' || t.status === 'bracket') || null;
 }
 
-// C32: PUBLIC Home = live status hub (layout C — dashboard tiles; chosen from 3 §38 mockups). Read-only
-// except the Check In CTA. Count-only headcount (NEVER names), no skill, no fabricated scores. The hub
-// regions (#ph-tiles / #ph-courts / #ph-tourney) update in place via partialRender (no scroll jump).
-// Shared court legend (Home + Scores) — single source so the two surfaces never drift (S2/H5).
-const PUBLIC_COURT_LEGEND = '<p class="ph-legend">Teams are numbered for tonight &middot; nets are numbered by play order &middot; live games show the winner or running score.</p>';
+// PUBLIC Home (dashboard remake, Slice 1): tournament-live -> spectator dashboard (gateway claim-in-hero +
+// live board + Standings/Bracket/History tiles); no tournament -> casual state (headcount + courts + next
+// session + Check In). Read-only except the Check In CTA. Count-only headcount (NEVER names), no skill, no
+// fabricated scores. Updated IN PLACE via a full #tab-home .container rebuild in partialRender (no scroll jump).
+// Shared court legend (Home + Scores) — single source so the two surfaces never drift. No "tonight" (vocab rule).
+const PUBLIC_COURT_LEGEND = '<p class="ph-legend">Teams are numbered &middot; nets are numbered by play order &middot; live games show the winner or running score.</p>';
 // Live-nets collapse caret — an SVG chevron that rotates (CT2: replaces the old up/down triangle text-glyph carets).
 function liveNetsCaretHTML(collapsed) {
   return `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false" style="vertical-align:-1px;transform:rotate(${collapsed ? 0 : 90}deg);transition:transform .12s ease;"><path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> ${collapsed ? 'Show' : 'Hide'}`;
 }
 function publicHomeHTML() {
+  const tourney = publicLiveTournament();
+  const tileSVG = {
+    standings: '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/>',
+    bracket: '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  };
+  const tile = (tab, icon, title, sub) => `<button type="button" class="pd-tile" data-nav-tab="${tab}">
+      <span class="pd-ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${tileSVG[icon]}</svg></span>
+      <span class="pd-tt">${escapeHTML(title)}</span>
+      <span class="pd-ts">${escapeHTML(sub)}</span>
+    </button>`;
+
+  // ----- Tournament live: the spectator dashboard (gateway claim-in-hero + live board + tiles). The personal
+  // hero + My Team tile are deferred to the accounts slice; "claim your team" is inert here (opens a note). -----
+  if (tourney) {
+    const teamCount = (state.tournamentTeams || []).length;
+    const liveNets = new Set((state.tournamentMatches || []).filter((m) => m.status === 'live' && m.net).map((m) => m.net)).size;
+    const bits = [
+      teamCount ? (teamCount + ' teams') : '',
+      tourney.status === 'bracket' ? 'Bracket underway' : 'Pools underway',
+      liveNets ? (liveNets + (liveNets === 1 ? ' net live' : ' nets live')) : '',
+    ].filter(Boolean).join(' · ');
+    const boardHTML = buildPublicTournamentLiveHTML(); // carries its own "<name> · live now" header
+    const standings = computeStandings(state.tournamentTeams || [], state.tournamentMatches || []);
+    const anyFinal = (state.tournamentMatches || []).some((m) => m.phase === 'pool' && m.status === 'final');
+    const standingsSub = (anyFinal && standings[0]) ? ('Leader: ' + (standings[0].name || '—')) : 'By pool';
+    return `<div class="home-screen">
+      <div class="pd-card pd-thero">
+        <span class="pd-eyebrow">Tournament · Live</span>
+        <div class="pd-h">${escapeHTML(tourney.name || 'Tournament')}</div>
+        <div class="pd-sub">${escapeHTML(bits)}</div>
+        <button type="button" class="pd-claimbtn" id="pd-claim">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>
+          Playing? Claim your team
+        </button>
+      </div>
+      ${boardHTML ? `<div class="pd-card">${boardHTML}</div>` : ''}
+      <div class="pd-tiles">
+        ${tile('standings', 'standings', 'Standings', standingsSub)}
+        ${tile('tournament', 'bracket', 'Bracket', tourney.status === 'bracket' ? 'In progress' : 'After pools')}
+        ${tile('history', 'clock', 'History', 'Past tournaments')}
+      </div>
+    </div>`;
+  }
+
+  // ----- No live tournament: casual pickup state (headcount + live courts + next session + Check In). -----
   const liveData = getPublicLiveData();
   const courtsHTML = buildPublicLiveCourtsHTML();
-  const tourney = publicLiveTournament();
   const st = publicHubStatus({
     checkedInCount: (state.checkedIn || []).length,
     liveCourtCount: liveData.liveCount,
-    tournamentStatus: tourney ? tourney.status : null,
+    tournamentStatus: null,
   });
   const liveTile = !state.loaded
-    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">checking&hellip;</div></div>` // H4: no hard-0 flash pre-sync
+    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">checking&hellip;</div></div>` // no hard-0 flash pre-sync
     : st.liveTile === 'courts'
     ? `<div class="ph-tile is-live"><div class="ph-tile-num"><span class="ph-dot"></span>${st.liveCount}</div><div class="ph-tile-lab">${st.liveCount === 1 ? 'court live now' : 'courts live now'}</div></div>`
-    : st.liveTile === 'tournament'
-    ? `<div class="ph-tile is-live"><div class="ph-tile-num"><span class="ph-dot"></span></div><div class="ph-tile-lab">tournament live</div></div>`
     : courtsHTML
-    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">round complete</div></div>` // H1: a finished round still on the board
+    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">round complete</div></div>`
     : `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">no games yet</div></div>`;
   const tilesHTML = `<div class="ph-tiles" id="ph-tiles">
     <div class="ph-tile is-here"><div class="ph-tile-num">${state.loaded ? st.here : '&mdash;'}</div><div class="ph-tile-lab">checked in</div></div>
     ${liveTile}
   </div>`;
   const courtsSection = courtsHTML
-    ? `<div id="ph-courts"><div class="ph-sec">On the courts</div>${courtsHTML}${PUBLIC_COURT_LEGEND}</div>` // H5: match the Scores legend
-    : '<div id="ph-courts"></div>';
-  // When nothing is live, surface an open-registration tournament as a "Sign up" banner so a shared
-  // GroupMe link lands on a clear CTA (not a cold Home). Reuses the .ph-tourney accent banner.
-  const regTourney = tourney ? null : (state.tournaments || []).find((t) => t.registration_open && t.status === 'setup');
-  const tourneyStrip = tourney
-    ? `<button type="button" class="ph-tourney" data-nav-tab="tournament" id="ph-tourney">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9H4a2 2 0 0 1-2-2V5h4M18 9h2a2 2 0 0 0 2-2V5h-4M6 5h12v3a6 6 0 0 1-12 0Z"/><path d="M9 18h6M10 21h4M12 14v4"/></svg>
-        <span class="ph-tourney-mid">
-          <span class="ph-tourney-live"><span class="ph-dot"></span>${tourney.status === 'bracket' ? 'Bracket live' : 'Pool play live'}</span>
-          <span class="ph-tourney-t">${escapeHTML(tourney.name || 'Tournament')}</span>
-        </span>
-        <span class="ph-tourney-go">View &rarr;</span>
+    ? `<div id="ph-courts"><div class="ph-sec">On the courts</div>${courtsHTML}${PUBLIC_COURT_LEGEND}</div>`
+    : '';
+  const regTourney = (state.tournaments || []).find((t) => t.registration_open && t.status === 'setup');
+  const regGateway = regTourney
+    ? `<button type="button" class="pd-claimrow" data-nav-tab="tournament">
+        <span class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 14l2 2 4-4"/></svg></span>
+        <span><span class="pd-t">Registration open</span><span class="pd-s">${escapeHTML(regTourney.name || 'Tournament')} — tap to register your team</span></span>
+        <span class="pd-c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
       </button>`
-    : regTourney
-    ? `<button type="button" class="ph-tourney" data-nav-tab="tournament" id="ph-tourney">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 14l2 2 4-4"/></svg>
-        <span class="ph-tourney-mid">
-          <span class="ph-tourney-live">Registration open</span>
-          <span class="ph-tourney-t">${escapeHTML(regTourney.name || 'Tournament')}</span>
-        </span>
-        <span class="ph-tourney-go">Sign up &rarr;</span>
-      </button>`
-    : '<span id="ph-tourney"></span>';
+    : '';
   const sessionCard = state.currentSession
     ? `<div class="ph-card ph-sescard">
         <div class="ph-lab">Next session</div>
@@ -2532,16 +2554,20 @@ function publicHomeHTML() {
       </div>`
     : state.loaded
       ? `<div class="ph-card ph-sescard ph-empty">No session scheduled yet — check back soon.</div>`
-      : `<div class="ph-card ph-sescard ph-empty">Loading…</div>`; // NF-8: don't flash "No session" pre-sync
+      : `<div class="ph-card ph-sescard ph-empty">Loading…</div>`; // don't flash "No session" pre-sync
   return `<div class="home-screen">
-    <div class="ph-brand">Athletic Specimen</div>
+    ${regGateway}
     ${tilesHTML}
     ${courtsSection}
     <div class="ph-bottom">
       ${sessionCard}
       <button type="button" class="ph-cta ph-cta-compact" data-nav-tab="players"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 11l3 3L20 6"/><path d="M20 12v7H4V5h11"/></svg>Check In</button>
     </div>
-    ${tourneyStrip}
+    <button type="button" class="pd-claimrow" data-nav-tab="history">
+      <span class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+      <span><span class="pd-t">Past tournaments</span><span class="pd-s">Champions, records &amp; results</span></span>
+      <span class="pd-c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+    </button>
   </div>`;
 }
 
@@ -8922,6 +8948,11 @@ function attachHandlers() {
   if (appContent && !appContent.dataset.navTabBound) {
     appContent.dataset.navTabBound = '1';
     appContent.addEventListener('click', (e) => {
+      // Slice 1: inert "claim your team" placeholder on the Home gateway (real claim = accounts slice).
+      if (e.target.closest('#pd-claim')) {
+        appNotice({ title: 'Claiming is coming soon', message: "Accounts are on the way. Once you can sign in, you'll claim your team to follow your games and your record." });
+        return;
+      }
       // C26 item 3b: Dashboard quick-actions wire to existing affordances (Tournament + Session
       // left the nav but their panels remain, reachable here).
       const qa = e.target.closest('[data-qa]');
