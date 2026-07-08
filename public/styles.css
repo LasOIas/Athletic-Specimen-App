@@ -16,6 +16,12 @@
   --live:        oklch(0.55 0.09 150);     /* muted green — live/positive/checked-in */
   --live-soft:   oklch(0.96 0.03 150);     /* muted-green tint — live status pill bg */
   --warn:        oklch(0.58 0.10 70);      /* amber — admin cautions only */
+  /* dashboard remake (Slice 1, 2026-07-08) — used by the pd-* component kit */
+  --accent-bd:   oklch(0.86 0.03 240);     /* accent border — pills, You-highlight, claim card */
+  --live-ink:    oklch(0.40 0.09 150);     /* live text on live-soft */
+  --gold:        oklch(0.62 0.08 78);      /* champion/records accent (matte, non-neon per §51) */
+  --gold-soft:   oklch(0.92 0.06 85);
+  --gold-bd:     oklch(0.82 0.07 85);
   --shadow:      0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
 
   /* legacy aliases — re-pointed to direction-A so existing components reskin coherently */
@@ -2959,3 +2965,114 @@ body.copilot-typing #bottom-nav { display: none; }
 .tm-pagetitle { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 16px; color: var(--ink); }
 .bt-act { display: flex; justify-content: flex-end; padding: 4px 8px 8px; }
 .bt-act button { min-height: 28px; padding: 3px 10px; font-size: 12px; }
+
+/* ===================================================================
+   PUBLIC DASHBOARD REMAKE (Slice 1, 2026-07-08) — pd-* component kit.
+   Namespaced to avoid colliding with the existing stylesheet. Ported
+   from the locked mockups (docs/superpowers/specs/2026-07-08-public-dashboard-mockups/).
+   Direction-A tokens only; §51 no neon; §11 no emoji.
+   =================================================================== */
+
+/* -- shared card + eyebrow -- */
+.pd-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 14px 15px; margin-bottom: 12px; }
+.pd-eyebrow { display: block; font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--muted); }
+
+/* -- header pieces (container layout wired in the header task) -- */
+.pd-sportpill { display: inline-flex; align-items: center; gap: 5px; background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px 6px 12px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.pd-sportpill svg { width: 12px; height: 12px; color: var(--muted); }
+.pd-avic { width: 35px; height: 35px; border-radius: 50%; background: var(--card); border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+.pd-avic svg { width: 18px; height: 18px; }
+
+/* -- tile grid (Home) -- */
+.pd-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
+.pd-tile { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-sm); padding: 13px; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.pd-tile:active { background: var(--surface-3); }
+.pd-ti { width: 33px; height: 33px; border-radius: 9px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; color: var(--accent); }
+.pd-ti svg { width: 18px; height: 18px; }
+.pd-tt { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 14px; color: var(--ink); }
+.pd-ts { font-size: 11px; color: var(--muted); margin-top: -3px; }
+
+/* -- live board rows (Home "On the courts", mockup .game) -- */
+.pd-game { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--border); }
+.pd-game.pd-first { border-top: none; }
+.pd-gnet { font-size: 11px; color: var(--muted); font-weight: 600; }
+.pd-gt { font-size: 13.5px; font-weight: 600; color: var(--ink); margin-top: 1px; }
+.pd-gR { display: flex; align-items: center; gap: 9px; }
+.pd-gsc { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 16px; color: var(--ink); letter-spacing: -.3px; }
+.pd-livetag { font-size: 9.5px; font-weight: 800; letter-spacing: .4px; color: var(--live); background: var(--live-soft); border-radius: 5px; padding: 2px 6px; }
+.pd-finaltag { font-size: 9.5px; font-weight: 800; letter-spacing: .4px; color: var(--muted); background: var(--surface-3); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; }
+
+/* -- segmented toggle (Standings / History) -- */
+.pd-seg { display: flex; background: var(--surface-3); border: 1px solid var(--border); border-radius: 11px; padding: 3px; margin-bottom: 12px; }
+.pd-seg-s { flex: 1; text-align: center; padding: 8px 4px; font-size: 12.5px; font-weight: 700; border-radius: 8px; color: var(--muted); background: none; border: none; }
+.pd-seg-s.pd-on { background: var(--card); color: var(--ink); box-shadow: var(--shadow-sm); }
+
+/* -- standings tables -- */
+.pd-ph { display: flex; align-items: center; gap: 7px; font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 13px; color: var(--ink); margin: 0 0 5px; }
+.pd-ph .pd-pl { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--muted); }
+.pd-colh { display: flex; align-items: center; gap: 11px; padding: 0 0 3px; font-size: 9px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--faint); }
+.pd-colh .pd-rk { width: 18px; text-align: center; }
+.pd-colh .pd-rec { margin-left: auto; }
+.pd-colh .pd-df { width: 40px; text-align: right; }
+.pd-st { display: flex; align-items: center; gap: 11px; padding: 8px 0; border-top: 1px solid var(--border); }
+.pd-st.pd-first { border-top: none; }
+.pd-st.pd-you { background: var(--accent-soft); margin: 2px -14px; padding: 9px 14px; border-radius: 9px; border: 1px solid var(--accent-bd); }
+.pd-st .pd-rk { width: 18px; text-align: center; font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 12.5px; color: var(--muted); }
+.pd-st.pd-you .pd-rk { color: var(--accent); }
+.pd-st .pd-tm { font-weight: 600; font-size: 13.5px; color: var(--ink); }
+.pd-st.pd-you .pd-tm { color: var(--accent); font-weight: 700; }
+.pd-youtag { font-size: 9px; font-weight: 700; color: #fff; background: var(--accent); border-radius: 999px; padding: 2px 7px; margin-left: 5px; }
+.pd-st .pd-rec { margin-left: auto; font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 12.5px; color: var(--muted); }
+.pd-st .pd-df { width: 40px; text-align: right; font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 12px; }
+.pd-df.pd-p { color: var(--live-ink); }
+.pd-df.pd-n { color: var(--faint); }
+.pd-medal { width: 19px; height: 19px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 10px; color: #fff; flex: none; }
+.pd-m1 { background: oklch(0.74 0.10 85); }
+.pd-m2 { background: oklch(0.70 0.015 255); }
+.pd-m3 { background: oklch(0.60 0.07 50); }
+.pd-youcard { background: var(--accent-soft); border: 1px solid var(--accent-bd); border-radius: var(--r-lg); padding: 13px 15px; margin-bottom: 12px; display: flex; align-items: center; gap: 13px; }
+.pd-youcard .pd-big { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 28px; color: var(--accent); letter-spacing: -1px; line-height: 1; }
+.pd-youcard .pd-l1 { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 15px; color: var(--ink); }
+.pd-youcard .pd-l2 { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.pd-foot { font-size: 10.5px; color: var(--faint); text-align: center; margin-top: 9px; line-height: 1.4; }
+
+/* -- history -- */
+.pd-yourrec { display: flex; align-items: center; gap: 13px; background: var(--accent-soft); border: 1px solid var(--accent-bd); border-radius: var(--r-lg); padding: 13px 15px; margin-bottom: 11px; }
+.pd-yourrec .pd-ic { width: 38px; height: 38px; border-radius: 11px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; }
+.pd-yourrec .pd-ic svg { width: 20px; height: 20px; }
+.pd-yourrec .pd-l1 { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 14px; color: var(--ink); }
+.pd-yourrec .pd-l2 { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.pd-pt { display: flex; align-items: center; gap: 11px; padding: 10px 0; border-top: 1px solid var(--border); }
+.pd-pt.pd-first { border-top: none; }
+.pd-pt .pd-nm { font-weight: 600; font-size: 13.5px; color: var(--ink); }
+.pd-pt .pd-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.pd-plc { margin-left: auto; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; border-radius: 999px; padding: 3px 9px; flex: none; }
+.pd-plc.pd-champ { background: var(--gold-soft); color: oklch(0.42 0.08 72); border: 1px solid var(--gold-bd); }
+.pd-plc.pd-fin { background: var(--surface-3); color: var(--muted); border: 1px solid var(--border); }
+.pd-plc.pd-mid { background: var(--surface-3); color: var(--faint); border: 1px solid var(--border); }
+.pd-rec2 { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--border); }
+.pd-rec2.pd-first { border-top: none; }
+.pd-rec2 .pd-ic { width: 32px; height: 32px; border-radius: 9px; background: var(--gold-soft); color: var(--gold); display: flex; align-items: center; justify-content: center; flex: none; }
+.pd-rec2 .pd-ic svg { width: 17px; height: 17px; }
+.pd-rec2 .pd-l { font-size: 9.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; font-weight: 700; }
+.pd-rec2 .pd-v { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 14px; color: var(--ink); margin-top: 1px; }
+.pd-rec2 .pd-n { margin-left: auto; font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 18px; color: var(--ink); }
+.pd-cw { display: flex; align-items: center; gap: 11px; padding: 9px 0; border-top: 1px solid var(--border); }
+.pd-cw.pd-first { border-top: none; }
+.pd-cw .pd-dt { font-size: 11px; color: var(--muted); width: 70px; flex: none; }
+.pd-cw .pd-tr { color: var(--gold); display: flex; flex: none; }
+.pd-cw .pd-tr svg { width: 16px; height: 16px; }
+.pd-cw .pd-tm { font-weight: 600; font-size: 13.5px; color: var(--ink); }
+
+/* -- claim card / gateway (Home) -- */
+.pd-claimrow { display: flex; align-items: center; gap: 11px; background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); padding: 11px 13px; margin-bottom: 11px; width: 100%; text-align: left; }
+.pd-claimrow .pd-ic { width: 30px; height: 30px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; flex: none; }
+.pd-claimrow .pd-ic svg { width: 16px; height: 16px; }
+.pd-claimrow .pd-t { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.pd-claimrow .pd-s { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.pd-claimrow .pd-c { margin-left: auto; color: var(--faint); display: flex; }
+.pd-claimrow .pd-c svg { width: 16px; height: 16px; }
+.pd-thero .pd-h { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 18px; letter-spacing: -.3px; color: var(--ink); margin-top: 3px; }
+.pd-thero .pd-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.pd-claimbtn { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; border: 1px solid var(--accent-bd); background: var(--accent-soft); color: var(--accent); border-radius: 11px; padding: 10px; font-weight: 700; font-size: 13px; margin-top: 12px; }
+.pd-claimbtn svg { width: 15px; height: 15px; }
