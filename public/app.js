@@ -24,7 +24,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: true },
 });
-const APP_VERSION = '2026.07.08.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.08.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -7354,7 +7354,7 @@ function buildPublicNavInnerHTML() {
 // The sync notice stays in the shell (partialRender depends on #js-sync-notice).
 function buildPublicHeaderHTML() {
   return `
-    <div class="pd-brand">Athletic Specimen</div>
+    <img class="as-logo" src="/logo-mark.png" alt="Athletic Specimen" />
     <div class="pd-hgrp">
       <button type="button" class="pd-sportpill" id="pd-sport" aria-label="Sport: Volleyball">
         Volleyball
@@ -7568,7 +7568,7 @@ function adminDashboardHTML() {
 <div class="container">
   <div class="ad-screen">
     <div class="ad-top">
-      <div class="ad-brand">${state.limitedGroup ? escapeHTML(state.limitedGroup) : 'Athletic Specimen'}</div>
+      <div class="ad-brand"><img class="as-logo" src="/logo-mark.png" alt="Athletic Specimen" />${state.limitedGroup ? `<span class="ad-brand-grp">${escapeHTML(state.limitedGroup)}</span>` : ''}</div>
     </div>
     <div class="ad-statcard" id="js-dashboard-stat">${buildDashboardStatHTML()}</div>
     <div class="ad-sec">Quick actions</div>
