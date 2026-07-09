@@ -25,10 +25,11 @@ Verifiable success: on a throwaway test tournament, end-to-end register → clai
 When linking a roster name to a player, **reuse an existing player rather than duplicate**:
 
 - Match = exact, case-insensitive, trimmed `name` **within the tournament's `community_id`**.
-- **0 matches →** create a new player row (`name`, `community_id` = tournament's, `checked_in=false`).
-- **exactly 1 match →** reuse that player row (this is what gives "claim once, auto-resolve in future tournaments").
-- **>1 existing rows already share that name →** create a new row rather than guess which person it is.
+- **≥1 match →** reuse the **earliest** (`order by created_at`) same-name player. This gives "claim once, auto-resolve in future tournaments" and links a tournament roster to an existing check-in-pool identity when the name matches.
+- **0 matches →** create a new player row (`name`, `community_id` = tournament's, `skill = 0` = the app's unrated convention).
 - Link via `team_members … ON CONFLICT (team_id, player_id) DO NOTHING`.
+
+**Constraint that shapes this (found during build 2026-07-08):** a pre-existing global unique index `players_real_name_group_uidx` on `(lower(btrim(name)), coalesce(group,''))` means two same-name players cannot both occupy the null-group slot. So a created player never duplicates a name there, and the original ">1 ambiguous → create new" branch was dropped — it was unreachable for created rows and would have violated the index. `players.skill` is `NOT NULL` with no default, so created rows must set `skill = 0`.
 
 **Accepted edge case (Mike acknowledged):** two *different* people with the same name collapse to one player row, and a same-name person listed on two teams in one tournament resolves to both. Mitigations: organizer approval is a human check at claim time; the claim UI shows each candidate **with its team** so the searcher picks the right one.
 

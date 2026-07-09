@@ -13,7 +13,8 @@
 - Bump `APP_VERSION` in `public/app.js:30` on every code change. Format `YYYY.MM.DD.N`, N resets to 1 each day. Current value `'2026.07.08.5'`.
 - Commit + push after every task (Vercel auto-deploys). No "Generated with Claude Code" trailer.
 - Run `node --check public/app.js` after every app.js edit.
-- Identity policy (Mike's decision): reuse existing player by **exact case-insensitive trimmed `name` within the tournament's `community_id`** — 0 matches → create; exactly 1 → reuse; >1 existing same-name → create new (don't guess). Link via `team_members … ON CONFLICT (team_id, player_id) DO NOTHING`.
+- Identity policy (Mike's decision): reuse existing player by **exact case-insensitive trimmed `name` within the tournament's `community_id`** — ≥1 match → reuse the earliest (`order by created_at`); 0 matches → create. A pre-existing global unique index `players_real_name_group_uidx` on `(lower(btrim(name)), coalesce(group,''))` guarantees no duplicate name in the null-group slot, so there is no "ambiguous → create new" branch. Link via `team_members … ON CONFLICT (team_id, player_id) DO NOTHING`.
+- `players.skill` is `NOT NULL` with no default → created rows set `skill = 0` (the app's unrated convention).
 - Every created `players` / `team_members` row MUST carry a non-null `community_id` (else `claim_player` raises `'player not found'`).
 - Migration number = **0042** (0039/0040/0041 stay reserved for the RLS/scoring/retire cutover). Save the file to `db/migrations/0042_register_team_creates_members.sql` after applying.
 - Never touch the 18 June teams / existing 233 players. Throwaway fixtures only; clean them up.
@@ -74,20 +75,23 @@ declare
   v_comm uuid := coalesce(p_community_id, (select id from public.communities order by created_at limit 1));
   nm text;
   v_player uuid;
-  v_count int;
 begin
   for nm in
     select distinct btrim(e)
     from jsonb_array_elements_text(coalesce(p_roster,'[]'::jsonb)) e
     where btrim(e) <> ''
   loop
-    select count(*), min(id) into v_count, v_player
+    -- reuse the earliest existing player with this name in the community; create only if none exists.
+    -- (No min(uuid) aggregate exists in Postgres, and the unique index makes a >1 null-group case impossible.)
+    select id into v_player
       from public.players
-      where community_id = v_comm and lower(btrim(name)) = lower(nm);
-    if v_count <> 1 then
-      -- 0 matches OR >1 ambiguous -> create a fresh row (don't guess which person)
-      insert into public.players (name, community_id) values (nm, v_comm) returning id into v_player;
-    end if;  -- exactly 1 -> reuse v_player (already = the match's id from min(id))
+      where community_id = v_comm and lower(btrim(name)) = lower(nm)
+      order by created_at
+      limit 1;
+    if v_player is null then
+      -- players.skill is NOT NULL, no default -> set 0 (app's unrated convention)
+      insert into public.players (name, community_id, skill) values (nm, v_comm, 0) returning id into v_player;
+    end if;
     insert into public.team_members (team_id, player_id, community_id)
       values (p_team_id, v_player, v_comm)
       on conflict (team_id, player_id) do nothing;
