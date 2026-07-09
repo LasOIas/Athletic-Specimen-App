@@ -1278,6 +1278,66 @@ function joinSheetValidate(teamName, roster, teamSize) {
   return { ok: true, teamName: name, roster: clean };
 }
 
+// Finish-line Slice 4 (spec §13.4): the ELIMINATED terminal timeline node. Has this team's double-elim
+// bracket run ENDED (been eliminated), and — only when the bracket structure makes it CERTAIN — what single
+// finishing place is derivable? A team is eliminated when it LOST a losers-bracket game or the grand final
+// (its 2nd loss / no next game). Winners-bracket losses do NOT eliminate (the team drops to losers), so they
+// are ignored. A defensive guard also requires the team to have NO upcoming bracket game (a team still in a
+// reset grand final isn't out yet). PURE (no DOM / no state).
+//   place: the grand-final loser is 2nd; a losers-bracket elimination resolves to a single Nth ONLY when its
+//   LB round eliminates exactly one team (e.g. the LB-final loser is always 3rd). When the LB round ties two
+//   or more teams (e.g. 5th-6th), place is null — "Run ended" shows with no place (NEVER invent a placing, §27).
+//   The count of games per losers round is read from the full generated bracket, so the place is structural
+//   (correct even mid-tournament, before later rounds are played).
+function computeTeamRunEnded(teamId, matches, teams) {
+  const main = (Array.isArray(matches) ? matches : []).filter((m) => m && m.phase === 'main');
+  if (!teamId || !main.length) return { ended: false, place: null };
+  const involves = (m) => m && (m.team_a_id === teamId || m.team_b_id === teamId);
+  // the team's eliminating loss: a FINAL losers/grand_final game it did not win
+  const lostElim = main.filter((m) => involves(m) && m.status === 'final'
+    && (m.side === 'losers' || m.side === 'grand_final')
+    && m.winner_team_id && m.winner_team_id !== teamId);
+  if (!lostElim.length) return { ended: false, place: null };
+  // defensive: a truly-out team has no upcoming (non-final, both-teams-set) bracket game.
+  const hasUpcoming = main.some((m) => involves(m) && m.status !== 'final' && m.team_a_id && m.team_b_id);
+  if (hasUpcoming) return { ended: false, place: null };
+  // grand-final loss → runner-up (2nd), a certain single place.
+  if (lostElim.some((m) => m.side === 'grand_final')) return { ended: true, place: 2 };
+  // losers-bracket elimination: the latest losers game the team lost sets its round.
+  const lbLoss = lostElim.filter((m) => m.side === 'losers')
+    .sort((a, b) => (Number(b.round) || 0) - (Number(a.round) || 0))[0];
+  if (!lbLoss) return { ended: true, place: null };
+  const r = Number(lbLoss.round) || 0;
+  const losersGames = main.filter((m) => m.side === 'losers');
+  const laterCount = losersGames.filter((m) => (Number(m.round) || 0) > r).length; // teams eliminated after this one
+  const sameCount = losersGames.filter((m) => (Number(m.round) || 0) === r).length; // teams tied at this round
+  const placeTop = 3 + laterCount;                       // 1 champ + 1 runner-up + everyone eliminated later
+  const placeBottom = placeTop + Math.max(0, sameCount - 1);
+  const place = (placeTop === placeBottom) ? placeTop : null; // a tie range → no single Nth (never invent)
+  return { ended: true, place };
+}
+
+// Finish-line Slice 4 (spec §13.6): the past-dated "next session" guard, shared by the casual Home card and
+// checkin.html. Returns true when the session date is TODAY or later (render the card), false when it is in the
+// past (→ the designed "No session scheduled" state) or the date is missing/unparseable. Dates are 'YYYY-MM-DD'
+// (a leading ISO date part is accepted); compared as calendar days in LOCAL time (a session is "today" all day).
+// todayStr defaults to the local today. PURE.
+function sessionIsUpcoming(dateStr, todayStr) {
+  const isoDate = (s) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s == null ? '' : s).trim());
+    return m ? (m[1] + '-' + m[2] + '-' + m[3]) : null;
+  };
+  const d = isoDate(dateStr);
+  if (!d) return false;
+  let today = isoDate(todayStr);
+  if (!today) {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    today = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+  }
+  return d >= today; // zero-padded ISO date parts compare correctly as strings
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -1298,6 +1358,7 @@ if (typeof module !== "undefined" && module.exports) {
     resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
     teamPeekModel, checkinHeroModel,
     bracketOutcome, bracketRoundLabel, bracketStatusLine,
-    registerEventModel, joinSheetValidate
+    registerEventModel, joinSheetValidate,
+    computeTeamRunEnded, sessionIsUpcoming
   };
 }

@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.11'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.09.12'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -2445,7 +2445,8 @@ function buildPublicLiveCourtsHTML() {
 // NF-7: the live tournament's in-progress games, as public court rows for the Scores board. Tournament
 // matches are scheduled->final atomically (SC-1: no running score), so "live" = the current unplayed game
 // per net (pool) / the playable matchups (bracket). Public-safe: team names only, "Playing", never a score.
-function buildPublicTournamentLiveHTML() {
+function buildPublicTournamentLiveHTML(opts) {
+  const lull = !!(opts && opts.lull); // §13.4: only the Home board opts into the between-rounds fallback
   const t = publicLiveTournament();
   if (!t || (t.status !== 'pools' && t.status !== 'bracket')) return '';
   const teams = state.tournamentTeams || [];
@@ -2489,7 +2490,30 @@ function buildPublicTournamentLiveHTML() {
       return row(label, m);
     }).join('');
   }
-  if (!rows) return '';
+  if (!rows) {
+    // Between-rounds lull (spec §13.4): during an ACTIVE tournament with no live games the Home board card
+    // no longer vanishes — it keeps its header (+ the caller's legend) and shows a quiet line plus the next
+    // scheduled matchups as faint rows (up to 3, from the same match data). The admin dashboard caller does
+    // not pass lull, so its "No courts live yet" empty state is unchanged.
+    if (!lull) return '';
+    const upNext = matches
+      .filter((m) => (t.status === 'pools' ? m.phase === 'pool' : m.phase === 'main')
+        && m.status !== 'final' && m.team_a_id && m.team_b_id)
+      .sort((a, b) => (a.net || 0) - (b.net || 0) || (a.queue_order || 0) - (b.queue_order || 0))
+      .slice(0, 3);
+    const gnB = t.status === 'bracket' ? bracketGameNumbers(matches.filter((m) => m.phase === 'main')).byId : {};
+    const tap = (id) => `<span class="tapname" data-team-peek="${escapeHTML(id)}">${escapeHTML(teamNameById(teams, id))}</span>`;
+    const faintRows = upNext.map((m) => {
+      const label = m.net ? ('Net ' + m.net) : (t.status === 'bracket' ? ('G' + (gnB[m.id] || '?')) : 'Up next');
+      return `<div class="court-row is-next">
+        <div class="court-row-info"><div class="court-row-name">${escapeHTML(label)}</div>
+          <div class="court-row-sub">${tap(m.team_a_id)} vs ${tap(m.team_b_id)}</div></div>
+        <span class="court-stat is-next">Up next</span>
+      </div>`;
+    }).join('');
+    return `<div class="ph-sec">${escapeHTML(t.name || 'Tournament')} &middot; between rounds</div>`
+      + `<p class="ph-lull">Between rounds — the next games appear here.</p>${faintRows}`;
+  }
   return `<div class="ph-sec">${escapeHTML(t.name || 'Tournament')} &middot; live now</div>${rows}`;
 }
 
@@ -2538,6 +2562,18 @@ function buildPersonalHeroHTML(mine, rec) {
   if (tl.then) {
     nodes.push(`<div class="pd-tl faint"><div class="pd-tlk">Then</div><div class="pd-tlv">vs ${escapeHTML(tl.then.oppName)}</div></div>`);
   }
+  // Ending micro-state (spec §13.4): eliminated mid-tournament (the bracket is still live — no champion yet)
+  // → ONE quiet terminal node. "Run ended · Nth place" only when the place is structurally certain (else
+  // just "Run ended" — never invent a placing), plus a chip that routes to the Bracket page.
+  const runEnd = computeTeamRunEnded(mine.teamId, matches, teams);
+  const championDecided = !!bracketOutcome(matches.filter((m) => m.phase === 'main'), teams);
+  if (runEnd.ended && !championDecided) {
+    const ord = (n) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
+    const placeTxt = runEnd.place ? ' · ' + ord(runEnd.place) + ' place' : '';
+    nodes.push(`<div class="pd-tl pd-tl-end"><div class="pd-tlk">Run ended${placeTxt}</div>`
+      + `<div class="pd-tlv"><button type="button" class="pd-bk-chip pd-tl-endchip" data-tn-view="bracket">Watch the bracket`
+      + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div></div>`);
+  }
   if (!nodes.length) {
     nodes.push('<div class="pd-tl faint"><div class="pd-tlk">Schedule</div><div class="pd-tlv">Your games appear when the schedule is drawn</div></div>');
   }
@@ -2556,11 +2592,12 @@ function publicHomeHTML() {
     const teamCount = (state.tournamentTeams || []).length;
     const liveNets = new Set((state.tournamentMatches || []).filter((m) => m.status === 'live' && m.net).map((m) => m.net)).size;
     const bits = [
-      teamCount ? (teamCount + ' teams') : '',
+      teamCount ? (teamCount + (teamCount === 1 ? ' team' : ' teams')) : '',
       tourney.status === 'bracket' ? 'Bracket underway' : 'Pools underway',
       liveNets ? (liveNets + (liveNets === 1 ? ' net live' : ' nets live')) : '',
     ].filter(Boolean).join(' · ');
-    const boardHTML = buildPublicTournamentLiveHTML(); // carries its own "<name> · live now" header
+    // §13.4: keep the board card between rounds (header + legend + next matchups) instead of vanishing.
+    const boardHTML = buildPublicTournamentLiveHTML({ lull: true });
     const mine = myTeamInfo();
     const myRec = mine ? computeTeamRecord(mine.teamId, state.tournamentMatches || [], state.tournamentTeams || []) : null;
     return `<div class="home-screen">
@@ -2607,7 +2644,7 @@ function publicHomeHTML() {
         <span class="pd-c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
       </button>`
     : '';
-  const sessionCard = state.currentSession
+  const sessionCard = (state.currentSession && sessionIsUpcoming(state.currentSession.date))
     ? `<div class="ph-card ph-sescard">
         <div class="ph-lab">Next session</div>
         <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg><b>${escapeHTML(formatSessionDate(state.currentSession.date))}</b></div>
@@ -5010,7 +5047,7 @@ function buildTournamentHubHTML() {
   const liveNets = new Set(matches.filter((m) => m.status === 'live' && m.net).map((m) => m.net)).size;
   const regOpen = !!(show && show.registration_open && show.status === 'setup');
   const bits = show ? [
-    teams.length ? teams.length + ' teams' : '',
+    teams.length ? teams.length + (teams.length === 1 ? ' team' : ' teams') : '',
     show.status === 'setup' ? (regOpen ? 'Registration open' : 'Registration closed')
       : show.status === 'pools' ? 'Pools underway'
       : show.status === 'bracket' ? 'Bracket underway' : 'Completed',
@@ -5083,12 +5120,18 @@ function buildBracketPageHTML() {
   const outcome = bracketOutcome(main, teams); // non-null ONLY once a champion is decided → the completed state
   const stateKind = outcome ? 'completed' : (main.length ? 'live' : 'pre');
 
+  // §13.6: a SETUP-status tournament is in registration, NOT pool play — key the pre-bracket copy + pill on
+  // status so "Pools in progress / still battling through pools" never shows before pools start.
+  const isReg = !!(show && show.status === 'setup');
+  const regOpen = !!(show && show.registration_open && show.status === 'setup');
   const backSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
   const pill = stateKind === 'completed'
     ? '<span class="pd-bk-pill is-gold"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Completed</span>'
     : stateKind === 'live'
       ? '<span class="pd-bk-pill is-live"><span class="pd-bk-dot"></span>Live</span>'
-      : '<span class="pd-bk-pill is-neutral">Pools in progress</span>';
+      : isReg
+        ? `<span class="pd-bk-pill is-neutral">${regOpen ? 'Registration' : 'Before pools'}</span>`
+        : '<span class="pd-bk-pill is-neutral">Pools in progress</span>';
   const header = `<div class="pd-pagehdr pd-bk-hdr">
       <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament">${backSvg}</button>
       <div class="ph-titles"><span class="pd-eyebrow">${escapeHTML(show ? (show.name || 'Tournament') : 'Tournament')}</span><div class="pd-htitle">Bracket</div></div>
@@ -5104,14 +5147,24 @@ function buildBracketPageHTML() {
         <div class="pd-bk-prog-top"><span class="pd-bk-prog-l">Pool play</span><span class="pd-bk-prog-n">${done} of ${total} games final</span></div>
         <div class="pd-bk-bar"><div class="pd-bk-bar-fill" style="width:${pct}%;"></div></div>
       </div>` : '';
+    // §13.6: key the heading + body on status. Registration (setup) → honest "comes after pool play" copy
+    // (never "battling through pools"); pools → the existing in-play copy + the seeding→Standings chip
+    // (seeding only exists once pool games are played, so the chip is omitted during registration).
+    const preH = isReg ? 'The bracket comes after pool play' : 'The bracket generates when pool play finishes';
+    const preS = isReg
+      ? (regOpen
+        ? 'Registration is open — the bracket comes after pool play. Once teams are in and pools wrap, it appears right here.'
+        : 'The bracket comes after pool play. Once pools wrap, it appears right here.')
+      : 'Teams are still battling through pools. The moment the last pool game goes final, seeds lock in and the bracket appears right here.';
+    const seedChip = isReg ? '' : `<button type="button" class="pd-bk-chip" data-nav-tab="standings">Current seeding
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+          <span class="pd-bk-chip-2">Standings</span></button>`;
     return `${header}<div class="pd-card pd-bk-precard">
         <div class="pd-bk-preic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v4a2 2 0 0 0 2 2h4"/><path d="M6 21v-4a2 2 0 0 1 2-2h4"/><path d="M12 12h6"/><path d="M18 8v8"/></svg></div>
-        <div class="pd-bk-preh">The bracket generates when pool play finishes</div>
-        <div class="pd-bk-pres">Teams are still battling through pools. The moment the last pool game goes final, seeds lock in and the bracket appears right here.</div>
+        <div class="pd-bk-preh">${escapeHTML(preH)}</div>
+        <div class="pd-bk-pres">${escapeHTML(preS)}</div>
         ${progress}
-        <button type="button" class="pd-bk-chip" data-nav-tab="standings">Current seeding
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
-          <span class="pd-bk-chip-2">Standings</span></button>
+        ${seedChip}
       </div>`;
   }
 
@@ -8305,7 +8358,16 @@ function openAccountMenu() {
   el.className = 'popup-overlay';
   el.style.display = 'flex';
   const email = (state.account && state.account.email) || '';
-  const roleLabel = state.role ? (state.role[0].toUpperCase() + state.role.slice(1)) : 'Spectator';
+  // §13.6: owner/organizer keep their capitalized server role. Otherwise a CLAIMED player reads
+  // "Player · <team name>" (team via myTeamInfo()/claimed_by_profile); an unclaimed signed-in account
+  // stays "Spectator". myClaimedPlayer is the fallback when the team roster isn't loaded this session.
+  let roleLabel;
+  if (state.role) {
+    roleLabel = state.role[0].toUpperCase() + state.role.slice(1);
+  } else {
+    const mine = myTeamInfo();
+    roleLabel = mine ? ('Player · ' + mine.teamName) : (state.myClaimedPlayer ? 'Player' : 'Spectator');
+  }
   el.innerHTML =
     '<div class="popup-card card kc-card am-card" role="dialog" aria-modal="true">'
     + '<div class="am-avatar">' + escapeHTML(authInitial()) + '</div>'
@@ -8409,10 +8471,7 @@ function buildPublicHeaderHTML() {
       <div class="pd-wm-2">COLORADO</div>
     </div>
     <div class="pd-hgrp">
-      <button type="button" class="pd-sportpill" id="pd-sport" aria-label="Sport: Volleyball">
-        Volleyball
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-      </button>
+      <span class="pd-sportpill" role="img" aria-label="Sport: Volleyball">Volleyball</span>
       ${state.authSession
         ? `<button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">${escapeHTML(authInitial())}</button>`
         : `<button type="button" class="pd-avic" id="pd-account" aria-label="Sign in">
@@ -10196,9 +10255,8 @@ function attachHandlers() {
     appHeaderEl.addEventListener('click', (e) => {
       if (e.target.closest('#pd-account')) {
         if (state.authSession) openAccountMenu(); else openAuthPage();
-      } else if (e.target.closest('#pd-sport')) {
-        appNotice({ title: 'More sports are coming', message: 'Athletic Specimen is starting with volleyball. Other sports are on the way.' });
       }
+      // §13.6: the sport pill is a static non-interactive badge now (SportPack lands later) — no handler.
     });
   }
   // C26 item 3a: in-content [data-nav-tab] navigation (e.g. the Home "Check In" CTA).
@@ -10270,6 +10328,9 @@ function attachHandlers() {
         dismissTeamPeek();
         const v = tnBtn.getAttribute('data-tn-view');
         pdTournamentView = (v === 'pools' || v === 'bracket' || v === 'register') ? v : 'hub';
+        // §13.4: a data-tn-view chip can live OUTSIDE the Tournament tab (e.g. the Home hero's "Watch the
+        // bracket" terminal chip) — switch to the Tournament tab first so the sub-page is actually visible.
+        if (activeMainTab !== 'tournament') activateMainTab('tournament');
         const c = document.querySelector('#tab-tournament .container');
         if (c) c.innerHTML = buildPublicTournamentRootHTML();
         if (pdTournamentView === 'bracket') layoutBracketTree(); // the Bracket page shows the real bt-* tree

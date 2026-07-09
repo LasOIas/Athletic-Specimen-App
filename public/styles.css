@@ -1867,6 +1867,10 @@ select:focus {
 .ph-bottom { display: flex; gap: 9px; margin-top: 13px; align-items: stretch; }
 .ph-bottom .ph-sescard { flex: 1; margin: 0; }
 .ph-legend { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 14px 4px 0; } /* C60: board legend */
+/* §13.4 between-rounds lull: quiet line + faint next-matchup rows (the board card no longer vanishes). */
+.ph-lull { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 2px 4px 12px; }
+.court-row.is-next { opacity: 0.62; }
+.court-stat.is-next { color: var(--muted); background: var(--accent-soft); }
 .ph-cta-compact { flex: 0 0 118px; flex-direction: column; gap: 7px; margin: 0; }
 
 .court-row {
@@ -3237,6 +3241,9 @@ body.pd-public-active .pd-scrim { display: block; }
 .pd-tl.now .pd-tlk { color: var(--accent); }
 .pd-tl .pd-tlv { font-size: .85rem; font-weight: 600; color: var(--text); margin-top: 1px; }
 .pd-tl.faint .pd-tlv, .pd-tl.faint .pd-tlk { color: var(--faint); }
+/* §13.4 ending micro-state: the eliminated terminal node — muted dot (default) + a quiet "Watch the bracket" chip. */
+.pd-tl.pd-tl-end .pd-tlk { color: var(--muted); }
+.pd-tl-endchip { margin-top: 8px; }
 /* My Team page (LOCKED Option B) — mt-* kit */
 .mt-center { text-align: center; }
 .mt-team { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 1.25rem; color: var(--text); margin-top: 3px; letter-spacing: -.01em; }

@@ -286,6 +286,10 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Shared Supabase config (URL + anon key) — must load before this script (C25 item 7) -->
   <script src="/supabase-config.js"></script>
+  <!-- Slice 4 (§13.6): reuse the app's pure helpers (sessionIsUpcoming — past-dated session guard) so this
+       page never drifts from the app. Browser-safe: pure.js's module.exports guard is skipped when `module`
+       is undefined, and every helper is exposed as a global. -->
+  <script src="/pure.js"></script>
   <script>
     // SUPABASE_URL + SUPABASE_ANON_KEY come from public/supabase-config.js (loaded above).
     const GROUP_NAME = CLUB_GROUP; // Wave 1d: shared canonical club group (supabase-config.js)
@@ -387,6 +391,16 @@
         if (error || !data) return;
         const banner = document.getElementById('session-banner');
         if (!banner) return;
+        // §13.6: never show a stale past-dated session. If the date is in the past (or missing/unparseable),
+        // render the quiet "No session scheduled" state instead of a fabricated future-looking banner.
+        // Falls back to showing the date if pure.js didn't load (behavior-neutral vs before).
+        if (typeof sessionIsUpcoming === 'function' && !sessionIsUpcoming(data.date)) {
+          banner.innerHTML =
+            '<div style="font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-dim); font-weight:600; margin-bottom:8px;">Next Session</div>'
+            + '<div style="font-size:15px; color:var(--text-dim);">No session scheduled yet — check back soon.</div>';
+          banner.hidden = false;
+          return;
+        }
         const [y, m, d] = data.date.split('-').map(Number);
         const dateStr = new Date(y, m - 1, d).toLocaleDateString('en-US', {
           weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
