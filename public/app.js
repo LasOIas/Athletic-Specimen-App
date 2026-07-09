@@ -2518,12 +2518,48 @@ const PUBLIC_COURT_LEGEND = '<p class="ph-legend">Teams are numbered &middot; ne
 function liveNetsCaretHTML(collapsed) {
   return `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false" style="vertical-align:-1px;transform:rotate(${collapsed ? 0 : 90}deg);transition:transform .12s ease;"><path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> ${collapsed ? 'Show' : 'Hide'}`;
 }
+// Slice 3c: the claimed player's "your run" hero body (Mike's LOCKED Option C timeline — done node
+// muted-green, UP NEXT accent + soft ring, then faint). Rendered INSIDE the pd-thero card in place of
+// the claim button. Honest ETA (§27): "~N min" only when computeTeamRunTimeline derived it from real
+// same-net final gaps; else "N games ahead"; nothing when unknown.
+function buildPersonalHeroHTML(mine, rec) {
+  const teams = state.tournamentTeams || [];
+  const matches = state.tournamentMatches || [];
+  const tl = computeTeamRunTimeline(mine.teamId, matches, teams);
+  const team = teams.find((t) => t.id === mine.teamId) || {};
+  const pool = (state.tournamentPools || []).find((p) => p.id === team.pool_id);
+  const metaBits = [pool && pool.name ? pool.name : '', rec ? (rec.wins + '–' + rec.losses) : '']
+    .filter(Boolean).join(' · ');
+  const nodes = [];
+  if (tl.last) {
+    nodes.push(`<div class="pd-tl done"><div class="pd-tlk">${tl.last.won ? 'Won' : 'Lost'} · ${tl.last.myScore}&ndash;${tl.last.oppScore}</div>`
+      + `<div class="pd-tlv">${tl.last.net ? 'Net ' + escapeHTML(String(tl.last.net)) + ' ' : ''}vs ${escapeHTML(tl.last.oppName || '—')}</div></div>`);
+  }
+  if (tl.next) {
+    const eta = tl.next.isNow ? ''
+      : (tl.next.etaMin != null ? ' · ~' + tl.next.etaMin + ' min'
+        : (tl.next.gamesAhead ? ' · ' + tl.next.gamesAhead + (tl.next.gamesAhead === 1 ? ' game ahead' : ' games ahead') : ''));
+    nodes.push(`<div class="pd-tl now"><div class="pd-tlk">${escapeHTML(tl.next.label)}${eta}</div>`
+      + `<div class="pd-tlv">${tl.next.net ? 'Net ' + escapeHTML(String(tl.next.net)) + ' · ' : ''}vs ${escapeHTML(tl.next.oppName || '—')}</div></div>`);
+  }
+  if (tl.then) {
+    nodes.push(`<div class="pd-tl faint"><div class="pd-tlk">Then</div><div class="pd-tlv">vs ${escapeHTML(tl.then.oppName)}</div></div>`);
+  }
+  if (!nodes.length) {
+    nodes.push('<div class="pd-tl faint"><div class="pd-tlk">Schedule</div><div class="pd-tlv">Your games appear when the schedule is drawn</div></div>');
+  }
+  return `
+        <div class="pd-hteam">${escapeHTML(mine.teamName)}${metaBits ? ` <span class="pd-hmeta">· ${escapeHTML(metaBits)}</span>` : ''}</div>
+        <div class="pd-timeline"><div class="pd-tlline"></div>${nodes.join('')}</div>`;
+}
+
 function publicHomeHTML() {
   const tourney = publicLiveTournament();
   const tileSVG = {
     standings: '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/>',
     bracket: '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    team: '<circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>',
   };
   const tile = (tab, icon, title, sub) => `<button type="button" class="pd-tile" data-nav-tab="${tab}">
       <span class="pd-ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${tileSVG[icon]}</svg></span>
@@ -2531,8 +2567,9 @@ function publicHomeHTML() {
       <span class="pd-ts">${escapeHTML(sub)}</span>
     </button>`;
 
-  // ----- Tournament live: the spectator dashboard (gateway claim-in-hero + live board + tiles). The personal
-  // hero + My Team tile are deferred to the accounts slice; "claim your team" is inert here (opens a note). -----
+  // ----- Tournament live: the spectator dashboard. Slice 3c: a signed-in CLAIMED player gets the
+  // personal "your run" hero (Mike's locked Option C timeline) in place of the claim button, plus a
+  // My Team tile; everyone else keeps the claim gateway. -----
   if (tourney) {
     const teamCount = (state.tournamentTeams || []).length;
     const liveNets = new Set((state.tournamentMatches || []).filter((m) => m.status === 'live' && m.net).map((m) => m.net)).size;
@@ -2545,20 +2582,23 @@ function publicHomeHTML() {
     const standings = computeStandings(state.tournamentTeams || [], state.tournamentMatches || []);
     const anyFinal = (state.tournamentMatches || []).some((m) => m.phase === 'pool' && m.status === 'final');
     const standingsSub = (anyFinal && standings[0]) ? ('Leader: ' + (standings[0].name || '—')) : 'By pool';
+    const mine = myTeamInfo();
+    const myRec = mine ? computeTeamRecord(mine.teamId, state.tournamentMatches || [], state.tournamentTeams || []) : null;
     return `<div class="home-screen">
       <div class="pd-card pd-thero">
         <span class="pd-eyebrow">Tournament · Live</span>
         <div class="pd-h">${escapeHTML(tourney.name || 'Tournament')}</div>
         <div class="pd-sub">${escapeHTML(bits)}</div>
-        <button type="button" class="pd-claimbtn" id="pd-claim">
+        ${mine ? buildPersonalHeroHTML(mine, myRec) : `<button type="button" class="pd-claimbtn" id="pd-claim">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>
           Playing? Claim your team
-        </button>
+        </button>`}
       </div>
       ${boardHTML ? `<div class="pd-card">${boardHTML}</div>` : ''}
       <div class="pd-tiles">
         ${tile('standings', 'standings', 'Standings', standingsSub)}
         ${tile('tournament', 'bracket', 'Bracket', tourney.status === 'bracket' ? 'In progress' : 'After pools')}
+        ${mine ? tile('myteam', 'team', 'My Team', (myRec ? myRec.wins + '–' + myRec.losses + ' · ' : '') + 'Your games') : ''}
         ${tile('history', 'clock', 'History', 'Past tournaments')}
       </div>
     </div>`;

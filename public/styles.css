@@ -3184,3 +3184,18 @@ body.pd-home-active .pd-scrim { display: block; }
 .edit-account .btn-unlink-account { min-height: 0; width: auto; padding: .4rem .85rem; font-size: .85rem; }
 /* review fix: 'Claimed' is a taken/negative state — muted gray, never the kiosk's positive green */
 .claim-row .cik-state { color: var(--text-4); }
+
+/* ── Slice 3c (2026-07-09): personal layer — Home "your run" hero (LOCKED Option C timeline),
+   My Team page (LOCKED Option B scoreboard), Standings You. Direction-A tokens only (§51). ── */
+.pd-hteam { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 1.05rem; color: var(--text); margin-top: 10px; letter-spacing: -.01em; }
+.pd-hteam .pd-hmeta { font-size: .78rem; font-weight: 600; color: var(--muted); font-family: 'Inter',sans-serif; letter-spacing: 0; }
+.pd-timeline { position: relative; padding-left: 20px; margin-top: 8px; }
+.pd-tlline { position: absolute; left: 10px; top: 16px; bottom: 12px; width: 2px; background: var(--border); }
+.pd-tl { position: relative; padding: 7px 0; }
+.pd-tl::before { content: ""; position: absolute; left: -14px; top: 13px; width: 9px; height: 9px; border-radius: 50%; background: var(--border-2); }
+.pd-tl.done::before { background: var(--live); }
+.pd-tl.now::before { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); } /* flat ring per the locked mock, not a glow */
+.pd-tl .pd-tlk { font-size: .66rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.pd-tl.now .pd-tlk { color: var(--accent); }
+.pd-tl .pd-tlv { font-size: .85rem; font-weight: 600; color: var(--text); margin-top: 1px; }
+.pd-tl.faint .pd-tlv, .pd-tl.faint .pd-tlk { color: var(--faint); }
