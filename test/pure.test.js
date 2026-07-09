@@ -20,6 +20,7 @@ const {
   shouldAutoPromptBracket, assignBracketNets,
   shapeClaimCandidates, filterClaimCandidates,
   resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
+  checkinHeroModel,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -1067,5 +1068,21 @@ describe('Slice 3c personal-layer helpers (resolveMyTeam / computeTeamRecord / c
     it('no matches -> all null', () => {
       expect(computeTeamRunTimeline('tA', [], TEAMS)).toEqual({ last: null, next: null, then: null });
     });
+  });
+});
+
+describe('checkinHeroModel', () => {
+  it('returns the single claimed player', () => {
+    expect(checkinHeroModel([{ id: 'a1', name: 'Michael Olas' }])).toEqual({ id: 'a1', name: 'Michael Olas' });
+  });
+  it('is null when nothing is claimed', () => {
+    expect(checkinHeroModel([])).toBeNull();
+    expect(checkinHeroModel(null)).toBeNull();
+  });
+  it('is null when ambiguous (2+ claimed rows)', () => {
+    expect(checkinHeroModel([{ id: 'a', name: 'x' }, { id: 'b', name: 'y' }])).toBeNull();
+  });
+  it('is null on malformed rows', () => {
+    expect(checkinHeroModel([{ id: null, name: '' }])).toBeNull();
   });
 });

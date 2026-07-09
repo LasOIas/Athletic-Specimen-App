@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.09.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -1296,6 +1296,9 @@ function escapeHTMLText(value) {
 }
 
 function buildCheckinStatsHTML() {
+  // Round 2 §12.3: the PUBLIC check-in surface shows only a quiet "N checked in" line (the admin
+  // dashboard keeps the full stat hero + per-group breakdown below).
+  if (!state.isAdmin) return `<div class="ckh-count">${state.checkedIn.length} checked in</div>`;
   const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
   const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE
     ? UNGROUPED_FILTER_LABEL
@@ -3105,6 +3108,7 @@ const state = {
   tournamentPools: [],        // pools for the active tournament
   tournamentMatches: [],      // matches for the active tournament
   teamMembers: null,          // Slice 3c: shaped claim candidates for the active tournament (signed-in only; null when signed out)
+  myClaimedPlayer: null,      // Round 2 §12.3: {id,name} of MY claimed player for the check-in hero (signed-in only; null when signed out / unclaimed / ambiguous)
   tournamentPickedTeamId: null, // self-serve: the team this phone picked
   bracketSide: null,          // bracket nav: 'winners' | 'losers' | 'grand_final'
   bracketRound: null,         // bracket nav: which round is shown
@@ -3823,6 +3827,23 @@ async function tdbListTeamMembers(tournamentId) {
 function myTeamInfo() {
   if (!state.account || !Array.isArray(state.teamMembers)) return null;
   return resolveMyTeam(state.account.id, state.teamMembers);
+}
+
+// Round 2 (spec §12.3): resolve MY claimed player (for the check-in one-tap hero). Authed-only —
+// anon SELECT on claimed_by_profile errors by design. Called from the GENUINE sign-in transition
+// only (v2026.07.09.2 storm rule: never per auth event) + initial restore; cleared on sign-out.
+async function loadMyClaimedPlayer() {
+  if (!supabaseClient || !state.account) { state.myClaimedPlayer = null; return; }
+  try {
+    const { data, error } = await supabaseClient
+      .from('players').select('id,name').eq('claimed_by_profile', state.account.id).limit(2);
+    if (error) throw error;
+    state.myClaimedPlayer = checkinHeroModel(data || []);
+  } catch (err) {
+    console.error('loadMyClaimedPlayer', err);
+    state.myClaimedPlayer = null; // fail safe -> search-first kiosk
+  }
+  if (!state.isAdmin && activeMainTab === 'players') partialRender();
 }
 
 // Surgically re-render only the tournament tab body (preserves other tabs' state).
@@ -7777,6 +7798,7 @@ function openAccountMenu() {
     // signOut normally resolves immediately, but under a slow/flaky network the supabase-js auth lock
     // (waiting on an in-flight token refresh) can delay it — we don't make the user wait on that.
     state.authSession = null; state.account = null; state.role = null;
+    state.myClaimedPlayer = null; // Round 2 §12.3: the hero signs out with the account
     try { render(); } catch (_) {}
     // Fire the real signOut in the background to clear the persisted token. The SIGNED_OUT event
     // re-runs the same cleanup (a no-op by then).
@@ -7785,11 +7807,8 @@ function openAccountMenu() {
 }
 
 function publicCheckinHTML() {
-  return `
-  <div class="ci-kiosk is-idle">
-    <div class="cik-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12.5l2.5 2.5L15.5 9"/><circle cx="12" cy="12" r="9"/></svg></div>
-    <h2 class="cik-h">Check in</h2>
-    <p class="cik-sub">Type your name, then tap it</p>
+  const me = state.myClaimedPlayer;
+  const searchBlock = `
     <div class="cik-search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input id="checkin-search" type="text" placeholder="Start typing your name&hellip;" autocapitalize="words" autocomplete="off" spellcheck="false" aria-label="Type your name" />
@@ -7798,12 +7817,39 @@ function publicCheckinHTML() {
     <button class="cik-new" id="btn-checkin-new" type="button">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       I'm new &mdash; add me
-    </button>
+    </button>`;
+  const heroBlock = me ? `
+    <div class="ckh-card" id="ckh-card">${checkinHeroInnerHTML()}</div>
+    <div class="ckh-alts"><span class="ckh-alt-label">Checking in someone else? Use the search below.</span></div>` : `
+    <div class="cik-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12.5l2.5 2.5L15.5 9"/><circle cx="12" cy="12" r="9"/></svg></div>`;
+  return `
+  <div class="ci-kiosk is-idle${me ? ' has-hero' : ''}">
+    ${heroBlock}
+    <h2 class="cik-h">Check in</h2>
+    <p class="cik-sub">Type your name, then tap it</p>
+    ${searchBlock}
     <div id="checkin-toast" class="cik-toast" role="status" aria-live="polite" hidden></div>
     <div id="checkin-admin-panel" class="cik-adminpanel" hidden>${adminLoginHTML()}</div>
     <button class="cik-admin" id="btn-open-admin" type="button">Admin</button>
   </div>
   `;
+}
+
+// The hero card body — split out so the tap handler can refresh JUST the card in place.
+function checkinHeroInnerHTML() {
+  const me = state.myClaimedPlayer;
+  if (!me) return '';
+  const row = (state.players || []).find((p) => String(p.id) === String(me.id));
+  const isIn = row ? (state.checkedIn || []).includes(playerIdentityKey(row)) : false;
+  const initials = me.name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+  return `
+      <span class="ckh-av">${escapeHTML(initials)}</span>
+      <span class="ckh-eyebrow">Signed in</span>
+      <div class="ckh-name">${escapeHTML(me.name)}</div>
+      <button type="button" class="ckh-btn${isIn ? ' is-in' : ''}" id="ckh-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.5l2.5 2.5L15.5 9"/><circle cx="12" cy="12" r="9"/></svg>
+        ${isIn ? "You're checked in" : 'Check in'}
+      </button>`;
 }
 
 // C26 item 2: Public surface shell — hardcodes the non-admin branch of every former interleaved
@@ -9913,6 +9959,10 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
           // Slice 3c: load the personal layer (team_members) now instead of waiting for the next
           // 15s poll — the Home hero/My Team tile should light up right after sign-in.
           try { await tdbRefreshTournaments(); } catch (_) { /* the poll catches up */ }
+          // Round 2 §12.3: resolve MY claimed player for the check-in hero. Storm-safe — this runs
+          // ONLY inside the isNewSignIn-gated heavy block (genuine sign-in transition + initial
+          // restore of a persisted real session), NEVER per auth event.
+          void loadMyClaimedPlayer();
           if (state.loaded) { try { render(); } catch {} }
         } catch (err) { console.error('Role derive error', err); }
       }, 0);
@@ -9926,6 +9976,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       state.account = null;
       state.role = null;
       state.teamMembers = null; // the personal layer signs out with the account (anon can't read claims)
+      state.myClaimedPlayer = null; // Round 2 §12.3: clear the check-in hero on the SIGNED_OUT path too
       claimIntent = false;
       closeClaimPage(); // a claim page can't outlive its session (harmless no-op when not open)
       if (state.isAdmin) {
@@ -10029,6 +10080,22 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       const isIn = (state.checkedIn || []).includes(playerIdentityKey(player));
       openKioskConfirm(player, isIn, () => performKioskToggle(player, isIn));
     });
+
+    // Round 2: the one-tap hero. Tapping YOUR OWN signed-in card checks you in directly (no confirm —
+    // the confirm popup exists for mis-taps on OTHER people's names). Checked-in tap -> confirm check-OUT.
+    const heroCard = document.getElementById('ckh-card');
+    if (heroCard) {
+      heroCard.addEventListener('click', (e) => {
+        if (!e.target.closest('#ckh-btn')) return;
+        const me = state.myClaimedPlayer;
+        const player = me && (state.players || []).find((p) => String(p.id) === String(me.id));
+        if (!player) { showCheckinToast('Still loading — one second, then tap again'); return; }
+        const isIn = (state.checkedIn || []).includes(playerIdentityKey(player));
+        const after = () => { const c = document.getElementById('ckh-card'); if (c) c.innerHTML = checkinHeroInnerHTML(); };
+        if (isIn) { openKioskConfirm(player, true, () => { performKioskToggle(player, true); after(); }); }
+        else { performKioskToggle(player, false); after(); }
+      });
+    }
 
     // "I'm new — add me": reuse the EXACT register path, then check the new player in (kiosk intent).
     const newBtn = document.getElementById('btn-checkin-new');

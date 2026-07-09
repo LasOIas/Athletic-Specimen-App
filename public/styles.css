@@ -2273,6 +2273,30 @@ body.copilot-typing #bottom-nav { display: none; }
    font/content change. */
 #tab-players > .container:has(.ci-kiosk.is-idle) { position: relative; justify-content: center; }
 #tab-players > .container:has(.ci-kiosk.is-idle) > #js-checkin-stats { position: absolute; top: 0; left: 0; right: 0; }
+
+/* Round 2 — check-in one-tap hero (spec §12.3, Mike's locked pick A). Placed AFTER the .is-idle
+   centering rule above so this equal-specificity override wins by source order (the hero container
+   carries BOTH .is-idle and .has-hero). */
+#tab-players > .container:has(.ci-kiosk.has-hero) { justify-content: flex-start; }
+.ckh-card { background: oklch(0.98 0.004 75 / 0.30); -webkit-backdrop-filter: blur(3px) saturate(1.05);
+  backdrop-filter: blur(3px) saturate(1.05); border: 1.5px solid var(--accent-bd);
+  border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 24px 18px 18px;
+  text-align: center; width: 100%; max-width: 400px; margin: 4px auto 18px; }
+.ckh-av { width: 56px; height: 56px; border-radius: 50%; background: var(--accent-soft);
+  border: 1px solid var(--accent-bd); color: var(--accent); font-family: 'Sora','Inter',sans-serif;
+  font-weight: 800; font-size: 21px; display: inline-flex; align-items: center; justify-content: center; }
+.ckh-eyebrow { display: block; font-size: 11px; font-weight: 700; letter-spacing: .7px;
+  text-transform: uppercase; color: var(--muted); margin-top: 12px; }
+.ckh-name { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 23px; color: var(--ink); margin-top: 2px; }
+.ckh-btn { width: 100%; margin-top: 16px; min-height: 52px; border: none; border-radius: var(--r-md);
+  background: var(--accent); color: #fff; font-weight: 700; font-size: 17px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
+.ckh-btn svg { width: 20px; height: 20px; }
+.ckh-btn.is-in { background: var(--live-soft); color: var(--live-ink); border: 1px solid oklch(0.85 0.05 150); }
+.ckh-alts { text-align: center; margin-bottom: 6px; }
+.ckh-alt-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.ckh-count { text-align: center; font-size: 13px; font-weight: 600; color: var(--muted); padding: 10px 0 0; }
+
 .ci-kiosk.is-idle {
   flex: 0 0 auto;
   display: flex;

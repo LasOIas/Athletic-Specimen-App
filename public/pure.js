@@ -1099,6 +1099,15 @@ function computeTeamRunTimeline(teamId, matches, teams) {
   return { last, next, then };
 }
 
+// Round 2 (spec §12.3): the check-in one-tap hero shows ONLY for an unambiguous claimed player.
+// 0 rows (unclaimed) or 2+ rows (ambiguous claim data) -> null -> the kiosk stays search-first.
+function checkinHeroModel(rows) {
+  if (!Array.isArray(rows) || rows.length !== 1) return null;
+  const p = rows[0] || {};
+  if (!p.id || !p.name) return null;
+  return { id: p.id, name: String(p.name) };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -1116,6 +1125,7 @@ if (typeof module !== "undefined" && module.exports) {
     shouldAutoPromptBracket, assignBracketNets,
     shapeStandingsByPool, computeAllTimeLeaderboard,
     shapeClaimCandidates, filterClaimCandidates,
-    resolveMyTeam, computeTeamRecord, computeTeamRunTimeline
+    resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
+    checkinHeroModel
   };
 }
