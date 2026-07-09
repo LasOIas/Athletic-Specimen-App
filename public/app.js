@@ -2531,11 +2531,11 @@ function buildPersonalHeroHTML(mine, rec) {
   const tl = computeTeamRunTimeline(mine.teamId, matches, teams);
   const team = teams.find((t) => t.id === mine.teamId) || {};
   const pool = (state.tournamentPools || []).find((p) => p.id === team.pool_id);
-  const metaBits = [pool && pool.name ? ('Pool ' + pool.name) : '', rec ? (rec.wins + '–' + rec.losses) : '']
+  const metaBits = [pool && pool.label ? ('Pool ' + pool.label) : '', rec ? (rec.wins + '–' + rec.losses) : '']
     .filter(Boolean).join(' · ');
   const nodes = [];
   if (tl.last) {
-    nodes.push(`<div class="pd-tl done"><div class="pd-tlk">${tl.last.won ? 'Won' : 'Lost'} · ${tl.last.myScore}&ndash;${tl.last.oppScore}</div>`
+    nodes.push(`<div class="pd-tl done${tl.last.won ? '' : ' lost'}"><div class="pd-tlk">${tl.last.won ? 'Won' : 'Lost'} · ${tl.last.myScore}&ndash;${tl.last.oppScore}</div>`
       + `<div class="pd-tlv">${tl.last.net ? 'Net ' + escapeHTML(String(tl.last.net)) + ' ' : ''}vs ${escapeHTML(tl.last.oppName || '—')}</div></div>`);
   }
   if (tl.next) {
@@ -7907,7 +7907,7 @@ function buildMyTeamPageHTML() {
   const pool = (state.tournamentPools || []).find((p) => p.id === team.pool_id);
   const anyFinal = matches.some((m) => m.phase === 'pool' && m.status === 'final');
   const seedRow = anyFinal ? (computeSeeding(teams, matches).find((s) => s.teamId === mine.teamId) || null) : null;
-  const eyebrow = [t.name || 'Tournament', pool && pool.name ? ('Pool ' + pool.name) : '', seedRow && seedRow.seed ? ('Seed ' + seedRow.seed) : '']
+  const eyebrow = [t.name || 'Tournament', pool && pool.label ? ('Pool ' + pool.label) : '', seedRow && seedRow.seed ? ('Seed ' + seedRow.seed) : '']
     .filter(Boolean).join(' · ');
 
   // Pips: one per game of mine with both teams known — green W, muted-red L, gray unplayed (§27 semantics).
@@ -9562,7 +9562,7 @@ function activateMainTab(tab) {
     });
   }
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
-  document.body.classList.toggle('pd-home-active', tab === 'home' && !state.isAdmin); // full-bleed logo backdrop shows on Home only
+  document.body.classList.toggle('pd-public-active', !state.isAdmin); // Mike (2026-07-09): the logo backdrop shows on EVERY public page (was Home-only); frosted cards + bolder outlines keep content readable
   // Reliability fix (2026-06-20): expose the current tab to assistive tech, not just a visual .active
   // class (this is the single place nav active state is set — first paint via activateMainTab(activeMainTab)
   // and on click — so aria-current stays correct everywhere).

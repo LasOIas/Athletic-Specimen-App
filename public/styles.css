@@ -2976,7 +2976,9 @@ body.copilot-typing #bottom-nav { display: none; }
 /* -- shared card + eyebrow -- */
 .pd-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 14px 15px; margin-bottom: 12px; }
 /* frosted glass ONLY on Home (so the logo reads through there); other tabs keep solid readable cards */
-.home-screen .pd-card { background: oklch(0.98 0.004 75 / 0.30); -webkit-backdrop-filter: blur(3px) saturate(1.05); backdrop-filter: blur(3px) saturate(1.05); border: 1px solid oklch(1 0 0 / 0.6); }
+/* Mike (2026-07-09): frosted "windowed" cards on ALL public pages (the logo reads through them),
+   with a BOLDER outline so each card's separation is obvious. */
+body.pd-public-active .pd-card { background: oklch(0.98 0.004 75 / 0.30); -webkit-backdrop-filter: blur(3px) saturate(1.05); backdrop-filter: blur(3px) saturate(1.05); border: 1.5px solid oklch(0.78 0.01 75); }
 .pd-eyebrow { display: block; font-size: 11px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; color: var(--muted); }
 
 /* -- header pieces (container layout wired in the header task) -- */
@@ -2993,9 +2995,10 @@ body.copilot-typing #bottom-nav { display: none; }
 .pd-watermark {
   position: fixed;
   display: none;
-  left: 50%; top: -3%;
+  /* Mike (2026-07-09): moved DOWN — the old top:-3% hid the top of the cross under the opaque header */
+  left: 50%; top: calc(env(safe-area-inset-top, 0px) + 92px);
   transform: translateX(-50%);
-  height: 82vh; width: auto;
+  height: 74vh; width: auto;
   opacity: 0.72;
   z-index: -2;
   pointer-events: none;
@@ -3010,9 +3013,10 @@ body.copilot-typing #bottom-nav { display: none; }
     oklch(0.95 0.004 75 / 0.08) 22%,
     oklch(0.95 0.004 75 / 0.08) 100%);
 }
-/* the Home logo backdrop shows ONLY on Home (body.pd-home-active toggled in activateMainTab); other tabs stay clean + readable */
-body.pd-home-active .pd-watermark { display: block; }
-body.pd-home-active .pd-scrim { display: block; }
+/* Mike (2026-07-09): the logo backdrop shows on EVERY public page (body.pd-public-active, toggled in
+   activateMainTab; admin stays clean). Readability comes from the frosted cards + bolder outlines below. */
+body.pd-public-active .pd-watermark { display: block; }
+body.pd-public-active .pd-scrim { display: block; }
 .pd-wordmark { display: flex; flex-direction: column; gap: 2px; }
 .pd-wm-1 { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15px; letter-spacing: .13em; color: var(--ink); line-height: 1; }
 .pd-wm-2 { font-weight: 600; font-size: 9px; letter-spacing: .30em; color: var(--faint); line-height: 1; }
@@ -3225,3 +3229,4 @@ body.pd-home-active .pd-scrim { display: block; }
 .mt-pl .av { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: .8rem; }
 .mt-pl .mt-nm { font-size: .9rem; font-weight: 600; color: var(--text); }
 .mt-you { margin-left: auto; font-size: .66rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-bd); padding: 1px 8px; border-radius: 999px; }
+.pd-tl.done.lost::before { background: var(--danger); } /* green dot = won only; a lost game gets the muted red (§27) */
