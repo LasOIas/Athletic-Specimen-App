@@ -22,6 +22,8 @@
       --accent-dim: oklch(0.96 0.015 240); /* accent-soft */
       --live: oklch(0.55 0.09 150);        /* muted green — success/checked-in */
       --live-soft: oklch(0.96 0.03 150);
+      --live-ink: oklch(0.40 0.09 150);    /* live text on live-soft — checked-in hero state (app --live-ink) */
+      --accent-bd: oklch(0.86 0.03 240);   /* accent border — mirrors the in-app hero card (app --accent-bd) */
       --danger: oklch(0.55 0.16 25);
     }
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -158,6 +160,53 @@
     .dialog-name { font-family: 'Sora', 'Inter', sans-serif; font-size: 24px; font-weight: 800; letter-spacing: -0.01em; word-break: break-word; }
     .dialog-q { color: var(--text-dim); font-size: 15px; margin: 6px 0 22px; }
     .dialog-card .btn + .btn { margin-top: 10px; }
+    /* Round 2 (spec §12.3) — one-tap check-in hero. Mirrors the in-app .ckh-* system (styles.css,
+       Slice C) adapted to this page's tokens: app --accent-soft == --accent-dim, --ink == --text,
+       --muted == --text-dim, --r-lg==16px, --r-md==13px, --shadow inlined. Best-effort / additive:
+       hidden entirely unless a carried app session resolves an unambiguous claimed player. */
+    .ckh-card {
+      background: oklch(0.98 0.004 75 / 0.30);
+      -webkit-backdrop-filter: blur(3px) saturate(1.05);
+      backdrop-filter: blur(3px) saturate(1.05);
+      border: 1.5px solid var(--accent-bd);
+      border-radius: 16px;
+      box-shadow: 0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
+      padding: 24px 18px 18px;
+      text-align: center;
+      width: 100%;
+      max-width: 400px;
+      margin: 4px auto 14px;
+    }
+    .ckh-av {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: var(--accent-dim); border: 1px solid var(--accent-bd); color: var(--accent);
+      font-family: 'Sora', 'Inter', sans-serif; font-weight: 800; font-size: 21px;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .ckh-eyebrow {
+      display: block; font-size: 11px; font-weight: 700; letter-spacing: .7px;
+      text-transform: uppercase; color: var(--text-dim); margin-top: 12px;
+    }
+    .ckh-name {
+      font-family: 'Sora', 'Inter', sans-serif; font-weight: 800; font-size: 23px;
+      color: var(--text); margin-top: 2px; word-break: break-word;
+    }
+    .ckh-btn {
+      width: 100%; margin-top: 16px; min-height: 52px; border: none; border-radius: 13px;
+      background: var(--accent); color: #fff; font-weight: 700; font-size: 17px;
+      font-family: inherit; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+      transition: transform 0.05s, background 0.15s;
+    }
+    .ckh-btn:active { transform: scale(0.98); background: oklch(0.48 0.08 240); }
+    .ckh-btn svg { width: 20px; height: 20px; }
+    .ckh-btn.is-in {
+      background: var(--live-soft); color: var(--live-ink);
+      border: 1px solid oklch(0.85 0.05 150); cursor: default;
+    }
+    .ckh-btn.is-in:active { transform: none; background: var(--live-soft); }
+    .ckh-alts { text-align: center; margin: 0 0 18px; }
+    .ckh-alt-label { font-size: 13px; font-weight: 600; color: var(--text-dim); }
   </style>
 </head>
 <body>
@@ -243,9 +292,72 @@
 
     // C21: kiosk is anon-only (no admin login); persistSession=false keeps it stateless so no
     // auth token can ever linger on this shared public device.
-    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
+    // storageKey namespaces this anon client OFF the default auth-token key so it never collides with
+    // the read-only sbUser client below (Round 2) — persistSession:false keeps it in-memory/stateless
+    // (C21) and the anon flow never touches auth storage, so this is behavior-neutral + more isolated.
+    const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false, storageKey: 'as-kiosk-anon' } });
     const $ = (id) => document.getElementById(id);
     let roster = [];
+
+    // Round 2 (spec §12.3): if the visitor is signed into the app on THIS device/browser, their
+    // persisted session lives in localStorage (same origin) — read it to offer a one-tap hero.
+    // READ-ONLY auth client: autoRefreshToken:false so this stateless kiosk (C21) never writes or
+    // rotates tokens — it only READS a session the app itself already persisted. We never call
+    // sign-in/out on it, so no auth token can ever linger from this page. Any failure -> the anon
+    // kiosk below is byte-identical to today (the hero is best-effort and purely additive).
+    const sbUser = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: false } });
+
+    async function tryRenderHero() {
+      try {
+        const { data: sess } = await sbUser.auth.getSession();
+        const user = sess && sess.session && sess.session.user;
+        if (!user) return;                                   // no carried session -> search-first kiosk
+        // Mirror checkinHeroModel's exactly-one rule (this page has no module system): 0 rows
+        // (unclaimed) or 2+ rows (ambiguous) -> no hero. checked_in drives the muted state.
+        const { data, error } = await sbUser.from('players')
+          .select('id,name,checked_in').eq('claimed_by_profile', user.id).limit(2);
+        if (error || !Array.isArray(data) || data.length !== 1 || !data[0].id || !data[0].name) return;
+        renderCheckinHero(data[0]);
+      } catch (_) { /* best-effort — the anon kiosk is untouched */ }
+    }
+
+    // Inject the hero card ABOVE the search input. Reuses the page's existing check-in path
+    // (checkInExisting -> check_in RPC -> showSuccess) so the success screen + vibration are shared.
+    function renderCheckinHero(player) {
+      if (!player || !player.id || !player.name) return;
+      const input = $('nameInput');
+      if (!input || !input.parentNode) return;
+      const existing = $('checkinHero');                     // repaint in place if already shown (tap flip)
+      const isIn = player.checked_in === true;
+      const wrap = document.createElement('div');
+      wrap.id = 'checkinHero';
+      wrap.innerHTML = `
+        <div class="ckh-card">
+          <span class="ckh-av"></span>
+          <span class="ckh-eyebrow">Signed in</span>
+          <div class="ckh-name"></div>
+          <button type="button" class="ckh-btn${isIn ? ' is-in' : ''}" id="heroCheckinBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.5l2.5 2.5L15.5 9"/><circle cx="12" cy="12" r="9"/></svg>
+            <span class="ckh-btn-label"></span>
+          </button>
+        </div>
+        <div class="ckh-alts"><span class="ckh-alt-label">Checking in someone else? Use the search below.</span></div>`;
+      // textContent (not interpolation) — reuse the page's nameInitials(); no HTML injection from names.
+      wrap.querySelector('.ckh-av').textContent = nameInitials(player.name);
+      wrap.querySelector('.ckh-name').textContent = player.name;
+      wrap.querySelector('.ckh-btn-label').textContent = isIn ? "You're checked in" : 'Check in';
+      if (existing) existing.replaceWith(wrap); else input.parentNode.insertBefore(wrap, input);
+      if (isIn) return;                                      // muted 'You're checked in' -> no action (mirrors the app hero)
+      wrap.querySelector('#heroCheckinBtn').addEventListener('click', () => {
+        // No confirm dialog: this is the visitor's OWN signed-in card (the confirm popup exists for
+        // mis-taps on OTHER people's names). Same check-in fn a tapped suggestion uses -> shared
+        // success screen + vibration. Optimistically flip to the muted state; the shared success
+        // screen shows over it, and on error we revert (the inline #checkinError explains why).
+        checkInExisting(player, () => { player.checked_in = false; renderCheckinHero(player); });
+        player.checked_in = true;
+        renderCheckinHero(player);
+      });
+    }
 
     // C47: styled confirm dialog (Option A center modal) — replaces native confirm()/alert().
     let pendingConfirm = null;
@@ -476,6 +588,7 @@
 
     loadRoster();
     loadSessionBanner();
+    tryRenderHero(); // Round 2 (spec §12.3): best-effort one-tap hero if a signed-in app session is carried here
     // C24 item 7: re-fetch the roster mid-session so a player added on another device shows up in the
     // typeahead (instead of re-registering as a duplicate). Refresh periodically + when the kiosk regains focus.
     setInterval(loadRoster, 30000);
