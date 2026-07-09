@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.9'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.09.10'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -5237,9 +5237,11 @@ function buildPoolsSchedulePageHTML() {
         if (g.status === 'final') {
           const aWin = g.winner_team_id === aId;
           const w = aWin ? aTap : bTap, l = aWin ? bTap : aTap;
+          // Score pair follows the displayed winner-first name order (§27 TRUE), not the stored a–b order.
+          const ws = aWin ? g.score_a : g.score_b, ls = aWin ? g.score_b : g.score_a;
           return `<div class="pd-pool-game${i === 0 ? ' pd-pool-first' : ''}">
             <div class="pd-pool-gi">${kick}<div class="pd-pool-gt"><b>${w}</b> def. <span class="pd-pool-glose">${l}</span></div></div>
-            <div class="pd-pool-gr"><span class="pd-pool-gsc">${escapeHTML(String(g.score_a))}&ndash;${escapeHTML(String(g.score_b))}</span><span class="pd-pool-finaltag">FINAL</span></div>
+            <div class="pd-pool-gr"><span class="pd-pool-gsc">${escapeHTML(String(ws))}&ndash;${escapeHTML(String(ls))}</span><span class="pd-pool-finaltag">FINAL</span></div>
           </div>`;
         }
         if (g.status === 'live') {
