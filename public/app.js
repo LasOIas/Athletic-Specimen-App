@@ -4031,13 +4031,16 @@ async function refreshTournamentLive() {
     if (tournamentTabIsDirty()) return;
     await tdbRefreshTournaments();
     if (onTournamentSurface()) partialRenderTournament();
-  } else if (activeMainTab === 'home' && publicLiveTournament()) {
-    // Slice 3c: the Home dashboard renders the live board + (claimed) personal hero + My Team page
-    // from tournament state, which previously went STALE here — this else-branch only refreshed the
-    // tournaments list, so Home's board never updated between tab switches. Refresh the data + repaint
-    // via partialRender() (its home/myteam branches rebuild in place; no form lives on those panels).
+  } else if ((activeMainTab === 'home' || activeMainTab === 'myteam' || activeMainTab === 'standings') && publicLiveTournament()) {
+    // Slice 3c: Home / My Team / Standings all render from tournament state, which previously went
+    // STALE here — this else-branch only refreshed the tournaments list, so those panels repainted
+    // every 15s from frozen data (review wf_4480d8a3-9be: a claimed player's record/up-next froze
+    // while they sat on My Team). Refresh the data + repaint via partialRender() (its in-place
+    // branches rebuild these panels; no form lives on them). History stays out: its data is the
+    // separate lazy loadTournamentHistory, not live tournament state.
+    const tabAtStart = activeMainTab;
     await tdbRefreshTournaments();
-    if (activeMainTab === 'home') partialRender();
+    if (activeMainTab === tabAtStart) partialRender();
   } else {
     // Off the tab: keep the list fresh so the Tournament nav appears/disappears as events go live.
     state.tournaments = await tdbListTournaments();
