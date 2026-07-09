@@ -18,7 +18,7 @@ const {
   splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
   bracketGameNumbers, bracketSourceLabel,
   shouldAutoPromptBracket, assignBracketNets,
-  shapeClaimCandidates,
+  shapeClaimCandidates, filterClaimCandidates,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -944,5 +944,31 @@ describe('shapeClaimCandidates (Slice 3b — claim-search rows from the team_mem
     const out = shapeClaimCandidates([row('p1', 'Cory', null, 't1', 'Dinkers')]);
     expect(out[0].initials).toBe('C');
     expect(shapeClaimCandidates(undefined)).toEqual([]);
+  });
+});
+
+describe('filterClaimCandidates (Slice 3b — claim search keeps team/claim fields)', () => {
+  const cands = [
+    { id: 'p1', name: 'Cade Wilson', teamId: 't1', teamName: 'Chewblockas', claimedBy: null, initials: 'CW' },
+    { id: 'p2', name: 'Caleb Standifer', teamId: 't1', teamName: 'Chewblockas', claimedBy: 'other', initials: 'CS' },
+    { id: 'p3', name: 'Mica Deleon', teamId: 't2', teamName: 'Setting Ducks', claimedBy: null, initials: 'MD' },
+  ];
+  it('matches case-insensitive substrings and RETURNS THE ORIGINAL OBJECTS (teamName/claimedBy intact)', () => {
+    // 'ca' hits Cade + Caleb at position 0 AND 'Mica' mid-string — substring semantics, prefix-first order
+    const out = filterClaimCandidates(cands, 'ca');
+    expect(out.map((c) => c.name)).toEqual(['Cade Wilson', 'Caleb Standifer', 'Mica Deleon']);
+    expect(out[0].teamName).toBe('Chewblockas');
+    expect(out.find((c) => c.id === 'p2').claimedBy).toBe('other');
+  });
+  it('prefix matches sort before mid-string matches', () => {
+    // 'de' hits 'Dean Ford' at position 0 and Cade/Deleon mid-string — Dean must lead
+    const out2 = filterClaimCandidates([...cands, { id: 'p4', name: 'Dean Ford', teamId: 't3', teamName: 'X', claimedBy: null, initials: 'DF' }], 'de');
+    expect(out2[0].name).toBe('Dean Ford');
+    expect(out2.map((c) => c.name)).toContain('Cade Wilson');
+  });
+  it('empty/whitespace query returns []; caps at 12', () => {
+    expect(filterClaimCandidates(cands, '  ')).toEqual([]);
+    const many = Array.from({ length: 20 }, (_, i) => ({ id: 'x' + i, name: 'Sam ' + i, teamId: 't', teamName: 'T', claimedBy: null, initials: 'S' }));
+    expect(filterClaimCandidates(many, 'sam')).toHaveLength(12);
   });
 });

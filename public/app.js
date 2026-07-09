@@ -7489,15 +7489,15 @@ async function fetchClaimCandidates() {
   renderClaimSearch();
 }
 
-function claimHeaderHTML(sub) {
+function claimHeaderHTML(title) {
   const t = claimableTournament();
   return `
     <button type="button" class="auth-back" id="claim-back" aria-label="Close claim">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>
     </button>
     <div class="auth-inner claim-inner">
-      <h2 class="auth-title">Find your name</h2>
-      <p class="auth-sub">${escapeHTML(sub || (t ? (t.name || 'Tournament') : 'Tournament'))}</p>`;
+      <h2 class="auth-title">${escapeHTML(title || 'Find your name')}</h2>
+      <p class="auth-sub">${escapeHTML(t ? (t.name || 'Tournament') : 'Tournament')}</p>`;
 }
 
 function renderClaimSearch() {
@@ -7506,12 +7506,12 @@ function renderClaimSearch() {
   const mine = (claimCandidates || []).find((c) => state.account && c.claimedBy === state.account.id);
   if (mine) {
     // Already linked — nothing to search for.
-    el.innerHTML = claimHeaderHTML() + `
+    el.innerHTML = claimHeaderHTML("You're linked") + `
       <div class="claim-linked">
         <span class="av claim-bigav">${escapeHTML(mine.initials)}</span>
         <div class="claim-nm">${escapeHTML(mine.name)}</div>
         <div class="claim-team">${escapeHTML(mine.teamName)}</div>
-        <p class="auth-sub">You're linked — this is you.</p>
+        <p class="auth-sub">This is you.</p>
         <button type="button" class="auth-submit" id="claim-done">Done</button>
       </div>
     </div>`;
@@ -7519,6 +7519,9 @@ function renderClaimSearch() {
     el.querySelector('#claim-done').addEventListener('click', closeClaimPage);
     return;
   }
+  // The fetch-completion re-render must never wipe a half-typed name (Mike's input-wipe bug class):
+  // carry the existing query across the rebuild and repaint with it.
+  const prevQuery = (document.getElementById('claim-search') || {}).value || '';
   el.innerHTML = claimHeaderHTML() + `
       <div class="cik-search claim-search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -7531,6 +7534,7 @@ function renderClaimSearch() {
   const results = el.querySelector('#claim-results');
   const paint = () => { results.innerHTML = buildClaimResultsHTML(input.value); };
   input.addEventListener('input', paint);
+  if (prevQuery) input.value = prevQuery;
   results.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-claim-id]');
     if (!btn) return;
@@ -7548,7 +7552,7 @@ function buildClaimResultsHTML(query) {
   }
   const q = String(query || '').trim();
   if (!q) return '<div class="small claim-note">Type your name to find yourself.</div>';
-  const list = disambiguatePlayersByName(claimCandidates, q);
+  const list = filterClaimCandidates(claimCandidates, q);
   if (!list.length) return '<div class="small claim-note">No match &mdash; check the spelling, or ask your organizer.</div>';
   return list.map((c) => {
     const taken = !!c.claimedBy;
@@ -7600,7 +7604,7 @@ async function submitClaim(c) {
 function renderClaimSuccess(c) {
   const el = document.getElementById('claim-page');
   if (!el) return;
-  el.innerHTML = claimHeaderHTML('You are linked') + `
+  el.innerHTML = claimHeaderHTML("You're linked") + `
       <div class="claim-linked">
         <span class="av claim-bigav">${escapeHTML(c.initials)}</span>
         <div class="claim-nm">${escapeHTML(c.name)}</div>

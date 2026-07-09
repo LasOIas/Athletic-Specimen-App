@@ -984,6 +984,25 @@ function shapeClaimCandidates(memberRows) {
   return out;
 }
 
+// Slice 3b: name search over claim candidates. Same semantics as disambiguatePlayersByName
+// (ci substring, prefix-first then name asc, cap 12, [] for empty query) but returns the ORIGINAL
+// candidate objects — disambiguatePlayersByName rebuilds rows into the check-in shape and would
+// strip teamName/claimedBy (found live: claimed rows lost their flag, teams rendered blank).
+function filterClaimCandidates(candidates, query) {
+  const q = String(query == null ? '' : query).trim().toLowerCase();
+  if (!q) return [];
+  const scored = [];
+  for (const c of (Array.isArray(candidates) ? candidates : [])) {
+    if (!c || typeof c !== 'object') continue;
+    const lower = String(c.name || '').toLowerCase();
+    const pos = lower.indexOf(q);
+    if (pos < 0) continue;
+    scored.push({ _prefix: pos === 0 ? 0 : 1, _name: lower, row: c });
+  }
+  scored.sort((a, b) => (a._prefix - b._prefix) || a._name.localeCompare(b._name));
+  return scored.slice(0, 12).map((s) => s.row);
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -1000,6 +1019,6 @@ if (typeof module !== "undefined" && module.exports) {
     bracketGameNumbers, bracketSourceLabel,
     shouldAutoPromptBracket, assignBracketNets,
     shapeStandingsByPool, computeAllTimeLeaderboard,
-    shapeClaimCandidates
+    shapeClaimCandidates, filterClaimCandidates
   };
 }
