@@ -277,3 +277,15 @@ of this commit; Mike's pick lands in §13.8. Mobile build proceeds first.
 **Mockups (scratchpad/pd-finish, session 6):** a1-{a,b,c,final} ·
 a2-{a,b,c,final} · b-{a,b,c} · c-{a,b,c} · r2-{a,b,c} · mega-review{,-2}.png.
 §38 markers ×3 at head 712f9ad; picks + rejections in 12-history task-#6…#9.
+
+### 13.8 Desktop (locked — Mike: "A is the best, but on desktop you can [fit] a lot more showing, use the full space")
+Option A's chrome — the same single-column app with the bottom nav becoming a
+slim top tab strip (Home · Check In · Tournament) at >=1024px — but the
+content area uses the FULL width (~1140px max), not a widened phone column:
+Home = timeline hero and the live courts board side by side when width
+allows; Pools & schedule = the now-playing cluster as a full-width row, then
+the three pools as side-by-side columns (each pool's net cards stacked within
+its column); Bracket = the full tree at full width (no panning at this size);
+Standings/My Team/History/registration = two-column where content allows,
+bigger type per A. No icon rail, no split panes — one app, one scroll, denser.
+Verified at 1280+ during the build's §27 pass (browser render, real data).
