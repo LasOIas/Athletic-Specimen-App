@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.09.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -1372,28 +1372,6 @@ function partialRender() {
     }
   }
 
-  // Wave 1b (2026-06-25): public Scores tab updates IN PLACE. Without this, a background sync (15s poll
-  // + realtime push) falls through to the line-~1338 full render() below, rebuilding #root and yanking a
-  // spectator scrolled down live Scores back to the top — the #1 stated frustration, on the most-watched
-  // public view. The public shell has no `.players`, so mirror the Home short-circuit: rebuild only the
-  // scores container (publicScoresHTML recomputes live courts/standings).
-  if (!playersEl && activeMainTab === 'scores') {
-    const c = document.querySelector('#tab-scores .container');
-    if (c) {
-      // Preserve the spectator's scroll across the rebuild: iOS Safari RESETS an overflow container's
-      // scrollTop when its innerHTML is replaced, yanking a fan scrolled down the live Scores board back
-      // to the top on every 15s sync / realtime score (Mike's #1 frustration class). render() +
-      // partialRenderTournament already save+restore this; this public Scores short-circuit didn't (the
-      // documented latent twin of the 2026-06-28 Manage scroll fix). No-op on desktop (saved === current).
-      const panel = document.getElementById('tab-scores');
-      const saved = panel ? panel.scrollTop : 0;
-      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
-      c.innerHTML = publicScoresHTML();
-      if (panel && saved > 0 && panel.scrollTop !== saved) panel.scrollTop = saved;
-      return;
-    }
-  }
-
   // Slice 1 (2026-07-08): public Standings + History sub-tabs update IN PLACE on a background sync,
   // mirroring the Scores short-circuit — rebuild only the panel container (recomputes live standings /
   // history; the segmented-toggle state lives in a module var so it survives) and preserve the
@@ -2558,17 +2536,6 @@ function buildPersonalHeroHTML(mine, rec) {
 
 function publicHomeHTML() {
   const tourney = publicLiveTournament();
-  const tileSVG = {
-    standings: '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/>',
-    bracket: '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/>',
-    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-    team: '<circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>',
-  };
-  const tile = (tab, icon, title, sub) => `<button type="button" class="pd-tile" data-nav-tab="${tab}">
-      <span class="pd-ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${tileSVG[icon]}</svg></span>
-      <span class="pd-tt">${escapeHTML(title)}</span>
-      <span class="pd-ts">${escapeHTML(sub)}</span>
-    </button>`;
 
   // ----- Tournament live: the spectator dashboard. Slice 3c: a signed-in CLAIMED player gets the
   // personal "your run" hero (Mike's locked Option C timeline) in place of the claim button, plus a
@@ -2582,9 +2549,6 @@ function publicHomeHTML() {
       liveNets ? (liveNets + (liveNets === 1 ? ' net live' : ' nets live')) : '',
     ].filter(Boolean).join(' · ');
     const boardHTML = buildPublicTournamentLiveHTML(); // carries its own "<name> · live now" header
-    const standings = computeStandings(state.tournamentTeams || [], state.tournamentMatches || []);
-    const anyFinal = (state.tournamentMatches || []).some((m) => m.phase === 'pool' && m.status === 'final');
-    const standingsSub = (anyFinal && standings[0]) ? ('Leader: ' + (standings[0].name || '—')) : 'By pool';
     const mine = myTeamInfo();
     const myRec = mine ? computeTeamRecord(mine.teamId, state.tournamentMatches || [], state.tournamentTeams || []) : null;
     return `<div class="home-screen">
@@ -2597,13 +2561,7 @@ function publicHomeHTML() {
           Playing? Claim your team
         </button>`}
       </div>
-      ${boardHTML ? `<div class="pd-card">${boardHTML}</div>` : ''}
-      <div class="pd-tiles">
-        ${tile('standings', 'standings', 'Standings', standingsSub)}
-        ${tile('tournament', 'bracket', 'Bracket', tourney.status === 'bracket' ? 'In progress' : 'After pools')}
-        ${mine ? tile('myteam', 'team', 'My Team', (myRec ? myRec.wins + '–' + myRec.losses + ' · ' : '') + 'Your games') : ''}
-        ${tile('history', 'clock', 'History', 'Past tournaments')}
-      </div>
+      ${boardHTML ? `<div class="pd-card">${boardHTML}${PUBLIC_COURT_LEGEND}</div>` : ''}
     </div>`;
   }
 
@@ -2660,48 +2618,6 @@ function publicHomeHTML() {
       <span><span class="pd-t">Past tournaments</span><span class="pd-s">Champions, records &amp; results</span></span>
       <span class="pd-c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
     </button>
-  </div>`;
-}
-
-// C26 item 3a: PUBLIC Scores (read-only live scoreboard). Win/loss status only, never a score.
-function publicScoresHTML() {
-  const liveData = getPublicLiveData();
-  const courtsHTML = buildPublicLiveCourtsHTML();
-  const tourneyHTML = buildPublicTournamentLiveHTML(); // NF-7: live tournament games on the Scores board
-  if (!courtsHTML && !tourneyHTML) {
-    // C48.6 (Option A): empty state is vertically centered in the available #app-content height
-    // (the .idle-center wrapper fills the absolutely-positioned .tab-panel and flex-centers).
-    // Subtle line-icon mark (bar-chart, currentColor=--accent), not neon, no emoji.
-    return `<div class="idle-center">
-      <div class="idle-block">
-        <div class="idle-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V11M10 19V6M16 19v-9M22 19H2"/></svg></div>
-        <div class="idle-title">${state.loaded ? 'No live games right now' : 'Checking for live games…'}</div>
-        <div class="idle-sub">Live games show here once a round starts.</div>
-      </div>
-    </div>`;
-  }
-  const upNext = (liveData.waitingTeams || []).length
-    ? `<div class="ph-sec">Up next &middot; rotating onto a net</div>
-       <div class="court-row"><div class="court-row-info"><div class="court-row-name">Next up</div><div class="court-row-sub">${liveData.waitingTeams.map((t) => 'Team ' + Number(t)).join(', ')}</div></div></div>` // S4: give the row a name like every other
-    : '';
-  // C60: legend so a spectator isn't guessing at "Net N" / "Team N" / what a live game shows (S2: shared, tournament too).
-  const legend = (courtsHTML || tourneyHTML) ? PUBLIC_COURT_LEGEND : '';
-  // S1: the live badge lights for a tournament-only live night too (not just casual courts).
-  const liveBadge = liveData.liveCount > 0
-    ? `<span class="ph-live"><span class="ph-dot"></span>${liveData.liveCount} playing</span>`
-    : tourneyHTML
-    ? `<span class="ph-live"><span class="ph-dot"></span>live now</span>`
-    : courtsHTML
-    ? `<span class="ph-done">Round complete &middot; next round coming up</span>`
-    : '';
-  // S3: casual court rows get an "On the courts" heading (tournament rows already carry their own).
-  const courtsSection = courtsHTML ? `<div class="ph-sec">On the courts</div>${courtsHTML}` : '';
-  return `<div class="home-screen">
-    <div class="ph-brand">Live scores ${liveBadge}</div>
-    ${courtsSection}
-    ${tourneyHTML}
-    ${upNext}
-    ${legend}
   </div>`;
 }
 
@@ -7906,9 +7822,9 @@ function buildPublicNavInnerHTML() {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>
       <span>Check In</span>
     </button>
-    <button class="nav-btn" data-nav-tab="scores">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
-      <span>Live</span>
+    <button class="nav-btn" data-nav-tab="tournament">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>
+      <span>Tournament</span>
     </button>`;
 }
 
@@ -8152,11 +8068,6 @@ function renderPublicShell() {
       <div class="container">
         <div id="js-checkin-stats">${buildCheckinStatsHTML()}</div>
         ${publicCheckinHTML()}
-      </div>
-    </div>
-    <div id="tab-scores" class="tab-panel">
-      <div class="container">
-        ${publicScoresHTML()}
       </div>
     </div>
     <div id="tab-tournament" class="tab-panel">
@@ -8923,8 +8834,8 @@ function render() {
   // No admin stale-key guard needed: session/tournament/teams are all still valid admin panels (reachable
   // via the Dashboard quick-actions), so a stored value for any of them is fine.
   activeMainTab = sessionStorage.getItem(currentTabKey()) || (state.isAdmin ? 'dashboard' : 'home');
-  // C26 item 3a: public 'teams' and the now-removed public 'session' tab fall back to 'home'.
-  if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'session')) activeMainTab = 'home';
+  // C26 item 3a + Round 2: public 'teams'/'session' and the removed 'scores' (Live) tab fall back to 'home'.
+  if (!state.isAdmin && ['teams', 'session', 'scores'].includes(activeMainTab)) activeMainTab = 'home';
   // Wave 1e: a fan last on the Bracket tab who returns after the tournament was deleted would land on
   // an empty 'tournament' panel with no nav button to highlight (the Bracket button is gone). Reset to
   // Home unless a tournament is actually live.
@@ -9210,7 +9121,7 @@ bindTournamentTabV2();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
-if (!state.isAdmin && (activeMainTab === 'teams' || activeMainTab === 'session')) activeMainTab = 'home';
+if (!state.isAdmin && ['teams', 'session', 'scores'].includes(activeMainTab)) activeMainTab = 'home';
 // Wave 1e: reset a stale public 'tournament' tab to Home when no tournament is live (else an empty panel + no nav button).
 if (!state.isAdmin && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 activateMainTab(activeMainTab);
@@ -9641,11 +9552,12 @@ function activateMainTab(tab) {
   // unchanged and still highlight themselves.
   const navButtons = document.querySelectorAll('#bottom-nav .nav-btn');
   const hasOwnButton = Array.prototype.some.call(navButtons, (b) => b.dataset.navTab === tab);
-  // Public tile-pages have no bottom-nav button of their own -> anchor their highlight to Home.
-  // (Admin keeps tournament/session -> dashboard; the public 'tournament' Bracket button was removed.)
+  // Public tile-pages (Standings/My Team/History) have no bottom-nav button of their own -> anchor their
+  // highlight to the Tournament nav button (they are Tournament content now). (Admin keeps
+  // tournament/session -> dashboard; the public 'tournament' Bracket tab has its own nav button again.)
   const NAV_ANCHOR = state.isAdmin
     ? { tournament: 'dashboard', session: 'dashboard' }
-    : { tournament: 'home', standings: 'home', history: 'home', myteam: 'home' };
+    : { standings: 'tournament', history: 'tournament', myteam: 'tournament' };
   const navActive = hasOwnButton ? tab : (NAV_ANCHOR[tab] || tab);
   navButtons.forEach((b) => {
     const isActive = b.dataset.navTab === navActive;
