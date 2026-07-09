@@ -1099,6 +1099,88 @@ function computeTeamRunTimeline(teamId, matches, teams) {
   return { last, next, then };
 }
 
+// Slice 1 (spec §13.2): the tap-a-team peek — a read-only spectator model for ONE team, shared by the
+// Pools & schedule page and the Home live board. PURE (no DOM / no state global): the caller passes
+// { teams, matches, pools }. Returns null for an unknown team. "Seeing is free" — no account, no skill.
+// Fields: teamName, initials, poolLabel, poolRank (rank within its OWN pool, or null), seed (overall,
+// or null until a pool game is final), wins/losses/pointDiff/gamesPlayed (FINAL games only),
+// live: { net, oppName, myScore, oppScore } | null   (a genuinely live-scored game — status 'live'),
+// next: { net, oppName, phase, roundLabel, isNow } | null (soonest upcoming game; pool queue preferred).
+// Reuses computeStandings (pool rank), computeSeeding (overall seed), computeTeamRecord (W-L / diff).
+function teamPeekModel(teamId, data) {
+  const d = data || {};
+  const teams = Array.isArray(d.teams) ? d.teams : [];
+  const matches = Array.isArray(d.matches) ? d.matches : [];
+  const pools = Array.isArray(d.pools) ? d.pools : [];
+  const team = teams.find((t) => t && t.id === teamId);
+  if (!team) return null;
+  const teamName = String(team.name || '');
+  const initials = teamName.trim().split(/\s+/).filter(Boolean)
+    .map((w) => (w[0] || '').toUpperCase()).slice(0, 2).join('') || '?';
+
+  // pool label + rank within its OWN pool (each pool ranks its own teams — spec §13.1/§6.3)
+  const pool = pools.find((p) => p && p.id === team.pool_id) || null;
+  const poolLabel = pool ? String(pool.label || '') : '';
+  let poolRank = null;
+  if (pool) {
+    const poolTeams = teams.filter((t) => t && t.pool_id === pool.id);
+    const poolMatches = matches.filter((m) => m && m.pool_id === pool.id);
+    const row = computeStandings(poolTeams, poolMatches).find((r) => r.teamId === teamId);
+    poolRank = row ? row.rank : null;
+  }
+
+  // overall seed is only honest (§27 TRUE) once at least one pool game is final — else null.
+  const anyFinal = matches.some((m) => m && m.phase === 'pool' && m.status === 'final');
+  let seed = null;
+  if (anyFinal) {
+    const s = computeSeeding(teams, matches).find((r) => r.teamId === teamId);
+    seed = s ? s.seed : null;
+  }
+
+  const rec = computeTeamRecord(teamId, matches, teams);
+
+  const involves = (m) => m && (m.team_a_id === teamId || m.team_b_id === teamId);
+  const orient = (m) => {
+    const iAmA = m.team_a_id === teamId;
+    const oppId = iAmA ? m.team_b_id : m.team_a_id;
+    const opp = teams.find((t) => t && t.id === oppId);
+    return {
+      oppName: (opp && opp.name) || '',
+      myScore: Number(iAmA ? m.score_a : m.score_b) || 0,
+      oppScore: Number(iAmA ? m.score_b : m.score_a) || 0,
+    };
+  };
+
+  // live = a genuinely live-scored game for this team (status 'live' — a running score exists).
+  const liveM = matches.find((m) => involves(m) && m.status === 'live' && m.team_a_id && m.team_b_id);
+  let live = null;
+  if (liveM) {
+    const o = orient(liveM);
+    live = { net: liveM.net || null, oppName: o.oppName, myScore: o.myScore, oppScore: o.oppScore };
+  }
+
+  // next = soonest upcoming game (not final, both teams set), excluding the live game; pool queue preferred
+  // (queue_order restarts for the bracket, so pool + bracket sets must not interleave — mirrors the timeline).
+  const upcomingAll = matches.filter((m) => involves(m) && m.status !== 'final'
+    && m.team_a_id && m.team_b_id && !(liveM && m.id === liveM.id));
+  const poolUp = upcomingAll.filter((m) => m.phase === 'pool');
+  const upcoming = (poolUp.length ? poolUp : upcomingAll)
+    .slice().sort((a, b) => (Number(a.queue_order) || 0) - (Number(b.queue_order) || 0));
+  let next = null;
+  if (upcoming.length) {
+    const n = upcoming[0];
+    const o = orient(n);
+    next = { net: n.net || null, oppName: o.oppName, phase: n.phase || 'pool', roundLabel: String(n.round_label || ''), isNow: n.status === 'live' };
+  }
+
+  return {
+    teamId, teamName, initials,
+    poolLabel, poolRank, seed,
+    wins: rec.wins, losses: rec.losses, pointDiff: rec.pointDiff, gamesPlayed: rec.results.length,
+    live, next,
+  };
+}
+
 // Round 2 (spec §12.3): the check-in one-tap hero shows ONLY for an unambiguous claimed player.
 // 0 rows (unclaimed) or 2+ rows (ambiguous claim data) -> null -> the kiosk stays search-first.
 function checkinHeroModel(rows) {
@@ -1126,6 +1208,6 @@ if (typeof module !== "undefined" && module.exports) {
     shapeStandingsByPool, computeAllTimeLeaderboard,
     shapeClaimCandidates, filterClaimCandidates,
     resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
-    checkinHeroModel
+    teamPeekModel, checkinHeroModel
   };
 }

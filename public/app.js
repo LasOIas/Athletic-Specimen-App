@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.09.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -1322,6 +1322,7 @@ function buildCheckinStatsHTML() {
 }
 
 function partialRender() {
+  dismissTeamPeek(); // §13.2: a background rebuild replaces the tapped anchor — never strand a floating peek
   const root = document.getElementById('root');
   if (!root || !root.hasChildNodes()) { render(); return; }
 
@@ -2448,9 +2449,11 @@ function buildPublicTournamentLiveHTML() {
     const stat = m.status === 'live'
       ? ((m.score_a != null ? m.score_a : 0) + '–' + (m.score_b != null ? m.score_b : 0))
       : 'Playing';
+    // Slice 1 (§13.2): team names are tap-a-team peek targets on the Home live board too.
+    const tap = (id) => `<span class="tapname" data-team-peek="${escapeHTML(id)}">${escapeHTML(teamNameById(teams, id))}</span>`;
     return `<div class="court-row">
       <div class="court-row-info"><div class="court-row-name">${escapeHTML(label)}</div>
-        <div class="court-row-sub">${escapeHTML(teamNameById(teams, m.team_a_id))} vs ${escapeHTML(teamNameById(teams, m.team_b_id))}</div></div>
+        <div class="court-row-sub">${tap(m.team_a_id)} vs ${tap(m.team_b_id)}</div></div>
       <span class="court-stat is-live">${escapeHTML(String(stat))}</span>
     </div>`;
   };
@@ -3863,6 +3866,7 @@ function tournamentTabIsDirty() {
 }
 
 function partialRenderTournament() {
+  dismissTeamPeek(); // §13.2: the pools-page rebuild replaces the tapped anchor — never strand a floating peek
   // Preserve the active panel's scroll across the rebuild: iOS Safari RESETS an overflow container's
   // scrollTop when its innerHTML is replaced, yanking the operator to the top mid-scroll on every 15s
   // sync / realtime score (Mike's #1 frustration; reintroduced on the Manage board in v2026.06.28.1).
@@ -4968,7 +4972,8 @@ function buildPublicRegisterHTML(t, teams) {
 // Round 2 (2026-07-09, spec §12.4 — Mike's locked §38 pick A "tile hub"): the public Tournament tab
 // is a hub (header card + tiles). The pre-existing public register/pool/bracket surface becomes the
 // 'board' sub-view behind the Pools & schedule / Bracket tiles. Admin branch untouched.
-let pdTournamentView = 'hub'; // 'hub' | 'board' — module var survives partialRender
+let pdTournamentView = 'hub'; // 'hub' | 'pools' | 'board' — module var survives partialRender
+let pdPoolFilter = 'all'; // Pools & schedule page client-side filter: 'all' | a pool label — survives partialRender
 
 function buildTournamentHubHTML() {
   const list = state.tournaments || [];
@@ -5006,7 +5011,7 @@ function buildTournamentHubHTML() {
       <span class="pd-ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svg}</svg></span>
       <span class="pd-tt">${escapeHTML(title)}</span><span class="pd-ts">${escapeHTML(sub)}</span></button>`;
   const tiles = [
-    show ? tile('data-tn-view="board"', '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', 'Pools & schedule',
+    show ? tile('data-tn-view="pools"', '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', 'Pools & schedule',
       show.status === 'setup' ? 'Before pool play' : liveNets ? (liveNets + (liveNets === 1 ? ' net live' : ' nets live')) : 'Every game by net') : '',
     show ? tile('data-nav-tab="standings"', '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/>', 'Standings',
       (anyFinal && standings[0]) ? ('Leader: ' + (standings[0].name || '—')) : 'By pool') : '',
@@ -5023,11 +5028,244 @@ function buildTournamentHubHTML() {
 // Admin keeps buildTournamentTabHTML() directly (its own branch inside that function).
 function buildPublicTournamentRootHTML() {
   if (state.isAdmin) return buildTournamentTabHTML();
+  if (pdTournamentView === 'pools') return buildPoolsSchedulePageHTML();
   if (pdTournamentView !== 'board') return buildTournamentHubHTML();
   return `<div class="pd-pagehdr">
       <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
       <div class="pd-htitle">Tournament</div>
     </div>` + buildTournamentTabHTML();
+}
+
+// ── Slice 1 (spec §13.1): the Pools & schedule page — a dedicated public destination behind the hub's
+// Pools & schedule tile (kills the status-driven shared board for the public). Locked hybrid "C structure
+// with B net cards": pd page header (back → hub, eyebrow = tournament name) · pool filter chips · a "Now
+// playing" cluster (one live-score card per net, hidden when nothing is live) · per-net cards grouped
+// under slim pool section labels, each listing that net's games in play order. Read-only spectator copy
+// (NEVER "submit your results"). Renders entirely from tournament state (partialRender-safe rebuild).
+function pdOrdinal(n) {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 1) return String(n);
+  const s = ['th', 'st', 'nd', 'rd'], m = v % 100;
+  return v + (s[(m - 20) % 10] || s[m] || s[0]);
+}
+
+function buildPoolsSchedulePageHTML() {
+  const list = state.tournaments || [];
+  const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
+  const show = active || list[0] || null;
+  const teams = (active ? state.tournamentTeams : []) || [];
+  const matches = (active ? state.tournamentMatches : []) || [];
+  const pools = (active ? state.tournamentPools : []) || [];
+  const header = `<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+      <div class="ph-titles"><span class="pd-eyebrow">${escapeHTML(show ? (show.name || 'Tournament') : 'Tournament')}</span><div class="pd-htitle">Pools &amp; schedule</div></div>
+    </div>`;
+  if (!show || !pools.length || !matches.length) {
+    return `${header}<div class="pd-empty">The schedule appears here once pool play is drawn.</div>`;
+  }
+
+  // Only pools that actually have games show a chip / section (a drawn-but-unscheduled pool is skipped).
+  const activePools = pools.filter((p) => matches.some((m) => m.pool_id === p.id));
+  const selected = (pdPoolFilter !== 'all' && activePools.some((p) => (p.label || '') === pdPoolFilter)) ? pdPoolFilter : 'all';
+  const chip = (label, val) => `<button type="button" class="pd-pool-chip${selected === val ? ' pd-on' : ''}" data-pd-pool="${escapeHTML(val)}"${selected === val ? ' aria-current="true"' : ''}>${escapeHTML(label)}</button>`;
+  const chips = activePools.length > 1
+    ? `<div class="pd-pool-chips" role="group" aria-label="Filter by pool">${chip('All', 'all')}${activePools.map((p) => chip('Pool ' + (p.label || ''), p.label || '')).join('')}</div>`
+    : '';
+
+  const shownPools = activePools.filter((p) => selected === 'all' || (p.label || '') === selected);
+
+  // "Now playing" cluster — one card per genuinely live game (status 'live'), across the shown pools, in net
+  // order. Hidden entirely when nothing is live (the between-rounds treatment for this page is the net cards).
+  const shownPoolIds = new Set(shownPools.map((p) => p.id));
+  const liveGames = matches
+    .filter((m) => m.status === 'live' && m.net && m.team_a_id && m.team_b_id && shownPoolIds.has(m.pool_id))
+    .sort((a, b) => (a.net || 0) - (b.net || 0));
+  let nowPlaying = '';
+  if (liveGames.length) {
+    const liveNets = [...new Set(liveGames.map((m) => m.net))].sort((a, b) => a - b);
+    const cards = liveGames.map((m) => {
+      const a = teamNameById(teams, m.team_a_id), b = teamNameById(teams, m.team_b_id);
+      const sa = Number(m.score_a) || 0, sb = Number(m.score_b) || 0;
+      const aLead = sa > sb ? ' pd-pool-lead' : '', bLead = sb > sa ? ' pd-pool-lead' : '';
+      return `<div class="pd-pool-live">
+        <div><div class="pd-pool-lcnet">Net ${escapeHTML(String(m.net))}</div>
+          <div class="pd-pool-lcm"><span class="tapname${aLead}" data-team-peek="${escapeHTML(m.team_a_id)}">${escapeHTML(a)}</span> <span class="pd-pool-vs">vs</span> <span class="tapname${bLead}" data-team-peek="${escapeHTML(m.team_b_id)}">${escapeHTML(b)}</span></div></div>
+        <div class="pd-pool-lcr"><div class="pd-pool-lcsc">${sa}&ndash;${sb}</div><div class="pd-pool-lctag">LIVE</div></div>
+      </div>`;
+    }).join('');
+    nowPlaying = `<section class="pd-card">
+      <div class="pd-pool-sechd"><span class="pd-pool-dot"></span><span class="pd-pool-sect">Now playing</span><span class="pd-pool-secsub">Net${liveNets.length > 1 ? 's' : ''} ${escapeHTML(formatNetList(liveNets))}</span></div>
+      ${cards}
+    </section>`;
+  }
+
+  // Per-net cards grouped under slim pool section labels ("POOL A · NETS 1–3").
+  const sections = shownPools.map((pool) => {
+    const poolMatches = matches.filter((m) => m.pool_id === pool.id);
+    const nets = [...new Set(poolMatches.map((m) => m.net).filter((n) => n != null))].sort((a, b) => a - b);
+    const netsLabel = nets.length ? ('Net' + (nets.length > 1 ? 's' : '') + ' ' + formatNetList(nets)) : '';
+    const label = `<div class="pd-pool-label">Pool ${escapeHTML(pool.label || '')}${netsLabel ? ' · ' + escapeHTML(netsLabel) : ''}</div>`;
+    const cards = nets.map((net) => {
+      const games = poolMatches.filter((m) => m.net === net).sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
+      const finalCount = games.filter((g) => g.status === 'final').length;
+      const liveCount = games.filter((g) => g.status === 'live').length;
+      const metaBits = [liveCount ? (liveCount + ' live') : '', finalCount ? (finalCount + ' final') : ''].filter(Boolean).join(' · ')
+        || (games.length + (games.length === 1 ? ' game' : ' games'));
+      const rows = games.map((g, i) => {
+        const order = g.queue_order || (i + 1);
+        const aId = g.team_a_id, bId = g.team_b_id;
+        const aN = escapeHTML(teamNameById(teams, aId));
+        const bN = escapeHTML(teamNameById(teams, bId));
+        const aTap = aId ? `<span class="tapname" data-team-peek="${escapeHTML(aId)}">${aN}</span>` : aN;
+        const bTap = bId ? `<span class="tapname" data-team-peek="${escapeHTML(bId)}">${bN}</span>` : bN;
+        const kick = `<div class="pd-pool-gnet">Round ${order}</div>`;
+        if (g.status === 'final') {
+          const aWin = g.winner_team_id === aId;
+          const w = aWin ? aTap : bTap, l = aWin ? bTap : aTap;
+          return `<div class="pd-pool-game${i === 0 ? ' pd-pool-first' : ''}">
+            <div class="pd-pool-gi">${kick}<div class="pd-pool-gt"><b>${w}</b> def. <span class="pd-pool-glose">${l}</span></div></div>
+            <div class="pd-pool-gr"><span class="pd-pool-gsc">${escapeHTML(String(g.score_a))}&ndash;${escapeHTML(String(g.score_b))}</span><span class="pd-pool-finaltag">FINAL</span></div>
+          </div>`;
+        }
+        if (g.status === 'live') {
+          const sa = Number(g.score_a) || 0, sb = Number(g.score_b) || 0;
+          return `<div class="pd-pool-game pd-pool-islive${i === 0 ? ' pd-pool-first' : ''}">
+            <div class="pd-pool-gi">${kick}<div class="pd-pool-gt">${aTap} <span class="pd-pool-vs">vs</span> ${bTap}</div></div>
+            <div class="pd-pool-gr"><span class="pd-pool-gsc pd-pool-sclive">${sa}&ndash;${sb}</span><span class="pd-pool-livetag">LIVE</span></div>
+          </div>`;
+        }
+        return `<div class="pd-pool-game${i === 0 ? ' pd-pool-first' : ''}">
+          <div class="pd-pool-gi">${kick}<div class="pd-pool-gt">${aTap} <span class="pd-pool-vs">vs</span> ${bTap}</div></div>
+        </div>`;
+      }).join('');
+      return `<section class="pd-card">
+        <div class="pd-pool-nethd"><span class="pd-pool-court">${escapeHTML(String(net))}</span><span class="pd-pool-netnm">Net ${escapeHTML(String(net))}</span><span class="pd-pool-netmeta${liveCount ? ' has-live' : ''}">${escapeHTML(metaBits)}</span></div>
+        ${rows || '<p class="small" style="color:var(--muted);margin:0;">No games scheduled.</p>'}
+      </section>`;
+    }).join('');
+    return label + cards;
+  }).join('');
+
+  const rules = show ? scoringRulesFor('pool', show) : null;
+  const ruleText = rules ? ('games to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ', cap ' + rules.cap : '')) : '';
+  const foot = `<div class="pd-foot">Read-only view · scores refresh live${ruleText ? ' · ' + escapeHTML(ruleText) : ''}</div>`;
+  return `${header}${chips}${nowPlaying}${sections}${foot}`;
+}
+
+// Slice 1 (spec §13.2): the tap-a-team peek — a read-only, account-free popover anchored below the tapped
+// team name (shared by the Pools page + the Home live board). Body-level + fixed-position so a background
+// partialRender rebuild of the panel can't strand it (dismissTeamPeek() runs on every render). No admin
+// actions, ever — "seeing is free".
+let _teamPeekOutside = null;
+function dismissTeamPeek() {
+  const el = document.getElementById('pd-team-peek');
+  if (el) el.remove();
+  if (_teamPeekOutside) {
+    document.removeEventListener('pointerdown', _teamPeekOutside, true);
+    const content = document.getElementById('app-content');
+    if (content) content.removeEventListener('scroll', _teamPeekOutside, true);
+    window.removeEventListener('resize', _teamPeekOutside, true);
+    _teamPeekOutside = null;
+  }
+  const prev = document.querySelector('.tapname.pd-peeked');
+  if (prev) prev.classList.remove('pd-peeked');
+}
+
+function buildTeamPeekInnerHTML(m) {
+  const poolPos = m.poolRank ? (pdOrdinal(m.poolRank) + ' in the pool') : (m.seed ? ('Seed #' + m.seed) : 'Not ranked yet');
+  const poolChip = m.poolLabel ? `<span class="pd-peek-pool">Pool ${escapeHTML(m.poolLabel)}</span>` : '';
+  const recLine = m.gamesPlayed
+    ? ((m.pointDiff > 0 ? '+' : '') + m.pointDiff + ' points · ' + m.gamesPlayed + (m.gamesPlayed === 1 ? ' game' : ' games') + ' played')
+    : 'No games scored yet';
+  let rows = '';
+  if (m.live) {
+    rows += `<div class="pd-peek-row">
+      <div class="pd-peek-ic pd-peek-live"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg></div>
+      <div class="pd-peek-rl"><div class="k">Playing now${m.live.net ? ' · Net ' + escapeHTML(String(m.live.net)) : ''}</div><div class="v">vs <span class="op">${escapeHTML(m.live.oppName || '—')}</span></div></div>
+      <div class="pd-peek-rr"><span class="sc">${m.live.myScore}&ndash;${m.live.oppScore}</span><span class="lt">LIVE</span></div>
+    </div>`;
+  }
+  if (m.next) {
+    const kick = m.next.phase === 'main'
+      ? ('Next game · Bracket' + (m.next.roundLabel ? ' · ' + escapeHTML(m.next.roundLabel.replace(/ M\d+$/, '')) : ''))
+      : ('Next game' + (m.next.net ? ' · Net ' + escapeHTML(String(m.next.net)) : ''));
+    rows += `<div class="pd-peek-row">
+      <div class="pd-peek-ic pd-peek-nx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div>
+      <div class="pd-peek-rl"><div class="k">${kick}</div><div class="v">vs <span class="op">${escapeHTML(m.next.oppName || '—')}</span></div></div>
+      <div class="pd-peek-rr"><span class="nx">Up next</span></div>
+    </div>`;
+  }
+  if (!rows) {
+    rows = `<div class="pd-peek-row"><div class="pd-peek-ic pd-peek-nx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div><div class="pd-peek-rl"><div class="k">Schedule</div><div class="v">No upcoming game right now</div></div></div>`;
+  }
+  return `<span class="pd-peek-arrow" aria-hidden="true"></span>
+    <button type="button" class="pd-peek-x" data-role="peek-close" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    </button>
+    <div class="pd-peek-top">
+      <div class="pd-peek-mark"><span>${escapeHTML(m.initials)}</span></div>
+      <div class="pd-peek-id"><div class="pd-peek-name">${escapeHTML(m.teamName)}</div><div class="pd-peek-sub">${poolChip}${escapeHTML(poolPos)}</div></div>
+      <span class="pd-peek-lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> View only</span>
+    </div>
+    <div class="pd-peek-rec"><div class="pd-peek-recbig">${m.wins}&ndash;${m.losses}</div><div class="pd-peek-recl">${escapeHTML(recLine)}</div></div>
+    <div class="pd-peek-rows">${rows}</div>
+    <div class="pd-peek-foot">Scores update on their own. Full standings live on the Standings tab.</div>`;
+}
+
+function openTeamPeek(teamId, anchorEl) {
+  dismissTeamPeek();
+  const model = teamPeekModel(teamId, {
+    teams: state.tournamentTeams || [],
+    matches: state.tournamentMatches || [],
+    pools: state.tournamentPools || [],
+  });
+  if (!model) return;
+  const peek = document.createElement('div');
+  peek.id = 'pd-team-peek';
+  peek.className = 'pd-peek';
+  peek.setAttribute('role', 'dialog');
+  peek.setAttribute('aria-label', 'Team peek: ' + model.teamName);
+  peek.innerHTML = buildTeamPeekInnerHTML(model);
+  document.body.appendChild(peek);
+  // The peek lives on document.body (outside #app-content's delegated listener), so its X binds here.
+  peek.addEventListener('click', (ev) => { if (ev.target.closest('[data-role="peek-close"]')) dismissTeamPeek(); });
+  if (anchorEl && anchorEl.classList) anchorEl.classList.add('pd-peeked');
+
+  // Position: below the tapped name, kept inside the app column (works on desktop where the shell is a
+  // centered 390 column). Flip above when it would run off the bottom; clamp the arrow under the name.
+  const content = document.getElementById('app-content') || document.body;
+  const cr = content.getBoundingClientRect();
+  const ar = anchorEl ? anchorEl.getBoundingClientRect() : cr;
+  const margin = 8;
+  const left = Math.round(cr.left + margin);
+  const width = Math.round(cr.width - margin * 2);
+  peek.style.left = left + 'px';
+  peek.style.width = width + 'px';
+  const ph = peek.offsetHeight;
+  const below = ar.bottom + 10;
+  let top;
+  if (below + ph <= window.innerHeight - margin) {
+    top = below;
+  } else if (ar.top - ph - 10 >= margin) {
+    top = ar.top - ph - 10;
+    peek.classList.add('pd-peek-flip');
+  } else {
+    top = Math.max(margin, window.innerHeight - ph - margin);
+  }
+  peek.style.top = Math.round(top) + 'px';
+  const arrow = peek.querySelector('.pd-peek-arrow');
+  if (arrow) arrow.style.left = Math.round(Math.min(Math.max(ar.left + ar.width / 2 - left, 18), width - 30)) + 'px';
+
+  // Dismiss on tap-outside / scroll / resize (the X is handled by the content click delegate).
+  _teamPeekOutside = (ev) => {
+    if (ev && ev.type === 'pointerdown' && (peek.contains(ev.target) || (anchorEl && anchorEl.contains(ev.target)))) return;
+    dismissTeamPeek();
+  };
+  setTimeout(() => {
+    document.addEventListener('pointerdown', _teamPeekOutside, true);
+    content.addEventListener('scroll', _teamPeekOutside, true);
+    window.addEventListener('resize', _teamPeekOutside, true);
+  }, 0);
 }
 
 function buildTournamentTabHTML() {
@@ -8761,6 +8999,7 @@ function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
 }
 
 function render() {
+  dismissTeamPeek(); // §13.2: a full render replaces the tapped anchor — never strand a floating peek
   const root = document.getElementById('root');
   if (!root) return;
   const existingPanel = document.getElementById('tab-' + activeMainTab);
@@ -9723,10 +9962,26 @@ function attachHandlers() {
         else if (a === 'session') activateMainTab('session');
         return;
       }
-      // Round 2 (spec §12.4): the public Tournament hub tiles/back toggle the hub<->board sub-view.
+      // Slice 1 (spec §13.2): tap-a-team peek — open on any tapped team name. Read-only, account-free;
+      // opens on the Pools page AND the Home live board. Checked before nav so a tap on a team name never
+      // falls through to navigation. (The peek's own X is bound in openTeamPeek — it lives on document.body.)
+      const peekBtn = e.target.closest('[data-team-peek]');
+      if (peekBtn) { openTeamPeek(peekBtn.getAttribute('data-team-peek'), peekBtn); return; }
+      // Slice 1 (spec §13.1): Pools & schedule pool filter chips — client-side, module var survives partialRender.
+      const poolChip = e.target.closest('[data-pd-pool]');
+      if (poolChip && !state.isAdmin) {
+        dismissTeamPeek();
+        pdPoolFilter = poolChip.getAttribute('data-pd-pool') || 'all';
+        const c = document.querySelector('#tab-tournament .container');
+        if (c) c.innerHTML = buildPublicTournamentRootHTML();
+        return;
+      }
+      // Round 2 (spec §12.4): the public Tournament hub tiles/back toggle the hub<->sub-page views.
       const tnBtn = e.target.closest('[data-tn-view]');
       if (tnBtn && !state.isAdmin) {
-        pdTournamentView = tnBtn.getAttribute('data-tn-view') === 'board' ? 'board' : 'hub';
+        dismissTeamPeek();
+        const v = tnBtn.getAttribute('data-tn-view');
+        pdTournamentView = (v === 'board' || v === 'pools') ? v : 'hub';
         const c = document.querySelector('#tab-tournament .container');
         if (c) c.innerHTML = buildPublicTournamentRootHTML();
         if (pdTournamentView === 'board') layoutBracketTree(); // the board may show the bracket tree
