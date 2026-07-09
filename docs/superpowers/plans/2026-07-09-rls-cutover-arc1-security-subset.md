@@ -158,6 +158,10 @@ git commit -m "feat(db): 0039 - lock overwrite of finalized scores to organizer/
 
 Any failing guard test, a helper-revoke that breaks role derivation, or an anon-read regression → STOP, roll back the migration (the header rollback block), report. Do not improvise around a failed verify on live prod.
 
+## ⚠ Arc-2 residual confirmed live (independent adversarial verify, 2026-07-09)
+
+An independent break-in agent (fresh context, faked-JWT throwaway fixtures, rolled back) returned **CONFIRMED-CLOSED** on W-F03/anon: anon cannot overwrite a finalized score via any of the 3 RPCs (all raise 42501), no other anon write-door to matches/live_state exists, profiles email + the 5 helpers are anon-blocked, `caller_role` stays authenticated, spectator reads intact. It surfaced ONE honest caveat, already the documented Arc-2 work, NOT a 0039 failure: **a signed-in `authenticated` user can still direct-`UPDATE matches`/`live_state` via PostgREST** because the blanket `c21/c22/live_state admin all` policies grant `authenticated` ALL with `USING true` and the table write-grants are still present. This needs a real account (outside the anon W-F03 scope) — closed by Arc-2's drop-blanket-policies + revoke-authenticated-grants (0041). Full verdict in 12-history task-#16.
+
 ## Arc 2 (documented, NOT this arc)
 
 Full role-based RLS: create the ~18 organizer-guarded SECURITY DEFINER RPCs (§4B of the recon map), re-route every app admin write through them, convert the 2 INVOKER fns to DEFINER+guard, drop the `c21/c22/live_state admin all` blanket policies, revoke authenticated table-write grants, retire `adminLoginWithCode`/nlvb2025 + `approve_claim`/`reject_claim` + the `admin_login` edge fn, rotate nlvb2025, make the repo private, re-home the co-pilot admin gate. Gated on: co-admin accounts seeded first (Mike keeps nlvb2025 for others until then). Migrations 0040 (RLS+RPCs) / 0041 (retire).
