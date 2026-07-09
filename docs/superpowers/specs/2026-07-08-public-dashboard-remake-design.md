@@ -198,3 +198,82 @@ Mike's.
 **Mockups (scratchpad, session 5):** `checkin-{A,B,C}.html` → `checkin-38-combined.png` ·
 `home-{A,B,C}.html` → `home-38-combined.png` · `tournament-{A,B,C}.html` →
 `tournament-38-combined.png`. §38 markers + picks recorded via ui38-mark (head `6fbdc81`).
+
+## 13. Finish-line round (2026-07-09, session 6) — LOCKED: board pages · endings · registration · polish
+
+All picks Mike's, from rendered §38 rounds on the real tokens (recon: the
+2026-07-09 gap board, 12-history task-#1). Gold = the matte gold tokens only.
+
+### 13.1 Pools & schedule page (locked hybrid — "C structure with B net cards")
+New dedicated destination behind the hub's Pools & schedule tile (kills the
+status-driven shared board for the public): pd page header (back → hub,
+eyebrow tournament name) · pool filter chips All/A/B/C · "Now playing" cluster
+(live score cards per net, matte green LIVE) · below, per-net cards grouped
+under pool section labels, each listing that net's games round-by-round
+("X def. Y 15-6 · FINAL", live row highlighted, upcoming plain) · NO standings
+table on this page (Standings stays its own page) · read-only copy (never
+"submit your results").
+
+### 13.2 Tap-a-team peek (locked, account-free)
+Tapping any team on the pools page / bracket page / Home live board opens a
+read-only popover: team name, W-L record, pool position or seed, next game +
+net (+ live score if playing), VIEW ONLY tag. No account required — "seeing is
+free"; claiming keeps the personal hero / My Team / one-tap check-in.
+
+### 13.3 Bracket page (locked — "leave it as we have it, a full bracket visible")
+Own destination behind the Bracket tile (fixes both-tiles-route-to-one-board).
+The full bt-* tree always visible in pd chrome (page header + status pill).
+RULES: bracket match-node cards are SOLID `var(--card)` — never frosted (the
+page backdrop keeps the watermark); gold appears ONLY on the decided
+championship game (gold-soft bg, gold border, trophy, winner bold) plus the
+champions strip + Completed pill — nothing gold before a winner exists, no
+gold path tint. States: pre-bracket ("The bracket generates when pool play
+finishes" + N of M pool games final + seeding→Standings chip) · live (status
+line "Double elimination · <round>", live game matte green) · completed
+(champions strip "Champions — <team> · record · def. <runner-up> in the
+final" above the tree, gold champ game). The completed state IS the
+tournament's ending surface (no Home ending module) and stays until the next
+event is scheduled.
+
+### 13.4 Ending micro-states (locked minimal)
+Eliminated claimed player: the timeline hero gains one quiet terminal node —
+"Run ended · Nth place" + "Watch the bracket →" chip. Between-rounds lull: the
+Home board card no longer vanishes — keeps header + legend, shows "Between
+rounds — the next games appear here" + next scheduled matchups as faint rows.
+
+### 13.5 Registration (locked round-2 pick A — event card + join sheet)
+The registration surface is the tournament as an EVENT: hero card (logo mark,
+REGISTRATION OPEN pill, tournament name in Sora display, co-ed line in plain
+English, chips: date · $80 a team · 4 players, live "N teams in" line) + one
+big "Register your team" CTA. The form opens as a join sheet (grab handle):
+team name + four numbered player slots + one Register button + "pay $20 each
+at check-in" caption. Post-submit: "You're in" state with payment-at-check-in
+chip + the claim-your-team hand-off (instant claims). Principles banked: sell
+the event before asking; inputs preview their result; one confident action; a
+payoff, not a toast.
+
+### 13.6 Polish set (locked decisions, no mockups needed)
+- Sport pill → static "Volleyball" badge, no chevron, no handler (SportPack later).
+- Account menu role label → "Player · <team name>" when claimed; "Spectator"
+  only for unclaimed. (Owner/organizer labels unchanged.)
+- Bottom nav active-state: Standings / My Team / History sub-pages highlight
+  the Tournament tab (they're its children).
+- Hub on an off day: the last COMPLETED tournament shows with honest
+  "Completed" framing (name + Completed sub + results tiles), never as if
+  live; "No tournament scheduled" only when none exists. Ending stays until
+  the next event is scheduled (Mike's call).
+- Past-dated "next session" guard: casual Home + checkin.html show a designed
+  "No session scheduled" state instead of a stale date.
+- checkin.html: self-host the fonts (kill the Google-Fonts CDN dependency) and
+  source tokens to match the app (drift guard). Verify Supabase email
+  confirmation is OFF at build (vault says Mike disabled it 2026-07-09).
+- Registration-closed + no-tournament board fallbacks re-render in pd chrome.
+- Legacy public seeding `.table` dies with the shared board (13.1/13.3).
+
+### 13.7 Desktop (§41) — round in flight
+Three desktop directions (widened column / two-pane / wide grid) rendering as
+of this commit; Mike's pick lands in §13.8. Mobile build proceeds first.
+
+**Mockups (scratchpad/pd-finish, session 6):** a1-{a,b,c,final} ·
+a2-{a,b,c,final} · b-{a,b,c} · c-{a,b,c} · r2-{a,b,c} · mega-review{,-2}.png.
+§38 markers ×3 at head 712f9ad; picks + rejections in 12-history task-#6…#9.
