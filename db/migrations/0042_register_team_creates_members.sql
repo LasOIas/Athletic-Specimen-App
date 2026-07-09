@@ -44,7 +44,9 @@ begin
   end loop;
 end $$;
 
-revoke execute on function public.link_roster_to_team(uuid, jsonb, uuid) from public, anon;
+-- internal helper: reachable ONLY via the SECURITY DEFINER register_team / sync_team_roster (which run as
+-- owner), never callable directly by a client role (else a signed-in non-admin could stuff arbitrary rosters).
+revoke execute on function public.link_roster_to_team(uuid, jsonb, uuid) from public, anon, authenticated;
 
 -- register_team rewrite: the EXACT prior body (validation preserved) + stamp community_id on the team +
 -- link the roster before returning. Signature + return type unchanged (callers untouched).
