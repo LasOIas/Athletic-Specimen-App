@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.09.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -9894,8 +9894,15 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
     }
 
     if (session && !isLocalCode) {
+      // STORM GUARD (2026-07-09, found live on prod v09.1): this branch fires on EVERY auth event —
+      // and the heavy work below (rpc + tournament reads) makes supabase-js re-validate/refresh the
+      // token, which EMITS MORE auth events → a self-sustaining ~14/sec request storm
+      // (ERR_INSUFFICIENT_RESOURCES). Only a GENUINE sign-in transition runs the heavy path; routine
+      // TOKEN_REFRESHED / repeat events just keep the session object fresh and stop.
+      const isNewSignIn = !state.authSession || !state.account || state.account.id !== session.user.id;
       state.authSession = session;
       state.account = { id: session.user.id, email };
+      if (!isNewSignIn) return;
       closeAuthPage();
       if (state.loaded) { try { render(); } catch {} }   // show signed-in immediately
       // Slice 3b: a signed-out "claim your team" tap routed through sign-in — finish the journey.
