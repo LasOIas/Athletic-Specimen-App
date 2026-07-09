@@ -39,7 +39,7 @@ Remake the Athletic Specimen **public (player/spectator-facing) surface** into a
 
 ## 5. Information architecture
 
-- **Bottom nav (public): Home · Check In · Live** (3 items). Standings / Bracket / My Team / History are reached via Home tiles + the Live tab — keep the nav to three.
+- **Bottom nav (public): Home · Check In · Live** (3 items). Standings / Bracket / My Team / History are reached via Home tiles + the Live tab — keep the nav to three. **⟶ SUPERSEDED by Round 2 (2026-07-09, §12 below): the Live slot becomes Tournament; the live board moves onto Home; the tiles are removed.**
 - **Header:** brand (left) + **sport-switcher pill** + account state (person icon when signed-in). In a tournament context the account entry is reframed as **"claim your team"** rather than a generic "Sign in".
 - **Sport switcher:** persistent top-bar pill; sport is a *context* that re-skins stable tabs, never a separate nav destination; future "All sports tonight" aggregate for a night running two sports.
 
@@ -116,3 +116,85 @@ Designed after Identity/Accounts landed (email+password sign-in live v2026.07.08
 **Build prerequisite — UPDATED 2026-07-08 → see `2026-07-08-personal-layer-forward-build.md` (the engineering spec).** The claim RPCs (`claim_player` / `approve_claim` / `reject_claim`) are **built + live** (`db/migrations/0038_claim_rpcs.sql`). The team↔player link is now **forward-only** (Mike's decision): a `register_team` rewrite creates `players` + `team_members` at registration — **no one-time backfill of the 18 June rosters** (that tournament is finished). Identity policy = reuse an existing same-name player in the community, else create. Build order (sliced in the engineering spec): (3a) data foundation `register_team` rewrite (**SHIPPED v2026.07.08.6, migration 0042**) → (3b) INSTANT claim UI (A) + admin Account row/Unlink (no approvals — Mike's 2026-07-09 correction; migration 0043) → (3c) Home hero (C) + My Team (B) + Standings "You", all wired to `claimed_by_profile` via a tested "my team" resolver.
 
 **Mockup fidelity rule:** every mockup MUST load the app's Google Fonts (Inter 400–800 + Sora 600–800) — a mockup that only names the families renders a system fallback and reads as off-brand.
+
+---
+
+## 12. Round 2 (2026-07-09, session 5) — LOCKED: Tournament nav · Live→Home · Check In remake
+
+Mike's ask (verbatim): *"the check in page, then the live page, the public dashboard
+needs to be real and it is almost there. i want a tournament nav at the bottom too,
+makes it cleaner and easier to see - so everything tournament related will be there"*
+— plus *"live doesnt need a nav, it can just show on the home page, the tournament
+nav can take over this."* Three §38 rounds run (3 rendered layouts each, ONE combined
+image, real tokens + the shipped `pd-public-active` backdrop); every pick below is
+Mike's.
+
+### 12.1 IA (overrides §5)
+- **Bottom nav (public): Home · Check In · Tournament** — still 3 items; the Live
+  slot is REPLACED by Tournament. The Live tab (`#tab-scores` + `publicScoresHTML`)
+  is REMOVED; its content lives on Home.
+- **Home drops the tile grid** — the Tournament hub + nav cover everything the
+  tiles pointed at.
+- **Tournament = everything tournament-related** in one destination: overview,
+  register, pools/schedule, standings, bracket, My Team, past tournaments (History).
+
+### 12.2 Home (tournament live) — pick **A "hero-led"** (amends §6.1)
+- The `pd-thero` card (eyebrow · tournament name · bits · the LOCKED Slice-3c
+  timeline hero — or the claim prompt when signed-out/unclaimed) on top, then the
+  live **"on the courts" board** card (per-net `court-row` rows with running score /
+  Playing, up-next, shared legend). Nothing else on the page.
+- The locked timeline hero is untouched (rejected: B board-first order-flip; C
+  merged single game-day card).
+- **Casual (no tournament) Home keeps its current layout**; its "Past tournaments"
+  row re-points into the Tournament tab.
+
+### 12.3 Check In — pick **A "one-tap hero"** (both surfaces, account-aware)
+- **Signed-in + claimed:** a single centered frosted hero card — avatar initials,
+  SIGNED IN eyebrow, your name, one big accent **Check in** button, quiet
+  "N checked in" count line — with two text actions below ("Someone else" opens
+  the search; "I'm new") and the quiet **Admin** link kept at the foot. One tap
+  and done; success uses the existing toast pattern and the card flips to a
+  checked-in state.
+- **Signed-out / unclaimed:** the same layout minus the personal card — the
+  search front and center (today's kiosk behavior restyled).
+- Applies to the in-app page AND the standalone **`checkin.html`** QR page in the
+  same pass (rejected: B session-led card; C who's-here roster grid). checkin.html
+  gets the one-tap card iff the auth session carries to the standalone page
+  (persisted supabase session, same origin) — else it stays search-first.
+
+### 12.4 Tournament tab — pick **A "tile hub"**
+- Header card (eyebrow TOURNAMENT · name · "18 teams · Pools underway" · matte
+  Live pill; a **Register CTA** appears here when registration is open) + a
+  `pd-tiles` grid: **Pools & schedule** (round · nets live) · **Standings**
+  (leader) · **Bracket** (status) · **My Team** (record · your games; claimed
+  users only) · **Past tournaments** (champions & records — the History page
+  absorbed here).
+- Each tile opens its OWN page: the shipped Standings / My Team / History pages
+  are reused as-is with their back chevron returning to Tournament; the pool
+  board + bracket tree (today's `#tab-tournament` surfaces) become hub sub-pages.
+  (Rejected: B segmented one-page; C long scroll.)
+- **No tournament:** the hub shows past tournaments + a "none scheduled" state.
+
+### 12.5 States
+- Signed-out spectator: full read-only everywhere (hub included); claim prompt on
+  Home; search-first check-in. Loading gates stay on `state.loaded` (no empty-state
+  flash). No skill, no "night" copy, no emoji, no neon (unchanged).
+
+### 12.6 Build notes (input to writing-plans)
+- **Live-tab removal sweep:** `buildPublicNavInnerHTML` (scores button →
+  tournament), `refreshTournamentLive`'s nav rebuild, every `data-nav-tab="scores"`
+  reference, the `#tab-scores` panel, `activateMainTab` wiring; `publicScoresHTML`'s
+  board content merges into Home's board card (single source with the Home board).
+- **Home:** delete the `pd-tiles` branch from `publicHomeHTML`'s tournament branch.
+- **Tournament:** new hub root for `#tab-tournament`; existing register/bracket/pool
+  surfaces re-rooted as sub-pages; `pdPageHeaderHTML` back targets become Tournament.
+- **Check In:** new one-tap hero on both surfaces; claimed-player resolution in-app
+  via the existing `myTeamInfo()`/`claimed_by_profile` plumbing; `checkin.html`
+  needs a lightweight session + claimed-player read of its own.
+- §41 desktop + mobile in the same change; APP_VERSION bump; `partialRender()`
+  discipline unchanged (the check-in stats + board refresh paths must keep their
+  dirty-guards).
+
+**Mockups (scratchpad, session 5):** `checkin-{A,B,C}.html` → `checkin-38-combined.png` ·
+`home-{A,B,C}.html` → `home-38-combined.png` · `tournament-{A,B,C}.html` →
+`tournament-38-combined.png`. §38 markers + picks recorded via ui38-mark (head `6fbdc81`).
