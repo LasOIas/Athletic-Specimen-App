@@ -3521,3 +3521,118 @@ body.pd-public-active .pd-scrim { display: block; }
 @keyframes pd-reg-scrimin { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pd-reg-sheetup { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .pd-reg-scrim, .pd-reg-sheet { animation: none; } .pd-reg-dot { animation: none; } }
+
+/* ===================================================================
+   SLICE 5 — DESKTOP FULL-WIDTH TREATMENT (spec §13.8, 2026-07-09)
+   Mike (locked): "A is the best, but on desktop you can fit a lot more
+   showing, use the full space." Option A's chrome (one app, one scroll)
+   but the PUBLIC content uses the full ~1140px width at >=1024px.
+
+   SCOPING CONTRACT (so 390px + the admin surface are byte-identical):
+   every rule below is BOTH scoped to body.pd-public-active AND inside
+   @media (min-width:1024px) — with ONE exception: the two mobile-INERT
+   structural hooks directly below. They use display:contents so the JS
+   wrapper divs (.pd-pool-cols/.pd-pool-col in the Pools page,
+   .pd-cardgrid in Standings) generate NO box below 1024px — the wrapped
+   content renders exactly as the pre-Slice-5 flat stack. The @media
+   block re-materialises them as grids. This is the only base-layer add.
+   =================================================================== */
+
+/* — mobile-inert structural hooks (see contract above) — */
+.pd-pool-cols, .pd-pool-col, .pd-cardgrid { display: contents; }
+
+@media (min-width: 1024px) {
+  /* ---- chrome: bottom nav becomes a slim top tab strip under the header ---- */
+  /* #app-shell is a flex column (header · #app-content · #bottom-nav in source order); reorder so the
+     nav sits directly under the header. Public only — admin keeps its bottom bar. */
+  body.pd-public-active #bottom-nav { order: 1; }
+  body.pd-public-active #app-content { order: 2; }
+  body.pd-public-active #bottom-nav {
+    min-height: 0;
+    border-top: none;
+    border-bottom: 1px solid var(--border);
+    padding: 0;
+    background: var(--bg);
+  }
+  /* slim, horizontal tab buttons (icon + label in a row), centred as a strip */
+  body.pd-public-active #bottom-nav .nav-btn {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 7px;
+    padding: 11px 26px;
+    font-size: 13px;
+  }
+  body.pd-public-active #bottom-nav .nav-btn svg { width: 17px; height: 17px; }
+  body.pd-public-active #bottom-nav .nav-btn.active { box-shadow: inset 0 -2px 0 var(--brand); }
+
+  /* ---- content width: the public column widens to ~1140px (was the 900px phone column) ---- */
+  body.pd-public-active .container { max-width: 1140px; }
+  /* the Check In kiosk stays a comfortable narrow column (its card is centred, no reflow this slice) */
+  body.pd-public-active #tab-players > .container { max-width: 640px; }
+
+  /* ---- typography: Sora titles up a notch on the surfaces that go wide (A direction) ---- */
+  body.pd-public-active .pd-thero .pd-h { font-size: 22px; }
+  body.pd-public-active .pd-htitle { font-size: 19px; }
+  body.pd-public-active .mt-team { font-size: 1.5rem; }
+  body.pd-public-active .mt-rn { font-size: 52px; }
+
+  /* ---- Home (tournament live): timeline hero | live courts board, side by side ---- */
+  /* Only when BOTH cards render (:has the board after the hero). Casual Home has no .pd-thero. */
+  body.pd-public-active #tab-home .home-screen:has(> .pd-thero + .pd-card) {
+    display: grid;
+    grid-template-columns: 5fr 7fr;
+    gap: 16px;
+    align-items: start;
+  }
+  body.pd-public-active #tab-home .home-screen:has(> .pd-thero + .pd-card) > .pd-card { margin-bottom: 0; }
+  /* Casual Home (no tournament): keep it a centred, wider column — not stretched across 1140. */
+  body.pd-public-active #tab-home .home-screen:not(:has(> .pd-thero)) {
+    max-width: 820px;
+    margin: 0 auto;
+  }
+
+  /* ---- Tournament hub: header card full width, tiles 4-across ---- */
+  body.pd-public-active .pd-tiles { grid-template-columns: repeat(4, 1fr); }
+
+  /* ---- Pools & schedule: now-playing cluster = a full-width ROW of live cards (was a vertical stack) ---- */
+  body.pd-public-active section.pd-card:has(> .pd-pool-live) {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    align-items: start;
+  }
+  body.pd-public-active section.pd-card:has(> .pd-pool-live) > .pd-pool-sechd { grid-column: 1 / -1; }
+  body.pd-public-active section.pd-card:has(> .pd-pool-live) > .pd-pool-live { margin-top: 0; }
+
+  /* ---- Pools & schedule: the pools become side-by-side columns ---- */
+  body.pd-public-active .pd-pool-cols {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 18px;
+    align-items: start;
+  }
+  body.pd-public-active .pd-pool-col { display: block; } /* each pool = one column; its net cards stack within */
+
+  /* ---- Standings: by-pool mini-tables 2–3 across; Overall as a centred wider table ---- */
+  body.pd-public-active .pd-cardgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+    align-items: start;
+  }
+  body.pd-public-active .pd-cardgrid > .pd-card { margin-bottom: 0; }
+  /* Overall view = a single bare .pd-card (+ foot) that is a DIRECT child of the container (pool cards live
+     inside .pd-cardgrid, so they are untouched) — centre it. */
+  body.pd-public-active #tab-standings > .container > .pd-card,
+  body.pd-public-active #tab-standings > .container > .pd-foot { max-width: 620px; margin-left: auto; margin-right: auto; }
+
+  /* ---- My Team: a comfortable centred column (scoreboard reads best focused, not stretched) ---- */
+  body.pd-public-active #tab-myteam > .container > * { max-width: 720px; margin-left: auto; margin-right: auto; }
+
+  /* ---- History: comfortable centred column ---- */
+  body.pd-public-active #tab-history > .container > * { max-width: 760px; margin-left: auto; margin-right: auto; }
+
+  /* ---- Registration event card: centred (the hero sells before it asks — not a full-width band) ---- */
+  body.pd-public-active #tab-tournament > .container:has(> .pd-reg-card) > * { max-width: 600px; margin-left: auto; margin-right: auto; }
+  /* (Bracket keeps its full-width tree + champions strip from the widened container; pan stays available.) */
+}

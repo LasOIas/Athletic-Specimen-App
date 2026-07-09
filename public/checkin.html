@@ -207,6 +207,11 @@
     .ckh-btn.is-in:active { transform: none; background: var(--live-soft); }
     .ckh-alts { text-align: center; margin: 0 0 18px; }
     .ckh-alt-label { font-size: 13px; font-weight: 600; color: var(--text-dim); }
+    /* Slice 5 (§13.8): widen the standalone kiosk card modestly on desktop; mobile unchanged. */
+    @media (min-width: 1024px) {
+      body { max-width: 640px; }
+      .cik-logo { height: 150px; }
+    }
   </style>
 </head>
 <body>

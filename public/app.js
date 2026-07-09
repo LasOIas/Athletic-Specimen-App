@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.12'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.09.13'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -5483,13 +5483,18 @@ function buildPoolsSchedulePageHTML() {
         ${rows || '<p class="small" style="color:var(--muted);margin:0;">No games scheduled.</p>'}
       </section>`;
     }).join('');
-    return label + cards;
+    // Slice 5 (§13.8) structural hook: each pool's [label + stacked net cards] wraps in a .pd-pool-col so the
+    // desktop grid can put Pool A | B | C side-by-side. MOBILE-INERT: .pd-pool-col is display:contents below
+    // 1024px (styles.css), so this div generates no box and the label+cards render exactly as before.
+    return `<div class="pd-pool-col">${label}${cards}</div>`;
   }).join('');
 
   const rules = show ? scoringRulesFor('pool', show) : null;
   const ruleText = rules ? ('games to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ', cap ' + rules.cap : '')) : '';
   const foot = `<div class="pd-foot">Read-only view · scores refresh live${ruleText ? ' · ' + escapeHTML(ruleText) : ''}</div>`;
-  return `${header}${chips}${nowPlaying}${sections}${foot}`;
+  // Slice 5 (§13.8): .pd-pool-cols is the desktop grid parent (Pool A | B | C side-by-side); mobile-inert
+  // (display:contents < 1024px) so the pool columns render as a single flat stack exactly as before.
+  return `${header}${chips}${nowPlaying}<div class="pd-pool-cols">${sections}</div>${foot}`;
 }
 
 // Slice 1 (spec §13.2): the tap-a-team peek — a read-only, account-free popover anchored below the tapped
@@ -8588,14 +8593,16 @@ function buildStandingsPageHTML() {
   };
   let body = '';
   if (view === 'pools') {
-    body = shapeStandingsByPool(pools, teams, matches).map((p) => {
+    // Slice 5 (§13.8): the per-pool mini-tables wrap in .pd-cardgrid so desktop lays them 2–3 across;
+    // mobile-inert (display:contents < 1024px) so they stack exactly as before.
+    body = '<div class="pd-cardgrid">' + shapeStandingsByPool(pools, teams, matches).map((p) => {
       const netsLabel = p.nets.length ? ('Net' + (p.nets.length > 1 ? 's' : '') + ' ' + formatNetList(p.nets)) : '';
       return `<div class="pd-card">
         <div class="pd-ph">Pool ${escapeHTML(p.poolLabel)}${netsLabel ? `<span class="pd-pl">${escapeHTML(netsLabel)}</span>` : ''}</div>
         <div class="pd-colh"><span class="pd-rk">#</span><span>Team</span><span class="pd-rec">W–L</span><span class="pd-df">Diff</span></div>
         ${p.rows.map((r, i) => rowHTML(r, r.rank, i)).join('')}
       </div>`;
-    }).join('');
+    }).join('') + '</div>';
   } else {
     const seeds = computeSeeding(teams, matches);
     body = `<div class="pd-card">
