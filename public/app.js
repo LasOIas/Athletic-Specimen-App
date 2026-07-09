@@ -3145,6 +3145,7 @@ const state = {
   tournamentTeams: [],        // teams for the active tournament
   tournamentPools: [],        // pools for the active tournament
   tournamentMatches: [],      // matches for the active tournament
+  teamMembers: null,          // Slice 3c: shaped claim candidates for the active tournament (signed-in only; null when signed out)
   tournamentPickedTeamId: null, // self-serve: the team this phone picked
   bracketSide: null,          // bracket nav: 'winners' | 'losers' | 'grand_final'
   bracketRound: null,         // bracket nav: which round is shown
@@ -3818,20 +3819,51 @@ async function tdbRefreshTournaments() {
     }
   }
   if (state.activeTournamentId) {
-    // Three independent reads — run concurrently (was 3 serial round-trips per refresh).
-    const [tTeams, tPools, tMatches] = await Promise.all([
+    // Independent reads — run concurrently (was serial round-trips per refresh). The 4th (team_members)
+    // is Slice 3c's personal-layer source and runs ONLY signed-in: anon lacks SELECT on
+    // players.claimed_by_profile, so an anon request would ERROR, not just return nulls.
+    const wantMembers = !!state.authSession;
+    const [tTeams, tPools, tMatches, tMembers] = await Promise.all([
       tdbListTeams(state.activeTournamentId),
       tdbListPools(state.activeTournamentId),
       tdbListMatches(state.activeTournamentId),
+      wantMembers ? tdbListTeamMembers(state.activeTournamentId) : Promise.resolve(null),
     ]);
     state.tournamentTeams = tTeams;
     state.tournamentPools = tPools;
     state.tournamentMatches = tMatches;
+    if (wantMembers && tMembers !== null) state.teamMembers = tMembers;
+    if (!wantMembers) state.teamMembers = null;
   } else {
     state.tournamentTeams = [];
     state.tournamentPools = [];
     state.tournamentMatches = [];
+    state.teamMembers = null;
   }
+}
+
+// Slice 3c: the team_members read for the personal layer (same embedded select as the claim page).
+// Returns shaped candidates, or null on failure (callers keep the previous value — a transient error
+// must not blank a working hero).
+async function tdbListTeamMembers(tournamentId) {
+  if (!supabaseClient || !tournamentId) return null;
+  try {
+    const { data, error } = await supabaseClient
+      .from('team_members')
+      .select('player_id, teams!inner(id,name,tournament_id), players!inner(id,name,claimed_by_profile)')
+      .eq('teams.tournament_id', tournamentId);
+    if (error) throw error;
+    return shapeClaimCandidates(data || []);
+  } catch (err) {
+    console.error('tdbListTeamMembers', err);
+    return null;
+  }
+}
+
+// Slice 3c: which team is "mine" (signed-in + claimed), from live state. Cheap — call per render.
+function myTeamInfo() {
+  if (!state.account || !Array.isArray(state.teamMembers)) return null;
+  return resolveMyTeam(state.account.id, state.teamMembers);
 }
 
 // Surgically re-render only the tournament tab body (preserves other tabs' state).
@@ -3956,6 +3988,13 @@ async function refreshTournamentLive() {
     if (tournamentTabIsDirty()) return;
     await tdbRefreshTournaments();
     if (onTournamentSurface()) partialRenderTournament();
+  } else if (activeMainTab === 'home' && publicLiveTournament()) {
+    // Slice 3c: the Home dashboard renders the live board + (claimed) personal hero + My Team page
+    // from tournament state, which previously went STALE here — this else-branch only refreshed the
+    // tournaments list, so Home's board never updated between tab switches. Refresh the data + repaint
+    // via partialRender() (its home/myteam branches rebuild in place; no form lives on those panels).
+    await tdbRefreshTournaments();
+    if (activeMainTab === 'home') partialRender();
   } else {
     // Off the tab: keep the list fresh so the Tournament nav appears/disappears as events go live.
     state.tournaments = await tdbListTournaments();
@@ -7604,7 +7643,13 @@ async function submitClaim(c) {
   try {
     const { error } = await supabaseClient.rpc('claim_player', { p_player: c.id });
     if (error) throw error;
-    if (state.account) c.claimedBy = state.account.id; // reflect locally without a refetch
+    if (state.account) {
+      c.claimedBy = state.account.id; // reflect locally without a refetch
+      // Slice 3c: also patch the shared personal-layer slot so the Home hero / My Team light up
+      // the moment the page closes (the 15s sync would catch up anyway; this removes the lag).
+      const shared = (state.teamMembers || []).find((x) => x.id === c.id && x.teamName === c.teamName);
+      if (shared) shared.claimedBy = state.account.id;
+    }
     renderClaimSuccess(c);
   } catch (e2) {
     console.error('claim_player', e2);
@@ -7628,8 +7673,10 @@ function renderClaimSuccess(c) {
         <button type="button" class="auth-submit" id="claim-done">Done</button>
       </div>
     </div>`;
-  el.querySelector('#claim-back').addEventListener('click', closeClaimPage);
-  el.querySelector('#claim-done').addEventListener('click', closeClaimPage);
+  // Closing the success view re-renders so the personal hero/tile appear immediately (user action -> render()).
+  const doneAndRender = () => { closeClaimPage(); try { render(); } catch (_) {} };
+  el.querySelector('#claim-back').addEventListener('click', doneAndRender);
+  el.querySelector('#claim-done').addEventListener('click', doneAndRender);
   setTimeout(() => { const b = document.getElementById('claim-done'); if (b) b.focus(); }, 50);
 }
 
@@ -9740,6 +9787,9 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
             if (state.role || !state.authSession) break;
             await new Promise((r) => setTimeout(r, 400));
           }
+          // Slice 3c: load the personal layer (team_members) now instead of waiting for the next
+          // 15s poll — the Home hero/My Team tile should light up right after sign-in.
+          try { await tdbRefreshTournaments(); } catch (_) { /* the poll catches up */ }
           if (state.loaded) { try { render(); } catch {} }
         } catch (err) { console.error('Role derive error', err); }
       }, 0);
@@ -9752,6 +9802,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       state.authSession = null;
       state.account = null;
       state.role = null;
+      state.teamMembers = null; // the personal layer signs out with the account (anon can't read claims)
       claimIntent = false;
       closeClaimPage(); // a claim page can't outlive its session (harmless no-op when not open)
       if (state.isAdmin) {
