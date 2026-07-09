@@ -19,6 +19,7 @@ const {
   bracketGameNumbers, bracketSourceLabel,
   shouldAutoPromptBracket, assignBracketNets,
   shapeClaimCandidates, filterClaimCandidates,
+  resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -970,5 +971,101 @@ describe('filterClaimCandidates (Slice 3b — claim search keeps team/claim fiel
     expect(filterClaimCandidates(cands, '  ')).toEqual([]);
     const many = Array.from({ length: 20 }, (_, i) => ({ id: 'x' + i, name: 'Sam ' + i, teamId: 't', teamName: 'T', claimedBy: null, initials: 'S' }));
     expect(filterClaimCandidates(many, 'sam')).toHaveLength(12);
+  });
+});
+
+describe('Slice 3c personal-layer helpers (resolveMyTeam / computeTeamRecord / computeTeamRunTimeline)', () => {
+  const TEAMS = [
+    { id: 'tA', name: 'Dink Responsibly', pool_id: 'p1' },
+    { id: 'tB', name: 'Ballin' },
+    { id: 'tC', name: 'Block Party' },
+    { id: 'tD', name: 'Your Sets Suck' },
+  ];
+  const cand = (id, claimedBy, teamId, teamName) => ({ id, name: 'X Y', teamId, teamName, claimedBy, initials: 'XY' });
+  const fin = (id, net, q, a, b, sa, sb, at) => ({
+    id, phase: 'pool', status: 'final', net, queue_order: q,
+    team_a_id: a, team_b_id: b, score_a: sa, score_b: sb,
+    winner_team_id: sa > sb ? a : b, updated_at: at,
+  });
+  const sched = (id, net, q, a, b, extra) => ({
+    id, phase: 'pool', status: 'scheduled', net, queue_order: q,
+    team_a_id: a, team_b_id: b, score_a: null, score_b: null, ...extra,
+  });
+
+  describe('resolveMyTeam', () => {
+    it('finds the candidate claimed by the profile', () => {
+      const out = resolveMyTeam('prof-1', [cand('pl1', null, 'tB', 'Ballin'), cand('pl2', 'prof-1', 'tA', 'Dink Responsibly')]);
+      expect(out).toMatchObject({ playerId: 'pl2', teamId: 'tA', teamName: 'Dink Responsibly' });
+    });
+    it('returns null when unclaimed / no profile / empty', () => {
+      expect(resolveMyTeam('prof-9', [cand('pl1', 'prof-1', 'tA', 'D')])).toBeNull();
+      expect(resolveMyTeam(null, [cand('pl1', 'prof-1', 'tA', 'D')])).toBeNull();
+      expect(resolveMyTeam('prof-1', null)).toBeNull();
+    });
+  });
+
+  describe('computeTeamRecord', () => {
+    const matches = [
+      fin('m1', 1, 1, 'tA', 'tB', 21, 18, '2026-07-09T18:00:00Z'),
+      fin('m2', 2, 2, 'tD', 'tA', 21, 15, '2026-07-09T18:30:00Z'),
+      fin('m3', 1, 3, 'tC', 'tD', 21, 10, '2026-07-09T18:40:00Z'), // not mine
+      sched('m4', 1, 5, 'tA', 'tC'),                                // unplayed: ignored
+    ];
+    it('counts wins/losses/pointDiff over MY finals only, results ordered by time', () => {
+      const r = computeTeamRecord('tA', matches, TEAMS);
+      expect(r.wins).toBe(1);
+      expect(r.losses).toBe(1);
+      expect(r.pointDiff).toBe(3 - 6);
+      expect(r.results.map((g) => g.oppName)).toEqual(['Ballin', 'Your Sets Suck']);
+      expect(r.results[0]).toMatchObject({ won: true, myScore: 21, oppScore: 18 });
+      expect(r.results[1]).toMatchObject({ won: false, myScore: 15, oppScore: 21 });
+    });
+    it('empty inputs -> zero record', () => {
+      expect(computeTeamRecord('tA', [], TEAMS)).toMatchObject({ wins: 0, losses: 0, pointDiff: 0, results: [] });
+    });
+  });
+
+  describe('computeTeamRunTimeline', () => {
+    // net 1 finals at 18:00, 18:10, 18:20 -> two 10-min gaps, median 10
+    const finals = [
+      fin('f1', 1, 1, 'tA', 'tB', 21, 18, '2026-07-09T18:00:00Z'),
+      fin('f2', 1, 2, 'tC', 'tD', 21, 12, '2026-07-09T18:10:00Z'),
+      fin('f3', 1, 3, 'tB', 'tC', 21, 19, '2026-07-09T18:20:00Z'),
+    ];
+    it('last = my most recent final, oriented to me', () => {
+      const tl = computeTeamRunTimeline('tA', finals.concat([sched('u1', 1, 4, 'tA', 'tC')]), TEAMS);
+      expect(tl.last).toMatchObject({ won: true, myScore: 21, oppScore: 18, oppName: 'Ballin' });
+    });
+    it('next: gamesAhead counts unplayed on the SAME net before mine; eta = median gap x gamesAhead', () => {
+      const matches = finals.concat([
+        sched('u0', 1, 4, 'tB', 'tD'),      // ahead of mine on net 1
+        sched('u1', 1, 5, 'tA', 'tC'),      // mine
+        sched('u2', 2, 6, 'tD', 'tA'),      // my later game, net 2
+      ]);
+      const tl = computeTeamRunTimeline('tA', matches, TEAMS);
+      expect(tl.next).toMatchObject({ net: 1, oppName: 'Block Party', gamesAhead: 1, etaMin: 10, isNow: false });
+      expect(tl.then).toMatchObject({ oppName: 'Your Sets Suck' });
+    });
+    it('isNow when nothing ahead on my net (or my game is live); eta null with <2 gap samples', () => {
+      const matches = [
+        fin('f1', 1, 1, 'tA', 'tB', 21, 18, '2026-07-09T18:00:00Z'), // only ONE final -> no gap samples
+        sched('u1', 1, 2, 'tA', 'tC'),
+      ];
+      const tl = computeTeamRunTimeline('tA', matches, TEAMS);
+      expect(tl.next).toMatchObject({ gamesAhead: 0, isNow: true, etaMin: null });
+      expect(tl.then).toBeNull();
+    });
+    it('bracket next: my playable main-phase matchup, no eta/gamesAhead', () => {
+      const matches = [
+        { id: 'b1', phase: 'main', status: 'scheduled', net: 2, queue_order: 1, team_a_id: 'tA', team_b_id: 'tD' },
+        { id: 'b2', phase: 'main', status: 'scheduled', net: 1, queue_order: 2, team_a_id: null, team_b_id: 'tB' }, // teamless: not "playable" and not mine
+      ];
+      const tl = computeTeamRunTimeline('tA', matches, TEAMS);
+      expect(tl.next).toMatchObject({ net: 2, oppName: 'Your Sets Suck', etaMin: null, gamesAhead: null });
+      expect(tl.last).toBeNull();
+    });
+    it('no matches -> all null', () => {
+      expect(computeTeamRunTimeline('tA', [], TEAMS)).toEqual({ last: null, next: null, then: null });
+    });
   });
 });

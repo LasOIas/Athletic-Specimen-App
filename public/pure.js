@@ -1003,6 +1003,102 @@ function filterClaimCandidates(candidates, query) {
   return scored.slice(0, 12).map((s) => s.row);
 }
 
+// ── Slice 3c: personal-layer helpers (Home "your run" hero, My Team page, Standings You). PURE. ──
+
+// Which team is "mine"? candidates = shapeClaimCandidates rows; the first one claimed by this profile wins.
+function resolveMyTeam(profileId, candidates) {
+  if (!profileId || !Array.isArray(candidates)) return null;
+  const mine = candidates.find((c) => c && c.claimedBy === profileId);
+  if (!mine) return null;
+  return { playerId: mine.id, teamId: mine.teamId, teamName: mine.teamName, playerName: mine.name };
+}
+
+function _teamName3c(teams, id) {
+  const t = (teams || []).find((x) => x && x.id === id);
+  return (t && t.name) || '';
+}
+function _involves3c(m, teamId) { return m && (m.team_a_id === teamId || m.team_b_id === teamId); }
+function _orient3c(m, teamId, teams) {
+  const iAmA = m.team_a_id === teamId;
+  const oppId = iAmA ? m.team_b_id : m.team_a_id;
+  return {
+    oppId,
+    oppName: _teamName3c(teams, oppId),
+    myScore: Number(iAmA ? m.score_a : m.score_b) || 0,
+    oppScore: Number(iAmA ? m.score_b : m.score_a) || 0,
+    won: m.winner_team_id === teamId,
+  };
+}
+
+// W-L / point diff / ordered results over MY final games (any phase).
+function computeTeamRecord(teamId, matches, teams) {
+  const finals = (Array.isArray(matches) ? matches : [])
+    .filter((m) => _involves3c(m, teamId) && m.status === 'final')
+    .sort((a, b) => String(a.updated_at || '').localeCompare(String(b.updated_at || '')));
+  let wins = 0, losses = 0, pointDiff = 0;
+  const results = finals.map((m) => {
+    const o = _orient3c(m, teamId, teams);
+    if (o.won) wins++; else losses++;
+    pointDiff += o.myScore - o.oppScore;
+    return { oppId: o.oppId, oppName: o.oppName, won: o.won, myScore: o.myScore, oppScore: o.oppScore, phase: m.phase };
+  });
+  return { wins, losses, pointDiff, results };
+}
+
+// The hero timeline: {last, next, then}. Honest ETA (§27 TRUE): only FINAL rows' updated_at are
+// trusted as finish times (net re-assignment bumps unplayed rows), and "~N min" renders only when
+// >=2 same-net gap samples exist; otherwise callers show "N games ahead" / nothing. Bracket
+// (phase 'main') has no per-net queue -> next carries etaMin:null + gamesAhead:null.
+function computeTeamRunTimeline(teamId, matches, teams) {
+  const list = Array.isArray(matches) ? matches : [];
+  const myFinals = list
+    .filter((m) => _involves3c(m, teamId) && m.status === 'final')
+    .sort((a, b) => String(a.updated_at || '').localeCompare(String(b.updated_at || '')));
+  const lastM = myFinals.length ? myFinals[myFinals.length - 1] : null;
+  const last = lastM
+    ? (() => { const o = _orient3c(lastM, teamId, teams); return { won: o.won, myScore: o.myScore, oppScore: o.oppScore, net: lastM.net || null, oppName: o.oppName }; })()
+    : null;
+
+  // My upcoming games: both teams set, not final. Prefer the pool queue while any exists (queue_order
+  // numbering restarts for the bracket, so the two sets must not be interleaved).
+  const upcomingAll = list.filter((m) =>
+    _involves3c(m, teamId) && m.status !== 'final' && m.team_a_id && m.team_b_id);
+  const poolUp = upcomingAll.filter((m) => m.phase === 'pool');
+  const upcoming = (poolUp.length ? poolUp : upcomingAll)
+    .sort((a, b) => (Number(a.queue_order) || 0) - (Number(b.queue_order) || 0));
+
+  let next = null;
+  if (upcoming.length) {
+    const n = upcoming[0];
+    const o = _orient3c(n, teamId, teams);
+    if (n.phase === 'pool') {
+      const aheadCount = list.filter((m) =>
+        m.phase === 'pool' && m.status !== 'final' && m.net === n.net &&
+        (Number(m.queue_order) || 0) < (Number(n.queue_order) || 0)).length;
+      // gap samples: minutes between consecutive finals on MY net
+      const netFinals = list
+        .filter((m) => m.phase === 'pool' && m.status === 'final' && m.net === n.net && m.updated_at)
+        .sort((a, b) => String(a.updated_at).localeCompare(String(b.updated_at)));
+      const gaps = [];
+      for (let i = 1; i < netFinals.length; i++) {
+        const mins = (new Date(netFinals[i].updated_at) - new Date(netFinals[i - 1].updated_at)) / 60000;
+        if (mins > 0) gaps.push(mins);
+      }
+      gaps.sort((a, b) => a - b);
+      const median = gaps.length ? gaps[Math.floor(gaps.length / 2) - (gaps.length % 2 === 0 ? 1 : 0)] : null;
+      const etaMin = (gaps.length >= 2 && aheadCount >= 1 && median != null) ? Math.round(median * aheadCount) : null;
+      const isNow = aheadCount === 0 || n.status === 'live';
+      next = { net: n.net || null, oppName: o.oppName, gamesAhead: aheadCount, etaMin, isNow, label: isNow ? 'Playing now' : 'Up next' };
+    } else {
+      next = { net: n.net || null, oppName: o.oppName, gamesAhead: null, etaMin: null, isNow: n.status === 'live', label: n.status === 'live' ? 'Playing now' : 'Up next' };
+    }
+  }
+
+  const thenM = upcoming.length > 1 ? upcoming[1] : null;
+  const then = thenM ? { oppName: _orient3c(thenM, teamId, teams).oppName } : null;
+  return { last, next, then };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -1019,6 +1115,7 @@ if (typeof module !== "undefined" && module.exports) {
     bracketGameNumbers, bracketSourceLabel,
     shouldAutoPromptBracket, assignBracketNets,
     shapeStandingsByPool, computeAllTimeLeaderboard,
-    shapeClaimCandidates, filterClaimCandidates
+    shapeClaimCandidates, filterClaimCandidates,
+    resolveMyTeam, computeTeamRecord, computeTeamRunTimeline
   };
 }
