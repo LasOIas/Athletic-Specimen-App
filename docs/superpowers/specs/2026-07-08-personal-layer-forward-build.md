@@ -66,10 +66,13 @@ Pure function(s) in `public/pure.js`, unit-tested with vitest:
 - `computeTeamRecord(team, matches)` → W–L, point-diff, seed for My Team B and the Standings "You" row.
 - The app fetches `team_members` + claimed players alongside the existing tournament read; resolver runs client-side; surfaces render off it via `partialRender()` on background syncs (never `render()` — scroll-jump rule).
 
-### 4d. App — claim UI (Option A) + organizer approvals
+### 4d. App — claim UI (Option A, INSTANT) + admin Account row — CORRECTED 2026-07-09 (Mike)
 
-- **Claim** (reuse the Check-In kiosk pattern): search field → tap your name shown as **avatar · name · team** → confirm ("Claim my spot" / "Not me") → `claim_player(playerId)` → "Claim sent — pending your organizer's OK." Reached from the Home claim prompt / tournament card (signed-in) or after sign-in if unclaimed. The search lists players in the active tournament's teams (so results carry team context and disambiguate same-name rows).
-- **Approvals** (organizer/owner only, in the admin/Manage surface): list pending `player_claims` (player name · team · requesting profile email) → Approve → `approve_claim(claimId)` / Reject → `reject_claim(claimId)`. Gated on `is_organizer` (RPCs already enforce; UI hides for non-organizers).
+> **Mike killed the approvals model** (*"i dont want any of that, all i want is to edit a player from the admin page, i dont want to have to approve every single player claim"*). Claims apply instantly; there is NO organizer approval step and NO approvals panel anywhere. The admin's only surface is the existing player editor.
+
+- **Claim** (reuse the Check-In kiosk pattern): search field → tap your name shown as **avatar · name · team** → confirm ("Claim my spot" / "Not me") → `claim_player(playerId)` → **instantly linked** ("You're linked — this is you now"). Reached from the Home claim prompt / tournament card (signed-in) or after sign-in if unclaimed. The search lists players in the active tournament's teams (team context disambiguates same-name rows). A player already claimed by someone else renders as claimed/untappable.
+- **Admin exception path** (replaces approvals): the existing admin player editor gets one **Account** row — the linked account's email (or "—") + an **Unlink** button (clears `claimed_by_profile` via the existing guarded admin write path). One tap fixes a wrong claim.
+- **DB (migration 0043):** `claim_player` rewritten to set `players.claimed_by_profile = auth.uid()` directly (row-locked; guards: signed in / player exists / not claimed by someone else; idempotent for re-claiming yourself) and log the `player_claims` audit row as `approved`. `approve_claim`/`reject_claim` (0038) become unused — left in place, retired in the later cutover (0041).
 
 ### 4e. App — surfaces (wire the locked layouts)
 
@@ -91,7 +94,7 @@ Home hero C, My Team B, Standings "You" highlight render off §4c resolver outpu
 ## 7. Slice plan (each = version bump + commit + deploy + verify)
 
 - **Slice 3a — Data foundation:** `link_roster_to_team` + `register_team` rewrite (0042) + `sync_team_roster` for admin paths + DB integration test. Invisible to users; mechanism only.
-- **Slice 3b — Claim + approvals:** claim UI (A) + organizer approvals panel.
+- **Slice 3b — Instant claim + admin Account row:** migration 0043 (`claim_player` auto-applies) + claim UI (A) + the Account row/Unlink in the admin player editor. No approvals surface.
 - **Slice 3c — Personal surfaces:** resolver + Home hero C + My Team B + Standings "You".
 
 ## 8. Out of scope
