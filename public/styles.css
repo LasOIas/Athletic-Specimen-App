@@ -3418,3 +3418,99 @@ body.pd-public-active .pd-scrim { display: block; }
 .bt-pan.pd-bk-ro .bt-node.pd-bk-champ .bt-row.win .bt-sc { color: var(--gold); font-weight: 800; }
 .bt-pan.pd-bk-ro .bt-node.pd-bk-live { border-color: oklch(0.85 0.05 150); box-shadow: inset 3px 0 0 var(--live), var(--shadow-sm); }
 .bt-pan.pd-bk-ro .bt-node.pd-bk-live .bt-meta { color: var(--live-ink); }
+
+/* ===================================================================
+   REGISTRATION EVENT CARD + JOIN SHEET (Finish-line Slice 3, 2026-07-09)
+   Spec §13.5, Mike's locked round-2 pick A. Ported from the locked visual
+   pd-finish/r2-a.html to the pd-* backdrop grammar. Direction-A tokens only;
+   §51 matte / no neon; §11 no emoji. Mobile-first (no new >=1024 rules).
+   =================================================================== */
+
+/* -- page header row (bare back chevron; the event card owns the naming) -- */
+.pd-reg-pagehdr { margin-bottom: 12px; }
+
+/* -- the EVENT card (a frosted .pd-card under body.pd-public-active) -- */
+.pd-reg-card { padding: 17px 17px 16px; }
+.pd-reg-top { display: flex; align-items: center; gap: 12px; margin-bottom: 15px; }
+.pd-reg-mark { width: 48px; height: 48px; flex: none; border-radius: 13px; background: var(--card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.pd-reg-mark img { width: 34px; height: 34px; object-fit: contain; }
+
+.pd-reg-pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 5px 11px 5px 9px; font-size: 10.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.pd-reg-pill.is-open { background: var(--live-soft); border: 1px solid oklch(0.85 0.05 150); color: var(--live-ink); }
+.pd-reg-pill.is-closed { background: var(--surface-3); border: 1px solid var(--border); color: var(--muted); padding-left: 11px; }
+.pd-reg-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); flex: none; animation: pd-reg-pulse 1.8s ease-in-out infinite; }
+
+.pd-reg-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.pd-reg-title { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 30px; letter-spacing: -.5px; color: var(--ink); line-height: 1.05; margin: 5px 0 8px; }
+.pd-reg-sub { font-size: 13.5px; font-weight: 500; color: var(--muted); line-height: 1.35; margin-bottom: 15px; }
+
+.pd-reg-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px; }
+.pd-reg-chip { display: inline-flex; align-items: center; gap: 7px; background: var(--surface-3); border: 1px solid var(--border); border-radius: 999px; padding: 8px 13px 8px 11px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.pd-reg-chip svg { width: 14px; height: 14px; color: var(--muted); flex: none; }
+.pd-reg-chip.pd-reg-chip-cost { background: var(--accent-soft); border-color: var(--accent-bd); color: var(--brand-dark); }
+.pd-reg-chip.pd-reg-chip-cost svg { color: var(--accent); }
+
+.pd-reg-spots { display: flex; align-items: center; gap: 8px; padding: 11px 13px; margin-bottom: 16px; background: var(--surface-3); border: 1px solid var(--border); border-radius: var(--r-md); font-size: 13px; color: var(--muted); }
+.pd-reg-spots .pd-reg-dot { width: 7px; height: 7px; }
+.pd-reg-spots b { font-family: 'Sora','Inter',sans-serif; font-weight: 800; color: var(--ink); letter-spacing: -.2px; }
+
+/* full-width primary CTA (shared: event card, sheet submit, success claim) */
+.pd-reg-cta { width: 100%; min-height: 56px; border: none; border-radius: var(--r-lg); background: var(--accent); color: oklch(0.99 0.01 240); font-family: 'Sora','Inter',sans-serif; font-weight: 700; letter-spacing: -.1px; display: flex; align-items: center; justify-content: center; gap: 9px; box-shadow: var(--shadow); }
+.pd-reg-cta svg { width: 19px; height: 19px; }
+.pd-reg-cta:hover { background: var(--brand-dark); }
+.pd-reg-cta:active { background: var(--brand-dark); }
+.pd-reg-cta[disabled] { opacity: .6; }
+.pd-reg-foot { text-align: center; font-size: 12px; font-weight: 500; color: var(--faint); margin-top: 11px; }
+.pd-reg-closed { text-align: center; font-size: 13px; font-weight: 500; color: var(--muted); padding: 6px 4px 2px; }
+
+/* -- the JOIN SHEET (body-level bottom sheet; dimmed backdrop, slide-up) -- */
+.pd-reg-scrim { position: fixed; inset: 0; z-index: 12000; display: flex; align-items: flex-end; justify-content: center; background: oklch(0.18 0.005 75 / 0.42); animation: pd-reg-scrimin .18s ease-out; }
+.pd-reg-sheet { width: 100%; max-width: 460px; max-height: 92vh; overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--bg); border: 1px solid var(--border); border-bottom: none; border-radius: 20px 20px 0 0; box-shadow: 0 -8px 30px oklch(0.18 0.005 75 / .18); padding: 8px 17px calc(18px + env(safe-area-inset-bottom, 0px)); animation: pd-reg-sheetup .26s cubic-bezier(.22,1,.36,1); }
+.pd-reg-grip { width: 38px; height: 4px; border-radius: 999px; background: var(--border-2); margin: 2px auto 15px; }
+
+.pd-reg-sheethd { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 4px; }
+.pd-reg-sheeteyebrow { font-size: 10.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); }
+.pd-reg-sheetteam { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 22px; letter-spacing: -.3px; color: var(--ink); margin-top: 3px; line-height: 1.08; }
+.pd-reg-sheetx { margin-left: auto; width: 32px; height: 32px; min-height: 0; padding: 0; flex: none; border-radius: 9px; background: var(--surface-3); border: 1px solid var(--border); color: var(--muted); display: flex; align-items: center; justify-content: center; }
+.pd-reg-sheetx:hover { background: var(--surface-3); }
+.pd-reg-sheetx svg { width: 15px; height: 15px; }
+
+.pd-reg-flbl { display: block; font-size: 10.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin: 16px 2px 8px; }
+.pd-reg-finput { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 16px; font-weight: 600; color: var(--ink); background: var(--card); border: 1.5px solid var(--border-2); border-radius: var(--r-md); padding: 15px; min-height: 54px; }
+.pd-reg-finput::placeholder { color: var(--faint); font-weight: 500; }
+.pd-reg-finput:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--brand-ring); }
+
+.pd-reg-plhead { display: flex; align-items: baseline; gap: 8px; margin: 18px 2px 9px; }
+.pd-reg-plhead .pd-reg-flbl { margin: 0; }
+.pd-reg-plhint { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--faint); }
+.pd-reg-pllist { display: flex; flex-direction: column; gap: 9px; }
+.pd-reg-plrow { display: flex; align-items: center; gap: 0; background: var(--card); border: 1.5px solid var(--border-2); border-radius: var(--r-md); padding-left: 13px; min-height: 56px; }
+.pd-reg-plrow:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--brand-ring); }
+.pd-reg-plnum { width: 27px; height: 27px; flex: none; border-radius: 50%; background: var(--accent-soft); border: 1px solid var(--accent-bd); color: var(--accent); font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 12.5px; display: flex; align-items: center; justify-content: center; }
+.pd-reg-plinput { flex: 1 1 auto; min-width: 0; border: none; background: none; font-family: inherit; font-size: 16px; font-weight: 600; color: var(--ink); padding: 15px 13px 15px 12px; }
+.pd-reg-plinput:focus { outline: none; }
+.pd-reg-plinput::placeholder { color: var(--faint); font-weight: 500; }
+.pd-reg-plcap { flex: none; margin-right: 12px; font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); background: var(--surface-3); border: 1px solid var(--border); border-radius: 6px; padding: 3px 7px; }
+
+.pd-reg-msg { min-height: 0; margin: 12px 2px 0; font-size: 13px; font-weight: 600; text-align: center; }
+.pd-reg-msg:empty { margin: 0; }
+.pd-reg-sheetcta { margin-top: 14px; }
+.pd-reg-pay { display: flex; align-items: center; justify-content: center; gap: 7px; margin-top: 12px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+.pd-reg-pay svg { width: 14px; height: 14px; color: var(--faint); flex: none; }
+.pd-reg-pay b { font-weight: 700; color: var(--ink); }
+
+/* -- the "You're in" payoff state (matte amber payment chip, distinct from the reserved gold) -- */
+.pd-reg-won { text-align: center; padding: 6px 4px 4px; }
+.pd-reg-check { width: 56px; height: 56px; margin: 6px auto 14px; border-radius: 50%; background: var(--live-soft); border: 1px solid oklch(0.85 0.05 150); color: var(--live-ink); display: flex; align-items: center; justify-content: center; }
+.pd-reg-check svg { width: 28px; height: 28px; }
+.pd-reg-wonh { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 22px; letter-spacing: -.3px; color: var(--ink); }
+.pd-reg-wonsub { font-size: 13.5px; color: var(--muted); margin: 6px 0 14px; }
+.pd-reg-paychip { display: inline-flex; align-items: center; gap: 7px; background: oklch(0.95 0.035 75); border: 1px solid oklch(0.86 0.06 78); color: oklch(0.46 0.08 70); border-radius: 999px; padding: 7px 13px 7px 11px; font-size: 12.5px; font-weight: 700; margin-bottom: 16px; }
+.pd-reg-paychip svg { width: 15px; height: 15px; flex: none; }
+.pd-reg-backlink { display: block; width: 100%; margin: 12px auto 0; min-height: 0; padding: 6px; background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 600; }
+.pd-reg-backlink:hover { background: none; color: var(--ink); }
+
+@keyframes pd-reg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+@keyframes pd-reg-scrimin { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pd-reg-sheetup { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .pd-reg-scrim, .pd-reg-sheet { animation: none; } .pd-reg-dot { animation: none; } }

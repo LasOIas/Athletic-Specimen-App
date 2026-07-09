@@ -1236,6 +1236,48 @@ function checkinHeroModel(rows) {
   return { id: p.id, name: String(p.name) };
 }
 
+// Finish-line Slice 3 (spec §13.5): the registration EVENT view-model. Pure shape for the event card —
+// the REGISTRATION OPEN / closed pill, the chips row, and the honest live-spots line. HARD RULE (spec +
+// §27): a date chip renders ONLY when the tournament actually carries a date (there is no date column
+// today, so `dateChip` is null and the chip is omitted — never invent one). Cost shows the tournament's
+// own `buy_in` when set, else the league's spec-locked "$80 a team" (the sheet's "$20 each" caption is the
+// same fixed price). `spotsLead` reads "Be the first team in" at zero teams, else "N teams in".
+function registerEventModel(show, teams) {
+  const t = show || {};
+  const list = Array.isArray(teams) ? teams : [];
+  const teamSize = Number(t.team_size) || 4;
+  const regOpen = !!(t.registration_open && t.status === 'setup');
+  const buyIn = t.buy_in != null ? String(t.buy_in).trim() : '';
+  const count = list.length;
+  const rawName = (t.name != null && String(t.name).trim()) ? String(t.name).trim() : 'Tournament';
+  const rawDate = t.event_date || t.start_date || t.starts_at || null; // no such column today → null → chip omitted
+  return {
+    regOpen,
+    name: rawName,
+    teamSize,
+    dateChip: rawDate ? String(rawDate) : null,
+    costChip: buyIn || '$80 a team',
+    playersChip: teamSize + ' players',
+    count,
+    isEmpty: count === 0,
+    spotsLead: count === 0 ? 'Be the first team in' : (count + ' team' + (count === 1 ? '' : 's') + ' in'),
+    spotsTail: count === 0 ? '' : 'room for more',
+  };
+}
+
+// Finish-line Slice 3 (spec §13.5): the join-sheet submit validation — the SAME rules the proven public
+// register write path enforced (team name required; the roster must carry EXACTLY the tournament's team
+// size), returning the identical inline error copy. Extracted pure so the sheet can validate before the
+// register_team RPC call without duplicating the messages. `roster` is trimmed + empties dropped first.
+function joinSheetValidate(teamName, roster, teamSize) {
+  const name = String(teamName || '').trim();
+  const size = Number(teamSize) || 4;
+  const clean = (Array.isArray(roster) ? roster : []).map((n) => String(n || '').trim()).filter(Boolean);
+  if (!name) return { ok: false, message: 'Enter a team name.' };
+  if (clean.length !== size) return { ok: false, message: 'Enter all ' + size + ' players.' };
+  return { ok: true, teamName: name, roster: clean };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -1255,6 +1297,7 @@ if (typeof module !== "undefined" && module.exports) {
     shapeClaimCandidates, filterClaimCandidates,
     resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
     teamPeekModel, checkinHeroModel,
-    bracketOutcome, bracketRoundLabel, bracketStatusLine
+    bracketOutcome, bracketRoundLabel, bracketStatusLine,
+    registerEventModel, joinSheetValidate
   };
 }

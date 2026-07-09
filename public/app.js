@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.10'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.09.11'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -394,6 +394,12 @@ function restoreTransientInteractionState(snapshot) {
       refreshAzStripAvailability();
       return;
     }
+    // Finish-line Slice 3 (spec §13.5): the event card's "Register your team" CTA opens the join sheet — a
+    // body-level overlay (openJoinSheet) so a background sync can never wipe a typed roster. Early-return
+    // like the toggles above; the sheet's own buttons (submit / close / claim / back) bind in openJoinSheet.
+    const regOpenSheet = e.target.closest('[data-role="reg-open-sheet"]');
+    if (regOpenSheet) { e.preventDefault(); openJoinSheet(); return; }
+
     // 1) Toggle the dropdown when ⋮ is clicked
     const dots = e.target.closest('.btn-actions');
     if (dots) {
@@ -5131,24 +5137,188 @@ function buildBracketPageHTML() {
   return `${header}${statusline}${tree}`;
 }
 
-// Slice 2 (§13.6): Register as its own destination behind the hub's "Register your team" CTA (the shared
-// board it used to open is retired). Wraps the existing self-registration screen in pd chrome (back → hub);
-// the screen's own title is suppressed since the page header supplies it.
+// Finish-line Slice 3 (spec §13.5, Mike's locked round-2 pick A): Register is the tournament as an EVENT.
+// The event card SELLS before it asks — logo mark + REGISTRATION OPEN pill + the name in Sora display + the
+// co-ed line in plain English + chips (date ONLY when real · cost · players) + an honest live-spots line +
+// one big "Register your team" CTA. The CTA opens a body-level join sheet (openJoinSheet) so a background
+// sync can never wipe a typed roster (the same overlay discipline as openClaimPage/openTeamPeek). Closed
+// variant: the same hero with a "Registration closed" pill and NO CTA (honest state, no dead button).
+const REG_CAL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg>';
+const REG_COST_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 6.5C17 4.6 14.8 3.5 12 3.5S7 4.6 7 6.5 9.2 9.5 12 9.5s5 1.4 5 3.5-2.2 3.5-5 3.5-5-1.1-5-3"/></svg>';
+const REG_PLAYERS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><circle cx="17" cy="9.5" r="2.6"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M15 15.5a4.5 4.5 0 0 1 5.5 3.5"/></svg>';
 function buildRegisterPageHTML() {
   const list = state.tournaments || [];
   const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
   const show = active || list[0] || null;
   const teams = (active ? state.tournamentTeams : []) || [];
   const backSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
-  const header = `<div class="pd-pagehdr">
+  const header = `<div class="pd-pagehdr pd-reg-pagehdr">
       <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament">${backSvg}</button>
-      <div class="ph-titles"><span class="pd-eyebrow">${escapeHTML(show ? (show.name || 'Tournament') : 'Tournament')}</span><div class="pd-htitle">Register</div></div>
     </div>`;
-  if (active && show && show.registration_open && show.status === 'setup') {
-    return header + buildPublicRegisterHTML(show, teams, { embedded: true });
+  if (!show) return `${header}<div class="pd-empty">No tournament scheduled.</div>`;
+
+  const m = registerEventModel(show, teams);
+  const chip = (svg, label, extra) => `<span class="pd-reg-chip${extra ? ' ' + extra : ''}">${svg}${escapeHTML(label)}</span>`;
+  const chips = `<div class="pd-reg-chips">
+      ${m.dateChip ? chip(REG_CAL_SVG, m.dateChip) : ''}
+      ${chip(REG_COST_SVG, m.costChip, 'pd-reg-chip-cost')}
+      ${chip(REG_PLAYERS_SVG, m.playersChip)}
+    </div>`;
+  const pill = m.regOpen
+    ? '<span class="pd-reg-pill is-open"><span class="pd-reg-dot"></span>Registration open</span>'
+    : '<span class="pd-reg-pill is-closed">Registration closed</span>';
+  const heroTop = `<div class="pd-reg-top">
+      <div class="pd-reg-mark"><img src="/logo-mark.png" alt="" aria-hidden="true" /></div>
+      ${pill}
+    </div>
+    <div class="pd-reg-eyebrow">Colorado · Volleyball</div>
+    <h1 class="pd-reg-title">${escapeHTML(m.name)}</h1>
+    <div class="pd-reg-sub">Co-ed 4s — at least one guy and one girl on every team. Grab three friends and put your name in.</div>
+    ${chips}`;
+
+  const tail = m.regOpen
+    ? `<div class="pd-reg-spots"><span class="pd-reg-dot"></span><span><b>${escapeHTML(m.spotsLead)}</b>${m.spotsTail ? ' · ' + escapeHTML(m.spotsTail) : ''}</span></div>
+       <button type="button" class="pd-reg-cta" data-role="reg-open-sheet">Register your team
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+       </button>
+       <div class="pd-reg-foot">Self-register while it's open — takes a minute, no payment now.</div>`
+    : `<div class="pd-reg-closed">Registration is closed for this tournament.</div>`;
+
+  return `${header}<section class="pd-card pd-reg-card">${heroTop}${tail}</section>`;
+}
+
+// ── Finish-line Slice 3 (spec §13.5): the JOIN SHEET. A body-level bottom sheet (dimmed backdrop, grab
+// handle, slide-up) that opens off the event card's CTA. It lives on document.body — OUTSIDE #tab-tournament
+// and #app-content — so neither partialRenderTournament nor a full render() can ever wipe a typed roster
+// (the same overlay discipline as openClaimPage / openTeamPeek; the app has a recorded history of background
+// syncs eating typed forms). It wires to the PROVEN public write path VERBATIM: joinSheetValidate (same rules
+// + inline copy) → tdbRegisterTeam (the register_team RPC). Payment moved to check-in (§13.5), so paid=false.
+function buildJoinSheetFormHTML(show) {
+  const teamSize = Number(show.team_size) || 4;
+  const name = escapeHTML((show.name && String(show.name).trim()) || 'Tournament');
+  const rows = Array.from({ length: teamSize }, (_, i) => `<div class="pd-reg-plrow">
+      <span class="pd-reg-plnum">${i + 1}</span>
+      <input class="pd-reg-plinput" id="reg-p${i + 1}" type="text" placeholder="Add a player" autocomplete="off" autocapitalize="words" spellcheck="false" />
+      ${i === 0 ? '<span class="pd-reg-plcap">Captain</span>' : ''}
+    </div>`).join('');
+  return `<div class="pd-reg-grip"></div>
+    <div class="pd-reg-sheethd">
+      <div>
+        <div class="pd-reg-sheeteyebrow">Register · ${name}</div>
+        <div class="pd-reg-sheetteam">Your team</div>
+      </div>
+      <button type="button" class="pd-reg-sheetx" data-role="reg-sheet-close" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <label class="pd-reg-flbl" for="reg-team">Team name</label>
+    <input class="pd-reg-finput" id="reg-team" type="text" placeholder="Pick a team name" autocomplete="off" autocapitalize="words" spellcheck="false" />
+    <div class="pd-reg-plhead">
+      <span class="pd-reg-flbl">Players</span>
+      <span class="pd-reg-plhint">Co-ed 4s · 1 guy + 1 girl min</span>
+    </div>
+    <div class="pd-reg-pllist">${rows}</div>
+    <p class="pd-reg-msg" id="reg-msg" role="status" aria-live="polite"></p>
+    <button type="button" class="pd-reg-cta pd-reg-sheetcta" data-role="reg-sheet-submit">Register team</button>
+    <div class="pd-reg-pay">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/></svg>
+      <span>Pay <b>$20 each</b> at check-in — cash or Venmo</span>
+    </div>`;
+}
+
+function closeJoinSheet() {
+  const el = document.getElementById('pd-reg-sheet');
+  if (el) el.remove();
+}
+
+function openJoinSheet() {
+  const list = state.tournaments || [];
+  const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
+  const show = active || list[0] || null;
+  // Never open a sheet for a closed / missing event (the CTA only renders when open, but guard anyway).
+  if (!show || !(show.registration_open && show.status === 'setup')) return;
+  closeJoinSheet();
+  const scrim = document.createElement('div');
+  scrim.id = 'pd-reg-sheet';
+  scrim.className = 'pd-reg-scrim';
+  scrim.setAttribute('role', 'dialog');
+  scrim.setAttribute('aria-modal', 'true');
+  scrim.setAttribute('aria-label', 'Register your team');
+  scrim.innerHTML = `<div class="pd-reg-sheet">${buildJoinSheetFormHTML(show)}</div>`;
+  document.body.appendChild(scrim);
+  // The sheet lives on document.body (outside #app-content's delegated listeners), so its buttons bind here.
+  scrim.addEventListener('click', (ev) => {
+    if (ev.target === scrim) { closeJoinSheet(); return; } // backdrop tap dismisses
+    const r = ev.target.closest('[data-role]');
+    if (!r) return;
+    const role = r.getAttribute('data-role');
+    if (role === 'reg-sheet-close') { closeJoinSheet(); return; }
+    if (role === 'reg-sheet-submit') { submitJoinSheet(r); return; }
+    if (role === 'reg-claim') {
+      // Instant claim hand-off (§13.5): signed-in → the claim page; signed-out → sign in first
+      // (claimIntent re-opens the claim page automatically once SIGNED_IN lands) — mirrors #pd-claim.
+      closeJoinSheet();
+      if (state.authSession) { openClaimPage(); }
+      else { claimIntent = true; openAuthPage(); }
+      return;
+    }
+    if (role === 'reg-back-hub') {
+      // Close to the hub, which now shows the incremented team count (render() ran on submit).
+      pdTournamentView = 'hub';
+      const c = document.querySelector('#tab-tournament .container');
+      if (c) c.innerHTML = buildPublicTournamentRootHTML();
+      closeJoinSheet();
+      return;
+    }
+  });
+  setTimeout(() => { const n = document.getElementById('reg-team'); if (n) { try { n.focus({ preventScroll: true }); } catch (_) { try { n.focus(); } catch (_e) {} } } }, 60);
+}
+
+async function submitJoinSheet(btn) {
+  const fv = (fid) => ((document.getElementById(fid) || {}).value || '').trim();
+  const teamName = fv('reg-team');
+  const t = (state.tournaments || []).find((x) => x.id === state.activeTournamentId) || {};
+  const teamSize = Number(t.team_size) || 4;
+  const roster = Array.from({ length: teamSize }, (_, i) => fv('reg-p' + (i + 1))).filter(Boolean);
+  const setMsg = (txt, ok) => { const el = document.getElementById('reg-msg'); if (el) { el.textContent = txt; el.style.color = ok ? 'var(--live)' : 'var(--danger)'; } };
+  const v = joinSheetValidate(teamName, roster, teamSize); // same rules + inline copy as the proven path
+  if (!v.ok) { setMsg(v.message, false); return; }
+  if (btn) btn.setAttribute('disabled', 'true'); // in-flight guard (double-tap)
+  try {
+    // The PROVEN write path, verbatim (tv2-register-team). paid=false: payment moves to check-in (§13.5).
+    await tdbRegisterTeam(state.activeTournamentId, v.teamName, v.roster, null, false);
+  } catch (err) {
+    if (btn) btn.removeAttribute('disabled');
+    setMsg((err && err.message) || 'Could not register — try again.', false);
+    return; // the INSERT failed → real error, stay on the form
   }
-  // Registration isn't open — say so in pd chrome instead of the raw board (§13.6).
-  return `${header}<div class="pd-empty">Registration is closed for this tournament.</div>`;
+  // Registered for real — a refresh/render hiccup must NOT claim it failed (mirrors the proven path). The
+  // sheet is body-level, so render() (which rebuilds the hub underneath with the new count) never wipes it.
+  try { await tdbRefreshTournaments(); render(); } catch (_) {}
+  renderJoinSheetSuccess(v.teamName);
+}
+
+// Post-submit "You're in" payoff (§13.5): the sheet swaps to the success state — a check, the team name,
+// the payment-at-check-in chip, the instant claim hand-off, and a quiet back-to-tournament link.
+function renderJoinSheetSuccess(teamName) {
+  const scrim = document.getElementById('pd-reg-sheet');
+  if (!scrim) return;
+  const sheet = scrim.querySelector('.pd-reg-sheet');
+  if (!sheet) return;
+  const nm = escapeHTML(teamName);
+  sheet.classList.add('is-success');
+  sheet.innerHTML = `<div class="pd-reg-grip"></div>
+    <div class="pd-reg-won">
+      <div class="pd-reg-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <div class="pd-reg-wonh">You're in, ${nm}!</div>
+      <div class="pd-reg-wonsub">Your team is registered — see you at the tournament.</div>
+      <span class="pd-reg-paychip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/></svg>
+        Payment: at check-in
+      </span>
+      <button type="button" class="pd-reg-cta" data-role="reg-claim">Claim your spot on ${nm}</button>
+      <button type="button" class="pd-reg-backlink" data-role="reg-back-hub">Back to tournament</button>
+    </div>`;
 }
 
 // ── Slice 1 (spec §13.1): the Pools & schedule page — a dedicated public destination behind the hub's
