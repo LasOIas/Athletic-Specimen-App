@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.08.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.08.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -186,7 +186,11 @@ function openPlayerEditPopup(playerKey) {
         const linked = !!(data && data.claimed_by_profile);
         statusEl.textContent = linked ? 'Linked to an account' : 'Not linked';
         unlinkBtn.style.display = linked ? '' : 'none';
-      } catch (_) { statusEl.textContent = 'Not linked'; }
+      } catch (err) {
+        // Review fix: a failed read must not read as an affirmative "Not linked".
+        console.error('claim status read', err);
+        statusEl.textContent = "Couldn't check — reopen to retry";
+      }
     })();
     unlinkBtn.addEventListener('click', async () => {
       unlinkBtn.disabled = true;
@@ -7428,7 +7432,10 @@ function renderAuthPageInner() {
       <button type="submit" class="auth-submit" id="auth-submit">${signup ? 'Create account' : 'Sign in'}</button>
       <button type="button" class="auth-alt" id="auth-alt">${signup ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>
     </form>`;
-  el.querySelector('#auth-back').addEventListener('click', closeAuthPage);
+  el.querySelector('#auth-back').addEventListener('click', () => {
+    claimIntent = false; // dismissing sign-in abandons a pending claim intent (review: it leaked into a later sign-in)
+    closeAuthPage();
+  });
   el.querySelector('#auth-alt').addEventListener('click', () => {
     authMode = signup ? 'signin' : 'signup';
     renderAuthPageInner();
@@ -7447,6 +7454,7 @@ function renderAuthPageInner() {
 // ─────────────────────────────────────────────────────────────────────────────
 let claimIntent = false;      // a signed-out "claim" tap — auto-open the page after sign-in
 let claimCandidates = null;   // null = loading; [] = loaded-empty; [rows] = loaded
+let claimFetchFailed = false; // a failed read must not masquerade as the "no players yet" empty state
 
 function claimableTournament() {
   // The live tournament first (the Home hero's context), else a registration-open setup one
@@ -7474,6 +7482,7 @@ function openClaimPage() {
 
 async function fetchClaimCandidates() {
   const t = claimableTournament();
+  claimFetchFailed = false;
   if (!t || !supabaseClient) { claimCandidates = []; renderClaimSearch(); return; }
   try {
     const { data, error } = await supabaseClient
@@ -7485,6 +7494,7 @@ async function fetchClaimCandidates() {
   } catch (err) {
     console.error('fetchClaimCandidates', err);
     claimCandidates = [];
+    claimFetchFailed = true;
   }
   renderClaimSearch();
 }
@@ -7517,6 +7527,7 @@ function renderClaimSearch() {
     </div>`;
     el.querySelector('#claim-back').addEventListener('click', closeClaimPage);
     el.querySelector('#claim-done').addEventListener('click', closeClaimPage);
+    setTimeout(() => { const b = document.getElementById('claim-done'); if (b) b.focus(); }, 50);
     return;
   }
   // The fetch-completion re-render must never wipe a half-typed name (Mike's input-wipe bug class):
@@ -7547,6 +7558,9 @@ function renderClaimSearch() {
 
 function buildClaimResultsHTML(query) {
   if (claimCandidates === null) return '<div class="small claim-note">Loading players&hellip;</div>';
+  if (claimFetchFailed) {
+    return '<div class="small claim-note">Couldn&rsquo;t load the players &mdash; check your connection, then close this and try again.</div>';
+  }
   if (!claimCandidates.length) {
     return '<div class="small claim-note">No players to claim yet &mdash; names show up here once teams register for a tournament.</div>';
   }
@@ -7580,6 +7594,7 @@ function renderClaimConfirm(c) {
   el.querySelector('#claim-back').addEventListener('click', closeClaimPage);
   el.querySelector('#claim-notme').addEventListener('click', renderClaimSearch);
   el.querySelector('#claim-confirm').addEventListener('click', () => submitClaim(c));
+  setTimeout(() => { const b = document.getElementById('claim-confirm'); if (b) b.focus(); }, 50);
 }
 
 async function submitClaim(c) {
@@ -7615,6 +7630,7 @@ function renderClaimSuccess(c) {
     </div>`;
   el.querySelector('#claim-back').addEventListener('click', closeClaimPage);
   el.querySelector('#claim-done').addEventListener('click', closeClaimPage);
+  setTimeout(() => { const b = document.getElementById('claim-done'); if (b) b.focus(); }, 50);
 }
 
 function friendlyAuthError(error, signup) {
