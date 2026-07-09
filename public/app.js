@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.09.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -9955,6 +9955,14 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
             await deriveRole();
             if (state.role || !state.authSession) break;
             await new Promise((r) => setTimeout(r, 400));
+          }
+          // Auth Task 4 (2026-07-09): a signed-in owner/organizer gets the admin surface from their SERVER role
+          // (caller_role), additively — the nlvb2025 code-login path (adminLoginWithCode ~9856) is untouched and
+          // still works for others. A plain 'player' or null role never sets isAdmin here. Cleared on sign-out
+          // (the SIGNED_OUT branch already resets isAdmin/masterAdminAuthenticated).
+          if (state.role === 'owner' || state.role === 'organizer') {
+            state.isAdmin = true;
+            state.masterAdminAuthenticated = (state.role === 'owner');
           }
           // Slice 3c: load the personal layer (team_members) now instead of waiting for the next
           // 15s poll — the Home hero/My Team tile should light up right after sign-in.
