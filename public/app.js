@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.09.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -3935,7 +3935,7 @@ function partialRenderTournament() {
   const c = document.querySelector('#tab-tournament .container');
   // Skip the rewrite when a form on this tab is being filled, so a background sync never wipes a public
   // team's in-progress registration (or a half-typed score). User actions that need a refresh call render().
-  if (c && !tournamentTabIsDirty()) c.innerHTML = buildTournamentTabHTML();
+  if (c && !tournamentTabIsDirty()) c.innerHTML = buildPublicTournamentRootHTML();
   // tournament-mode dashboard surfaces the same data on the Manage + Live panels.
   if (state.tournamentMode) {
     // The Manage panel is an admin EDITING surface (Settings / Teams / Registration forms). A BACKGROUND
@@ -5026,6 +5026,71 @@ function buildPublicRegisterHTML(t, teams) {
     <p class="reg-teamspill" id="reg-msg">${count} ${count === 1 ? 'team' : 'teams'} registered so far</p>
     ${registered}
   </div>`;
+}
+
+// Round 2 (2026-07-09, spec §12.4 — Mike's locked §38 pick A "tile hub"): the public Tournament tab
+// is a hub (header card + tiles). The pre-existing public register/pool/bracket surface becomes the
+// 'board' sub-view behind the Pools & schedule / Bracket tiles. Admin branch untouched.
+let pdTournamentView = 'hub'; // 'hub' | 'board' — module var survives partialRender
+
+function buildTournamentHubHTML() {
+  const list = state.tournaments || [];
+  const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
+  const show = active || list[0] || null;
+  const teams = (active ? state.tournamentTeams : []) || [];
+  const matches = (active ? state.tournamentMatches : []) || [];
+  const isLive = !!(show && (show.status === 'pools' || show.status === 'bracket'));
+  const liveNets = new Set(matches.filter((m) => m.status === 'live' && m.net).map((m) => m.net)).size;
+  const regOpen = !!(show && show.registration_open && show.status === 'setup');
+  const bits = show ? [
+    teams.length ? teams.length + ' teams' : '',
+    show.status === 'setup' ? (regOpen ? 'Registration open' : 'Registration closed')
+      : show.status === 'pools' ? 'Pools underway'
+      : show.status === 'bracket' ? 'Bracket underway' : 'Completed',
+  ].filter(Boolean).join(' · ') : '';
+  const header = show
+    ? `<div class="pd-card pd-thero"><div class="tn-head"><div>
+         <span class="pd-eyebrow">Tournament</span>
+         <div class="pd-h">${escapeHTML(show.name || 'Tournament')}</div>
+         <div class="pd-sub">${escapeHTML(bits)}</div>
+       </div>${isLive ? '<span class="tn-live"><span class="tn-dot"></span>Live</span>' : ''}</div>
+       ${regOpen ? `<button type="button" class="pd-claimbtn" data-tn-view="board">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 14l2 2 4-4"/></svg>
+         Register your team
+       </button>` : ''}</div>`
+    : `<div class="pd-card pd-thero"><span class="pd-eyebrow">Tournament</span>
+       <div class="pd-h">No tournament scheduled</div>
+       <div class="pd-sub">${state.loaded ? 'Check back soon.' : 'Loading…'}</div></div>`;
+  const standings = show ? computeStandings(teams, matches) : [];
+  const anyFinal = matches.some((m) => m.phase === 'pool' && m.status === 'final');
+  const mine = myTeamInfo();
+  const myRec = mine ? computeTeamRecord(mine.teamId, matches, teams) : null;
+  const tile = (attrs, svg, title, sub) => `<button type="button" class="pd-tile" ${attrs}>
+      <span class="pd-ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svg}</svg></span>
+      <span class="pd-tt">${escapeHTML(title)}</span><span class="pd-ts">${escapeHTML(sub)}</span></button>`;
+  const tiles = [
+    show ? tile('data-tn-view="board"', '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', 'Pools & schedule',
+      show.status === 'setup' ? 'Before pool play' : liveNets ? (liveNets + (liveNets === 1 ? ' net live' : ' nets live')) : 'Every game by net') : '',
+    show ? tile('data-nav-tab="standings"', '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/>', 'Standings',
+      (anyFinal && standings[0]) ? ('Leader: ' + (standings[0].name || '—')) : 'By pool') : '',
+    show ? tile('data-tn-view="board"', '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/>', 'Bracket',
+      show.status === 'bracket' ? 'In progress' : show.status === 'completed' ? 'Final' : 'After pools') : '',
+    mine ? tile('data-nav-tab="myteam"', '<circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>', 'My Team',
+      (myRec ? myRec.wins + '–' + myRec.losses + ' · ' : '') + 'Your games') : '',
+    tile('data-nav-tab="history"', '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/>', 'Past tournaments', 'Champions & records'),
+  ].filter(Boolean).join('');
+  return `${header}<div class="pd-tiles">${tiles}</div>`;
+}
+
+// The public Tournament tab root: hub, or the pre-existing board surface with a back-to-hub header.
+// Admin keeps buildTournamentTabHTML() directly (its own branch inside that function).
+function buildPublicTournamentRootHTML() {
+  if (state.isAdmin) return buildTournamentTabHTML();
+  if (pdTournamentView !== 'board') return buildTournamentHubHTML();
+  return `<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+      <div class="pd-htitle">Tournament</div>
+    </div>` + buildTournamentTabHTML();
 }
 
 function buildTournamentTabHTML() {
@@ -7879,7 +7944,7 @@ function authInitial() {
 // Shared page header: a back-to-Home chevron + the page title (mirrors the mockup's per-page header).
 function pdPageHeaderHTML(title) {
   return `<div class="pd-pagehdr">
-    <button type="button" class="pd-back" data-nav-tab="home" aria-label="Back to Home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+    <button type="button" class="pd-back" data-nav-tab="tournament" aria-label="Back to Tournament"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
     <div class="pd-htitle">${escapeHTML(title)}</div>
   </div>`;
 }
@@ -8096,7 +8161,7 @@ function renderPublicShell() {
     </div>
     <div id="tab-tournament" class="tab-panel">
       <div class="container">
-        ${buildTournamentTabHTML()}
+        ${buildPublicTournamentRootHTML()}
       </div>
     </div>
     <div id="tab-standings" class="tab-panel">
@@ -9698,6 +9763,17 @@ function attachHandlers() {
         else if (a === 'generate') activateMainTab('teams');
         else if (a === 'tournament') enterTournamentMode();
         else if (a === 'session') activateMainTab('session');
+        return;
+      }
+      // Round 2 (spec §12.4): the public Tournament hub tiles/back toggle the hub<->board sub-view.
+      const tnBtn = e.target.closest('[data-tn-view]');
+      if (tnBtn && !state.isAdmin) {
+        pdTournamentView = tnBtn.getAttribute('data-tn-view') === 'board' ? 'board' : 'hub';
+        const c = document.querySelector('#tab-tournament .container');
+        if (c) c.innerHTML = buildPublicTournamentRootHTML();
+        if (pdTournamentView === 'board') layoutBracketTree(); // the board may show the bracket tree
+        const panel = document.getElementById('tab-tournament');
+        if (panel) panel.scrollTop = 0; // a sub-page open/back is an explicit user action — top is correct
         return;
       }
       const navBtn = e.target.closest('[data-nav-tab]');

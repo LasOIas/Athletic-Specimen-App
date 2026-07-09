@@ -3041,6 +3041,13 @@ body.pd-public-active .pd-scrim { display: block; }
 .pd-tt { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 14px; color: var(--ink); }
 .pd-ts { font-size: 11px; color: var(--muted); margin-top: -3px; }
 
+/* Round 2 — Tournament hub (spec §12.4) */
+.tn-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.tn-live { display: inline-flex; align-items: center; gap: 6px; background: var(--live-soft);
+  border: 1px solid oklch(0.85 0.05 150); color: var(--live-ink); border-radius: 999px;
+  padding: 4px 10px; font-size: 12px; font-weight: 700; flex: none; }
+.tn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); }
+
 /* -- live board rows (Home "On the courts", mockup .game) -- */
 .pd-game { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--border); }
 .pd-game.pd-first { border-top: none; }
