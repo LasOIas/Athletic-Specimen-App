@@ -956,6 +956,34 @@ function assignBracketNets(matches, netCount) {
   return byId;
 }
 
+// Slice 3b (claim page): flatten the one-shot team_members read (players+teams embedded rows) into
+// claim-search candidates — {id, name, teamId, teamName, claimedBy, initials}, name-sorted (then team).
+// Skips rows missing an embedded player/team or with a blank name (defensive vs partial joins). A player
+// on two teams keeps BOTH rows — the team context is what disambiguates same-name people (§AS: no skill).
+function shapeClaimCandidates(memberRows) {
+  const out = [];
+  (Array.isArray(memberRows) ? memberRows : []).forEach((r) => {
+    const p = r && r.players;
+    const t = r && r.teams;
+    if (!p || !p.id || !t || !t.name) return;
+    const name = String(p.name || '').trim();
+    if (!name) return;
+    const initials = name.split(/\s+/).map((w) => (w[0] || '').toUpperCase()).slice(0, 2).join('');
+    out.push({
+      id: String(p.id),
+      name,
+      teamId: t.id ? String(t.id) : '',
+      teamName: String(t.name),
+      claimedBy: p.claimed_by_profile || null,
+      initials,
+    });
+  });
+  out.sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+    || a.teamName.localeCompare(b.teamName, undefined, { sensitivity: 'base' }));
+  return out;
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -971,6 +999,7 @@ if (typeof module !== "undefined" && module.exports) {
     splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
     bracketGameNumbers, bracketSourceLabel,
     shouldAutoPromptBracket, assignBracketNets,
-    shapeStandingsByPool, computeAllTimeLeaderboard
+    shapeStandingsByPool, computeAllTimeLeaderboard,
+    shapeClaimCandidates
   };
 }

@@ -3160,3 +3160,25 @@ body.pd-home-active .pd-scrim { display: block; }
 .am-card { }
 .am-avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 22px; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; }
 .am-role { color: var(--muted); font-size: 13px; margin: 4px 0 20px; }
+
+/* ── Slice 3b (2026-07-09): claim-your-team page (Mike's LOCKED Option A, search-your-name)
+   + the admin player-editor Account row. Reuses the .auth-page overlay shell + the .cik-* kiosk
+   search kit; Direction-A tokens only (§51 no neon, §11 no emoji). */
+.claim-page { align-items: flex-start; }                 /* search reads top-down, not centered */
+.claim-inner { width: 100%; max-width: 380px; margin: 0 auto; }
+.claim-inner .auth-title { margin-top: 6px; }
+.claim-search { margin-top: 12px; }
+.claim-results { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.claim-note { color: var(--text-3); padding: 10px 2px; }
+.claim-row .cik-gp { color: var(--text-3); }
+.claim-row.is-claimed { opacity: .55; cursor: default; }
+.claim-linked { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-top: 26px; text-align: center; }
+.claim-bigav { width: 64px; height: 64px; border-radius: 50%; background: var(--accent-soft); border: 1px solid var(--accent-bd); color: var(--accent); display: flex; align-items: center; justify-content: center; font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 1.3rem; }
+.claim-nm { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 1.25rem; color: var(--text); }
+.claim-team { color: var(--text-3); font-size: .9rem; }
+.claim-linked .auth-submit { margin-top: 16px; }
+.claim-linked .auth-err { width: 100%; }
+/* admin player-editor Account row (edit modal) */
+.edit-account { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 2px 2px; }
+.edit-account .edit-account-status { color: var(--text-3); }
+.edit-account .btn-unlink-account { min-height: 0; width: auto; padding: .4rem .85rem; font-size: .85rem; }

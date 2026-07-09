@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.08.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.08.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -149,6 +149,12 @@ function openPlayerEditPopup(playerKey) {
         </div>
         <div class="group-chips">${renderEditGroupChipsMarkup(playerGroups)}</div>
       </div>
+      ${player.id ? `
+      <label class="popup-edit-label">Account</label>
+      <div class="edit-account">
+        <span class="edit-account-status small">Checking&hellip;</span>
+        <button type="button" class="btn-unlink-account secondary" style="display:none;">Unlink</button>
+      </div>` : ''}
       <div class="edit-actions" style="margin-top:12px;">
         <button type="button" class="btn-save-edit success" data-player-key="${keyAttr}" data-id="${playerId}">Save</button>
         <button type="button" class="btn-cancel-edit secondary" data-player-key="${keyAttr}">Cancel</button>
@@ -163,6 +169,40 @@ function openPlayerEditPopup(playerKey) {
   // Bug A fix (2026-06-21): do NOT auto-focus/select the Name field on open. Editing the name is
   // usually NOT what the admin wants (skill/group is), and auto-focus pops the keyboard onto the
   // wrong field. Leave focus to the admin — they tap the field they want to edit.
+
+  // Slice 3b: Account row — this player's claim status via a one-shot read (the players sync doesn't
+  // carry claimed_by_profile). Unlink = the admin exception path for a wrong claim (Mike: "all i want
+  // is to edit a player from the admin page") — one tap, no approval queues. Requires the admin's
+  // authenticated session (anon lacks SELECT/UPDATE on claimed_by_profile → fails safe to "Not linked").
+  const acct = body.querySelector('.edit-account');
+  if (acct && supabaseClient && player.id) {
+    const statusEl = acct.querySelector('.edit-account-status');
+    const unlinkBtn = acct.querySelector('.btn-unlink-account');
+    (async () => {
+      try {
+        const { data, error } = await supabaseClient
+          .from('players').select('claimed_by_profile').eq('id', player.id).maybeSingle();
+        if (error) throw error;
+        const linked = !!(data && data.claimed_by_profile);
+        statusEl.textContent = linked ? 'Linked to an account' : 'Not linked';
+        unlinkBtn.style.display = linked ? '' : 'none';
+      } catch (_) { statusEl.textContent = 'Not linked'; }
+    })();
+    unlinkBtn.addEventListener('click', async () => {
+      unlinkBtn.disabled = true;
+      statusEl.textContent = 'Unlinking…';
+      try {
+        const ok = await updatePlayerFieldsSupabase(player.id, { claimed_by_profile: null });
+        if (!ok) throw new Error('update failed');
+        statusEl.textContent = 'Not linked';
+        unlinkBtn.style.display = 'none';
+      } catch (err) {
+        console.error('unlink account', err);
+        statusEl.textContent = "Couldn't unlink — try again";
+        unlinkBtn.disabled = false;
+      }
+    });
+  }
 }
 
 function closeInlineEditRow(row) {
@@ -7397,6 +7437,182 @@ function renderAuthPageInner() {
   setTimeout(() => { const f = document.getElementById('auth-email'); if (f) f.focus(); }, 50);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Slice 3b (2026-07-09) — claim-your-team page. Mike's LOCKED §38 pick: Option A
+// "search your name" (kiosk-style). Claims are INSTANT (Mike killed approvals —
+// the admin exception path is the Account row in the player edit modal). Same
+// body-appended overlay pattern as .auth-page so partialRender never wipes it.
+// Data = a one-shot read of team_members for the claimable tournament; the page
+// only opens signed-in (anon lacks SELECT on players.claimed_by_profile).
+// ─────────────────────────────────────────────────────────────────────────────
+let claimIntent = false;      // a signed-out "claim" tap — auto-open the page after sign-in
+let claimCandidates = null;   // null = loading; [] = loaded-empty; [rows] = loaded
+
+function claimableTournament() {
+  // The live tournament first (the Home hero's context), else a registration-open setup one
+  // (people claim right after registering), else nothing.
+  return publicLiveTournament()
+    || (state.tournaments || []).find((t) => t.registration_open && t.status === 'setup')
+    || null;
+}
+
+function closeClaimPage() {
+  const el = document.getElementById('claim-page');
+  if (el) el.remove();
+  claimCandidates = null;
+}
+
+function openClaimPage() {
+  closeClaimPage();
+  const el = document.createElement('div');
+  el.id = 'claim-page';
+  el.className = 'auth-page claim-page';
+  document.body.appendChild(el);
+  renderClaimSearch();
+  fetchClaimCandidates();
+}
+
+async function fetchClaimCandidates() {
+  const t = claimableTournament();
+  if (!t || !supabaseClient) { claimCandidates = []; renderClaimSearch(); return; }
+  try {
+    const { data, error } = await supabaseClient
+      .from('team_members')
+      .select('player_id, teams!inner(id,name,tournament_id), players!inner(id,name,claimed_by_profile)')
+      .eq('teams.tournament_id', t.id);
+    if (error) throw error;
+    claimCandidates = shapeClaimCandidates(data || []);
+  } catch (err) {
+    console.error('fetchClaimCandidates', err);
+    claimCandidates = [];
+  }
+  renderClaimSearch();
+}
+
+function claimHeaderHTML(sub) {
+  const t = claimableTournament();
+  return `
+    <button type="button" class="auth-back" id="claim-back" aria-label="Close claim">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>
+    </button>
+    <div class="auth-inner claim-inner">
+      <h2 class="auth-title">Find your name</h2>
+      <p class="auth-sub">${escapeHTML(sub || (t ? (t.name || 'Tournament') : 'Tournament'))}</p>`;
+}
+
+function renderClaimSearch() {
+  const el = document.getElementById('claim-page');
+  if (!el) return;
+  const mine = (claimCandidates || []).find((c) => state.account && c.claimedBy === state.account.id);
+  if (mine) {
+    // Already linked — nothing to search for.
+    el.innerHTML = claimHeaderHTML() + `
+      <div class="claim-linked">
+        <span class="av claim-bigav">${escapeHTML(mine.initials)}</span>
+        <div class="claim-nm">${escapeHTML(mine.name)}</div>
+        <div class="claim-team">${escapeHTML(mine.teamName)}</div>
+        <p class="auth-sub">You're linked — this is you.</p>
+        <button type="button" class="auth-submit" id="claim-done">Done</button>
+      </div>
+    </div>`;
+    el.querySelector('#claim-back').addEventListener('click', closeClaimPage);
+    el.querySelector('#claim-done').addEventListener('click', closeClaimPage);
+    return;
+  }
+  el.innerHTML = claimHeaderHTML() + `
+      <div class="cik-search claim-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="claim-search" type="text" placeholder="Start typing your name&hellip;" autocapitalize="words" autocomplete="off" spellcheck="false" aria-label="Type your name" />
+      </div>
+      <div id="claim-results" class="claim-results"></div>
+    </div>`;
+  el.querySelector('#claim-back').addEventListener('click', closeClaimPage);
+  const input = el.querySelector('#claim-search');
+  const results = el.querySelector('#claim-results');
+  const paint = () => { results.innerHTML = buildClaimResultsHTML(input.value); };
+  input.addEventListener('input', paint);
+  results.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-claim-id]');
+    if (!btn) return;
+    const c = (claimCandidates || []).find((x) => x.id === btn.dataset.claimId && x.teamName === btn.dataset.claimTeam);
+    if (c && !c.claimedBy) renderClaimConfirm(c);
+  });
+  paint();
+  setTimeout(() => { try { input.focus(); } catch (_) {} }, 50);
+}
+
+function buildClaimResultsHTML(query) {
+  if (claimCandidates === null) return '<div class="small claim-note">Loading players&hellip;</div>';
+  if (!claimCandidates.length) {
+    return '<div class="small claim-note">No players to claim yet &mdash; names show up here once teams register for a tournament.</div>';
+  }
+  const q = String(query || '').trim();
+  if (!q) return '<div class="small claim-note">Type your name to find yourself.</div>';
+  const list = disambiguatePlayersByName(claimCandidates, q);
+  if (!list.length) return '<div class="small claim-note">No match &mdash; check the spelling, or ask your organizer.</div>';
+  return list.map((c) => {
+    const taken = !!c.claimedBy;
+    return `<button class="cik-btn claim-row${taken ? ' is-claimed' : ''}" type="button" ${taken ? 'disabled' : ''} data-claim-id="${escapeHTML(c.id)}" data-claim-team="${escapeHTML(c.teamName)}">`
+      + `<span class="av">${escapeHTML(c.initials)}</span>`
+      + `<span class="cik-info"><span class="cik-nm">${escapeHTML(c.name)}</span><span class="cik-gp">${escapeHTML(c.teamName)}</span></span>`
+      + (taken ? '<span class="cik-state">Claimed</span>' : '')
+      + '</button>';
+  }).join('');
+}
+
+function renderClaimConfirm(c) {
+  const el = document.getElementById('claim-page');
+  if (!el) return;
+  el.innerHTML = claimHeaderHTML() + `
+      <div class="claim-linked">
+        <span class="av claim-bigav">${escapeHTML(c.initials)}</span>
+        <div class="claim-nm">${escapeHTML(c.name)}</div>
+        <div class="claim-team">${escapeHTML(c.teamName)}</div>
+        <div class="auth-err" id="claim-err" role="alert" hidden></div>
+        <button type="button" class="auth-submit" id="claim-confirm">Claim my spot</button>
+        <button type="button" class="auth-alt" id="claim-notme">Not me &mdash; back to search</button>
+      </div>
+    </div>`;
+  el.querySelector('#claim-back').addEventListener('click', closeClaimPage);
+  el.querySelector('#claim-notme').addEventListener('click', renderClaimSearch);
+  el.querySelector('#claim-confirm').addEventListener('click', () => submitClaim(c));
+}
+
+async function submitClaim(c) {
+  const btn = document.getElementById('claim-confirm');
+  const err = document.getElementById('claim-err');
+  if (btn) { btn.disabled = true; btn.textContent = 'Claiming…'; }
+  try {
+    const { error } = await supabaseClient.rpc('claim_player', { p_player: c.id });
+    if (error) throw error;
+    if (state.account) c.claimedBy = state.account.id; // reflect locally without a refetch
+    renderClaimSuccess(c);
+  } catch (e2) {
+    console.error('claim_player', e2);
+    const msg = /already claimed/i.test((e2 && e2.message) || '')
+      ? 'Someone already claimed this player — ask your organizer to fix it.'
+      : "Couldn't claim right now — try again.";
+    if (err) { err.textContent = msg; err.hidden = false; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Claim my spot'; }
+  }
+}
+
+function renderClaimSuccess(c) {
+  const el = document.getElementById('claim-page');
+  if (!el) return;
+  el.innerHTML = claimHeaderHTML('You are linked') + `
+      <div class="claim-linked">
+        <span class="av claim-bigav">${escapeHTML(c.initials)}</span>
+        <div class="claim-nm">${escapeHTML(c.name)}</div>
+        <div class="claim-team">${escapeHTML(c.teamName)}</div>
+        <p class="auth-sub">Done &mdash; this is you now. Your games and your record are on the way.</p>
+        <button type="button" class="auth-submit" id="claim-done">Done</button>
+      </div>
+    </div>`;
+  el.querySelector('#claim-back').addEventListener('click', closeClaimPage);
+  el.querySelector('#claim-done').addEventListener('click', closeClaimPage);
+}
+
 function friendlyAuthError(error, signup) {
   const m = (error && error.message) || '';
   if (/invalid login credentials/i.test(m)) return "That email or password isn't right.";
@@ -9255,9 +9471,11 @@ function attachHandlers() {
   if (appContent && !appContent.dataset.navTabBound) {
     appContent.dataset.navTabBound = '1';
     appContent.addEventListener('click', (e) => {
-      // Slice 1: inert "claim your team" placeholder on the Home gateway (real claim = accounts slice).
+      // Slice 3b: "claim your team" — signed-in → the claim page; signed-out → sign in first
+      // (claimIntent re-opens the claim page automatically once SIGNED_IN lands).
       if (e.target.closest('#pd-claim')) {
-        appNotice({ title: 'Claiming is coming soon', message: "Accounts are on the way. Once you can sign in, you'll claim your team to follow your games and your record." });
+        if (state.authSession) { openClaimPage(); }
+        else { claimIntent = true; openAuthPage(); }
         return;
       }
       // Slice 1: Standings Pools/Overall toggle — state in a module var (survives partialRender), re-render in place.
@@ -9485,6 +9703,12 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       state.account = { id: session.user.id, email };
       closeAuthPage();
       if (state.loaded) { try { render(); } catch {} }   // show signed-in immediately
+      // Slice 3b: a signed-out "claim your team" tap routed through sign-in — finish the journey.
+      // Deferred: openClaimPage does a .from() read, and supabase calls inline in this callback deadlock.
+      if (claimIntent) {
+        claimIntent = false;
+        setTimeout(() => { try { openClaimPage(); } catch (_) {} }, 0);
+      }
       // Derive the community role out-of-band, then re-render (the account menu shows the role).
       // Retry a few times: a fresh SIGNED_IN can race the JWT propagation to PostgREST, so the first
       // caller_role may return null before the token attaches. Stop as soon as a role resolves or the
@@ -9508,6 +9732,8 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       state.authSession = null;
       state.account = null;
       state.role = null;
+      claimIntent = false;
+      closeClaimPage(); // a claim page can't outlive its session (harmless no-op when not open)
       if (state.isAdmin) {
         state.isAdmin = false;
         state.masterAdminAuthenticated = false;

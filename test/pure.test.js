@@ -18,6 +18,7 @@ const {
   splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
   bracketGameNumbers, bracketSourceLabel,
   shouldAutoPromptBracket, assignBracketNets,
+  shapeClaimCandidates,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -902,5 +903,46 @@ describe('assignBracketNets (re-net a bracket when net_count changes — mirrors
   });
   it('clamps a bad net_count to >= 1', () => {
     expect(assignBracketNets(bracket, 0)).toEqual({ w1a: 1, w1b: 1, w2: 1, l1: 1, gf: 1 });
+  });
+});
+
+describe('shapeClaimCandidates (Slice 3b — claim-search rows from the team_members read)', () => {
+  const row = (pid, pname, claimed, tid, tname) => ({
+    player_id: pid,
+    players: { id: pid, name: pname, claimed_by_profile: claimed },
+    teams: { id: tid, name: tname, tournament_id: 'T1' },
+  });
+  it('flattens embedded rows to {id,name,teamId,teamName,claimedBy,initials} sorted by name', () => {
+    const out = shapeClaimCandidates([
+      row('p2', 'Zoe Aarons', null, 't1', 'Spikers'),
+      row('p1', 'Amy Beck', 'prof-1', 't2', 'Setters'),
+    ]);
+    expect(out.map((c) => c.name)).toEqual(['Amy Beck', 'Zoe Aarons']);
+    expect(out[0]).toEqual({ id: 'p1', name: 'Amy Beck', teamId: 't2', teamName: 'Setters', claimedBy: 'prof-1', initials: 'AB' });
+    expect(out[1].claimedBy).toBe(null);
+    expect(out[1].initials).toBe('ZA');
+  });
+  it('keeps one row per (player, team) — a player on two teams appears twice', () => {
+    const out = shapeClaimCandidates([
+      row('p1', 'Amy Beck', null, 't1', 'Spikers'),
+      row('p1', 'Amy Beck', null, 't2', 'Setters'),
+    ]);
+    expect(out).toHaveLength(2);
+    expect(out.map((c) => c.teamName).sort()).toEqual(['Setters', 'Spikers']);
+  });
+  it('skips malformed rows (missing embedded player/team) and blank names', () => {
+    const out = shapeClaimCandidates([
+      row('p1', 'Amy Beck', null, 't1', 'Spikers'),
+      { player_id: 'px', players: null, teams: { id: 't', name: 'T', tournament_id: 'T1' } },
+      { player_id: 'py', players: { id: 'py', name: '   ', claimed_by_profile: null }, teams: { id: 't', name: 'T' } },
+      null,
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].name).toBe('Amy Beck');
+  });
+  it('single-word names get a single initial; non-array input returns []', () => {
+    const out = shapeClaimCandidates([row('p1', 'Cory', null, 't1', 'Dinkers')]);
+    expect(out[0].initials).toBe('C');
+    expect(shapeClaimCandidates(undefined)).toEqual([]);
   });
 });
