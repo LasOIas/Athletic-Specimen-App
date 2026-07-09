@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.08.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.08.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -3310,12 +3310,15 @@ async function tdbRenameTeam(teamId, newName) {
 }
 
 // Admin: replace a team's roster (edit its players post-registration). Mirrors tdbRenameTeam (direct authed
-// update). Powers tournament-mode "Edit roster" (Mike, 2026-06-27).
+// update). Powers tournament-mode "Edit roster" (Mike, 2026-06-27). Slice 3a: also sync team_members so an
+// edited roster keeps its player links (additive — sync adds missing links; it does not prune removed names).
 async function tdbSetTeamRoster(teamId, roster) {
   if (!supabaseClient || !teamId) throw new Error('No team.');
   const clean = (roster || []).map((n) => String(n || '').trim()).filter(Boolean);
   const { error } = await supabaseClient.from('teams').update({ roster: clean }).eq('id', teamId);
   if (error) { console.error('tdbSetTeamRoster', error); throw error; }
+  const { error: syncErr } = await supabaseClient.rpc('sync_team_roster', { p_team_id: teamId, p_roster: clean });
+  if (syncErr) { console.error('tdbSetTeamRoster sync', syncErr); throw syncErr; }
 }
 
 // SC-7: withdraw a team mid-pool by FORFEITING its remaining unplayed pool games (the opponent wins by
