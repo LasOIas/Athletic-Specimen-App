@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.09.9'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -4264,21 +4264,29 @@ function championPathIds(main, champ) {
 
 // One bracket match = a node in the tree. A match you can score (admin, or your picked team) is a
 // TAP TARGET (tv2-bracket-open) that opens the result pop-up — no cramped inputs inside the box.
-function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam, gn) {
+function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam, gn, opts = {}) {
   const seeds = seedByTeam || {};
+  const ro = !!opts.readOnly; // Slice 2 (§13.3): public read-only bracket — no scoring; team names are peek targets.
   // C75: a small seed number before a known team's name (no seed for TBD / source placeholders).
   const seedTag = (id) => (id && seeds[id]) ? `<span class="bt-seed">${seeds[id]}</span>` : ''; // D3: styles moved to CSS
   const aKnown = !!m.team_a_id, bKnown = !!m.team_b_id;
   const srcA = bracketSourceLabel(m.source_a, gn && gn.byRoundLabel); // "Winner of WB R1 M1" -> "Winner of G3"
   const srcB = bracketSourceLabel(m.source_b, gn && gn.byRoundLabel);
-  const aName = (aKnown ? seedTag(m.team_a_id) : '') + (aKnown ? escapeHTML(teamNameById(teams, m.team_a_id)) : escapeHTML(srcA || 'TBD'));
-  const bName = (bKnown ? seedTag(m.team_b_id) : '') + (bKnown ? escapeHTML(teamNameById(teams, m.team_b_id)) : escapeHTML(srcB || 'TBD'));
+  // In read-only mode a KNOWN team's name (seed + name) is wrapped as a tap-a-team peek target (Slice 1 pd-peek).
+  const peek = (id, inner) => (ro && id) ? `<span class="tapname" data-team-peek="${escapeHTML(id)}">${inner}</span>` : inner;
+  const aName = aKnown ? peek(m.team_a_id, seedTag(m.team_a_id) + escapeHTML(teamNameById(teams, m.team_a_id))) : escapeHTML(srcA || 'TBD');
+  const bName = bKnown ? peek(m.team_b_id, seedTag(m.team_b_id) + escapeHTML(teamNameById(teams, m.team_b_id))) : escapeHTML(srcB || 'TBD');
   const gNum = (gn && gn.byId) ? gn.byId[m.id] : null; // continuous bracket game number (Mike, 2026-06-27)
   const gLbl = gNum ? ('G' + gNum) : (m.round_label || '').replace(/ M\d+$/, '');
-  const meta = `<div class="bt-meta">${escapeHTML(gLbl)}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
+  // Gold ONLY on the decided championship game (§13.3); matte-green highlight on a genuinely live public node.
+  const isChamp = ro && opts.champMatchId && m.id === opts.champMatchId;
+  const isLiveNode = ro && m.status === 'live' && aKnown && bKnown;
+  const trophy = isChamp ? '<svg class="pd-bk-trophy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>' : '';
+  const meta = `<div class="bt-meta">${trophy}${escapeHTML(gLbl)}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
   // Any unplayed matchup is tappable for EVERYONE — the pop-up either lets you score it (admin /
   // your picked team) or tells you how to (log in / pick your team). A silent dead tap was the bug.
-  const openable = aKnown && bKnown && m.status !== 'final';
+  // Read-only spectator nodes are NEVER openable (no scoring copy, no "Tap to enter score") — §13.3/§6.
+  const openable = !ro && aKnown && bKnown && m.status !== 'final';
 
   let body;
   if (m.status === 'final') {
@@ -4289,7 +4297,7 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam,
         <span class="bt-sc">${haveScores ? escapeHTML(String(id === m.team_a_id ? m.score_a : m.score_b)) : (win ? 'W' : '')}</span>
       </div>`;
     body = row(aName, m.team_a_id, aWin) + row(bName, m.team_b_id, !aWin)
-      + (state.isAdmin ? `<div class="bt-act"><button type="button" class="secondary" data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}">Edit score</button><button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}">Clear</button></div>` : '');
+      + ((!ro && state.isAdmin) ? `<div class="bt-act"><button type="button" class="secondary" data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}">Edit score</button><button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}">Clear</button></div>` : '');
   } else if (aKnown && bKnown && m.status === 'live') {
     // C72: a live-scored bracket match shows its running score + a LIVE pill — mirrors the pool board so the
     // live scorer reads the same on every surface (was rendered identically to an unplayed match).
@@ -4314,7 +4322,8 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam,
   // data-next = the match this winner advances to — layoutBracketTree reads it off the DOM to draw the
   // connector line, so it works for BOTH the live bracket and the teamless format preview.
   const nextAttr = m.winner_next_match_id ? ` data-next="${escapeHTML(String(m.winner_next_match_id))}"` : '';
-  return `<div class="bt-node${pathIds.has(m.id) ? ' path' : ''}${openable ? ' tappable' : ''}" data-mid="${escapeHTML(m.id)}"${nextAttr}${openAttrs}>${meta}${body}</div>`;
+  const roCls = (isChamp ? ' pd-bk-champ' : '') + (isLiveNode ? ' pd-bk-live' : '');
+  return `<div class="bt-node${pathIds.has(m.id) ? ' path' : ''}${openable ? ' tappable' : ''}${roCls}" data-mid="${escapeHTML(m.id)}"${nextAttr}${openAttrs}>${meta}${body}</div>`;
 }
 
 // The result pop-up: tap a match -> big teams + a score box each + Submit. Winner = higher score.
@@ -4711,10 +4720,15 @@ function buildBracketHTML(tournament, matches, teams, opts = {}) {
   const seedByTeam = {};
   computeSeeding(teams, (matches || []).filter((m) => m.phase === 'pool')).forEach((r) => { seedByTeam[r.teamId] = r.seed; });
 
+  const ro = !!opts.readOnly; // Slice 2 (§13.3): public read-only bracket — no scoring, no path tint, gold only on the decided champ game.
+
   const gn = bracketGameNumbers(main); // continuous "G" game numbers across the whole bracket (Mike, 2026-06-27)
   const champ = computeChampion(main, teams);
-  const pathIds = championPathIds(main, champ);
-  const champBanner = champ ? `<div class="bt-champ">
+  // §13.3: no gold/accent "champion path" tint through the public tree — the champions strip carries the gold.
+  const pathIds = ro ? new Set() : championPathIds(main, champ);
+  // The public Bracket page renders its OWN matte-gold champions strip above the tree, so suppress the
+  // built-in green banner in read-only mode (would double up).
+  const champBanner = (!ro && champ) ? `<div class="bt-champ">
     <span class="bt-cup" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2.3l2.9 5.9 6.5.9-4.7 4.6 1.1 6.5L12 17.8 6.2 20.7l1.1-6.5L2.6 9.1l6.5-.9z"/></svg></span>
     <span><span class="bt-champ-lbl">CHAMPION</span><span class="bt-champ-nm">${escapeHTML(champ.name)}</span></span>
   </div>` : '';
@@ -4723,7 +4737,9 @@ function buildBracketHTML(tournament, matches, teams, opts = {}) {
 
   // Double-elim has Winners / Losers / Final brackets — one connected tree per side.
   const sideDefs = [['winners', 'Winners'], ['losers', 'Losers'], ['grand_final', 'Final']].filter(([s]) => main.some((m) => m.side === s));
-  let side = state.bracketSide;
+  // opts.side is a caller-supplied INITIAL side (public completed bracket opens on the Final so the gold game
+  // shows) — used only until the viewer taps a side tab (which sets state.bracketSide). Admin passes none.
+  let side = state.bracketSide || opts.side || null;
   if (!sideDefs.some(([s]) => s === side)) side = sideDefs[0][0];
   const sideTabs = sideDefs.length > 1 ? `<div class="bt-sides">
     ${sideDefs.map(([s, lbl]) => `<button type="button" data-role="tv2-bracket-side" data-side="${s}" class="${s === side ? 'on' : ''}">${lbl}</button>`).join('')}
@@ -4731,7 +4747,7 @@ function buildBracketHTML(tournament, matches, teams, opts = {}) {
 
   // C57: map-style bracket — pinch to zoom, drag any direction to pan (gestures handle it, no zoom buttons).
   // Mike removed the [- Fit +] control; keep a one-line hint so scoring stays discoverable.
-  const zoomToggle = `<div class="bt-bar"><span class="bt-hint">${opts.preview ? 'Bracket format — teams seed in once pools finish' : 'tap a match to enter its score'}</span></div>`;
+  const zoomToggle = `<div class="bt-bar"><span class="bt-hint">${ro ? 'Tap a team for its record · pinch or drag to zoom' : (opts.preview ? 'Bracket format — teams seed in once pools finish' : 'tap a match to enter its score')}</span></div>`;
 
   // Columns left-to-right = rounds; connector lines between them are drawn post-render.
   const sideMatches = main.filter((m) => m.side === side);
@@ -4747,12 +4763,12 @@ function buildBracketHTML(tournament, matches, teams, opts = {}) {
     const rm = sideMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
     return `<div class="bt-col">
       <div class="bt-rlabel">${escapeHTML(roundLabelFor(r))}</div>
-      ${rm.map((m) => buildBracketNodeHTML(m, main, teams, true, pathIds, seedByTeam, gn)).join('')}
+      ${rm.map((m) => buildBracketNodeHTML(m, main, teams, !ro, pathIds, seedByTeam, gn, { readOnly: ro, champMatchId: opts.champMatchId })).join('')}
     </div>`;
   }).join('');
 
   return `${champBanner}${sideTabs}${zoomToggle}
-    <div class="bt-pan" data-role="bt-pan">
+    <div class="bt-pan${ro ? ' pd-bk-ro' : ''}" data-role="bt-pan">
       <div class="bt-canvas" data-role="bt-canvas">
         <svg class="bt-links" data-role="bt-links" xmlns="http://www.w3.org/2000/svg"></svg>
         <div class="bt-cols" data-role="bt-cols">${cols}</div>
@@ -4933,7 +4949,7 @@ function wireBracketGestures(pan, canvas) {
 // Public team self-registration screen (§38 layout A — one card; replaces the Google Form). AS-custom:
 // team name + fixed 4 player names + co-ed reminder + Venmo link/"we paid" + Register. Registered teams
 // shown for social proof (names only, no skill). Submits via the anon register_team RPC.
-function buildPublicRegisterHTML(t, teams) {
+function buildPublicRegisterHTML(t, teams, opts = {}) {
   const count = (teams || []).length;
   const venmoRaw = t.venmo_link ? String(t.venmo_link).trim() : '';
   const venmo = /^https?:\/\//i.test(venmoRaw) ? venmoRaw : ''; // only render an http(s) link (block javascript: etc.)
@@ -4949,9 +4965,12 @@ function buildPublicRegisterHTML(t, teams) {
         (teams || []).map((tm) => `<div class="reg-regrow" data-role="tv2-team-card" data-id="${escapeHTMLText(tm.id)}" role="button" tabindex="0"><span>${escapeHTMLText(tm.name || '')}</span>${tm.paid ? '<span class="reg-paidtag">paid</span>' : ''}<svg class="reg-regchev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`).join('')
       }</div>`
     : '';
+  // When embedded under the Tournament hub's pd page-header (Slice 2), the header supplies the title/eyebrow,
+  // so the screen's own h1/sub are suppressed to avoid a doubled title.
+  const titleBlock = opts.embedded ? '' : `<h2 class="reg-h1">Register your team</h2>
+    <p class="reg-sub">${escapeHTMLText(t.name || '')}${buyIn ? ' · ' + escapeHTMLText(buyIn) : ''}</p>`;
   return `<div class="reg-screen">
-    <h2 class="reg-h1">Register your team</h2>
-    <p class="reg-sub">${escapeHTMLText(t.name || '')}${buyIn ? ' · ' + escapeHTMLText(buyIn) : ''}</p>
+    ${titleBlock}
     <div class="card reg-card">
       <label class="reg-label" for="reg-team">Team name</label>
       <input type="text" id="reg-team" class="reg-input" placeholder="e.g. Bumpin Uglies" autocomplete="off" autocapitalize="words" />
@@ -4972,7 +4991,7 @@ function buildPublicRegisterHTML(t, teams) {
 // Round 2 (2026-07-09, spec §12.4 — Mike's locked §38 pick A "tile hub"): the public Tournament tab
 // is a hub (header card + tiles). The pre-existing public register/pool/bracket surface becomes the
 // 'board' sub-view behind the Pools & schedule / Bracket tiles. Admin branch untouched.
-let pdTournamentView = 'hub'; // 'hub' | 'pools' | 'board' — module var survives partialRender
+let pdTournamentView = 'hub'; // 'hub' | 'pools' | 'bracket' | 'register' — module var survives partialRender (the shared 'board' view is retired from the public path — spec §13.3/§13.6)
 let pdPoolFilter = 'all'; // Pools & schedule page client-side filter: 'all' | a pool label — survives partialRender
 
 function buildTournamentHubHTML() {
@@ -4996,7 +5015,7 @@ function buildTournamentHubHTML() {
          <div class="pd-h">${escapeHTML(show.name || 'Tournament')}</div>
          <div class="pd-sub">${escapeHTML(bits)}</div>
        </div>${isLive ? '<span class="tn-live"><span class="tn-dot"></span>Live</span>' : ''}</div>
-       ${regOpen ? `<button type="button" class="pd-claimbtn" data-tn-view="board">
+       ${regOpen ? `<button type="button" class="pd-claimbtn" data-tn-view="register">
          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 14l2 2 4-4"/></svg>
          Register your team
        </button>` : ''}</div>`
@@ -5015,7 +5034,7 @@ function buildTournamentHubHTML() {
       show.status === 'setup' ? 'Before pool play' : liveNets ? (liveNets + (liveNets === 1 ? ' net live' : ' nets live')) : 'Every game by net') : '',
     show ? tile('data-nav-tab="standings"', '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/>', 'Standings',
       (anyFinal && standings[0]) ? ('Leader: ' + (standings[0].name || '—')) : 'By pool') : '',
-    show ? tile('data-tn-view="board"', '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/>', 'Bracket',
+    show ? tile('data-tn-view="bracket"', '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/>', 'Bracket',
       show.status === 'bracket' ? 'In progress' : show.status === 'completed' ? 'Final' : 'After pools') : '',
     mine ? tile('data-nav-tab="myteam"', '<circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>', 'My Team',
       (myRec ? myRec.wins + '–' + myRec.losses + ' · ' : '') + 'Your games') : '',
@@ -5024,16 +5043,112 @@ function buildTournamentHubHTML() {
   return `${header}<div class="pd-tiles">${tiles}</div>`;
 }
 
-// The public Tournament tab root: hub, or the pre-existing board surface with a back-to-hub header.
-// Admin keeps buildTournamentTabHTML() directly (its own branch inside that function).
+// The public Tournament tab root: the hub, or one of its dedicated sub-pages (each its own destination).
+// Slice 2 (§13.3/§13.6): the legacy shared 'board' view is RETIRED from the public path — Pools & schedule,
+// Bracket, and Register are their own pages in pd chrome; the no-tournament / registration-closed fallbacks
+// live in the hub itself. Admin keeps buildTournamentTabHTML() directly (its own branch inside that function).
 function buildPublicTournamentRootHTML() {
   if (state.isAdmin) return buildTournamentTabHTML();
   if (pdTournamentView === 'pools') return buildPoolsSchedulePageHTML();
-  if (pdTournamentView !== 'board') return buildTournamentHubHTML();
-  return `<div class="pd-pagehdr">
-      <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
-      <div class="pd-htitle">Tournament</div>
-    </div>` + buildTournamentTabHTML();
+  if (pdTournamentView === 'bracket') return buildBracketPageHTML();
+  if (pdTournamentView === 'register') return buildRegisterPageHTML();
+  return buildTournamentHubHTML();
+}
+
+// ── Slice 2 (spec §13.3): the public Bracket page — a dedicated destination behind the hub's Bracket tile
+// (fixes both tiles routing to one board). pd chrome (page header + status pill). THREE states driven by
+// tournament status + bracket data:
+//   pre-bracket (no main-phase matches / pools running) — a frosted card "The bracket generates when pool
+//     play finishes" + a live "N of M pool games final" progress line + a quiet seeding → Standings chip.
+//   live — the FULL real bt-* tree (buildBracketHTML in read-only mode: winners + losers via side tabs,
+//     live game lit matte green) under a status line "Double elimination · <current round>".
+//   completed — a matte-gold champions strip above the tree + the decided championship game lit gold; this
+//     is the tournament's ending surface and stays until the next event is scheduled.
+// HARD RULES (Mike): bracket match-node cards stay SOLID var(--card) (never frosted — the page keeps the
+// watermark); gold appears ONLY on the decided championship game + the champions strip + the Completed pill
+// (nothing gold before a winner exists, no gold path tint). Read-only spectator copy — never "submit results".
+function buildBracketPageHTML() {
+  const list = state.tournaments || [];
+  const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
+  const show = active || list[0] || null;
+  const teams = (active ? state.tournamentTeams : []) || [];
+  const matches = (active ? state.tournamentMatches : []) || [];
+  const main = matches.filter((m) => m.phase === 'main');
+  const outcome = bracketOutcome(main, teams); // non-null ONLY once a champion is decided → the completed state
+  const stateKind = outcome ? 'completed' : (main.length ? 'live' : 'pre');
+
+  const backSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
+  const pill = stateKind === 'completed'
+    ? '<span class="pd-bk-pill is-gold"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Completed</span>'
+    : stateKind === 'live'
+      ? '<span class="pd-bk-pill is-live"><span class="pd-bk-dot"></span>Live</span>'
+      : '<span class="pd-bk-pill is-neutral">Pools in progress</span>';
+  const header = `<div class="pd-pagehdr pd-bk-hdr">
+      <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament">${backSvg}</button>
+      <div class="ph-titles"><span class="pd-eyebrow">${escapeHTML(show ? (show.name || 'Tournament') : 'Tournament')}</span><div class="pd-htitle">Bracket</div></div>
+      ${pill}
+    </div>`;
+
+  if (stateKind === 'pre') {
+    const poolGames = matches.filter((m) => m.phase === 'pool' && m.team_a_id && m.team_b_id);
+    const total = poolGames.length;
+    const done = poolGames.filter((m) => m.status === 'final').length;
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    const progress = total ? `<div class="pd-bk-prog">
+        <div class="pd-bk-prog-top"><span class="pd-bk-prog-l">Pool play</span><span class="pd-bk-prog-n">${done} of ${total} games final</span></div>
+        <div class="pd-bk-bar"><div class="pd-bk-bar-fill" style="width:${pct}%;"></div></div>
+      </div>` : '';
+    return `${header}<div class="pd-card pd-bk-precard">
+        <div class="pd-bk-preic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v4a2 2 0 0 0 2 2h4"/><path d="M6 21v-4a2 2 0 0 1 2-2h4"/><path d="M12 12h6"/><path d="M18 8v8"/></svg></div>
+        <div class="pd-bk-preh">The bracket generates when pool play finishes</div>
+        <div class="pd-bk-pres">Teams are still battling through pools. The moment the last pool game goes final, seeds lock in and the bracket appears right here.</div>
+        ${progress}
+        <button type="button" class="pd-bk-chip" data-nav-tab="standings">Current seeding
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+          <span class="pd-bk-chip-2">Standings</span></button>
+      </div>`;
+  }
+
+  if (stateKind === 'completed') {
+    const rec = computeTeamRecord(outcome.championId, matches, teams);
+    const recLine = rec.wins + '–' + rec.losses
+      + (outcome.runnerUpName ? ' · def. ' + escapeHTML(outcome.runnerUpName) + ' in the final' : '');
+    const strip = `<div class="pd-bk-champbar">
+        <span class="pd-bk-cbic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg></span>
+        <div><div class="pd-bk-cbh">Champions — ${escapeHTML(outcome.championName)}</div><div class="pd-bk-cbs">${recLine}</div></div>
+      </div>`;
+    const tree = buildBracketHTML(active, matches, teams, { readOnly: true, champMatchId: outcome.decidingMatchId, side: 'grand_final' });
+    const persist = '<p class="pd-bk-persist">These results stay on this page until the next event is scheduled.</p>';
+    return `${header}${strip}${tree}${persist}`;
+  }
+
+  // live
+  const line = bracketStatusLine(main);
+  const statusline = line
+    ? `<div class="pd-bk-statusline"><span class="pd-bk-sl-dot"></span>Double elimination · ${escapeHTML(line)}</div>`
+    : '';
+  const tree = buildBracketHTML(active, matches, teams, { readOnly: true });
+  return `${header}${statusline}${tree}`;
+}
+
+// Slice 2 (§13.6): Register as its own destination behind the hub's "Register your team" CTA (the shared
+// board it used to open is retired). Wraps the existing self-registration screen in pd chrome (back → hub);
+// the screen's own title is suppressed since the page header supplies it.
+function buildRegisterPageHTML() {
+  const list = state.tournaments || [];
+  const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
+  const show = active || list[0] || null;
+  const teams = (active ? state.tournamentTeams : []) || [];
+  const backSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
+  const header = `<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament">${backSvg}</button>
+      <div class="ph-titles"><span class="pd-eyebrow">${escapeHTML(show ? (show.name || 'Tournament') : 'Tournament')}</span><div class="pd-htitle">Register</div></div>
+    </div>`;
+  if (active && show && show.registration_open && show.status === 'setup') {
+    return header + buildPublicRegisterHTML(show, teams, { embedded: true });
+  }
+  // Registration isn't open — say so in pd chrome instead of the raw board (§13.6).
+  return `${header}<div class="pd-empty">Registration is closed for this tournament.</div>`;
 }
 
 // ── Slice 1 (spec §13.1): the Pools & schedule page — a dedicated public destination behind the hub's
@@ -9976,15 +10091,16 @@ function attachHandlers() {
         if (c) c.innerHTML = buildPublicTournamentRootHTML();
         return;
       }
-      // Round 2 (spec §12.4): the public Tournament hub tiles/back toggle the hub<->sub-page views.
+      // Round 2 (spec §12.4) / Slice 2 (§13.3): the public Tournament hub tiles/back toggle the hub<->sub-page
+      // views (pools / bracket / register — the shared 'board' is retired from the public path).
       const tnBtn = e.target.closest('[data-tn-view]');
       if (tnBtn && !state.isAdmin) {
         dismissTeamPeek();
         const v = tnBtn.getAttribute('data-tn-view');
-        pdTournamentView = (v === 'board' || v === 'pools') ? v : 'hub';
+        pdTournamentView = (v === 'pools' || v === 'bracket' || v === 'register') ? v : 'hub';
         const c = document.querySelector('#tab-tournament .container');
         if (c) c.innerHTML = buildPublicTournamentRootHTML();
-        if (pdTournamentView === 'board') layoutBracketTree(); // the board may show the bracket tree
+        if (pdTournamentView === 'bracket') layoutBracketTree(); // the Bracket page shows the real bt-* tree
         const panel = document.getElementById('tab-tournament');
         if (panel) panel.scrollTop = 0; // a sub-page open/back is an explicit user action — top is correct
         return;

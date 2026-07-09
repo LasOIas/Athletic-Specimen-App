@@ -1099,6 +1099,52 @@ function computeTeamRunTimeline(teamId, matches, teams) {
   return { last, next, then };
 }
 
+// Slice 2 (spec §13.3): the public Bracket page — completed-state summary. PURE (no DOM / no state).
+// Given the main-phase (bracket) matches + teams, returns the champion, the runner-up (the champion's
+// opponent in the deciding grand-final game), and that deciding game's id — or null while no champion is
+// decided yet. Reuses computeChampion (grand-final logic, incl. reset). Drives the matte-gold champions
+// strip + the gold championship-game node; the page renders NOTHING gold until this is non-null.
+function bracketOutcome(main, teams) {
+  const list = Array.isArray(main) ? main : [];
+  const champ = computeChampion(list, teams);
+  if (!champ) return null;
+  const gf2 = list.find((m) => m && m.side === 'grand_final' && m.round === 2);
+  const gf1 = list.find((m) => m && m.side === 'grand_final' && m.round === 1);
+  const deciding = (gf2 && gf2.status === 'final') ? gf2 : ((gf1 && gf1.status === 'final') ? gf1 : null);
+  let runnerUpId = null;
+  if (deciding) runnerUpId = (deciding.team_a_id === champ.teamId) ? deciding.team_b_id : deciding.team_a_id;
+  const ru = (teams || []).find((t) => t && t.id === runnerUpId);
+  return {
+    championId: champ.teamId,
+    championName: champ.name,
+    runnerUpId: runnerUpId || null,
+    runnerUpName: (ru && ru.name) || '',
+    decidingMatchId: deciding ? deciding.id : null,
+  };
+}
+
+// The friendly side+round label for one bracket match ("Winners round 2" / "Losers round 1" /
+// "Grand final" / "Grand final (reset)"). Used by the live status line.
+function bracketRoundLabel(m) {
+  if (!m) return null;
+  if (m.side === 'grand_final') return (Number(m.round) === 2) ? 'Grand final (reset)' : 'Grand final';
+  const r = Number(m.round) || 1;
+  return (m.side === 'losers' ? 'Losers round ' : 'Winners round ') + r;
+}
+
+// Slice 2 (spec §13.3): the live bracket status line — the round currently in play, as
+// "Double elimination · <this>". PURE. Prefers a genuinely live game's round; else the soonest
+// still-to-play game (lowest queue_order among playable, both-teams-set, non-final games). Returns
+// null when nothing is in play (no bracket, or every game final) so the caller can omit the line.
+function bracketStatusLine(main) {
+  const list = (Array.isArray(main) ? main : [])
+    .filter((m) => m && m.team_a_id && m.team_b_id && m.status !== 'final');
+  if (!list.length) return null;
+  const live = list.find((m) => m.status === 'live');
+  const focus = live || list.slice().sort((a, b) => (Number(a.queue_order) || 0) - (Number(b.queue_order) || 0))[0];
+  return bracketRoundLabel(focus);
+}
+
 // Slice 1 (spec §13.2): the tap-a-team peek — a read-only spectator model for ONE team, shared by the
 // Pools & schedule page and the Home live board. PURE (no DOM / no state global): the caller passes
 // { teams, matches, pools }. Returns null for an unknown team. "Seeing is free" — no account, no skill.
@@ -1208,6 +1254,7 @@ if (typeof module !== "undefined" && module.exports) {
     shapeStandingsByPool, computeAllTimeLeaderboard,
     shapeClaimCandidates, filterClaimCandidates,
     resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
-    teamPeekModel, checkinHeroModel
+    teamPeekModel, checkinHeroModel,
+    bracketOutcome, bracketRoundLabel, bracketStatusLine
   };
 }

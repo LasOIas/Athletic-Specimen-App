@@ -22,6 +22,7 @@
   --gold:        oklch(0.62 0.08 78);      /* champion/records accent (matte, non-neon per §51) */
   --gold-soft:   oklch(0.92 0.06 85);
   --gold-bd:     oklch(0.82 0.07 85);
+  --gold-ink:    oklch(0.46 0.06 78);      /* gold text on gold-soft — champions strip / Completed pill / champ game (Slice 2) */
   --shadow:      0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
 
   /* legacy aliases — re-pointed to direction-A so existing components reskin coherently */
@@ -3360,3 +3361,60 @@ body.pd-public-active .pd-scrim { display: block; }
 .pd-peek-rr .lt { display: block; font-size: 8.5px; font-weight: 800; letter-spacing: .4px; color: var(--live); }
 .pd-peek-rr .nx { font-size: 11px; font-weight: 700; color: var(--accent); }
 .pd-peek-foot { margin-top: 10px; font-size: 10.5px; color: var(--faint); line-height: 1.4; }
+
+/* ── Slice 2 (spec §13.3): the public Bracket page. Ported from the Mike-locked a2-final mockup onto the
+   app kit; reuses the existing pd chrome (.pd-pagehdr/.pd-back/.ph-titles/.pd-eyebrow/.pd-htitle), the
+   frosted .pd-card, and the shipped bt-* tree (buildBracketHTML read-only). Gold (§51 matte) appears ONLY
+   on the decided championship game + the champions strip + the Completed pill — nothing gold before a
+   winner exists, no gold path tint. New classes namespaced pd-bk-*. ── */
+
+/* page header: let the title block flex so the status pill sits hard-right */
+.pd-bk-hdr .ph-titles { flex: 1 1 auto; min-width: 0; }
+
+/* status pill (right of the page title) */
+.pd-bk-pill { display: inline-flex; align-items: center; gap: 5px; flex: none; margin-left: auto; border-radius: 999px; padding: 5px 10px; font-size: 11px; font-weight: 800; letter-spacing: .3px; }
+.pd-bk-pill svg { width: 11px; height: 11px; flex: none; }
+.pd-bk-pill.is-gold { background: var(--gold-soft); border: 1px solid var(--gold-bd); color: var(--gold-ink); }
+.pd-bk-pill.is-live { background: var(--live-soft); border: 1px solid oklch(0.85 0.05 150); color: var(--live-ink); }
+.pd-bk-pill.is-neutral { background: var(--surface-3); border: 1px solid var(--border); color: var(--muted); }
+.pd-bk-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); animation: pdbkpulse 1.8s ease-in-out infinite; }
+@keyframes pdbkpulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
+
+/* live status line ("Double elimination · Winners round 2") — indented under the title */
+.pd-bk-statusline { display: flex; align-items: center; gap: 7px; margin: -2px 0 12px 41px; font-size: 11.5px; color: var(--muted); }
+.pd-bk-sl-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); animation: pdbkpulse 1.8s ease-in-out infinite; flex: none; }
+
+/* completed: matte-gold champions strip above the tree (SOLID gold-soft — never frosted) */
+.pd-bk-champbar { display: flex; align-items: center; gap: 12px; margin: 0 0 12px; background: var(--gold-soft); border: 1.5px solid var(--gold-bd); border-radius: var(--r-lg); padding: 12px 14px; }
+.pd-bk-cbic { width: 40px; height: 40px; flex: none; border-radius: 50%; background: var(--card); border: 1px solid var(--gold-bd); display: flex; align-items: center; justify-content: center; color: var(--gold); }
+.pd-bk-cbic svg { width: 21px; height: 21px; }
+.pd-bk-cbh { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15.5px; letter-spacing: -.2px; color: var(--ink); line-height: 1.15; }
+.pd-bk-cbs { font-size: 12px; font-weight: 600; color: var(--gold-ink); margin-top: 3px; }
+.pd-bk-persist { font-size: 11px; color: var(--faint); text-align: center; margin: 12px 6px 2px; line-height: 1.45; }
+
+/* pre-bracket: frosted .pd-card + these inner bits (icon / heading / progress / seeding chip) */
+.pd-bk-preic { width: 42px; height: 42px; border-radius: 11px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; color: var(--accent); margin-bottom: 13px; }
+.pd-bk-preic svg { width: 22px; height: 22px; }
+.pd-bk-preh { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 16px; letter-spacing: -.2px; color: var(--ink); line-height: 1.28; }
+.pd-bk-pres { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 8px; }
+.pd-bk-prog { margin-top: 17px; }
+.pd-bk-prog-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 7px; }
+.pd-bk-prog-l { font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--faint); }
+.pd-bk-prog-n { font-family: 'Sora','Inter',sans-serif; font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.pd-bk-bar { height: 8px; border-radius: 999px; background: var(--surface-3); border: 1px solid var(--border); overflow: hidden; }
+.pd-bk-bar-fill { height: 100%; background: var(--accent); border-radius: 999px; }
+.pd-bk-chip { display: inline-flex; align-items: center; gap: 7px; margin-top: 17px; background: var(--accent-soft); border: 1px solid var(--accent-bd); color: var(--accent); border-radius: 999px; padding: 8px 13px; font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.pd-bk-chip svg { width: 14px; height: 14px; flex: none; }
+.pd-bk-chip .pd-bk-chip-2 { color: var(--muted); font-weight: 600; }
+
+/* read-only tree modifiers — scoped under .bt-pan.pd-bk-ro so the shared admin bt-* nodes are untouched.
+   Nodes stay SOLID var(--card) (inherited from .bt-node); these add ONLY the gold champ game + the matte-
+   green live node. No gold path tint (the public tree is rendered with an empty pathIds set). */
+.bt-pan.pd-bk-ro .bt-node.pd-bk-champ { border: 1.5px solid var(--gold-bd); box-shadow: 0 0 0 1.5px var(--gold-soft), var(--shadow-sm); }
+.bt-pan.pd-bk-ro .bt-node.pd-bk-champ .bt-meta { color: var(--gold-ink); font-weight: 800; display: flex; align-items: center; gap: 3px; }
+.pd-bk-trophy { width: 10px; height: 10px; flex: none; }
+.bt-pan.pd-bk-ro .bt-node.pd-bk-champ .bt-row.win { background: var(--gold-soft); }
+.bt-pan.pd-bk-ro .bt-node.pd-bk-champ .bt-row.win .bt-name { color: var(--ink); font-weight: 800; }
+.bt-pan.pd-bk-ro .bt-node.pd-bk-champ .bt-row.win .bt-sc { color: var(--gold); font-weight: 800; }
+.bt-pan.pd-bk-ro .bt-node.pd-bk-live { border-color: oklch(0.85 0.05 150); box-shadow: inset 3px 0 0 var(--live), var(--shadow-sm); }
+.bt-pan.pd-bk-ro .bt-node.pd-bk-live .bt-meta { color: var(--live-ink); }
