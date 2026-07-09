@@ -17,18 +17,17 @@
 // below. If left blank the app will continue to function fully offline
 // using browser storage. See https://supabase.io for more information.
 // SUPABASE_URL + SUPABASE_KEY come from public/supabase-config.js (loaded before app.js) — C25 item 7.
-// C21: persistSession=false — the admin JWT lives in memory only and dies with the tab, so a
-// left-behind session can never grant the next visitor admin on a shared/kiosk device. The quick
-// code re-login (server-verified) is the intended way back in. autoRefreshToken keeps a long
-// active session alive in-tab.
+// Identity (2026-07-08, Mike's call): persistSession=true so REAL email+password sign-ins survive a
+// reload (Mike: "save them logged in"). The legacy `nlvb2025` code-login (synthetic `*.local` accounts)
+// stays EPHEMERAL exactly as under the old C21 in-memory design — a restored `.local` session is signed
+// out on load in onAuthStateChange (INITIAL_SESSION), so a left-behind admin session still can't grant
+// the next visitor admin on a shared/kiosk device, and admin gating is unchanged this slice.
+// detectSessionInUrl is a harmless no-op for password auth (kept for a future Google redirect option).
+// autoRefreshToken keeps a real session alive.
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-  // Identity (2026-07-08, Mike's call): remember REAL sign-ins across reloads (persistSession) + complete
-  // the magic-link/OAuth redirect (detectSessionInUrl). The legacy `nlvb2025` code-login stays EPHEMERAL —
-  // a restored `.local` code session is signed out on load (see onAuthStateChange), so admin gating is
-  // unchanged this slice. autoRefreshToken keeps a real session alive.
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.08.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.08.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -3081,6 +3080,13 @@ const state = {
   selectedIds: [], // player.id[] currently selected (admin bulk)
   limitedGroup: null, // when set, admin is locked to this group
   masterAdminAuthenticated: false, // true only for an owner-role server session
+  // Identity/Accounts (2026-07-08) — real email+password sign-in on top of the additive DB foundation.
+  // authSession = live Supabase session for a REAL account (null when signed out OR a `.local` code
+  // session — those stay ephemeral); account = { id, email }; role = community role from caller_role
+  // (owner|organizer|player|null). role is NOT yet wired to admin gating (that is the next slice).
+  authSession: null,
+  account: null,
+  role: null,
   sharedSyncState: (SUPABASE_AUTHORITATIVE && supabaseClient)
     ? SHARED_SYNC_PENDING
     : SHARED_SYNC_LOCAL_ONLY,
@@ -7309,6 +7315,162 @@ function appPrompt({ title, message, value, confirmText, placeholder } = {}) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Identity/Accounts (2026-07-08) — real email+password sign-in. Reached from the
+// header account icon (#pd-account). Full-screen "page" (Mike's pick: Option B,
+// clean-centered), implemented as a .auth-page overlay appended to <body> so
+// partialRender never wipes it. On success onAuthStateChange sets state + re-renders.
+// ─────────────────────────────────────────────────────────────────────────────
+let authMode = 'signin';                 // 'signin' | 'signup'
+let asCommunityId = null;                 // cached community uuid (read live, never hardcoded)
+
+async function fetchCommunityId() {
+  if (asCommunityId || !supabaseClient) return asCommunityId;
+  try {
+    const { data } = await supabaseClient
+      .from('communities').select('id').eq('slug', 'athletic-specimen').maybeSingle();
+    if (data && data.id) asCommunityId = data.id;
+  } catch (_) { /* best-effort — role stays null on failure */ }
+  return asCommunityId;
+}
+
+// Best-effort community role for the signed-in account (owner|organizer|player|null).
+// NOT an admin gate this slice — stored for the next slice. Never blocks sign-in.
+async function deriveRole() {
+  // Resolve into a local first, then assign ONCE — never null-out state.role mid-flight (a re-derive
+  // on TOKEN_REFRESHED/INITIAL_SESSION would otherwise blip the account menu to "Spectator").
+  const cid = await fetchCommunityId();
+  if (!cid || !supabaseClient) { state.role = null; return; }
+  let role = null;
+  try {
+    const { data, error } = await supabaseClient.rpc('caller_role', { p_community: cid });
+    if (!error) role = data || null;
+  } catch (_) { /* leave null */ }
+  state.role = role;
+}
+
+function closeAuthPage() {
+  const el = document.getElementById('auth-page');
+  if (el) el.remove();
+}
+
+function openAuthPage() {
+  closeAuthPage();
+  authMode = 'signin';
+  const el = document.createElement('div');
+  el.id = 'auth-page';
+  el.className = 'auth-page';
+  document.body.appendChild(el);
+  renderAuthPageInner();
+}
+
+function renderAuthPageInner() {
+  const el = document.getElementById('auth-page');
+  if (!el) return;
+  const signup = authMode === 'signup';
+  el.innerHTML = `
+    <button type="button" class="auth-back" id="auth-back" aria-label="Close sign in">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>
+    </button>
+    <form class="auth-inner" id="auth-form" novalidate autocomplete="on">
+      <img class="auth-logo" src="logo-mark.png" alt="Athletic Specimen" />
+      <div class="auth-wm"><div class="auth-wm-1">ATHLETIC SPECIMEN</div><div class="auth-wm-2">COLORADO</div></div>
+      <h2 class="auth-title">${signup ? 'Create account' : 'Welcome'}</h2>
+      <p class="auth-sub">Sign in to claim your team and follow your games.</p>
+      <label class="auth-label" for="auth-email">Email</label>
+      <input class="auth-input" id="auth-email" type="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="you@email.com" />
+      <label class="auth-label" for="auth-pass">Password</label>
+      <input class="auth-input" id="auth-pass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="${signup ? 'At least 6 characters' : 'Your password'}" />
+      <div class="auth-err" id="auth-err" role="alert" hidden></div>
+      <button type="submit" class="auth-submit" id="auth-submit">${signup ? 'Create account' : 'Sign in'}</button>
+      <button type="button" class="auth-alt" id="auth-alt">${signup ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>
+    </form>`;
+  el.querySelector('#auth-back').addEventListener('click', closeAuthPage);
+  el.querySelector('#auth-alt').addEventListener('click', () => {
+    authMode = signup ? 'signin' : 'signup';
+    renderAuthPageInner();
+  });
+  el.querySelector('#auth-form').addEventListener('submit', onAuthSubmit);
+  setTimeout(() => { const f = document.getElementById('auth-email'); if (f) f.focus(); }, 50);
+}
+
+function friendlyAuthError(error, signup) {
+  const m = (error && error.message) || '';
+  if (/invalid login credentials/i.test(m)) return "That email or password isn't right.";
+  if (/already registered|user already/i.test(m)) return 'That email already has an account — sign in instead.';
+  if (/password/i.test(m) && /(6|characters|short)/i.test(m)) return 'Password must be at least 6 characters.';
+  if (/email/i.test(m) && /valid/i.test(m)) return 'Enter a valid email address.';
+  return m || (signup ? 'Could not create your account.' : 'Could not sign you in.');
+}
+
+async function onAuthSubmit(e) {
+  e.preventDefault();
+  const emailEl = document.getElementById('auth-email');
+  const passEl = document.getElementById('auth-pass');
+  const errEl = document.getElementById('auth-err');
+  const btn = document.getElementById('auth-submit');
+  const email = (emailEl && emailEl.value || '').trim();
+  const password = (passEl && passEl.value) || '';
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
+  if (errEl) errEl.hidden = true;
+  if (!email || !password) { showErr('Enter your email and password.'); return; }
+  const signup = authMode === 'signup';
+  if (signup && password.length < 6) { showErr('Password must be at least 6 characters.'); return; }
+  if (!supabaseClient) { showErr('Sign-in is unavailable right now.'); return; }
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = signup ? 'Creating…' : 'Signing in…'; }
+  try {
+    const res = signup
+      ? await supabaseClient.auth.signUp({ email, password })
+      : await supabaseClient.auth.signInWithPassword({ email, password });
+    if (res.error) { showErr(friendlyAuthError(res.error, signup)); if (btn) { btn.disabled = false; btn.textContent = orig; } return; }
+    if (signup && !(res.data && res.data.session)) {
+      // Email confirmation is ON at the project level -> no instant session. (We aim to disable it.)
+      showErr('Account created. Check your email to confirm, then sign in.');
+      authMode = 'signin';
+      if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+      return;
+    }
+    closeAuthPage(); // success -> onAuthStateChange sets state + re-renders the header
+  } catch (_) {
+    showErr('Something went wrong. Try again.');
+    if (btn) { btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
+// Signed-in: a small centered card with the account email + role + Sign out.
+function openAccountMenu() {
+  const prev = document.getElementById('account-menu'); if (prev) prev.remove();
+  const el = document.createElement('div');
+  el.id = 'account-menu';
+  el.className = 'popup-overlay';
+  el.style.display = 'flex';
+  const email = (state.account && state.account.email) || '';
+  const roleLabel = state.role ? (state.role[0].toUpperCase() + state.role.slice(1)) : 'Spectator';
+  el.innerHTML =
+    '<div class="popup-card card kc-card am-card" role="dialog" aria-modal="true">'
+    + '<div class="am-avatar">' + escapeHTML(authInitial()) + '</div>'
+    + '<div class="kc-name">' + escapeHTML(email) + '</div>'
+    + '<div class="am-role">' + escapeHTML(roleLabel) + '</div>'
+    + '<button type="button" class="kc-confirm" id="am-signout">Sign out</button>'
+    + '<button type="button" class="kc-cancel" id="am-close">Close</button>'
+    + '</div>';
+  document.body.appendChild(el);
+  el.querySelector('#am-close').addEventListener('click', () => el.remove());
+  el.addEventListener('click', (ev) => { if (ev.target === el) el.remove(); });
+  el.querySelector('#am-signout').addEventListener('click', () => {
+    el.remove();
+    // Optimistic: clear local auth state + re-render NOW so sign-out feels instant. A local-scope
+    // signOut normally resolves immediately, but under a slow/flaky network the supabase-js auth lock
+    // (waiting on an in-flight token refresh) can delay it — we don't make the user wait on that.
+    state.authSession = null; state.account = null; state.role = null;
+    try { render(); } catch (_) {}
+    // Fire the real signOut in the background to clear the persisted token. The SIGNED_OUT event
+    // re-runs the same cleanup (a no-op by then).
+    try { supabaseClient.auth.signOut({ scope: 'local' }); } catch (_) {}
+  });
+}
+
 function publicCheckinHTML() {
   return `
   <div class="ci-kiosk is-idle">
@@ -7367,10 +7529,18 @@ function buildPublicHeaderHTML() {
         Volleyball
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
       </button>
-      <button type="button" class="pd-avic" id="pd-account" aria-label="Account">
+      ${state.authSession
+        ? `<button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">${escapeHTML(authInitial())}</button>`
+        : `<button type="button" class="pd-avic" id="pd-account" aria-label="Sign in">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
-      </button>
+      </button>`}
     </div>`;
+}
+
+// The single glyph shown in the signed-in account chip: first letter of the account email, uppercased.
+function authInitial() {
+  const e = (state.account && state.account.email) || '';
+  return (e.trim()[0] || '?').toUpperCase();
 }
 
 // Slice 1 sub-pages reached from Home tiles (no bottom-nav button; nav highlight anchors to Home).
@@ -9070,7 +9240,7 @@ function attachHandlers() {
   if (appHeaderEl) {
     appHeaderEl.addEventListener('click', (e) => {
       if (e.target.closest('#pd-account')) {
-        appNotice({ title: 'Accounts are coming soon', message: 'Sign-in and claiming your team are on the way. For now you can watch everything live without an account.' });
+        if (state.authSession) openAccountMenu(); else openAuthPage();
       } else if (e.target.closest('#pd-sport')) {
         appNotice({ title: 'More sports are coming', message: 'Athletic Specimen is starting with volleyball. Other sports are on the way.' });
       }
@@ -9285,23 +9455,72 @@ const logoutBtn = document.getElementById('btn-logout');
   });
 }
 
-// C21: follow the real session. If it ever ends while the UI still thinks it's admin — an explicit
-// signOut, or a failed token refresh — drop admin state so the UI can't show admin without a JWT.
+// C21 + Identity (2026-07-08): follow the real session.
+//  - A `.local` code-login session (synthetic nlvb2025 accounts) stays EPHEMERAL: one restored from
+//    storage on page load (INITIAL_SESSION) is signed out immediately, so it can't grant the next
+//    visitor admin on a shared device — exactly the old in-memory C21 behavior. A fresh in-tab
+//    code-login (SIGNED_IN via setSession) is left for adminLoginWithCode to handle.
+//  - A REAL email+password account is recorded in state + its community role derived (best-effort),
+//    and persists across reloads. role is NOT wired to admin gating this slice.
+//  - Session loss drops admin state (an explicit signOut / failed refresh) and purges skill.
 if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthStateChange === 'function') {
   supabaseClient.auth.onAuthStateChange(async (event, session) => {
-    if (!session && state.isAdmin) {
-      state.isAdmin = false;
-      state.masterAdminAuthenticated = false;
-      state.limitedGroup = null;
-      state.activeGroup = 'All';
-      // Reliability fix (2026-06-20): a SILENT session loss (JWT expiry / failed refresh) must purge
-      // skill from memory + the localStorage cache the same way explicit logout does — re-fetch as anon
-      // (the fetch omits the skill column when !isAdmin) and overwrite the cache before re-rendering.
-      try {
-        const synced = await syncFromSupabase();
-        if (synced) saveLocal();
-      } catch (err) { console.error('Post-logout anon re-sync error', err); }
-      try { render(); } catch {}
+    const email = (session && session.user && session.user.email) || '';
+    const isLocalCode = /\.local$/i.test(email); // synthetic code-login account
+
+    // NOTE: supabase-js holds an internal lock during this callback — calling other supabase methods
+    // (auth/rpc/from) INLINE here races/deadlocks (role came back null even though caller_role is fine).
+    // So any supabase call below is deferred with setTimeout(0) per Supabase's own guidance.
+    if (session && isLocalCode) {
+      // Keep the legacy code-login ephemeral: sign out a restored `.local` session on load.
+      if (event === 'INITIAL_SESSION') { setTimeout(() => { try { supabaseClient.auth.signOut({ scope: 'local' }); } catch (_) {} }, 0); }
+      return; // never treat a code session as a real account
+    }
+
+    if (session && !isLocalCode) {
+      state.authSession = session;
+      state.account = { id: session.user.id, email };
+      closeAuthPage();
+      if (state.loaded) { try { render(); } catch {} }   // show signed-in immediately
+      // Derive the community role out-of-band, then re-render (the account menu shows the role).
+      // Retry a few times: a fresh SIGNED_IN can race the JWT propagation to PostgREST, so the first
+      // caller_role may return null before the token attaches. Stop as soon as a role resolves or the
+      // session is gone. A genuine no-membership spectator just falls through to null (a few cheap calls).
+      setTimeout(async () => {
+        try {
+          for (let i = 0; i < 3; i++) {
+            await deriveRole();
+            if (state.role || !state.authSession) break;
+            await new Promise((r) => setTimeout(r, 400));
+          }
+          if (state.loaded) { try { render(); } catch {} }
+        } catch (err) { console.error('Role derive error', err); }
+      }, 0);
+      return;
+    }
+
+    // No session -> signed out.
+    if (!session) {
+      const wasSignedIn = !!state.authSession;
+      state.authSession = null;
+      state.account = null;
+      state.role = null;
+      if (state.isAdmin) {
+        state.isAdmin = false;
+        state.masterAdminAuthenticated = false;
+        state.limitedGroup = null;
+        state.activeGroup = 'All';
+        // Reliability fix (2026-06-20): a SILENT session loss (JWT expiry / failed refresh) must purge
+        // skill from memory + the localStorage cache the same way explicit logout does — re-fetch as anon
+        // (the fetch omits the skill column when !isAdmin) and overwrite the cache before re-rendering.
+        try {
+          const synced = await syncFromSupabase();
+          if (synced) saveLocal();
+        } catch (err) { console.error('Post-logout anon re-sync error', err); }
+        try { render(); } catch {}
+      } else if (wasSignedIn && state.loaded) {
+        try { render(); } catch {}
+      }
     }
   });
 }

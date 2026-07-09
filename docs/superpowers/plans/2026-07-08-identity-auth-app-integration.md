@@ -2,11 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** Wire real user accounts into the app on top of the already-applied DB foundation — Supabase Auth (magic-link + Google) sign-in, membership-**role**-gated admin (retiring `nlvb2025` + client `isAdmin`), the claim-a-player flow, and the RLS + scoring-RPC cutover — tested against real sign-ins, without breaking the live spectator app or locking the owner out.
+> **AUTH METHOD DECISION (2026-07-08, Mike):** **email + password**, NOT magic-link. Mike: *"i dont want a magic link, that takes too long."* Google OAuth also deferred (needs his creds). Tasks 1–2 below are rewritten for email+password; Task 2 (the sign-in UI) is **BUILT + verified** on branch `feat/identity-auth` (v2026.07.08.5) — full-screen sign-in **page** (Mike picked Option B "clean centered" from 3 rendered §38 layouts).
+
+**Goal:** Wire real user accounts into the app on top of the already-applied DB foundation — Supabase Auth **email+password** sign-in, membership-**role**-gated admin (retiring `nlvb2025` + client `isAdmin`), the claim-a-player flow, and the RLS + scoring-RPC cutover — tested against real sign-ins, without breaking the live spectator app or locking the owner out.
 
 **Architecture:** The auth plumbing already exists — `adminLoginWithCode()` exchanges the code for a Supabase session via `supabaseClient.auth.setSession()` (app.js:9196-9201), and `onAuthStateChange` (9280) already derives admin state from the session. This track *replaces* the code path with passwordless sign-in and derives the admin role from `memberships` (via the `caller_role` RPC built in the DB foundation) instead of a JWT group claim. The risky RLS/RPC cutover (DB-foundation Tasks 8-10, deferred to here) lands alongside the sign-in wiring so each role path is tested with a real authenticated user. Old `c21` RLS policies stay until the very end, so the app keeps working throughout.
 
-**Tech Stack:** Supabase Auth (magic-link OTP + Google OAuth), `supabase-js` (already loaded), vanilla-JS app. Postgres RLS/RPC (helpers already built: `caller_role`/`is_organizer`/`is_owner`/`caller_claims_team`, and `player_claims`).
+**Tech Stack:** Supabase Auth (email + password), `supabase-js` (already loaded), vanilla-JS app. Postgres RLS/RPC (helpers already built: `caller_role`/`is_organizer`/`is_owner`/`caller_claims_team`, and `player_claims`).
 
 ## Scope
 
@@ -27,29 +29,31 @@
 
 ---
 
-## Task 1: Enable Supabase Auth providers
+## Task 1: Enable Supabase email+password auth (Mike's dashboard action)
 
-**Interfaces:** Produces working magic-link + Google sign-in at the project level. Consumed by Task 2.
+**Interfaces:** Produces working email+password sign-in/sign-up at the project level. Consumed by Task 2/3.
 
-- [ ] **Step 1: Enable Email OTP (magic-link)** in Supabase Auth config (magic-link on; confirm the redirect/site URL = the app's prod + localhost URLs).
-- [ ] **Step 2: Enable Google OAuth** — requires Google Cloud OAuth client credentials (id + secret). **Real-world setup = Mike's call** (route via AskUserQuestion; he provides creds or defers Google to email-only for v1).
-- [ ] **Step 3: Enable leaked-password protection + note MFA** (the advisors flagged these) — low-effort security wins while in the Auth settings.
-- [ ] **Step 4: Verify** a magic-link sign-in end-to-end on localhost (email arrives → link → session established → `profiles` row auto-created by the `handle_new_user` trigger). No commit (config).
+- [ ] **Step 1: Email provider is on** (default). Confirm password sign-ins/sign-ups are enabled.
+- [ ] **Step 2 (Mike, REQUIRED before owner sign-up): turn OFF "Confirm email"** — Supabase Dashboard → **Authentication → Sign In / Providers → Email → "Confirm email" = OFF**. Without this, sign-up sends a confirmation link (the exact round-trip Mike rejected); with it off, `signUp` returns a session immediately → instant. (Could not be flipped via MCP — no auth-config tool; it is a 2-tap dashboard step.)
+- [ ] **Step 3: Enable leaked-password protection + note MFA** (advisors flagged these) — low-effort while in Auth settings.
+- [ ] **Step 4: Verify** an email+password sign-up on prod returns a session immediately (no confirmation email) and the `profiles` row auto-creates via the `handle_new_user` trigger.
 
-> **OPEN (route to Mike):** Google OAuth creds (provide now, or ship email-magic-link only for v1 and add Google later).
+> **OPEN (route to Mike):** flip "Confirm email" OFF (above). Google one-tap remains a later add (needs his OAuth creds).
 
 ---
 
-## Task 2: Sign-in / sign-out UI + `onAuthStateChange` → role
+## Task 2: Sign-in / sign-out UI + `onAuthStateChange` → role — ✅ BUILT + VERIFIED (v2026.07.08.5)
 
-**Files:** Modify `public/app.js` — the account button (`#pd-account`, currently an inert `appNotice`), a new `buildAuthSheetHTML()`, and the `onAuthStateChange` handler (9280).
+**Files:** `public/app.js` (config, header `#pd-account`, new auth-page/account-menu/role helpers, `onAuthStateChange`), `public/styles.css` (`.auth-page` + `.am-*` + signed-in chip).
 
-**Interfaces:** Produces a real sign-in sheet (magic-link email input + "Continue with Google") opened from the account icon, and `state.profile` / `state.role` derived from the session via `caller_role`. Consumed by Tasks 4/7.
+**Interfaces:** A full-screen email+password sign-in **page** opened from the account icon, and `state.account` / `state.role` derived from the session via `caller_role`. Consumed by Tasks 4/7.
 
-- [ ] **Step 1: Build `buildAuthSheetHTML()`** — a `.popup-card` with an email field + "Send magic link" (`supabaseClient.auth.signInWithOtp({ email })`) and a "Continue with Google" button (`supabaseClient.auth.signInWithOAuth({ provider: 'google' })`). Wire `#pd-account`: signed-out → open this sheet; signed-in → a small menu (name + Sign out). Replace the inert `appNotice`.
-- [ ] **Step 2: Derive role on auth change.** In `onAuthStateChange`, after a session is set: call `caller_role(community_id)` (RPC) → set `state.profile`, `state.role` (`owner|organizer|player|null`). A signed-in profile with no membership = spectator (role null) until claimed/approved.
-- [ ] **Step 3: `node --check` + browser verify** (desktop + mobile): account icon opens the sheet; magic-link sends; after sign-in the header shows the account; sign-out returns to spectator; **anon spectator flow unchanged when signed-out**; 0 console errors. Screenshot.
-- [ ] **Step 4: Bump `APP_VERSION`, commit + push.**
+**What shipped:**
+- [x] **Config:** `persistSession: true` (real sign-ins survive reload — Mike: "save them logged in"). The legacy `nlvb2025` code-login stays **ephemeral** — a restored `*.local` code session is signed out on load in `onAuthStateChange` (`INITIAL_SESSION`), preserving the old C21 "no left-behind admin on a shared device" property. `detectSessionInUrl:true` is a harmless no-op for password auth (kept for a future Google option). *(This resolves the earlier ⚠ finding: rather than accept the transition-window tradeoff, the code path stays ephemeral and only real accounts persist.)*
+- [x] **Sign-in page (Option B, clean-centered)** — full-screen `.auth-page` appended to `<body>` (survives partialRender): logo + wordmark + "Welcome" + email + password + Sign in + a Sign in/Create-account toggle. `signInWithPassword` / `signUp`, plain-English error mapping. `#pd-account`: signed-out → sign-in page; signed-in → account menu (email + role + **instant/optimistic** Sign out).
+- [x] **Role on auth change:** `onAuthStateChange` → `caller_role(community_id)` → `state.role` (`owner|organizer|player|null`), deferred out of the callback via `setTimeout(0)` (supabase-js holds an auth lock during the callback — an inline rpc raced to null) with a bounded retry for JWT propagation. Role assigned once at the end (no "Spectator" blip on re-derive). No admin-gating change this slice.
+- [x] **Verified** (localhost, v2026.07.08.5, desktop 1920 + mobile 390, 0 console errors): page renders both sizes; toggle; sign-up error path; **sign-in success → session + role=`player` derived + page closes + header shows the account initial**; **persists across reload**; account menu shows email+role; **optimistic sign-out is instant** + reverts to spectator; DB cross-checked (throwaway account created+verified+deleted, baseline 233 players / 1 community / 2 `.local` accounts intact). *(Env note: browser→Supabase in the sandbox was intermittently slow — a `signOut` once took ~78s to resolve behind the auth lock; the optimistic UI clear makes sign-out feel instant regardless. Mike's real device on prod is the final confirm.)*
+- [ ] **Owner sign-up = Task 3** (needs Task 1 Step 2 done first).
 
 ---
 
@@ -57,7 +61,7 @@
 
 **Interfaces:** Seeds Mike's `owner` membership from his real (not `.local`) account, once.
 
-- [ ] **Step 1: Mike signs in for real** (magic-link, `olasmikey@gmail.com`) → `profiles` row auto-created. Capture his real `auth.uid()`.
+- [ ] **Step 1: Mike creates his account** in the app (email+password, `olasmikey@gmail.com`, via the new sign-in page → "Create an account") → `profiles` row auto-created by the trigger. Capture his real `auth.uid()`. (Requires Task 1 Step 2 = "Confirm email" OFF, so it's instant.)
 - [ ] **Step 2: Seed owner** (one-time, via Supabase MCP):
 ```sql
 insert into public.memberships (profile_id, community_id, role, status)
