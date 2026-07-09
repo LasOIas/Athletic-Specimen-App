@@ -100,3 +100,19 @@ Because the personal features depend on accounts, the recommended build order is
 ---
 
 **Mockup source:** the `mockups/` paths referenced above resolve to `./2026-07-08-public-dashboard-mockups/` (locked HTML mockups rendered with the real design tokens). Regenerate PNGs by opening them in a browser at ~1240px wide.
+
+---
+
+## Personal layer (Slice 3) — LOCKED layouts (2026-07-09, Mike's §38 picks)
+
+Designed after Identity/Accounts landed (email+password sign-in live v2026.07.08.5). Three rendered §38 rounds; Mike's picks:
+
+- **Home "you're up next" personal hero → Option C "Your run" (timeline).** A compact team header (name · Pool · record) then a vertical timeline: last result (done, muted-green) → **UP NEXT** node (accent, highlighted: "Net 2 · vs <opp> · ~8 min") → then (faint). Sits at the top of Home when signed-in + claimed; signed-out shows the shell minus the hero + a claim prompt.
+- **My Team → Option B "big-record scoreboard".** Centered eyebrow (tournament · Pool · Seed) → team name (Sora) → dominant `W–L` record (Sora 44px) with W/L pips → up-next strip → **Games ↔ Roster** segmented toggle (Games = results log with W/L badges + scores; Roster = named teammates, "You" tag).
+- **Claim-your-team → Option A "search your name".** Reuses the Check-In kiosk pattern: search field → tap your name (avatar + name + team) → confirm ("Claim my spot" / "Not me") → **"Claim sent — pending your organizer's OK."** Organizer approval gates it. Reached from the Home claim prompt / tournament card (signed-in) or after sign-in if unclaimed.
+
+**Mockups (scratchpad, this session):** `home-hero-options.html`, `myteam-options.html` / `myteam-B-fonts.html`, `claim-options.html`.
+
+**Build prerequisite (NOT yet built):** the claim data-link — `claim_player` / `approve_claim` RPCs + the team↔player link (`team_members` at registration + a one-time backfill of the existing 18 teams' jsonb rosters) = **Task 6 of `2026-07-08-identity-auth-app-integration.md`**. Until that lands, these screens have no "which player is you" source. Build order: (1) claim plumbing (auth Task 6) → (2) claim flow UI (A) → (3) Home hero (C) + My Team (B) wired to `claimed_by_profile`.
+
+**Mockup fidelity rule:** every mockup MUST load the app's Google Fonts (Inter 400–800 + Sora 600–800) — a mockup that only names the families renders a system fallback and reads as off-brand.
