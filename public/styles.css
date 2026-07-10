@@ -3642,3 +3642,57 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
     padding-bottom: 0;
   }
 }
+
+/* ── hm-* : atom-up public Home kit (2026-07-10 spec) — card-free ── */
+.hm{ position: relative; z-index: 1; }
+.hm-lead{ display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 10px; padding: 12px 2px 6px; }
+.hm-eyebrow{ display: flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--live-ink); text-transform: uppercase; }
+.hm-eyebrow .hm-dot{ width: 7px; height: 7px; border-radius: 50%; background: var(--live); }
+.hm-eyebrow.is-quiet{ color: var(--muted); } .hm-eyebrow.is-quiet .hm-dot{ background: var(--faint); }
+.hm-lead h1{ font-family: var(--font-display); font-size: 27px; font-weight: 700; margin: 8px 0 4px; }
+.hm-meta{ font-size: 13px; color: var(--muted); }
+.hm-logo{ height: 96px; justify-self: end; }
+.hm-cta{ grid-column: 1 / -1; margin-top: 14px; width: 100%; padding: 13px 0; background: var(--accent); color: #fff; border: none; border-radius: 11px; font: 600 15px 'Inter', sans-serif; }
+.hm-sect{ font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; margin: 20px 2px 8px; }
+.hm-nethead{ display: flex; align-items: center; gap: 10px; font: 700 12.5px var(--font-display); letter-spacing: .12em; color: var(--ink); }
+.hm-nethead::after{ content: ''; flex: 1; height: 1px; background: var(--border); }
+.hm-netblock{ margin-bottom: 16px; }
+.hm-game{ display: flex; align-items: center; padding: 8px 2px 0; }
+.hm-teams{ flex: 1; min-width: 0; }
+.hm-teams .hm-row{ display: flex; justify-content: space-between; align-items: baseline; padding: 1.5px 0; }
+.hm-teams .hm-nm{ font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hm-teams .hm-sc{ font-family: var(--font-display); font-size: 15px; font-weight: 700; margin-left: 12px; }
+.hm-pill{ font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 99px; margin-left: 12px; background: var(--live-soft); color: var(--live-ink); }
+.hm-pill.is-done{ background: oklch(0.94 0.004 75); color: var(--muted); }
+.hm-mini{ display: flex; justify-content: space-between; align-items: baseline; padding: 8px 2px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.hm-mini:last-of-type{ border-bottom: none; }
+.hm-mini .hm-rk{ color: var(--muted); font: 700 12px var(--font-display); margin-right: 8px; }
+.hm-mini .hm-rec{ font-family: var(--font-display); font-weight: 700; }
+.hm-link{ display: flex; justify-content: space-between; align-items: center; padding: 12px 2px; font: 600 13.5px 'Inter', sans-serif; color: var(--brand-dark); }
+.hm-detail{ display: flex; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--border); font-size: 14px; align-items: center; }
+.hm-detail:last-of-type{ border-bottom: none; }
+.hm-detail svg{ width: 18px; height: 18px; stroke: var(--faint); fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.hm-detail .hm-d2{ color: var(--muted); margin-left: auto; font-size: 13px; }
+/* — kit extensions required to render the spec states as <button>s (reset the global button chrome);
+   matte, existing tokens only (§51). — */
+.hm-link{ width: 100%; background: none; border: none; text-align: left; gap: 10px; }
+.hm-link:hover{ background: none; }
+.hm-link > span{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hm-link .hm-chev{ flex: none; }
+.hm-empty{ padding: 8px 2px; color: var(--muted); font-size: 13px; }
+
+/* — atom-up Home mobile ordering. On mobile the tournament-live rail/board wrappers dissolve
+   (display:contents) so their children lay out directly under .hm as a flex column, and `order`
+   sequences them: lead → LIVE NOW → COMING UP → STANDINGS → link. Scoped to mobile; the ≥1024
+   rail+board grid is added in the desktop media block (Task 4, CSS-only). — */
+@media (max-width: 1023px){
+  body.pd-public-active #tab-home .hm.is-live{ display: flex; flex-direction: column; }
+  body.pd-public-active #tab-home .hm.is-live .hm-rail,
+  body.pd-public-active #tab-home .hm.is-live .hm-board{ display: contents; }
+  body.pd-public-active #tab-home .hm.is-live .hm-rail > .hm-lead{ order: 1; }
+  body.pd-public-active #tab-home .hm.is-live .hm-board > .hm-sect{ order: 2; }
+  body.pd-public-active #tab-home .hm.is-live .hm-board > .hm-netgrid{ order: 2; }
+  body.pd-public-active #tab-home .hm.is-live .hm-rail > .hm-comingup{ order: 3; }
+  body.pd-public-active #tab-home .hm.is-live .hm-rail > .hm-standings{ order: 4; }
+  body.pd-public-active #tab-home .hm.is-live .hm-rail > .hm-link{ order: 5; }
+}

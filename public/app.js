@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -2582,92 +2582,217 @@ function buildPersonalHeroHTML(mine, rec) {
         <div class="pd-timeline"><div class="pd-tlline"></div>${nodes.join('')}</div>`;
 }
 
-function publicHomeHTML() {
-  const tourney = publicLiveTournament();
+// ── atom-up public Home (spec 2026-07-10 §1-§2): ONE state at a time, card-free, NO personalization. ──
+// The pure state machine (publicHomeState) picks exactly one of tournament_live / session_live /
+// registration / quiet. Home is the everyone surface — identical signed-in or out; the personal layer
+// (my-team, claim) lives on the Tournament tab, never here. All dynamic text through escapeHTML; no
+// "night/tonight" copy; singular/plural correct.
+const HM_CHEV = '<svg class="hm-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="m9 6 6 6-6 6"/></svg>';
+const HM_LOGO = '<img class="hm-logo" src="/logo-mark.png" alt="" aria-hidden="true">';
+// Detail-row icons — bare paths; `.hm-detail svg` supplies stroke/fill/width (matte, §51). pin / users / format.
+const HM_IC_PIN = '<svg viewBox="0 0 24 24"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>';
+const HM_IC_USERS = '<svg viewBox="0 0 24 24"><circle cx="9" cy="7" r="3.5"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 4a3.6 3.6 0 0 1 0 6.8"/><path d="M20.5 20a5.5 5.5 0 0 0-4-5.3"/></svg>';
+const HM_IC_FORMAT = '<svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/></svg>';
 
-  // ----- Tournament live: the spectator dashboard. Slice 3c: a signed-in CLAIMED player gets the
-  // personal "your run" hero (Mike's locked Option C timeline) in place of the claim button, plus a
-  // My Team tile; everyone else keeps the claim gateway. -----
-  if (tourney) {
-    const teamCount = (state.tournamentTeams || []).length;
-    const liveNets = new Set((state.tournamentMatches || []).filter((m) => m.status === 'live' && m.net).map((m) => m.net)).size;
-    const bits = [
-      teamCount ? (teamCount + (teamCount === 1 ? ' team' : ' teams')) : '',
-      tourney.status === 'bracket' ? 'Bracket underway' : 'Pools underway',
-      liveNets ? (liveNets + (liveNets === 1 ? ' net live' : ' nets live')) : '',
-    ].filter(Boolean).join(' · ');
-    // §13.4: keep the board card between rounds (header + legend + next matchups) instead of vanishing.
-    const boardHTML = buildPublicTournamentLiveHTML({ lull: true });
-    const mine = myTeamInfo();
-    const myRec = mine ? computeTeamRecord(mine.teamId, state.tournamentMatches || [], state.tournamentTeams || []) : null;
-    return `<div class="home-screen">
-      <div class="pd-card pd-thero">
-        <span class="pd-eyebrow">Tournament · Live</span>
-        <div class="pd-h">${escapeHTML(tourney.name || 'Tournament')}</div>
-        <div class="pd-sub">${escapeHTML(bits)}</div>
-        ${mine ? buildPersonalHeroHTML(mine, myRec) : `<button type="button" class="pd-claimbtn" id="pd-claim">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>
-          Playing? Claim your team
-        </button>`}
+// Shared lead block (no card): eyebrow (status dot + small-caps) → Barlow title → muted meta → optional
+// CTA, with the logo mark filling the open space to the right (Mike's directive). The CTA spans full width.
+function hmLeadHTML(o) {
+  return `<div class="hm-lead">
+      <div class="hm-leadtext">
+        <div class="hm-eyebrow${o.quiet ? ' is-quiet' : ''}"><span class="hm-dot"></span>${escapeHTML(o.eyebrow)}</div>
+        <h1>${escapeHTML(o.title)}</h1>
+        ${o.meta ? `<div class="hm-meta">${escapeHTML(o.meta)}</div>` : ''}
       </div>
-      ${boardHTML ? `<div class="pd-card">${boardHTML}${PUBLIC_COURT_LEGEND}</div>` : ''}
+      ${HM_LOGO}
+      ${o.ctaHTML || ''}
     </div>`;
-  }
+}
 
-  // ----- No live tournament: casual pickup state (headcount + live courts + next session + Check In). -----
-  const liveData = getPublicLiveData();
-  const courtsHTML = buildPublicLiveCourtsHTML();
-  const st = publicHubStatus({
-    checkedInCount: (state.checkedIn || []).length,
-    liveCourtCount: liveData.liveCount,
-    tournamentStatus: null,
+function hmDetailRowHTML(icon, text) {
+  return `<div class="hm-detail">${icon}<span>${escapeHTML(text)}</span></div>`;
+}
+
+// A tournament LIVE-NOW net block: net-header line + the game (two team rows + running score) + Playing pill.
+function hmNetBlockHTML(b) {
+  return `<div class="hm-netblock">
+      <div class="hm-nethead">${escapeHTML(b.label)}</div>
+      <div class="hm-game">
+        <div class="hm-teams">
+          <div class="hm-row"><span class="hm-nm">${escapeHTML(b.a.name)}</span><span class="hm-sc">${escapeHTML(String(b.a.score))}</span></div>
+          <div class="hm-row"><span class="hm-nm">${escapeHTML(b.b.name)}</span><span class="hm-sc">${escapeHTML(String(b.b.score))}</span></div>
+        </div>
+        <span class="hm-pill">Playing</span>
+      </div>
+    </div>`;
+}
+
+// Casual ON THE COURTS blocks — reuse getPublicLiveData (team NUMBERS + win/loss, NO scores) restyled into
+// the same net-block grammar with COURT N headers. Truthful: no fabricated score, just matchup + status pill.
+function hmCasualCourtsHTML() {
+  const { matchups, results } = getPublicLiveData();
+  if (!matchups.length) return '';
+  return matchups.map((m, idx) => {
+    const winner = Number(results[liveMatchupKey(m.teamA, m.teamB)]) || 0;
+    const pill = winner
+      ? `<span class="hm-pill is-done">Team ${escapeHTML(String(winner))} won</span>`
+      : '<span class="hm-pill">Playing</span>';
+    return `<div class="hm-netblock">
+        <div class="hm-nethead">COURT ${idx + 1}</div>
+        <div class="hm-game">
+          <div class="hm-teams">
+            <div class="hm-row"><span class="hm-nm">Team ${escapeHTML(String(m.teamA))}</span></div>
+            <div class="hm-row"><span class="hm-nm">Team ${escapeHTML(String(m.teamB))}</span></div>
+          </div>
+          ${pill}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+// Local weekday for a 'YYYY-MM-DD' session date → the "<Weekday> Pick-up" title (spec §2c example format).
+function hmSessionWeekday(dateStr) {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}/.test(String(dateStr))) return '';
+  const p = String(dateStr).slice(0, 10).split('-').map(Number);
+  const dt = new Date(p[0], p[1] - 1, p[2]);
+  return isNaN(dt.getTime()) ? '' : dt.toLocaleDateString('en-US', { weekday: 'long' });
+}
+
+// A left-name / right-muted mini row (past tournaments).
+function hmPastRowHTML(name, teamCount) {
+  const meta = (teamCount ? (teamCount + (teamCount === 1 ? ' team' : ' teams') + ' · ') : '') + 'completed';
+  return `<div class="hm-mini"><span>${escapeHTML(name || 'Tournament')}</span><span class="hm-meta">${escapeHTML(meta)}</span></div>`;
+}
+
+// ── State 2a: tournament day (live). Rail (lead + COMING UP + STANDINGS + link) + board (LIVE NOW nets).
+// The rail/board wrappers exist for the Task-4 desktop grid; on mobile they dissolve (display:contents) and
+// `order` sequences the flattened children: lead → LIVE NOW → COMING UP → STANDINGS → link. ──
+function hmTournamentLiveHTML(t) {
+  const teams = state.tournamentTeams || [];
+  const matches = state.tournamentMatches || [];
+  const isBracket = t.status === 'bracket';
+  const phaseMatches = matches.filter((m) => m.phase === (isBracket ? 'main' : 'pool'));
+  const done = phaseMatches.filter((m) => m.status === 'final').length;
+  const total = phaseMatches.length;
+  const teamCount = teams.length;
+  const netCount = new Set(matches.filter((m) => m.net != null).map((m) => m.net)).size;
+  const meta = [
+    total ? (done + ' of ' + total + ' games done') : '',
+    teamCount ? (teamCount + (teamCount === 1 ? ' team' : ' teams')) : '',
+    netCount ? (netCount + (netCount === 1 ? ' net' : ' nets')) : '',
+  ].filter(Boolean).join(' · ');
+  const lead = hmLeadHTML({ eyebrow: (isBracket ? 'Bracket' : 'Pool play') + ' · Live', title: t.name || 'Tournament', meta });
+
+  const blocks = homeNetBlocksModel(matches, teams, 'NET');
+  const netgrid = blocks.length ? blocks.map(hmNetBlockHTML).join('') : '<div class="hm-empty">No games in progress right now.</div>';
+
+  const coming = homeComingUpModel(matches, teams, 'Net');
+  const comingHTML = coming.length ? `<div class="hm-comingup">
+        <div class="hm-sect">Coming up</div>
+        ${coming.map((c) => `<div class="hm-mini"><span><span class="hm-rk">${escapeHTML(c.label)}</span>${escapeHTML(c.text)}</span><span class="hm-meta">next</span></div>`).join('')}
+      </div>` : '';
+
+  const standings = homeTopStandingsModel(computeStandings(teams, matches), 3);
+  const standingsHTML = standings.length ? `<div class="hm-standings">
+        <div class="hm-sect">Standings · Top 3</div>
+        ${standings.map((s) => `<div class="hm-mini"><span><span class="hm-rk">${s.rank}</span>${escapeHTML(s.name)}</span><span class="hm-rec">${escapeHTML(s.record)}</span></div>`).join('')}
+      </div>` : '';
+
+  const link = `<button type="button" class="hm-link" data-nav-tab="tournament"><span>Full standings &amp; schedule</span>${HM_CHEV}</button>`;
+
+  return `<div class="hm is-live">
+      <div class="hm-rail">${lead}${comingHTML}${standingsHTML}${link}</div>
+      <div class="hm-board"><div class="hm-sect">Live now</div><div class="hm-netgrid">${netgrid}</div></div>
+    </div>`;
+}
+
+// ── State 2c: casual session day. Lead + Check in CTA (→ activateMainTab('players')) + ON THE COURTS.
+// Cross-state rule: when a reg-open tournament ALSO exists, ONE registration link row sits under the board
+// (the only cross-state element allowed by spec §2). ──
+function hmSessionLiveHTML(reg) {
+  const sess = state.currentSession || {};
+  const weekday = hmSessionWeekday(sess.date);
+  const checkedIn = (state.checkedIn || []).length;
+  const teamCount = (state.generatedTeams || []).length;
+  const courtCount = getPublicLiveData().matchups.length;
+  const meta = [
+    checkedIn ? (checkedIn + ' checked in') : '',
+    teamCount ? (teamCount + (teamCount === 1 ? ' team' : ' teams')) : '',
+    courtCount ? (courtCount + (courtCount === 1 ? ' court' : ' courts')) : '',
+  ].filter(Boolean).join(' · ');
+  const cta = '<button type="button" class="hm-cta" data-nav-tab="players">Check in</button>';
+  const lead = hmLeadHTML({ eyebrow: 'Session live', title: weekday ? (weekday + ' Pick-up') : 'Pick-up session', meta, ctaHTML: cta });
+
+  const courts = hmCasualCourtsHTML();
+  const courtsSection = courts ? `<div class="hm-sect">On the courts</div>${courts}` : '';
+  const regLink = reg
+    ? `<button type="button" class="hm-link" data-tn-view="register"><span>Registration open — ${escapeHTML(reg.name || 'Tournament')}</span>${HM_CHEV}</button>`
+    : '';
+
+  return `<div class="hm">${lead}${courtsSection}${regLink}</div>`;
+}
+
+// ── State 2b: registration open. Lead + Register CTA (routes into the SHIPPED register event card/join
+// sheet via data-tn-view="register") + DETAILS rows. No date row (tournaments carry no date column); the
+// location row reads "posted in GroupMe"; team-size binds to the tournament row. ──
+function hmRegistrationHTML(reg) {
+  const list = state.tournaments || [];
+  const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
+  const regTeams = (active && active.id === reg.id) ? (state.tournamentTeams || []) : [];
+  const rm = registerEventModel(reg, regTeams);
+  const meta = [rm.teamSize + 's co-ed', rm.costChip, rm.spotsLead].filter(Boolean).join(' · ');
+  const cta = '<button type="button" class="hm-cta" data-tn-view="register">Register your team</button>';
+  const lead = hmLeadHTML({ eyebrow: 'Registration open', title: rm.name, meta, ctaHTML: cta });
+
+  const rows = hmDetailRowHTML(HM_IC_PIN, 'posted in GroupMe')
+    + hmDetailRowHTML(HM_IC_USERS, rm.teamSize + ' per team, co-ed — at least 1 guy + 1 girl')
+    + hmDetailRowHTML(HM_IC_FORMAT, 'Pool play → double-elim bracket — win by 2');
+
+  return `<div class="hm">${lead}<div class="hm-sect">Details</div>${rows}</div>`;
+}
+
+// ── State 2d: quiet (nothing on). Muted lead + past tournaments + champions link. History is loaded lazily
+// (only when the History tab opens), so Home first renders past rows from state.tournaments completed rows
+// and upgrades to the richer team-count rows once loadTournamentHistory() fills state.tournamentHistory. ──
+function hmQuietHTML() {
+  const lead = hmLeadHTML({ quiet: true, eyebrow: 'Nothing on right now', title: 'Next tournament soon', meta: 'Announced here and in GroupMe' });
+
+  const hist = state.tournamentHistory;
+  let pastRows = '';
+  if (Array.isArray(hist) && hist.length) {
+    pastRows = hist.slice(0, 5).map((h) => hmPastRowHTML(h.name, h.teamCount)).join('');
+  } else {
+    const completed = (state.tournaments || []).filter((t) => t.status === 'completed');
+    if (typeof hist === 'undefined' && !state.tournamentHistoryLoading && completed.length) {
+      // fire-and-forget: refresh Home in place once the counts land (mirrors activateMainTab's lazy load)
+      loadTournamentHistory().then(() => {
+        if (activeMainTab === 'home') {
+          const c = document.querySelector('#tab-home .container');
+          if (c) c.innerHTML = publicHomeHTML();
+        }
+      });
+    }
+    pastRows = completed.slice(0, 5).map((t) => hmPastRowHTML(t.name || 'Tournament', 0)).join('');
+  }
+  const pastSection = pastRows ? `<div class="hm-sect">Past tournaments</div>${pastRows}` : '';
+  const champLink = '<button type="button" class="hm-link" data-nav-tab="history"><span>Champions, records &amp; results</span>' + HM_CHEV + '</button>';
+
+  return `<div class="hm">${lead}${pastSection}${champLink}</div>`;
+}
+
+function publicHomeHTML() {
+  const t = publicLiveTournament();
+  const reg = (state.tournaments || []).find((x) => x.registration_open && x.status === 'setup') || null;
+  const st = publicHomeState({
+    liveTournament: t,
+    regTournament: reg,
+    session: state.currentSession,
+    todayStr: null, // sessionIsUpcoming defaults to local today when todayStr is null
+    hasLiveCourts: getPublicLiveData().liveCount > 0,
   });
-  const liveTile = !state.loaded
-    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">checking&hellip;</div></div>` // no hard-0 flash pre-sync
-    : st.liveTile === 'courts'
-    ? `<div class="ph-tile is-live"><div class="ph-tile-num"><span class="ph-dot"></span>${st.liveCount}</div><div class="ph-tile-lab">${st.liveCount === 1 ? 'court live now' : 'courts live now'}</div></div>`
-    : courtsHTML
-    ? `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">round complete</div></div>`
-    : `<div class="ph-tile is-idle"><div class="ph-tile-num">&mdash;</div><div class="ph-tile-lab">no games yet</div></div>`;
-  const tilesHTML = `<div class="ph-tiles" id="ph-tiles">
-    <div class="ph-tile is-here"><div class="ph-tile-num">${state.loaded ? st.here : '&mdash;'}</div><div class="ph-tile-lab">checked in</div></div>
-    ${liveTile}
-  </div>`;
-  const courtsSection = courtsHTML
-    ? `<div id="ph-courts"><div class="ph-sec">On the courts</div>${courtsHTML}${PUBLIC_COURT_LEGEND}</div>`
-    : '';
-  const regTourney = (state.tournaments || []).find((t) => t.registration_open && t.status === 'setup');
-  const regGateway = regTourney
-    ? `<button type="button" class="pd-claimrow" data-nav-tab="tournament">
-        <span class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 14l2 2 4-4"/></svg></span>
-        <span><span class="pd-t">Registration open</span><span class="pd-s">${escapeHTML(regTourney.name || 'Tournament')} — tap to register your team</span></span>
-        <span class="pd-c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
-      </button>`
-    : '';
-  const sessionCard = (state.currentSession && sessionIsUpcoming(state.currentSession.date))
-    ? `<div class="ph-card ph-sescard">
-        <div class="ph-lab">Next session</div>
-        <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg><b>${escapeHTML(formatSessionDate(state.currentSession.date))}</b></div>
-        <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg><b>${escapeHTML(state.currentSession.time || '')}</b></div>
-        <div class="ph-srow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>${escapeHTML(state.currentSession.location || '')}</div>
-      </div>`
-    : state.loaded
-      ? `<div class="ph-card ph-sescard ph-empty">No session scheduled yet — check back soon.</div>`
-      : `<div class="ph-card ph-sescard ph-empty">Loading…</div>`; // don't flash "No session" pre-sync
-  return `<div class="home-screen">
-    ${regGateway}
-    ${tilesHTML}
-    ${courtsSection}
-    <div class="ph-bottom">
-      ${sessionCard}
-      <button type="button" class="ph-cta ph-cta-compact" data-nav-tab="players"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 11l3 3L20 6"/><path d="M20 12v7H4V5h11"/></svg>Check In</button>
-    </div>
-    <button type="button" class="pd-claimrow" data-nav-tab="history">
-      <span class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
-      <span><span class="pd-t">Past tournaments</span><span class="pd-s">Champions, records &amp; results</span></span>
-      <span class="pd-c"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
-    </button>
-  </div>`;
+  if (st === 'tournament_live') return hmTournamentLiveHTML(t);
+  if (st === 'session_live') return hmSessionLiveHTML(reg);
+  if (st === 'registration') return hmRegistrationHTML(reg);
+  return hmQuietHTML();
 }
 
 function maybeAdvanceLiveCourtsFromResults() {
