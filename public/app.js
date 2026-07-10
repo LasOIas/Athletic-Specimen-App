@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -2529,57 +2529,9 @@ function publicLiveTournament() {
 // live board + Standings/Bracket/History tiles); no tournament -> casual state (headcount + courts + next
 // session + Check In). Read-only except the Check In CTA. Count-only headcount (NEVER names), no skill, no
 // fabricated scores. Updated IN PLACE via a full #tab-home .container rebuild in partialRender (no scroll jump).
-// Shared court legend (Home + Scores) — single source so the two surfaces never drift. No "tonight" (vocab rule).
-const PUBLIC_COURT_LEGEND = '<p class="ph-legend">Teams are numbered &middot; nets are numbered by play order &middot; live games show the winner or running score.</p>';
 // Live-nets collapse caret — an SVG chevron that rotates (CT2: replaces the old up/down triangle text-glyph carets).
 function liveNetsCaretHTML(collapsed) {
   return `<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false" style="vertical-align:-1px;transform:rotate(${collapsed ? 0 : 90}deg);transition:transform .12s ease;"><path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg> ${collapsed ? 'Show' : 'Hide'}`;
-}
-// Slice 3c: the claimed player's "your run" hero body (Mike's LOCKED Option C timeline — done node
-// muted-green, UP NEXT accent + soft ring, then faint). Rendered INSIDE the pd-thero card in place of
-// the claim button. Honest ETA (§27): "~N min" only when computeTeamRunTimeline derived it from real
-// same-net final gaps; else "N games ahead"; nothing when unknown.
-function buildPersonalHeroHTML(mine, rec) {
-  const teams = state.tournamentTeams || [];
-  const matches = state.tournamentMatches || [];
-  const tl = computeTeamRunTimeline(mine.teamId, matches, teams);
-  const team = teams.find((t) => t.id === mine.teamId) || {};
-  const pool = (state.tournamentPools || []).find((p) => p.id === team.pool_id);
-  const metaBits = [pool && pool.label ? ('Pool ' + pool.label) : '', rec ? (rec.wins + '–' + rec.losses) : '']
-    .filter(Boolean).join(' · ');
-  const nodes = [];
-  if (tl.last) {
-    nodes.push(`<div class="pd-tl done${tl.last.won ? '' : ' lost'}"><div class="pd-tlk">${tl.last.won ? 'Won' : 'Lost'} · ${tl.last.myScore}&ndash;${tl.last.oppScore}</div>`
-      + `<div class="pd-tlv">${tl.last.net ? 'Net ' + escapeHTML(String(tl.last.net)) + ' ' : ''}vs ${escapeHTML(tl.last.oppName || '—')}</div></div>`);
-  }
-  if (tl.next) {
-    const eta = tl.next.isNow ? ''
-      : (tl.next.etaMin != null ? ' · ~' + tl.next.etaMin + ' min'
-        : (tl.next.gamesAhead ? ' · ' + tl.next.gamesAhead + (tl.next.gamesAhead === 1 ? ' game ahead' : ' games ahead') : ''));
-    nodes.push(`<div class="pd-tl now"><div class="pd-tlk">${escapeHTML(tl.next.label)}${eta}</div>`
-      + `<div class="pd-tlv">${tl.next.net ? 'Net ' + escapeHTML(String(tl.next.net)) + ' · ' : ''}vs ${escapeHTML(tl.next.oppName || '—')}</div></div>`);
-  }
-  if (tl.then) {
-    nodes.push(`<div class="pd-tl faint"><div class="pd-tlk">Then</div><div class="pd-tlv">vs ${escapeHTML(tl.then.oppName)}</div></div>`);
-  }
-  // Ending micro-state (spec §13.4): eliminated mid-tournament (the bracket is still live — no champion yet)
-  // → ONE quiet terminal node. "Run ended · Nth place" only when the place is structurally certain (else
-  // just "Run ended" — never invent a placing), plus a chip that routes to the Bracket page.
-  const runEnd = computeTeamRunEnded(mine.teamId, matches, teams);
-  const championDecided = !!bracketOutcome(matches.filter((m) => m.phase === 'main'), teams);
-  if (runEnd.ended && !championDecided) {
-    const ord = (n) => { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); };
-    const placeTxt = runEnd.place ? ' · ' + ord(runEnd.place) + ' place' : '';
-    nodes.push(`<div class="pd-tl pd-tl-end"><div class="pd-tlk">Run ended${placeTxt}</div>`
-      + `<div class="pd-tlv"><button type="button" class="pd-bk-chip pd-tl-endchip" data-tn-view="bracket">Watch the bracket`
-      + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></button></div></div>`);
-  }
-  if (!nodes.length) {
-    nodes.push('<div class="pd-tl faint"><div class="pd-tlk">Schedule</div><div class="pd-tlv">Your games appear when the schedule is drawn</div></div>');
-  }
-  return `
-        <div class="pd-hteam">${escapeHTML(mine.teamName)}${metaBits ? ` <span class="pd-hmeta">· ${escapeHTML(metaBits)}</span>` : ''}</div>
-        <div class="pd-timeline"><div class="pd-tlline"></div>${nodes.join('')}</div>`;
 }
 
 // ── atom-up public Home (spec 2026-07-10 §1-§2): ONE state at a time, card-free, NO personalization. ──
