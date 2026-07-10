@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -2548,16 +2548,14 @@ const HM_IC_FORMAT = '<svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><cir
 
 // Shared lead block (no card): eyebrow (status dot + small-caps) → Barlow title → muted meta → optional
 // CTA, with the logo mark filling the open space to the right (Mike's directive). The CTA spans full width.
+// Used by tournament_live / session_live / quiet. Registration owns its own lead (hmRegistrationHTML).
 function hmLeadHTML(o) {
   const eyebrow = `<div class="hm-eyebrow${o.quiet ? ' is-quiet' : ''}"><span class="hm-dot"></span>${escapeHTML(o.eyebrow)}</div>`;
   const title = `<h1>${escapeHTML(o.title)}</h1>`;
   const meta = o.meta ? `<div class="hm-meta">${escapeHTML(o.meta)}</div>` : '';
-  // titleFirst (registration state, Mike 2026-07-10): TITLE at the top, the status eyebrow UNDER it, then
-  // meta — so the tournament name leads. Other states keep eyebrow-first (default). Only eyebrow/title swap.
-  const textCol = o.titleFirst ? `${title}${eyebrow}${meta}` : `${eyebrow}${title}${meta}`;
   return `<div class="hm-lead">
       <div class="hm-leadtext">
-        ${textCol}
+        ${eyebrow}${title}${meta}
       </div>
       ${HM_LOGO}
       ${o.ctaHTML || ''}
@@ -2697,25 +2695,25 @@ function hmRegistrationHTML(reg) {
   const regTeams = (active && active.id === reg.id) ? (state.tournamentTeams || []) : [];
   const rm = registerEventModel(reg, regTeams);
   const meta = [rm.teamSize + 's co-ed', rm.costChip, rm.spotsLead].filter(Boolean).join(' · ');
-  // Title on top, admin-driven reg status UNDER it (Mike 2026-07-10). Status tracks the tournament row's
-  // registration_open flag (via registerEventModel.regOpen): OPEN → green dot + "Registration open" + the
-  // Register CTA; CLOSED/absent → muted eyebrow (.is-quiet) + "Registration closed" + NO CTA. Either way the
-  // upcoming tournament stays visible on Home and the DETAILS rows below render in both variants.
+  // Registration lead (Mike rung-12 pick D, 2026-07-10): TITLE flush at the top; the logo mark is
+  // absolutely sized to the exact height of the title+meta info block (.hm-reginfo reserves its width);
+  // the admin-driven reg status renders as a divider LABEL directly above the CTA — no eyebrow, no dot.
+  // Status tracks the tournament row's registration_open flag (via registerEventModel.regOpen): OPEN →
+  // "Registration open" + Register CTA; CLOSED/absent → muted "Registration closed" divider + NO CTA. The
+  // upcoming tournament stays visible on Home either way and the DETAILS rows below render in both variants.
+  const metaHTML = meta ? `<div class="hm-meta">${escapeHTML(meta)}</div>` : '';
+  const lead = `<div class="hm-reglead">
+      <div class="hm-reginfo"><h1>${escapeHTML(rm.name)}</h1>${metaHTML}</div>
+      <img class="hm-reglogo" src="/logo-mark.png" alt="" aria-hidden="true">
+    </div>`;
+  const status = `<div class="hm-status${rm.regOpen ? '' : ' is-closed'}"><span>${rm.regOpen ? 'Registration open' : 'Registration closed'}</span></div>`;
   const cta = rm.regOpen ? '<button type="button" class="hm-cta" data-tn-view="register">Register your team</button>' : '';
-  const lead = hmLeadHTML({
-    titleFirst: true,
-    quiet: !rm.regOpen,
-    eyebrow: rm.regOpen ? 'Registration open' : 'Registration closed',
-    title: rm.name,
-    meta,
-    ctaHTML: cta,
-  });
 
   const rows = hmDetailRowHTML(HM_IC_PIN, 'posted in GroupMe')
     + hmDetailRowHTML(HM_IC_USERS, rm.teamSize + ' per team, co-ed — at least 1 guy + 1 girl')
     + hmDetailRowHTML(HM_IC_FORMAT, 'Pool play → double-elim bracket — win by 2');
 
-  return `<div class="hm">${lead}<div class="hm-sect">Details</div>${rows}</div>`;
+  return `<div class="hm">${lead}${status}${cta}<div class="hm-sect">Details</div>${rows}</div>`;
 }
 
 // ── State 2d: quiet (nothing on). Muted lead + past tournaments + champions link. History is loaded lazily
