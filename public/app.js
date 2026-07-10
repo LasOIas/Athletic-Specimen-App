@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -5194,6 +5194,14 @@ function buildTournamentHubHTML() {
   const anyFinal = matches.some((m) => m.phase === 'pool' && m.status === 'final');
   const mine = myTeamInfo();
   const myRec = mine ? computeTeamRecord(mine.teamId, matches, teams) : null;
+  // Claim entry relocated from the old Home hero (atom-up spec 2026-07-10 §2 — Home is the everyone
+  // surface, no personalization; the claim/personal layer lives on the Tournament tab). An unclaimed
+  // user (no My Team) with a live tournament to claim into gets the claim tile here, in the My Team
+  // slot (mutually exclusive with My Team). publicLiveTournament() is the same condition the old Home
+  // hero gated on AND the first branch of the claim page's own precondition (claimableTournament(),
+  // app.js ~8254) — so the entry is never dead. Same #pd-claim id → the delegated #app-content click
+  // handler (app.js ~10400) binds it unchanged; the hub renders inside #app-content.
+  const canClaim = !mine && !!publicLiveTournament();
   const tile = (attrs, svg, title, sub) => `<button type="button" class="pd-tile" ${attrs}>
       <span class="pd-ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svg}</svg></span>
       <span class="pd-tt">${escapeHTML(title)}</span><span class="pd-ts">${escapeHTML(sub)}</span></button>`;
@@ -5205,7 +5213,8 @@ function buildTournamentHubHTML() {
     show ? tile('data-tn-view="bracket"', '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/>', 'Bracket',
       show.status === 'bracket' ? 'In progress' : show.status === 'completed' ? 'Final' : 'After pools') : '',
     mine ? tile('data-nav-tab="myteam"', '<circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>', 'My Team',
-      (myRec ? myRec.wins + '–' + myRec.losses + ' · ' : '') + 'Your games') : '',
+      (myRec ? myRec.wins + '–' + myRec.losses + ' · ' : '') + 'Your games')
+      : (canClaim ? tile('id="pd-claim"', '<path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/>', 'Claim your team', 'Playing? Find your name') : ''),
     tile('data-nav-tab="history"', '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/>', 'Past tournaments', 'Champions & records'),
   ].filter(Boolean).join('');
   return `${header}<div class="pd-tiles">${tiles}</div>`;
