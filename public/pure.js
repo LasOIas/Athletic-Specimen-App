@@ -1338,6 +1338,85 @@ function sessionIsUpcoming(dateStr, todayStr) {
   return d >= today; // zero-padded ISO date parts compare correctly as strings
 }
 
+// ── Public Home state machine + view-models (atom-up spec 2026-07-10 §2) ──
+// PURE: no state access, no DOM, no Date.now(); todayStr comes in as a parameter.
+// Consume the TOURNAMENT match-row shape (verified vs buildPublicTournamentLiveHTML /
+// computeStandings): team_a_id/team_b_id, score_a/score_b, net, status
+// ('scheduled'|'live'|'final'), queue_order. Casual courts (getPublicLiveData) carry a
+// different shape (team NUMBERS, no scores, win/loss only) and are rendered from their
+// own builder in the caller — these score-carrying models do not apply to them.
+
+// Exclusive with precedence: tournament_live > session_live > registration > quiet.
+// hasLiveCourts is accepted for symmetry with the render caller but deliberately does
+// NOT make a stale session live — the date gate (sessionIsUpcoming) is the truth source,
+// so live-court data left over from a past session is ignored (the June-28 prod bug).
+function publicHomeState(o) {
+  o = o || {};
+  if (o.liveTournament) return 'tournament_live';
+  var sessionToday = !!(o.session && o.session.date && sessionIsUpcoming(o.session.date, o.todayStr));
+  if (sessionToday) return 'session_live';
+  if (o.regTournament) return 'registration';
+  return 'quiet';
+}
+
+// Live tournament games shaped one-block-per-net for the Home "LIVE NOW" board.
+// Only genuinely live-scored games (status 'live') carry a running score, so those are
+// the ones shown. First live game wins per net; blocks sorted by net ascending.
+function homeNetBlocksModel(matches, teams, labelPrefix) {
+  var nameOf = function (id) {
+    var t = (teams || []).find(function (x) { return x && x.id === id; });
+    return (t && t.name) || '';
+  };
+  var seen = {};
+  var live = (matches || []).filter(function (m) {
+    if (!m || m.status !== 'live' || m.net == null) return false;
+    if (seen[m.net]) return false;
+    seen[m.net] = true;
+    return true;
+  });
+  live.sort(function (a, b) { return a.net - b.net; });
+  return live.map(function (m) {
+    return {
+      label: labelPrefix + ' ' + m.net,
+      a: { name: nameOf(m.team_a_id), score: Number(m.score_a) || 0 },
+      b: { name: nameOf(m.team_b_id), score: Number(m.score_b) || 0 },
+      status: 'playing',
+    };
+  });
+}
+
+// The next queued game per net for the Home "COMING UP" list: scheduled (neither live
+// nor final) with both teams known, earliest by queue_order. Only nets that actually
+// have a queued game appear; rows sorted by net ascending.
+function homeComingUpModel(matches, teams, labelPrefix) {
+  var nameOf = function (id) {
+    var t = (teams || []).find(function (x) { return x && x.id === id; });
+    return (t && t.name) || '';
+  };
+  var byNet = {};
+  (matches || []).forEach(function (m) {
+    if (!m || m.net == null || m.status === 'live' || m.status === 'final') return;
+    if (!m.team_a_id || !m.team_b_id) return;
+    var cur = byNet[m.net];
+    if (!cur || (Number(m.queue_order) || 0) < (Number(cur.queue_order) || 0)) byNet[m.net] = m;
+  });
+  return Object.keys(byNet)
+    .map(function (k) { return byNet[k]; })
+    .sort(function (a, b) { return a.net - b.net; })
+    .map(function (m) {
+      return { label: labelPrefix + ' ' + m.net, text: nameOf(m.team_a_id) + ' vs ' + nameOf(m.team_b_id) };
+    });
+}
+
+// Top-n standings rows shaped for the Home "STANDINGS · TOP 3" list. Consumes
+// computeStandings() output (name/wins/losses, already rank-sorted); rank is the list
+// position so the model stays faithful whether or not a rank field is present.
+function homeTopStandingsModel(standings, n) {
+  return (standings || []).slice(0, n).map(function (r, i) {
+    return { rank: i + 1, name: (r && r.name) || '', record: ((r && r.wins) || 0) + '-' + ((r && r.losses) || 0) };
+  });
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -1359,6 +1438,7 @@ if (typeof module !== "undefined" && module.exports) {
     teamPeekModel, checkinHeroModel,
     bracketOutcome, bracketRoundLabel, bracketStatusLine,
     registerEventModel, joinSheetValidate,
-    computeTeamRunEnded, sessionIsUpcoming
+    computeTeamRunEnded, sessionIsUpcoming,
+    publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel
   };
 }
