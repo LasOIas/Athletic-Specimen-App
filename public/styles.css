@@ -3626,6 +3626,17 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
   /* ---- Registration event card: centred (the hero sells before it asks — not a full-width band) ---- */
   body.pd-public-active #tab-tournament > .container:has(> .pd-reg-card) > * { max-width: 600px; margin-left: auto; margin-right: auto; }
   /* (Bracket keeps its full-width tree + champions strip from the widened container; pan stays available.) */
+
+  /* ---- atom-up Home (2026-07-10 spec §3): rail + board at >=1024, CSS-only ----
+     Mobile (<1024) is byte-identical — the flatten rules live in @media (max-width:1023px)
+     and the .hm-rail/.hm-board base layer is untouched block flow. */
+  body.pd-public-active #tab-home .hm{ max-width: 1140px; margin: 0 auto; }
+  body.pd-public-active #tab-home .hm.is-live{ display: grid; grid-template-columns: 360px 1fr; column-gap: 40px; align-items: start; }
+  /* rail = lead + coming-up + standings + link; board = LIVE NOW section */
+  body.pd-public-active #tab-home .hm.is-live .hm-rail{ grid-column: 1; }
+  body.pd-public-active #tab-home .hm.is-live .hm-board{ grid-column: 2; display: block; }
+  body.pd-public-active #tab-home .hm.is-live .hm-board .hm-netgrid{ display: grid; grid-template-columns: 1fr 1fr; column-gap: 32px; }
+  body.pd-public-active #tab-home .hm:not(.is-live){ max-width: 640px; }
 }
 
 /* pnav — floating full-width rounded public nav (atom-up rung 5, pick H1).
