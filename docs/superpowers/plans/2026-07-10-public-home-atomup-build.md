@@ -81,20 +81,22 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 
 - [ ] **Step 5: Simplify the header.** In `buildPublicHeaderHTML()` (`public/app.js:8472-8486`) delete the sport-pill span (`pd-sportpill`) so the header is wordmark + `#pd-account` only. Grep-gate: `grep -n "pd-sportpill" public/app.js public/styles.css` → CSS rule may remain for now (removed in Task 6); JS emits none.
 
-- [ ] **Step 6: Floating rounded nav (mobile, public only).** Append to styles.css:
+- [x] **Step 6: Floating rounded nav (mobile, public only).** AS BUILT in commit `180b48c` (the original left/right/bottom rule was a no-op — `#bottom-nav` is a static in-flow flex child of `#app-shell` — and unscoped it clobbered the ≥1024 top strip). The committed rule (styles.css ~3631, mobile-scoped, safe-area relocated into the margin calc, content clearance automatic because the bar stays in flow):
 
 ```css
-/* pnav — floating full-width rounded public nav (atom-up rung 5, pick H1) */
-body.pd-public-active #bottom-nav{
-  left: 12px; right: 12px; bottom: 12px; width: auto;
-  border-radius: 18px; border: 1px solid var(--border);
-  background: oklch(1 0 0 / .82);
-  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-  box-shadow: 0 4px 14px oklch(0.18 0.005 75 / .10);
+@media (max-width: 1023px){
+  body.pd-public-active #bottom-nav{
+    margin: 0 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    width: auto; border-radius: 18px; border: 1px solid var(--border);
+    background: oklch(1 0 0 / .82);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    box-shadow: 0 4px 14px oklch(0.18 0.005 75 / .10);
+    padding-bottom: 0;
+  }
 }
 ```
 
-Verify the existing safe-area / `env()` padding on `#bottom-nav` still applies (do not remove any `env(safe-area-inset-bottom)` handling; the 12px offset ADDS to it). Tab panels need matching bottom padding so content clears the floating bar: check the existing `#app-content` / `.tab-panel` bottom spacing and increase by 12px for `body.pd-public-active` if content is cut.
+Task 4 note: the ≥1024 media block (top tab strip, styles.css:3544-3629) is untouched by this rule.
 
 - [ ] **Step 7: Verify + ship.** `node --check public/app.js`; `cd test && npx vitest run` (green); browser pass at 390px AND 1280px on localhost: all PUBLIC pages (Home, Check In, Tournament hub, Standings, Bracket, History) render with new nav/watermark/fonts, zero console errors — this task intentionally re-chromes every public page. Bump `APP_VERSION` to today's next N. Commit:
 
