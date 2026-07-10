@@ -52,14 +52,22 @@ right, fill it").
 4. `STANDINGS · TOP 3` — rank, name, W-L record (Barlow numerals).
 5. `Full standings & schedule ›` link row → Tournament tab.
 
-### 2b. Registration open
-1. Lead: eyebrow `● REGISTRATION OPEN` · title · meta `4s co-ed · $80 a team · N teams in`
-   (real count, singular/plural correct) · CTA **Register your team** (full-width,
-   accent) · logo right.
-2. `DETAILS` — icon rows (SVG): date + time · location (posted in GroupMe) ·
+### 2b. Registration / upcoming tournament (AS BUILT — Mike's live iteration 2026-07-10, v2026.07.10.8→.11)
+1. Lead (`.hm-regwrap`, one relative cluster): **title flush at the top** (no eyebrow above
+   it, no gap under the header) → meta `4s co-ed · $80 a team` (**no spots/teams-in copy on
+   Home, ever** — Mike: "that should never show"; the register event card keeps its spots
+   line) → **divider-label status** snug under the meta (`.hm-status`: Barlow caps between
+   hairlines — `REGISTRATION OPEN`, or muted `REGISTRATION CLOSED` with NO CTA) → CTA
+   **Register your team** whose width ends at the SAME right boundary as the status
+   hairline (118px reserve) → the **logo, absolutely positioned right, spans the full
+   cluster height** (title top → CTA bottom; tracks the wrapper, max-width 118px).
+2. The status is driven by the admin's actual `registration_open` flag, and a created
+   (`status='setup'`) tournament ALWAYS shows here — open or closed (closed = muted
+   divider, no button). No green dot anywhere in this lead.
+3. `DETAILS` — icon rows (SVG): date + time · location (posted in GroupMe) ·
    `4 per team, co-ed — at least 1 guy + 1 girl` · `Pool play → double-elim bracket — win by 2`.
    Values bind to the tournament row; omit a row when the field is empty.
-3. Nothing else. (Mike rejected who's-in, past-tournaments, and bare variants.)
+4. Nothing else. (Mike rejected who's-in, past-tournaments, and bare variants.)
 
 ### 2c. Casual session day
 1. Lead: eyebrow `● SESSION LIVE` · title = session name (e.g. `Sunday Pick-up`) ·
