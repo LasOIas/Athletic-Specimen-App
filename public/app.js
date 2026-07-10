@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.09.13'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -8466,8 +8466,8 @@ function buildPublicNavInnerHTML() {
     </button>`;
 }
 
-// Public header (dashboard remake, Slice 1): brand + inert sport-switcher pill + spectator account icon.
-// The sport pill and account action are placeholders this slice — SportPack + Supabase Auth are later tracks.
+// Public header (atom-up 2026-07-10, spec §1): wordmark + spectator account icon only. Sport-pill removed.
+// The account action is a placeholder — Supabase Auth is a later track.
 // The sync notice stays in the shell (partialRender depends on #js-sync-notice).
 function buildPublicHeaderHTML() {
   return `
@@ -8476,7 +8476,6 @@ function buildPublicHeaderHTML() {
       <div class="pd-wm-2">COLORADO</div>
     </div>
     <div class="pd-hgrp">
-      <span class="pd-sportpill" role="img" aria-label="Sport: Volleyball">Volleyball</span>
       ${state.authSession
         ? `<button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">${escapeHTML(authInitial())}</button>`
         : `<button type="button" class="pd-avic" id="pd-account" aria-label="Sign in">
@@ -8689,7 +8688,6 @@ function renderPublicShell() {
   return `
 <div id="app-shell">
   <img class="pd-watermark" src="/logo-mark.png" alt="" aria-hidden="true" />
-  <div class="pd-scrim" aria-hidden="true"></div>
   <header id="app-header" class="pd-header">
     <span class="app-header-mode">PUBLIC</span>
     ${buildPublicHeaderHTML()}

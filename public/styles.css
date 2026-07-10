@@ -23,6 +23,8 @@
   --gold-soft:   oklch(0.92 0.06 85);
   --gold-bd:     oklch(0.82 0.07 85);
   --gold-ink:    oklch(0.46 0.06 78);      /* gold text on gold-soft — champions strip / Completed pill / champ game (Slice 2) */
+  --font-display: 'Barlow Semi Condensed', 'Inter', sans-serif;  /* public display face (atom-up 2026-07-10) */
+  --wm-opacity: .07;                                             /* tamed watermark strength */
   --shadow:      0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
 
   /* legacy aliases — re-pointed to direction-A so existing components reskin coherently */
@@ -3021,34 +3023,23 @@ body.pd-public-active .pd-card { background: oklch(0.98 0.004 75 / 0.30); -webki
 .ad-brand { display: inline-flex; align-items: center; }
 .ad-brand-grp { margin-left: 8px; font-weight: 600; font-size: 13px; color: var(--muted); }
 /* Mike's pick (2026-07-08): full-bleed logo behind a soft gradient scrim + text wordmark header */
-.pd-watermark {
-  position: fixed;
-  display: none;
-  /* Mike (2026-07-09): moved DOWN — the old top:-3% hid the top of the cross under the opaque header */
-  left: 50%; top: calc(env(safe-area-inset-top, 0px) + 92px);
-  transform: translateX(-50%);
-  height: 74vh; width: auto;
-  opacity: 0.72;
-  z-index: -2;
-  pointer-events: none;
-  -webkit-user-select: none; user-select: none;
+/* Tamed watermark (atom-up 2026-07-10, spec §1): grayscale, ~7%, centered, z-index below all
+   content, pointer-events:none — can never collide with text again. Scrim retired on public pages. */
+.pd-watermark{
+  display: none; position: fixed; z-index: 0; pointer-events: none;
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(340px, 80vw); height: auto;
+  opacity: var(--wm-opacity); filter: grayscale(1);
 }
-.pd-scrim {
-  position: fixed; inset: 0; z-index: -1; pointer-events: none;
-  display: none;
-  background: linear-gradient(180deg,
-    oklch(0.95 0.004 75 / 0.55) 0%,
-    oklch(0.95 0.004 75 / 0.22) 9%,
-    oklch(0.95 0.004 75 / 0.08) 22%,
-    oklch(0.95 0.004 75 / 0.08) 100%);
-}
-/* Mike (2026-07-09): the logo backdrop shows on EVERY public page (body.pd-public-active, toggled in
-   activateMainTab; admin stays clean). Readability comes from the frosted cards + bolder outlines below. */
-body.pd-public-active .pd-watermark { display: block; }
-body.pd-public-active .pd-scrim { display: block; }
+body.pd-public-active .pd-watermark{ display: block; }
 .pd-wordmark { display: flex; flex-direction: column; gap: 2px; }
 .pd-wm-1 { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15px; letter-spacing: .13em; color: var(--ink); line-height: 1; }
 .pd-wm-2 { font-weight: 600; font-size: 9px; letter-spacing: .30em; color: var(--faint); line-height: 1; }
+/* Public display face (atom-up 2026-07-10, spec §1): Barlow Semi Condensed on the public surface only.
+   Admin keeps Sora via the base rule above. */
+body.pd-public-active h1, body.pd-public-active h2, body.pd-public-active h3,
+body.pd-public-active .pd-wordmark, body.pd-public-active .score,
+body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .pd-hgrp { display: flex; align-items: center; gap: 9px; }
 /* public dashboard header layout — id-qualified so it beats the base #app-header + its @media centering */
 #app-header.pd-header { justify-content: space-between; flex-wrap: wrap; row-gap: 3px; }
@@ -3635,4 +3626,19 @@ body.pd-public-active .pd-scrim { display: block; }
   /* ---- Registration event card: centred (the hero sells before it asks — not a full-width band) ---- */
   body.pd-public-active #tab-tournament > .container:has(> .pd-reg-card) > * { max-width: 600px; margin-left: auto; margin-right: auto; }
   /* (Bracket keeps its full-width tree + champions strip from the widened container; pan stays available.) */
+}
+
+/* pnav — floating full-width rounded public nav (atom-up rung 5, pick H1).
+   Mobile-only: #bottom-nav is a static in-flow flex child of #app-shell, so the float is done with
+   margin (content clearance stays automatic); the base rule's env(safe-area-inset-bottom) padding
+   relocates into the bottom margin calc. The >=1024 top tab strip (media block above) is untouched. */
+@media (max-width: 1023px){
+  body.pd-public-active #bottom-nav{
+    margin: 0 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    width: auto; border-radius: 18px; border: 1px solid var(--border);
+    background: oklch(1 0 0 / .82);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    box-shadow: 0 4px 14px oklch(0.18 0.005 75 / .10);
+    padding-bottom: 0;
+  }
 }
