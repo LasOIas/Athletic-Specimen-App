@@ -33,6 +33,15 @@ describe('publicHomeState — exclusive with precedence (spec §2)', () => {
   it('registration when nothing is live', () => {
     expect(publicHomeState({ ...base, regTournament: { id: 2 } })).toBe('registration');
   });
+  it('an upcoming setup tournament shows on Home even when registration is CLOSED (Mike 2026-07-10)', () => {
+    // Home widened its reg lookup to any status:'setup' row; publicHomeState only checks regTournament
+    // truthiness, so a closed-registration upcoming tournament still resolves to 'registration' (visible on
+    // Home). The lead's open/closed eyebrow copy ("Registration open" vs "Registration closed") + the CTA
+    // gating live in the DOM builder hmRegistrationHTML, driven by registerEventModel.regOpen — that pure
+    // open/closed/live contract is locked in registration.test.js.
+    expect(publicHomeState({ ...base, regTournament: { id: 2, status: 'setup', registration_open: false } })).toBe('registration');
+    expect(publicHomeState({ ...base, regTournament: { id: 2, status: 'setup', registration_open: true } })).toBe('registration');
+  });
   it('quiet when nothing at all', () => { expect(publicHomeState(base)).toBe('quiet'); });
   it('a session with no/blank date does not force session_live', () => {
     expect(publicHomeState({ ...base, session: { date: '' } })).toBe('quiet');

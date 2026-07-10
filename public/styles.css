@@ -3540,7 +3540,7 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .hm-eyebrow.is-quiet{ color: var(--muted); } .hm-eyebrow.is-quiet .hm-dot{ background: var(--faint); }
 .hm-lead h1{ font-family: var(--font-display); font-size: 27px; font-weight: 700; margin: 8px 0 4px; }
 .hm-meta{ font-size: 13px; color: var(--muted); }
-.hm-logo{ height: 96px; justify-self: end; }
+.hm-logo{ height: 148px; max-height: 148px; width: auto; align-self: center; justify-self: end; object-fit: contain; object-position: right center; }
 .hm-cta{ grid-column: 1 / -1; margin-top: 14px; width: 100%; padding: 13px 0; background: var(--accent); color: #fff; border: none; border-radius: 11px; font: 600 15px 'Inter', sans-serif; }
 .hm-sect{ font-size: 11px; font-weight: 700; letter-spacing: .12em; color: var(--muted); text-transform: uppercase; margin: 20px 2px 8px; }
 .hm-nethead{ display: flex; align-items: center; gap: 10px; font: 700 12.5px var(--font-display); letter-spacing: .12em; color: var(--ink); }

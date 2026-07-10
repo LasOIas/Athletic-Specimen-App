@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -2549,11 +2549,15 @@ const HM_IC_FORMAT = '<svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><cir
 // Shared lead block (no card): eyebrow (status dot + small-caps) → Barlow title → muted meta → optional
 // CTA, with the logo mark filling the open space to the right (Mike's directive). The CTA spans full width.
 function hmLeadHTML(o) {
+  const eyebrow = `<div class="hm-eyebrow${o.quiet ? ' is-quiet' : ''}"><span class="hm-dot"></span>${escapeHTML(o.eyebrow)}</div>`;
+  const title = `<h1>${escapeHTML(o.title)}</h1>`;
+  const meta = o.meta ? `<div class="hm-meta">${escapeHTML(o.meta)}</div>` : '';
+  // titleFirst (registration state, Mike 2026-07-10): TITLE at the top, the status eyebrow UNDER it, then
+  // meta — so the tournament name leads. Other states keep eyebrow-first (default). Only eyebrow/title swap.
+  const textCol = o.titleFirst ? `${title}${eyebrow}${meta}` : `${eyebrow}${title}${meta}`;
   return `<div class="hm-lead">
       <div class="hm-leadtext">
-        <div class="hm-eyebrow${o.quiet ? ' is-quiet' : ''}"><span class="hm-dot"></span>${escapeHTML(o.eyebrow)}</div>
-        <h1>${escapeHTML(o.title)}</h1>
-        ${o.meta ? `<div class="hm-meta">${escapeHTML(o.meta)}</div>` : ''}
+        ${textCol}
       </div>
       ${HM_LOGO}
       ${o.ctaHTML || ''}
@@ -2676,7 +2680,8 @@ function hmSessionLiveHTML(reg) {
 
   const courts = hmCasualCourtsHTML();
   const courtsSection = courts ? `<div class="hm-sect">On the courts</div>${courts}` : '';
-  const regLink = reg
+  // Cross-state link only when registration is ACTUALLY open — reg can now be a CLOSED upcoming tournament.
+  const regLink = (reg && reg.registration_open)
     ? `<button type="button" class="hm-link" data-tn-view="register"><span>Registration open — ${escapeHTML(reg.name || 'Tournament')}</span>${HM_CHEV}</button>`
     : '';
 
@@ -2692,8 +2697,19 @@ function hmRegistrationHTML(reg) {
   const regTeams = (active && active.id === reg.id) ? (state.tournamentTeams || []) : [];
   const rm = registerEventModel(reg, regTeams);
   const meta = [rm.teamSize + 's co-ed', rm.costChip, rm.spotsLead].filter(Boolean).join(' · ');
-  const cta = '<button type="button" class="hm-cta" data-tn-view="register">Register your team</button>';
-  const lead = hmLeadHTML({ eyebrow: 'Registration open', title: rm.name, meta, ctaHTML: cta });
+  // Title on top, admin-driven reg status UNDER it (Mike 2026-07-10). Status tracks the tournament row's
+  // registration_open flag (via registerEventModel.regOpen): OPEN → green dot + "Registration open" + the
+  // Register CTA; CLOSED/absent → muted eyebrow (.is-quiet) + "Registration closed" + NO CTA. Either way the
+  // upcoming tournament stays visible on Home and the DETAILS rows below render in both variants.
+  const cta = rm.regOpen ? '<button type="button" class="hm-cta" data-tn-view="register">Register your team</button>' : '';
+  const lead = hmLeadHTML({
+    titleFirst: true,
+    quiet: !rm.regOpen,
+    eyebrow: rm.regOpen ? 'Registration open' : 'Registration closed',
+    title: rm.name,
+    meta,
+    ctaHTML: cta,
+  });
 
   const rows = hmDetailRowHTML(HM_IC_PIN, 'posted in GroupMe')
     + hmDetailRowHTML(HM_IC_USERS, rm.teamSize + ' per team, co-ed — at least 1 guy + 1 girl')
@@ -2733,7 +2749,10 @@ function hmQuietHTML() {
 
 function publicHomeHTML() {
   const t = publicLiveTournament();
-  const reg = (state.tournaments || []).find((x) => x.registration_open && x.status === 'setup') || null;
+  // An upcoming (setup) tournament shows on Home even when registration is CLOSED (Mike 2026-07-10) — widened
+  // from `registration_open && setup`. Prefer a registration-open setup row when several exist.
+  const setups = (state.tournaments || []).filter((x) => x.status === 'setup');
+  const reg = setups.find((x) => x.registration_open) || setups[0] || null;
   const st = publicHomeState({
     liveTournament: t,
     regTournament: reg,
