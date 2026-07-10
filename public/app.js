@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.9'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -2695,25 +2695,28 @@ function hmRegistrationHTML(reg) {
   const regTeams = (active && active.id === reg.id) ? (state.tournamentTeams || []) : [];
   const rm = registerEventModel(reg, regTeams);
   const meta = [rm.teamSize + 's co-ed', rm.costChip, rm.spotsLead].filter(Boolean).join(' · ');
-  // Registration lead (Mike rung-12 pick D, 2026-07-10): TITLE flush at the top; the logo mark is
-  // absolutely sized to the exact height of the title+meta info block (.hm-reginfo reserves its width);
-  // the admin-driven reg status renders as a divider LABEL directly above the CTA — no eyebrow, no dot.
-  // Status tracks the tournament row's registration_open flag (via registerEventModel.regOpen): OPEN →
-  // "Registration open" + Register CTA; CLOSED/absent → muted "Registration closed" divider + NO CTA. The
-  // upcoming tournament stays visible on Home either way and the DETAILS rows below render in both variants.
+  // Registration cluster (Mike rung-12 pick D + v9 logo sizing, 2026-07-10): TITLE flush at the top; the
+  // logo mark is absolutely sized to the FULL cluster height — title + meta + status divider (.hm-regwrap
+  // is the relative wrapper; both text elements reserve the logo's width) — so it ends right above the
+  // Register CTA, which stays OUTSIDE the wrapper. The admin-driven reg status renders as a divider LABEL
+  // inside the cluster — no eyebrow, no dot. Status tracks the tournament row's registration_open flag
+  // (via registerEventModel.regOpen): OPEN → "Registration open" + Register CTA; CLOSED/absent → muted
+  // "Registration closed" divider + NO CTA (the wrapper still ends at the divider — identical geometry).
+  // The upcoming tournament stays visible on Home either way; the DETAILS rows render in both variants.
   const metaHTML = meta ? `<div class="hm-meta">${escapeHTML(meta)}</div>` : '';
-  const lead = `<div class="hm-reglead">
+  const status = `<div class="hm-status${rm.regOpen ? '' : ' is-closed'}"><span>${rm.regOpen ? 'Registration open' : 'Registration closed'}</span></div>`;
+  const cluster = `<div class="hm-regwrap">
       <div class="hm-reginfo"><h1>${escapeHTML(rm.name)}</h1>${metaHTML}</div>
+      ${status}
       <img class="hm-reglogo" src="/logo-mark.png" alt="" aria-hidden="true">
     </div>`;
-  const status = `<div class="hm-status${rm.regOpen ? '' : ' is-closed'}"><span>${rm.regOpen ? 'Registration open' : 'Registration closed'}</span></div>`;
   const cta = rm.regOpen ? '<button type="button" class="hm-cta" data-tn-view="register">Register your team</button>' : '';
 
   const rows = hmDetailRowHTML(HM_IC_PIN, 'posted in GroupMe')
     + hmDetailRowHTML(HM_IC_USERS, rm.teamSize + ' per team, co-ed — at least 1 guy + 1 girl')
     + hmDetailRowHTML(HM_IC_FORMAT, 'Pool play → double-elim bracket — win by 2');
 
-  return `<div class="hm">${lead}${status}${cta}<div class="hm-sect">Details</div>${rows}</div>`;
+  return `<div class="hm">${cluster}${cta}<div class="hm-sect">Details</div>${rows}</div>`;
 }
 
 // ── State 2d: quiet (nothing on). Muted lead + past tournaments + champions link. History is loaded lazily

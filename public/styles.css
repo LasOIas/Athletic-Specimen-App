@@ -3542,15 +3542,18 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .hm-meta{ font-size: 13px; color: var(--muted); }
 .hm-logo{ height: 148px; max-height: 148px; width: auto; align-self: center; justify-self: end; object-fit: contain; object-position: right center; }
 .hm-cta{ grid-column: 1 / -1; margin-top: 14px; width: 100%; padding: 13px 0; background: var(--accent); color: #fff; border: none; border-radius: 11px; font: 600 15px 'Inter', sans-serif; }
-/* Registration lead (Mike rung-12 pick D, 2026-07-10): title flush at top, the logo mark absolutely
-   sized to the EXACT height of the title+meta info block, and the reg status rendered as a divider LABEL
-   above the CTA (not an eyebrow under the title). Reg-only — other states keep the shared .hm-lead grammar. */
-.hm-reglead{ position: relative; padding: 2px 2px 0; }
-.hm-reglead .hm-reginfo{ padding-right: 76px; }
-.hm-reglead h1{ font-family: var(--font-display); font-size: 27px; font-weight: 700; line-height: 1.05; margin: 0; }
-.hm-reglead .hm-meta{ margin-top: 5px; }
-.hm-reglead .hm-reglogo{ position: absolute; right: 0; top: 0; height: 100%; width: auto; object-fit: contain; object-position: right top; }
-.hm-status{ display: flex; align-items: center; gap: 12px; margin-top: 18px; }
+/* Registration cluster (Mike rung-12 pick D + v9 logo sizing, 2026-07-10): title flush at top; the logo
+   mark absolutely sized to the FULL cluster height — title + meta + status divider (.hm-regwrap wraps all
+   three) — ending right above the Register CTA, which sits OUTSIDE the wrapper. Both text elements reserve
+   the logo's width (padding-right: 92px — the divider's right hairline stops before the logo because the
+   ::after flex item lays out inside the padded content box). The reg status is a divider LABEL, not an
+   eyebrow under the title. Reg-only — other states keep the shared .hm-lead grammar. */
+.hm-regwrap{ position: relative; padding: 2px 2px 0; }
+.hm-regwrap .hm-reginfo{ padding-right: 92px; }
+.hm-regwrap h1{ font-family: var(--font-display); font-size: 27px; font-weight: 700; line-height: 1.05; margin: 0; }
+.hm-regwrap .hm-meta{ margin-top: 5px; }
+.hm-regwrap .hm-reglogo{ position: absolute; right: 0; top: 0; height: 100%; width: auto; object-fit: contain; object-position: right top; }
+.hm-status{ display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-right: 92px; }
 .hm-status::before, .hm-status::after{ content: ''; flex: 1; height: 1px; background: oklch(0.88 0.005 75); }
 .hm-status span{ font: 700 13px var(--font-display); letter-spacing: .16em; text-transform: uppercase; color: oklch(0.42 0.006 75); }
 .hm-status.is-closed span{ color: oklch(0.55 0.005 75); }
