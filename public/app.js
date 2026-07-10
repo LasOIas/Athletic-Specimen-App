@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.11'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.12'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -2765,7 +2765,7 @@ function publicHomeHTML() {
     liveTournament: t,
     regTournament: reg,
     session: state.currentSession,
-    todayStr: null, // sessionIsUpcoming defaults to local today when todayStr is null
+    todayStr: null, // sessionIsToday (day-of gate) defaults to local today when todayStr is null
     hasLiveCourts: getPublicLiveData().liveCount > 0,
   });
   if (st === 'tournament_live') return hmTournamentLiveHTML(t);
@@ -4095,6 +4095,15 @@ async function maybeAutoGenerateBracket() {
 // (a focused input/select in the tab would be clobbered).
 function tournamentNavVisible() {
   return state.isAdmin || (state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status));
+}
+
+// Check In rework (Mike 2026-07-10): the PUBLIC Check In nav tab exists ONLY on the day of the
+// scheduled pickup session ("it should not show unless an admin creates a pickup day" — and only
+// day-of, not for future days). Same day-of gate (sessionIsToday, pure.js) as Home's session_live
+// state, so the nav tab and the Home Check-in CTA always agree. Admin surface is unaffected
+// (its nav is built separately).
+function checkinNavVisible() {
+  return !!(state.currentSession && state.currentSession.date && sessionIsToday(state.currentSession.date));
 }
 
 async function refreshTournamentLive() {
@@ -7983,7 +7992,9 @@ function adminLoginHTML() {
 // All behavior (check in / check out toggle / register) routes through the SAME existing paths/RPCs
 // wired in attachHandlers (check_in / check_out / register_player) — no new DB. The big name buttons
 // render into #checkin-results via a targeted DOM update (renderCheckinResults), never full-render
-// on keystroke. The "Admin" corner link reveals the existing adminLoginHTML() form (handler intact).
+// on keystroke. Check In rework (Mike 2026-07-10): the "Admin" corner link moved off this page — the
+// adminLoginHTML() form now lives behind the sign-in page's quiet "Admin sign-in" link (renderAuthPageInner);
+// the standalone checkin.html kiosk keeps its own copy.
 function renderCheckinButton(row) {
   const inClass = row.checkedIn ? ' is-in' : '';
   const stateLabel = row.checkedIn ? 'Checked in · tap to undo' : ''; // C60: signal the tap undoes the check-in
@@ -8198,23 +8209,30 @@ function renderAuthPageInner() {
   const el = document.getElementById('auth-page');
   if (!el) return;
   const signup = authMode === 'signup';
+  // Check In rework (Mike 2026-07-10): .auth-inner is a wrapper DIV now (was the form itself) so the
+  // quiet "Admin sign-in" link + the adminLoginHTML() code form can sit UNDER the sign-in form without
+  // nesting <form> inside <form> (invalid HTML — the browser drops the inner form and its submit).
   el.innerHTML = `
     <button type="button" class="auth-back" id="auth-back" aria-label="Close sign in">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>
     </button>
-    <form class="auth-inner" id="auth-form" novalidate autocomplete="on">
-      <img class="auth-logo" src="logo-mark.png" alt="Athletic Specimen" />
-      <div class="auth-wm"><div class="auth-wm-1">ATHLETIC SPECIMEN</div><div class="auth-wm-2">COLORADO</div></div>
-      <h2 class="auth-title">${signup ? 'Create account' : 'Welcome'}</h2>
-      <p class="auth-sub">Sign in to claim your team and follow your games.</p>
-      <label class="auth-label" for="auth-email">Email</label>
-      <input class="auth-input" id="auth-email" type="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="you@email.com" />
-      <label class="auth-label" for="auth-pass">Password</label>
-      <input class="auth-input" id="auth-pass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="${signup ? 'At least 6 characters' : 'Your password'}" />
-      <div class="auth-err" id="auth-err" role="alert" hidden></div>
-      <button type="submit" class="auth-submit" id="auth-submit">${signup ? 'Create account' : 'Sign in'}</button>
-      <button type="button" class="auth-alt" id="auth-alt">${signup ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>
-    </form>`;
+    <div class="auth-inner">
+      <form id="auth-form" novalidate autocomplete="on">
+        <img class="auth-logo" src="logo-mark.png" alt="Athletic Specimen" />
+        <div class="auth-wm"><div class="auth-wm-1">ATHLETIC SPECIMEN</div><div class="auth-wm-2">COLORADO</div></div>
+        <h2 class="auth-title">${signup ? 'Create account' : 'Welcome'}</h2>
+        <p class="auth-sub">Sign in to claim your team and follow your games.</p>
+        <label class="auth-label" for="auth-email">Email</label>
+        <input class="auth-input" id="auth-email" type="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="you@email.com" />
+        <label class="auth-label" for="auth-pass">Password</label>
+        <input class="auth-input" id="auth-pass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="${signup ? 'At least 6 characters' : 'Your password'}" />
+        <div class="auth-err" id="auth-err" role="alert" hidden></div>
+        <button type="submit" class="auth-submit" id="auth-submit">${signup ? 'Create account' : 'Sign in'}</button>
+        <button type="button" class="auth-alt" id="auth-alt">${signup ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>
+      </form>
+      <button type="button" class="auth-admin" id="auth-admin">Admin sign-in</button>
+      <div class="auth-adminpanel" id="auth-adminpanel" hidden>${adminLoginHTML()}</div>
+    </div>`;
   el.querySelector('#auth-back').addEventListener('click', () => {
     claimIntent = false; // dismissing sign-in abandons a pending claim intent (review: it leaked into a later sign-in)
     closeAuthPage();
@@ -8224,6 +8242,19 @@ function renderAuthPageInner() {
     renderAuthPageInner();
   });
   el.querySelector('#auth-form').addEventListener('submit', onAuthSubmit);
+  // Check In rework (Mike 2026-07-10): the quiet link reveals the SAME adminLoginHTML() code form the
+  // old Check In "Admin" corner link toggled, bound to the SAME submit flow (onAdminLoginSubmit →
+  // adminLoginWithCode). Toggle + focus mirrors the old handler.
+  el.querySelector('#auth-admin').addEventListener('click', () => {
+    const panel = el.querySelector('#auth-adminpanel');
+    if (!panel) return;
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) {
+      const codeInput = el.querySelector('#admin-code');
+      if (codeInput) codeInput.focus();
+    }
+  });
+  el.querySelector('#admin-login-form').addEventListener('submit', onAdminLoginSubmit);
   setTimeout(() => { const f = document.getElementById('auth-email'); if (f) f.focus(); }, 50);
 }
 
@@ -8468,6 +8499,77 @@ async function onAuthSubmit(e) {
   }
 }
 
+// ── Admin sign-in (code login) — reached from the sign-in page's quiet "Admin sign-in" link
+// (Check In rework, Mike 2026-07-10: "we can put the admin sign in in the profile bubble").
+// Both functions moved VERBATIM out of attachHandlers (the form left the app shell, so the
+// old render-time binding found nothing); renderAuthPageInner binds the form to onAdminLoginSubmit. ──
+
+// C21 — server-verified admin login (the ONLY login path). POSTs only the code to the admin_login
+// Edge Function, which checks it against a server-only map (NOT in this bundle) and returns a real
+// Supabase session whose JWT carries role/group in app_metadata (for RLS). On success the session
+// is set on supabaseClient (in-memory; persistSession=false) so every later admin request carries
+// the JWT. Returns {role, group}, or null on a wrong code / unreachable function.
+async function adminLoginWithCode(code) {
+  if (!supabaseClient || !code) return null;
+  try {
+    const { data, error } = await supabaseClient.functions.invoke('admin_login', { body: { code } });
+    if (error || !data || !data.access_token || !data.refresh_token) return null;
+    const setRes = await supabaseClient.auth.setSession({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+    });
+    if (setRes.error) return null;
+    return { role: data.role, group: data.group || null };
+  } catch {
+    return null;
+  }
+}
+
+async function onAdminLoginSubmit(e) {
+  e.preventDefault(); // C25 item 10: native form submit — stop the page reload, run the login flow
+  const codeInput = document.getElementById('admin-code');
+  const code = codeInput ? codeInput.value.trim() : '';
+  if (!code) return;
+
+  // C21: the ONLY login path — server-verified. adminLoginWithCode returns {role, group} and
+  // has set a real Supabase session, or null on a wrong code / unreachable function. There is
+  // no client-side code compare and no fallback: the JWT is the source of truth for admin state.
+  const session = await adminLoginWithCode(code);
+  if (!session) { alert('Incorrect admin code'); return; }
+  if (codeInput) codeInput.value = '';
+
+  state.isAdmin = true;
+  state.masterAdminAuthenticated = (session.role === 'owner');
+  state.limitedGroup = (session.role === 'group_admin') ? session.group : null;
+  state.activeGroup = state.limitedGroup || 'All';
+  if (state.limitedGroup && !state.groups.includes(state.limitedGroup)) {
+    state.groups = Array.from(new Set([...state.groups, state.limitedGroup]));
+  }
+  // sessionStorage flags are in-tab UI continuity only (NOT trusted on load — see loadFromLocal).
+  sessionStorage.setItem(LS_ADMIN_KEY, 'true');
+  if (state.masterAdminAuthenticated) sessionStorage.setItem(LS_MASTER_ADMIN_AUTH_KEY, 'true');
+  else sessionStorage.removeItem(LS_MASTER_ADMIN_AUTH_KEY);
+  if (state.limitedGroup) sessionStorage.setItem(LS_LIMITED_GROUP_KEY, state.limitedGroup);
+  else sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
+  try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, state.activeGroup); } catch {}
+
+  const synced = await syncFromSupabase();   // re-fetch as the authenticated admin (incl. skill)
+  if (synced) saveLocal();
+  // C22 item 1: re-hydrate the night now that players carry skill — an anon init hydrate built the
+  // teams from skill-less player objects, so fairness totals would read 0 until this re-maps them.
+  liveStateHydratedOnce = false;
+  if (synced) { await loadLiveStateFromSupabase(); saveLocal(); }
+  if (synced && canRunAdminSharedBackfill()) {
+    (async () => {
+      const catalogSynced = await backfillGroupCatalogToSupabase();
+      const membershipsSynced = await backfillPlayerMembershipsToSupabase();
+      if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
+    })();
+  }
+  closeAuthPage(); // the form lives on the sign-in overlay now — dismiss it before the admin shell paints
+  render();
+}
+
 // Signed-in: a small centered card with the account email + role + Sign out.
 function openAccountMenu() {
   const prev = document.getElementById('account-menu'); if (prev) prev.remove();
@@ -8534,8 +8636,6 @@ function publicCheckinHTML() {
     <p class="cik-sub">Type your name, then tap it</p>
     ${searchBlock}
     <div id="checkin-toast" class="cik-toast" role="status" aria-live="polite" hidden></div>
-    <div id="checkin-admin-panel" class="cik-adminpanel" hidden>${adminLoginHTML()}</div>
-    <button class="cik-admin" id="btn-open-admin" type="button">Admin</button>
   </div>
   `;
 }
@@ -8564,15 +8664,20 @@ function checkinHeroInnerHTML() {
 // of a full render() that resets a spectator's scroll. The click handler is delegated on #bottom-nav
 // (attachHandlers), so swapping innerHTML keeps navigation working.
 function buildPublicNavInnerHTML() {
+  // Check In rework (Mike 2026-07-10): the Check In button renders ONLY on the pickup-session day
+  // (checkinNavVisible → sessionIsToday). Home and Tournament always render. Every nav rebuild goes
+  // through this builder (full render() shell + refreshTournamentLive's surgical swap), so the tab
+  // re-derives consistently; the #tab-players panel itself stays in the DOM (routing-only change).
+  const checkinBtn = checkinNavVisible() ? `
+    <button class="nav-btn" data-nav-tab="players">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>
+      <span>Check In</span>
+    </button>` : '';
   return `
     <button class="nav-btn" data-nav-tab="home">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
       <span>Home</span>
-    </button>
-    <button class="nav-btn" data-nav-tab="players">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>
-      <span>Check In</span>
-    </button>
+    </button>${checkinBtn}
     <button class="nav-btn" data-nav-tab="tournament">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>
       <span>Tournament</span>
@@ -9585,6 +9690,9 @@ function render() {
   activeMainTab = sessionStorage.getItem(currentTabKey()) || (state.isAdmin ? 'dashboard' : 'home');
   // C26 item 3a + Round 2: public 'teams'/'session' and the removed 'scores' (Live) tab fall back to 'home'.
   if (!state.isAdmin && ['teams', 'session', 'scores'].includes(activeMainTab)) activeMainTab = 'home';
+  // Check In rework (Mike 2026-07-10): a saved 'players' tab from a session day bounces to Home when the
+  // Check In nav button is hidden (session deleted / date passed) — mirrors the retired-'scores' bounce.
+  if (!state.isAdmin && activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
   // Wave 1e: a fan last on the Bracket tab who returns after the tournament was deleted would land on
   // an empty 'tournament' panel with no nav button to highlight (the Bracket button is gone). Reset to
   // Home unless a tournament is actually live.
@@ -9871,6 +9979,8 @@ bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
 if (!state.isAdmin && ['teams', 'session', 'scores'].includes(activeMainTab)) activeMainTab = 'home';
+// Check In rework (Mike 2026-07-10): bounce a stranded public 'players' tab to Home when the Check In nav button is hidden.
+if (!state.isAdmin && activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
 // Wave 1e: reset a stale public 'tournament' tab to Home when no tournament is live (else an empty panel + no nav button).
 if (!state.isAdmin && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 activateMainTab(activeMainTab);
@@ -10278,6 +10388,9 @@ function bindTournamentTabV2() {
 function activateMainTab(tab) {
   // Tournament-mode tabs (manage/live) only exist while in the mode — fall back if stale (e.g. after a reload).
   if ((tab === 'manage' || tab === 'live') && !state.tournamentMode) tab = 'dashboard';
+  // Check In rework (Mike 2026-07-10): the public Check In tab only exists on the pickup-session day —
+  // any stale route to it (saved tab, mid-visit nav rebuild after the session hides) bounces to Home.
+  if (tab === 'players' && !state.isAdmin && !checkinNavVisible()) tab = 'home';
   activeMainTab = tab;
   sessionStorage.setItem(currentTabKey(), tab);
   // Slice 1: lazy-load completed-tournament history the first time History opens (read-only, cached on state).
@@ -10535,77 +10648,9 @@ function closeQrModal() {
 }());
 
   // --- Admin login/logout ---
-// Admin login
-// C25 item 10: the admin login is a <form> now — native submit fires on Enter AND the submit button,
-// so the manual Enter-keydown listener is no longer needed.
-const adminLoginForm = document.getElementById('admin-login-form');
-
-// C21 — server-verified admin login (the ONLY login path). POSTs only the code to the admin_login
-// Edge Function, which checks it against a server-only map (NOT in this bundle) and returns a real
-// Supabase session whose JWT carries role/group in app_metadata (for RLS). On success the session
-// is set on supabaseClient (in-memory; persistSession=false) so every later admin request carries
-// the JWT. Returns {role, group}, or null on a wrong code / unreachable function.
-async function adminLoginWithCode(code) {
-  if (!supabaseClient || !code) return null;
-  try {
-    const { data, error } = await supabaseClient.functions.invoke('admin_login', { body: { code } });
-    if (error || !data || !data.access_token || !data.refresh_token) return null;
-    const setRes = await supabaseClient.auth.setSession({
-      access_token: data.access_token,
-      refresh_token: data.refresh_token,
-    });
-    if (setRes.error) return null;
-    return { role: data.role, group: data.group || null };
-  } catch {
-    return null;
-  }
-}
-
-if (adminLoginForm) {
-  adminLoginForm.addEventListener('submit', async (e) => {
-    e.preventDefault(); // C25 item 10: native form submit — stop the page reload, run the login flow
-    const codeInput = document.getElementById('admin-code');
-    const code = codeInput ? codeInput.value.trim() : '';
-    if (!code) return;
-
-    // C21: the ONLY login path — server-verified. adminLoginWithCode returns {role, group} and
-    // has set a real Supabase session, or null on a wrong code / unreachable function. There is
-    // no client-side code compare and no fallback: the JWT is the source of truth for admin state.
-    const session = await adminLoginWithCode(code);
-    if (!session) { alert('Incorrect admin code'); return; }
-    if (codeInput) codeInput.value = '';
-
-    state.isAdmin = true;
-    state.masterAdminAuthenticated = (session.role === 'owner');
-    state.limitedGroup = (session.role === 'group_admin') ? session.group : null;
-    state.activeGroup = state.limitedGroup || 'All';
-    if (state.limitedGroup && !state.groups.includes(state.limitedGroup)) {
-      state.groups = Array.from(new Set([...state.groups, state.limitedGroup]));
-    }
-    // sessionStorage flags are in-tab UI continuity only (NOT trusted on load — see loadFromLocal).
-    sessionStorage.setItem(LS_ADMIN_KEY, 'true');
-    if (state.masterAdminAuthenticated) sessionStorage.setItem(LS_MASTER_ADMIN_AUTH_KEY, 'true');
-    else sessionStorage.removeItem(LS_MASTER_ADMIN_AUTH_KEY);
-    if (state.limitedGroup) sessionStorage.setItem(LS_LIMITED_GROUP_KEY, state.limitedGroup);
-    else sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
-    try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, state.activeGroup); } catch {}
-
-    const synced = await syncFromSupabase();   // re-fetch as the authenticated admin (incl. skill)
-    if (synced) saveLocal();
-    // C22 item 1: re-hydrate the night now that players carry skill — an anon init hydrate built the
-    // teams from skill-less player objects, so fairness totals would read 0 until this re-maps them.
-    liveStateHydratedOnce = false;
-    if (synced) { await loadLiveStateFromSupabase(); saveLocal(); }
-    if (synced && canRunAdminSharedBackfill()) {
-      (async () => {
-        const catalogSynced = await backfillGroupCatalogToSupabase();
-        const membershipsSynced = await backfillPlayerMembershipsToSupabase();
-        if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
-      })();
-    }
-    render();
-  });
-}
+// Admin login: Check In rework (Mike 2026-07-10) — the code-login form no longer lives in the app
+// shell (it moved behind the sign-in page's "Admin sign-in" link), so adminLoginWithCode + the
+// submit flow (onAdminLoginSubmit) are TOP-LEVEL now, next to the auth-page code that binds them.
 
 // Admin logout
 const logoutBtn = document.getElementById('btn-logout');
@@ -10913,20 +10958,8 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       });
     }
 
-    // "Admin" corner link reveals the existing adminLoginHTML() form (its submit handler is bound
-    // separately and stays intact). Just toggle the hidden panel + focus the code field.
-    const openAdminBtn = document.getElementById('btn-open-admin');
-    if (openAdminBtn) {
-      openAdminBtn.addEventListener('click', () => {
-        const panel = document.getElementById('checkin-admin-panel');
-        if (!panel) return;
-        panel.hidden = !panel.hidden;
-        if (!panel.hidden) {
-          const codeInput = document.getElementById('admin-code');
-          if (codeInput) codeInput.focus();
-        }
-      });
-    }
+    // Check In rework (Mike 2026-07-10): the "Admin" corner link + its panel toggle moved to the
+    // sign-in page (renderAuthPageInner binds the same adminLoginHTML() form to onAdminLoginSubmit).
   }
 
   // --- Player cards: inline actions ---

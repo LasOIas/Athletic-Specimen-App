@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const pure = require('../public/pure.js');
-const { computeTeamRunEnded, sessionIsUpcoming } = pure;
+const { computeTeamRunEnded, sessionIsUpcoming, sessionIsToday } = pure;
 
 // A B=4 double-elim losers structure: L1 (round 1, one game) + L2/LB-final (round 2, one game).
 // Every LB round has exactly one game, so both LB rounds resolve to a single certain place (4th, 3rd).
@@ -137,5 +137,39 @@ describe('sessionIsUpcoming', () => {
   it('defaults todayStr to the local today when omitted (a clearly-future date passes)', () => {
     expect(sessionIsUpcoming('2999-01-01')).toBe(true);
     expect(sessionIsUpcoming('2000-01-01')).toBe(false);
+  });
+});
+
+// Check In rework (Mike 2026-07-10): the tab exists ONLY on the day of the pickup session,
+// not for future days — sessionIsToday is the day-of gate (nav tab + Home session_live state).
+describe('sessionIsToday', () => {
+  it('is true only for today', () => {
+    expect(sessionIsToday('2026-07-10', '2026-07-10')).toBe(true);
+  });
+
+  it('is false for yesterday', () => {
+    expect(sessionIsToday('2026-07-09', '2026-07-10')).toBe(false);
+  });
+
+  it('is false for tomorrow / any future day (unlike sessionIsUpcoming)', () => {
+    expect(sessionIsToday('2026-07-11', '2026-07-10')).toBe(false);
+    expect(sessionIsToday('2026-07-20', '2026-07-10')).toBe(false);
+  });
+
+  it('is false for a missing / empty / unparseable date', () => {
+    expect(sessionIsToday('', '2026-07-10')).toBe(false);
+    expect(sessionIsToday(null, '2026-07-10')).toBe(false);
+    expect(sessionIsToday(undefined, '2026-07-10')).toBe(false);
+    expect(sessionIsToday('not-a-date', '2026-07-10')).toBe(false);
+  });
+
+  it('accepts a full ISO timestamp as the session date (date part only)', () => {
+    expect(sessionIsToday('2026-07-10T18:30:00Z', '2026-07-10')).toBe(true);
+    expect(sessionIsToday('2026-07-11T00:01:00Z', '2026-07-10')).toBe(false);
+  });
+
+  it('defaults todayStr to the local today when omitted (clearly-future/past dates fail)', () => {
+    expect(sessionIsToday('2999-01-01')).toBe(false);
+    expect(sessionIsToday('2000-01-01')).toBe(false);
   });
 });

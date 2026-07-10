@@ -1338,6 +1338,27 @@ function sessionIsUpcoming(dateStr, todayStr) {
   return d >= today; // zero-padded ISO date parts compare correctly as strings
 }
 
+// Check In rework (Mike 2026-07-10): true ONLY when the session date IS today — the day-of gate for
+// the public Check In nav tab and the Home session_live state ("it should not show unless an admin
+// creates a pickup day"; a FUTURE pickup day stays quiet until its day). Same date parsing as
+// sessionIsUpcoming: 'YYYY-MM-DD' (leading ISO date part accepted), compared as calendar days in
+// LOCAL time; missing/unparseable dates → false. todayStr defaults to the local today. PURE.
+function sessionIsToday(dateStr, todayStr) {
+  const isoDate = (s) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s == null ? '' : s).trim());
+    return m ? (m[1] + '-' + m[2] + '-' + m[3]) : null;
+  };
+  const d = isoDate(dateStr);
+  if (!d) return false;
+  let today = isoDate(todayStr);
+  if (!today) {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    today = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
+  }
+  return d === today;
+}
+
 // ── Public Home state machine + view-models (atom-up spec 2026-07-10 §2) ──
 // PURE: no state access, no DOM, no Date.now(); todayStr comes in as a parameter.
 // Consume the TOURNAMENT match-row shape (verified vs buildPublicTournamentLiveHTML /
@@ -1348,12 +1369,15 @@ function sessionIsUpcoming(dateStr, todayStr) {
 
 // Exclusive with precedence: tournament_live > session_live > registration > quiet.
 // hasLiveCourts is accepted for symmetry with the render caller but deliberately does
-// NOT make a stale session live — the date gate (sessionIsUpcoming) is the truth source,
+// NOT make a stale session live — the date gate (sessionIsToday) is the truth source,
 // so live-court data left over from a past session is ignored (the June-28 prod bug).
+// Check In rework (Mike 2026-07-10): the gate is DAY-OF only (was sessionIsUpcoming) so
+// a future pickup day renders the quiet state until its day — Home and the Check In nav
+// tab (checkinNavVisible in app.js) agree on the same helper.
 function publicHomeState(o) {
   o = o || {};
   if (o.liveTournament) return 'tournament_live';
-  var sessionToday = !!(o.session && o.session.date && sessionIsUpcoming(o.session.date, o.todayStr));
+  var sessionToday = !!(o.session && o.session.date && sessionIsToday(o.session.date, o.todayStr));
   if (sessionToday) return 'session_live';
   if (o.regTournament) return 'registration';
   return 'quiet';
@@ -1438,7 +1462,7 @@ if (typeof module !== "undefined" && module.exports) {
     teamPeekModel, checkinHeroModel,
     bracketOutcome, bracketRoundLabel, bracketStatusLine,
     registerEventModel, joinSheetValidate,
-    computeTeamRunEnded, sessionIsUpcoming,
+    computeTeamRunEnded, sessionIsUpcoming, sessionIsToday,
     publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel
   };
 }

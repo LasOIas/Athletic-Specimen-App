@@ -27,8 +27,9 @@ describe('publicHomeState — exclusive with precedence (spec §2)', () => {
   it('todays session without live courts is still session_live (check-in phase)', () => {
     expect(publicHomeState({ ...base, session: { date: '2026-07-10' } })).toBe('session_live');
   });
-  it('a future-dated session is session_live (a session is upcoming today or later)', () => {
-    expect(publicHomeState({ ...base, session: { date: '2026-07-20' } })).toBe('session_live');
+  it('a FUTURE-dated session stays quiet — session_live is day-of only (Mike 2026-07-10 Check In rework)', () => {
+    expect(publicHomeState({ ...base, session: { date: '2026-07-20' } })).toBe('quiet');
+    expect(publicHomeState({ ...base, session: { date: '2026-07-11' } })).toBe('quiet');
   });
   it('registration when nothing is live', () => {
     expect(publicHomeState({ ...base, regTournament: { id: 2 } })).toBe('registration');
