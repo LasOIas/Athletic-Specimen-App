@@ -3546,18 +3546,19 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
    Register CTA sits INSIDE the wrapper and its width ends at the SAME right boundary as the status
    divider's hairline (the shared 118px logo reserve); the logo mark is absolutely sized to the FULL
    cluster height — title + meta + status divider + CTA — running from the title's top to the button's
-   bottom. Every text element reserves the logo's width (118px = ~106px logo at the 236/335 intrinsic
-   ratio for a ~150px wrapper + gap; the divider's right hairline stops before the logo because the
-   ::after flex item lays out inside the padded content box; max-width guards the 2-line-title case where
-   the taller wrapper would make the contained logo wider than the reserve). The reg status is a divider
-   LABEL, not an eyebrow under the title. Reg-only — other states keep the shared .hm-lead grammar. */
+   bottom. v11 tightening (Mike): the status divider sits snug under the meta (margin-top 8px) and the
+   Home meta drops the spots segment, so the wrapper is ~136px → logo ~96px wide at the 236/335 intrinsic
+   ratio — the 118px reserve holds with margin (2-line-title case ~164px → ~115px, still under the
+   max-width guard). The divider's right hairline stops before the logo because the ::after flex item lays
+   out inside the padded content box. The reg status is a divider LABEL, not an eyebrow under the title.
+   Reg-only — other states keep the shared .hm-lead grammar. */
 .hm-regwrap{ position: relative; padding: 2px 2px 0; }
 .hm-regwrap .hm-reginfo{ padding-right: 118px; }
 .hm-regwrap h1{ font-family: var(--font-display); font-size: 27px; font-weight: 700; line-height: 1.05; margin: 0; }
 .hm-regwrap .hm-meta{ margin-top: 5px; }
 .hm-regwrap .hm-cta{ width: calc(100% - 118px); display: block; }
 .hm-regwrap .hm-reglogo{ position: absolute; right: 0; top: 0; height: 100%; width: auto; max-width: 118px; object-fit: contain; object-position: right top; }
-.hm-status{ display: flex; align-items: center; gap: 12px; margin-top: 18px; padding-right: 118px; }
+.hm-status{ display: flex; align-items: center; gap: 12px; margin-top: 8px; padding-right: 118px; }
 .hm-status::before, .hm-status::after{ content: ''; flex: 1; height: 1px; background: oklch(0.88 0.005 75); }
 .hm-status span{ font: 700 13px var(--font-display); letter-spacing: .16em; text-transform: uppercase; color: oklch(0.42 0.006 75); }
 .hm-status.is-closed span{ color: oklch(0.55 0.005 75); }

@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.10'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.11'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -2694,7 +2694,10 @@ function hmRegistrationHTML(reg) {
   const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
   const regTeams = (active && active.id === reg.id) ? (state.tournamentTeams || []) : [];
   const rm = registerEventModel(reg, regTeams);
-  const meta = [rm.teamSize + 's co-ed', rm.costChip, rm.spotsLead].filter(Boolean).join(' · ');
+  // Home meta is ONLY "4s co-ed · $80 a team" (Mike v11 tightening: "remove 'be the first team in' that
+  // should never show") — no spots segment here in either the zero-team or N-teams case. The register
+  // event card page (buildRegisterPageHTML) keeps its spots line; registerEventModel.spotsLead is unchanged.
+  const meta = [rm.teamSize + 's co-ed', rm.costChip].filter(Boolean).join(' · ');
   // Registration cluster (Mike rung-12 pick D + v10 iteration, 2026-07-10): TITLE flush at the top; the
   // Register CTA lives INSIDE the cluster and its width ends at the same right boundary as the status
   // divider's hairline (the shared 118px logo reserve, Mike: "the register buttons length is the same as
