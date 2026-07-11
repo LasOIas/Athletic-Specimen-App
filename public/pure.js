@@ -1278,6 +1278,40 @@ function joinSheetValidate(teamName, roster, teamSize) {
   return { ok: true, teamName: name, roster: clean };
 }
 
+// Launch spec (2026-07-10): the NEW registration PAGE validator. Same team-name + exact-size gates as
+// joinSheetValidate, PLUS a per-row FULL-NAME gate — every player must carry a first AND a last name
+// (Mike: "there are no captains; every player must have a first and last name"). The full-name rule is
+// deliberately looser than isValidFullName (which requires each part >= 2 chars): a name passes when, after
+// trimming, it splits on whitespace into >= 2 tokens each with >= 1 non-space char ("Sam" fails, "Sam Lee"
+// and "Sam  Lee" pass). Friendly inline copy names the offending value. Trims the team name + every roster
+// name before returning so the stored roster jsonb is clean (fixes the raw-REST untrimmed-roster note). PURE.
+function registerFormValidate(teamName, roster, teamSize) {
+  const name = String(teamName == null ? '' : teamName).trim();
+  const size = Number(teamSize) || 4;
+  const clean = (Array.isArray(roster) ? roster : [])
+    .map((n) => String(n == null ? '' : n).trim())
+    .filter(Boolean);
+  if (!name) return { ok: false, message: 'Enter a team name.' };
+  if (clean.length !== size) return { ok: false, message: 'Enter all ' + size + ' players.' };
+  for (const nm of clean) {
+    const tokens = nm.split(/\s+/).filter(Boolean); // whitespace-split; each token already has a non-space char
+    if (tokens.length < 2) return { ok: false, message: 'Give ' + nm + ' a last name too.' };
+  }
+  return { ok: true, teamName: name, roster: clean };
+}
+
+// Addendum (2026-07-10, Mike): proactive duplicate-team-name check for the registration page's inline warning.
+// The server (register_team) remains the AUTHORITY on rejecting duplicates under concurrency; this only drives
+// the "already taken" hint as the captain types. Case-insensitive + trimmed on both sides, matching the
+// server's comparison. An empty/whitespace name or an empty/nullish team list is never "taken". PURE.
+function teamNameTaken(name, teams) {
+  const q = String(name == null ? '' : name).trim().toLowerCase();
+  if (!q) return false;
+  return (Array.isArray(teams) ? teams : []).some(
+    (t) => String((t && t.name) || '').trim().toLowerCase() === q
+  );
+}
+
 // Finish-line Slice 4 (spec §13.4): the ELIMINATED terminal timeline node. Has this team's double-elim
 // bracket run ENDED (been eliminated), and — only when the bracket structure makes it CERTAIN — what single
 // finishing place is derivable? A team is eliminated when it LOST a losers-bracket game or the grand final
@@ -1461,7 +1495,7 @@ if (typeof module !== "undefined" && module.exports) {
     resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
     teamPeekModel, checkinHeroModel,
     bracketOutcome, bracketRoundLabel, bracketStatusLine,
-    registerEventModel, joinSheetValidate,
+    registerEventModel, joinSheetValidate, registerFormValidate, teamNameTaken,
     computeTeamRunEnded, sessionIsUpcoming, sessionIsToday,
     publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel
   };

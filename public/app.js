@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.12'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.13'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -399,6 +399,20 @@ function restoreTransientInteractionState(snapshot) {
     // like the toggles above; the sheet's own buttons (submit / close / claim / back) bind in openJoinSheet.
     const regOpenSheet = e.target.closest('[data-role="reg-open-sheet"]');
     if (regOpenSheet) { e.preventDefault(); openJoinSheet(); return; }
+
+    // Launch spec (2026-07-10): the registration PAGE lives inside #app-content, so its Register button and
+    // post-success "Claim your spot" bind on this delegated document handler (the page's Back links use
+    // data-tn-view="hub", handled with the hub tiles). The Register button is disabled until payment is
+    // checked; the disabled guard is belt-and-suspenders (a disabled <button> emits no click).
+    const regPageSubmit = e.target.closest('[data-role="reg-page-submit"]');
+    if (regPageSubmit) { e.preventDefault(); if (!regPageSubmit.hasAttribute('disabled')) submitRegisterForm(regPageSubmit); return; }
+    const regPageClaim = e.target.closest('[data-role="reg-page-claim"]');
+    if (regPageClaim) {
+      e.preventDefault();
+      if (state.authSession) { openClaimPage(); }
+      else { claimIntent = true; openAuthPage(); }
+      return;
+    }
 
     // 1) Toggle the dropdown when ⋮ is clicked
     const dots = e.target.closest('.btn-actions');
@@ -1071,6 +1085,53 @@ function updateBulkBarVisibility() {
     if (!brand) return;
     const activePanel = document.querySelector('.tab-panel.active');
     if (activePanel) activePanel.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+})();
+
+// -- Registration PAGE pay-to-register gate: the "We sent it on Venmo" checkbox unlocks the Register button --
+// Document-delegated + once-bound so it survives every partialRender/render rebuild of the page. Pure DOM
+// toggle (no state), so a background sync that leaves the checkbox checked keeps the button unlocked.
+(function ensureRegPaidGateBound() {
+  if (window.__regPaidGateBound) return;
+  window.__regPaidGateBound = true;
+  document.addEventListener('change', (e) => {
+    const cb = e.target;
+    if (!cb || cb.id !== 'reg-paid') return;
+    const btn = document.querySelector('[data-role="reg-page-submit"]');
+    if (!btn) return;
+    if (cb.checked) { btn.removeAttribute('disabled'); btn.removeAttribute('aria-disabled'); }
+    else { btn.setAttribute('disabled', 'true'); btn.setAttribute('aria-disabled', 'true'); }
+  });
+})();
+
+// -- Registration PAGE proactive duplicate-team-name warning (addendum 2026-07-10, Mike) --
+// As the captain types the team name (debounced ~300ms) and on blur, warn inline if it collides with an
+// already-registered team. The SERVER (register_team) stays the authority under concurrency; this is only a
+// heads-up so they fix it before submitting. textContent (never innerHTML) keeps the echoed name XSS-safe;
+// the .rf-warn:empty CSS hides the line when there's nothing to say. Document-delegated + once-bound so it
+// survives every render/partialRender rebuild of the page.
+(function ensureRegNameDupBound() {
+  if (window.__regNameDupBound) return;
+  window.__regNameDupBound = true;
+  let timer = null;
+  const runCheck = () => {
+    const input = document.getElementById('reg-team');
+    const warn = document.getElementById('reg-name-warn');
+    if (!input || !warn) return;
+    const name = String(input.value || '').trim();
+    warn.textContent = (name && teamNameTaken(name, registerTargetTeams()))
+      ? 'A team named "' + name + '" is already taken — pick another name.'
+      : '';
+  };
+  document.addEventListener('input', (e) => {
+    if (!e.target || e.target.id !== 'reg-team') return;
+    clearTimeout(timer);
+    timer = setTimeout(runCheck, 300);
+  });
+  document.addEventListener('focusout', (e) => {
+    if (!e.target || e.target.id !== 'reg-team') return;
+    clearTimeout(timer);
+    runCheck();
   });
 })();
 
@@ -5148,6 +5209,10 @@ function buildPublicRegisterHTML(t, teams, opts = {}) {
 // is a hub (header card + tiles). The pre-existing public register/pool/bracket surface becomes the
 // 'board' sub-view behind the Pools & schedule / Bracket tiles. Admin branch untouched.
 let pdTournamentView = 'hub'; // 'hub' | 'pools' | 'bracket' | 'register' — module var survives partialRender (the shared 'board' view is retired from the public path — spec §13.3/§13.6)
+// Launch spec (2026-07-10): the just-registered team name, or null. State-driven so the "You're in!" payoff
+// SURVIVES a background partialRenderTournament — the success page has no inputs, so tournamentTabIsDirty()
+// is false and a 15s sync would otherwise rebuild an empty form over it. Reset to null on any hub/sub-page nav.
+let regSubmittedTeam = null;
 let pdPoolFilter = 'all'; // Pools & schedule page client-side filter: 'all' | a pool label — survives partialRender
 
 function buildTournamentHubHTML() {
@@ -5321,45 +5386,187 @@ function buildBracketPageHTML() {
 const REG_CAL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg>';
 const REG_COST_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 6.5C17 4.6 14.8 3.5 12 3.5S7 4.6 7 6.5 9.2 9.5 12 9.5s5 1.4 5 3.5-2.2 3.5-5 3.5-5-1.1-5-3"/></svg>';
 const REG_PLAYERS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><circle cx="17" cy="9.5" r="2.6"/><path d="M3.5 19a5.5 5.5 0 0 1 11 0M15 15.5a4.5 4.5 0 0 1 5.5 3.5"/></svg>';
-function buildRegisterPageHTML() {
+// Launch spec (2026-07-10, Mike): the registration PAGE. Home "Register" (data-tn-view="register") routes
+// STRAIGHT here — no event-card middle step, no join sheet. "there are no captains; every player must have a
+// first and last name … enter the team name and the 4 players names … a spot for the venmo link … teams have
+// to pay to register." Team name + exactly team_size player rows (first AND last name, NO captain) + a Venmo
+// pay-to-register gate; the Register button stays LOCKED until the "we sent it" box is checked, and submit
+// writes paid=TRUE. Renders inside #tab-tournament .container: tournamentTabIsDirty() already shields a typed
+// roster from the 15s background sync, and success swaps the page content IN PLACE (no body-level sheet).
+// SINGLE source of truth for which tournament this page shows AND submits against — the page builder and the
+// submit handler both call resolveRegisterTournament(), so the displayed event and the written event can
+// never diverge (spec item 7).
+function resolveRegisterTournament() {
   const list = state.tournaments || [];
+  // Resolve EXACTLY as the Home "Register" CTA does (publicHomeHTML): the open setup tournament — never a
+  // live/completed one — so display and submit target the same event the CTA advertised (spec item 7). This
+  // matters when a live tournament runs alongside an open setup one: state.activeTournamentId then points at
+  // the LIVE row (public auto-follow), which must NOT become the thing we register into.
+  const setups = list.filter((x) => x.status === 'setup');
+  const reg = setups.find((x) => x.registration_open) || setups[0] || null;
+  if (reg) return reg;
+  // Fallback only when the route is reached with no setup tournament at all (stale link): the active row.
   const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
-  const show = active || list[0] || null;
-  const teams = (active ? state.tournamentTeams : []) || [];
+  return active || list[0] || null;
+}
+
+// The registered teams for the register target, for the proactive duplicate-name hint. state.tournamentTeams
+// is loaded for state.activeTournamentId; on launch the target IS the active (auto-followed) tournament, so
+// this is the same list the event card counted. When the target isn't the active row (rare: a live event runs
+// alongside the open setup one), we return [] and lean on the SERVER duplicate check — the true authority.
+function registerTargetTeams() {
+  const show = resolveRegisterTournament();
+  if (show && state.activeTournamentId === show.id) return state.tournamentTeams || [];
+  return [];
+}
+
+const RF_VENMO_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/></svg>';
+
+function buildRegisterPageHTML() {
+  // State-driven success: once a team is in, this route renders the payoff (survives partialRender rebuilds).
+  if (regSubmittedTeam) return buildRegisterSuccessHTML(regSubmittedTeam);
+  const show = resolveRegisterTournament();
   const backSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
   const header = `<div class="pd-pagehdr pd-reg-pagehdr">
       <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament">${backSvg}</button>
     </div>`;
   if (!show) return `${header}<div class="pd-empty">No tournament scheduled.</div>`;
 
-  const m = registerEventModel(show, teams);
-  const chip = (svg, label, extra) => `<span class="pd-reg-chip${extra ? ' ' + extra : ''}">${svg}${escapeHTML(label)}</span>`;
-  const chips = `<div class="pd-reg-chips">
-      ${m.dateChip ? chip(REG_CAL_SVG, m.dateChip) : ''}
-      ${chip(REG_COST_SVG, m.costChip, 'pd-reg-chip-cost')}
-      ${chip(REG_PLAYERS_SVG, m.playersChip)}
-    </div>`;
-  const pill = m.regOpen
-    ? '<span class="pd-reg-pill is-open"><span class="pd-reg-dot"></span>Registration open</span>'
-    : '<span class="pd-reg-pill is-closed">Registration closed</span>';
-  const heroTop = `<div class="pd-reg-top">
-      <div class="pd-reg-mark"><img src="/logo-mark.png" alt="" aria-hidden="true" /></div>
-      ${pill}
+  const regOpen = !!(show.registration_open && show.status === 'setup');
+  const name = (show.name && String(show.name).trim()) || 'Tournament';
+  const teamSize = Number(show.team_size) || 4;
+
+  // A closed/stale route shows an honest closed state, never a dead form (the Home CTA only appears when open).
+  if (!regOpen) {
+    return `${header}<section class="pd-card rf-card">
+        <div class="rf-eyebrow">${escapeHTML(name)}</div>
+        <h1 class="rf-h1">Registration closed</h1>
+        <p class="rf-sub">Registration isn't open for this tournament right now.</p>
+      </section>`;
+  }
+
+  // Payment: bind the amount to buy_in when set, else the league default. ONE money token drives both the
+  // Venmo button and the checkbox so the displayed price and the "we paid" line can never disagree (§27).
+  const buyIn = show.buy_in != null ? String(show.buy_in).trim() : '';
+  const payDisplay = buyIn || '$80 a team';
+  const moneyMatch = buyIn.match(/\$\s?\d[\d,]*/);
+  const money = moneyMatch ? moneyMatch[0].replace(/\s+/g, '') : '$80';
+
+  // Only render a real, tappable link for an http(s) Venmo URL (same guard as buildPublicRegisterHTML) — an
+  // empty/unset link renders a DISABLED button + "coming soon" so Mike pastes it into admin settings and it
+  // lights up (no dead javascript: link ever reaches the DOM).
+  const venmoRaw = show.venmo_link ? String(show.venmo_link).trim() : '';
+  const venmo = /^https?:\/\//i.test(venmoRaw) ? venmoRaw : '';
+  const venmoBlock = venmo
+    ? `<a class="rf-venmo" href="${escapeHTML(venmo)}" target="_blank" rel="noopener noreferrer">${RF_VENMO_SVG}Pay ${escapeHTML(money)} on Venmo</a>`
+    : `<button type="button" class="rf-venmo is-disabled" disabled aria-disabled="true">${RF_VENMO_SVG}Pay ${escapeHTML(money)} on Venmo</button>
+       <div class="rf-venmo-soon">Venmo link coming soon</div>`;
+
+  const rows = Array.from({ length: teamSize }, (_, i) => `<div class="rf-prow">
+      <span class="rf-pnum">${i + 1}</span>
+      <input class="rf-pinput" id="reg-p${i + 1}" type="text" placeholder="First and last name" autocomplete="off" autocapitalize="words" spellcheck="false" />
+    </div>`).join('');
+
+  // Header composition mirrors the Home registration lead (.hm-regwrap): title cluster left, the cross logo
+  // absolute at the TOP RIGHT, its height matched to the h1+sub cluster (not an oversized floating image). The
+  // form fields below stay full-width — the logo accompanies only the header, exactly like Home.
+  return `${header}<section class="pd-card rf-card">
+      <div class="rf-hero">
+        <div class="rf-heroinfo">
+          <h1 class="rf-h1">Register your team</h1>
+          <p class="rf-sub">${escapeHTML(name)} · ${teamSize}s co-ed</p>
+        </div>
+        <img class="rf-herologo" src="/logo-mark.png" alt="" aria-hidden="true" />
+      </div>
+
+      <div class="rf-sect">Team name</div>
+      <div class="rf-fld"><input class="rf-tinput" id="reg-team" type="text" placeholder="Pick a team name" autocomplete="off" autocapitalize="words" spellcheck="false" /></div>
+      <p class="rf-warn" id="reg-name-warn" role="status" aria-live="polite"></p>
+
+      <div class="rf-plhead"><span class="rf-sect">Players</span><span class="rf-plhint">first + last name</span></div>
+      <div class="rf-pllist">${rows}</div>
+
+      <div class="rf-divlab"><span>Payment</span></div>
+      <div class="rf-payline"><span class="rf-amt">${escapeHTML(payDisplay)}</span><span class="rf-payd">Teams pay to register — your spot is held once it's sent.</span></div>
+      ${venmoBlock}
+      <label class="rf-paid"><input type="checkbox" id="reg-paid" class="rf-paidbox" /><span class="rf-paidt">We sent the ${escapeHTML(money)} on Venmo</span></label>
+
+      <p class="rf-msg" id="reg-msg" role="status" aria-live="polite"></p>
+      <button type="button" class="rf-cta" data-role="reg-page-submit" disabled aria-disabled="true">Register team</button>
+      <div class="rf-ctanote">The button unlocks once payment is checked off.</div>
+    </section>`;
+}
+
+// The registration PAGE submit — mirrors the PROVEN safety of submitJoinSheet, adapted for an in-page (not
+// body-level) surface. Double-tap guard (disable before the RPC, re-enable ONLY on a caught failure); after a
+// REAL insert, show success UNCONDITIONALLY even if the post-refresh throws; paid=TRUE (pay-to-register); a
+// network-type error maps to friendly copy; no outbox/queue on failure. The tournament id + team_size come
+// from resolveRegisterTournament() — the same resolution the page rendered from.
+async function submitRegisterForm(btn) {
+  const show = resolveRegisterTournament();
+  if (!show) return;
+  const teamSize = Number(show.team_size) || 4;
+  const fv = (fid) => ((document.getElementById(fid) || {}).value || '').trim();
+  const teamName = fv('reg-team');
+  const roster = Array.from({ length: teamSize }, (_, i) => fv('reg-p' + (i + 1)));
+  const setMsg = (txt, ok) => { const el = document.getElementById('reg-msg'); if (el) { el.textContent = txt; el.style.color = ok ? 'var(--live)' : 'var(--danger)'; } };
+  // Pay-to-register gate: the button is disabled until the box is checked, but guard here too (belt + braces).
+  const paid = !!((document.getElementById('reg-paid') || {}).checked);
+  if (!paid) { setMsg('Check the box once you\'ve sent payment on Venmo.', false); return; }
+  const v = registerFormValidate(teamName, roster, teamSize); // team name + exactly N + first-and-last, trimmed
+  if (!v.ok) { setMsg(v.message, false); return; }
+  if (btn) btn.setAttribute('disabled', 'true'); // in-flight guard (double-tap) — re-enabled ONLY on a real failure
+  try {
+    // paid = TRUE now (pay-to-register). Roster is already trimmed by registerFormValidate → clean jsonb.
+    await tdbRegisterTeam(show.id, v.teamName, v.roster, null, true);
+  } catch (err) {
+    if (btn) btn.removeAttribute('disabled');
+    const raw = (err && err.message) || '';
+    const netlike = /fetch|network|failed to fetch/i.test(raw); // a connectivity blip, not a real reject
+    setMsg(netlike ? 'Could not register — check your connection and try again.' : (raw || 'Could not register — try again.'), false);
+    return; // the INSERT failed → real error, stay on the form (no outbox/queue)
+  }
+  // Registered for real — a refresh/render hiccup must NOT claim it failed (mirrors the proven path). Flip the
+  // state flag FIRST so the render() below already paints the payoff (not a flash of empty form), then the
+  // explicit swap guarantees success even if that render() threw.
+  regSubmittedTeam = v.teamName;
+  try { await tdbRefreshTournaments(); render(); } catch (_) {}
+  renderRegisterFormSuccess(v.teamName);
+}
+
+// Post-submit "You're in" payoff. Reuses the recorded join-sheet success design (pd-reg-won/check/wonh/
+// paychip/cta/backlink), the payment chip now reading "sent on Venmo", and the same claim hand-off
+// (openClaimPage when signed in, else claimIntent → openAuthPage). Pure builder so both the immediate
+// in-place swap AND a later partialRender rebuild (via buildRegisterPageHTML) produce the identical page.
+function buildRegisterSuccessHTML(teamName) {
+  const nm = escapeHTML(teamName);
+  const backSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
+  return `<div class="pd-pagehdr pd-reg-pagehdr">
+      <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament">${backSvg}</button>
     </div>
-    <div class="pd-reg-eyebrow">Colorado · Volleyball</div>
-    <h1 class="pd-reg-title">${escapeHTML(m.name)}</h1>
-    <div class="pd-reg-sub">Co-ed 4s — at least one guy and one girl on every team. Grab three friends and put your name in.</div>
-    ${chips}`;
+    <section class="pd-card pd-reg-card is-success">
+      <div class="pd-reg-won">
+        <div class="pd-reg-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+        <div class="pd-reg-wonh">You're in, ${nm}!</div>
+        <div class="pd-reg-wonsub">Your team is registered — see you at the tournament.</div>
+        <span class="pd-reg-paychip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/></svg>
+          Payment: sent on Venmo
+        </span>
+        <button type="button" class="pd-reg-cta" data-role="reg-page-claim">Claim your spot on ${nm}</button>
+        <button type="button" class="pd-reg-backlink" data-tn-view="hub">Back to tournament</button>
+      </div>
+    </section>`;
+}
 
-  const tail = m.regOpen
-    ? `<div class="pd-reg-spots"><span class="pd-reg-dot"></span><span><b>${escapeHTML(m.spotsLead)}</b>${m.spotsTail ? ' · ' + escapeHTML(m.spotsTail) : ''}</span></div>
-       <button type="button" class="pd-reg-cta" data-role="reg-open-sheet">Register your team
-         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
-       </button>
-       <div class="pd-reg-foot">Self-register while it's open — takes a minute, no payment now.</div>`
-    : `<div class="pd-reg-closed">Registration is closed for this tournament.</div>`;
-
-  return `${header}<section class="pd-card pd-reg-card">${heroTop}${tail}</section>`;
+// Flip to the payoff: set the state flag (so it survives background rebuilds) AND swap the container now
+// (so it shows even if the post-refresh render() threw before this ran — spec: success UNCONDITIONALLY).
+function renderRegisterFormSuccess(teamName) {
+  regSubmittedTeam = teamName;
+  const c = document.querySelector('#tab-tournament .container');
+  if (c) c.innerHTML = buildRegisterSuccessHTML(teamName);
+  const panel = document.getElementById('tab-tournament');
+  if (panel) panel.scrollTop = 0;
 }
 
 // ── Finish-line Slice 3 (spec §13.5): the JOIN SHEET. A body-level bottom sheet (dimmed backdrop, grab
@@ -10558,6 +10765,7 @@ function attachHandlers() {
       if (tnBtn && !state.isAdmin) {
         dismissTeamPeek();
         const v = tnBtn.getAttribute('data-tn-view');
+        regSubmittedTeam = null; // any explicit nav (open Register fresh / Back to hub) clears the payoff
         pdTournamentView = (v === 'pools' || v === 'bracket' || v === 'register') ? v : 'hub';
         // §13.4: a data-tn-view chip can live OUTSIDE the Tournament tab (e.g. the Home hero's "Watch the
         // bracket" terminal chip) — switch to the Tournament tab first so the sub-page is actually visible.

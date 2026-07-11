@@ -3406,6 +3406,54 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .pd-reg-backlink { display: block; width: 100%; margin: 12px auto 0; min-height: 0; padding: 6px; background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 600; }
 .pd-reg-backlink:hover { background: none; color: var(--ink); }
 
+/* ── Launch spec (2026-07-10): the registration PAGE (replaces the event-card → join-sheet flow). §51 matte,
+   token-driven, Barlow display via var(--font-display), 16px inputs (iOS zoom guard), SVG icons only. ── */
+.rf-card { padding: 18px 17px 18px; }
+.rf-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+/* Header cluster — Home's .hm-regwrap grammar: title/sub left, cross logo absolute top-right, height matched
+   to the h1+sub cluster (max-width guard so it never over-scales), object-position pins it to the top-right. */
+.rf-hero { position: relative; margin-bottom: 22px; }
+.rf-heroinfo { padding-right: 72px; }
+.rf-herologo { position: absolute; right: 0; top: 0; height: 100%; width: auto; max-width: 64px; object-fit: contain; object-position: right top; }
+.rf-h1 { font-family: var(--font-display); font-weight: 800; font-size: 28px; letter-spacing: -.3px; color: var(--ink); line-height: 1.05; margin: 0; }
+.rf-sub { font-size: 13.5px; font-weight: 500; color: var(--muted); line-height: 1.35; margin: 5px 0 0; }
+.rf-sect { font-size: 10.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); }
+.rf-warn { margin: 8px 2px 0; font-size: 13px; font-weight: 600; color: var(--danger); line-height: 1.3; }
+.rf-warn:empty { display: none; }
+.rf-fld { border-bottom: 1.5px solid var(--border-2); padding: 8px 2px; margin-top: 18px; }
+.rf-fld:focus-within { border-bottom-color: var(--accent); }
+.rf-tinput { width: 100%; box-sizing: border-box; border: none; background: none; font-family: inherit; font-size: 18px; font-weight: 600; color: var(--ink); padding: 4px 0; }
+.rf-tinput:focus { outline: none; }
+.rf-tinput::placeholder { color: var(--faint); font-weight: 500; }
+.rf-plhead { display: flex; align-items: baseline; gap: 8px; margin: 24px 2px 10px; }
+.rf-plhint { margin-left: auto; font-size: 11.5px; font-weight: 600; color: var(--faint); }
+.rf-pllist { display: flex; flex-direction: column; gap: 9px; }
+.rf-prow { display: flex; align-items: center; gap: 0; background: var(--card); border: 1.5px solid var(--border-2); border-radius: var(--r-md); padding-left: 13px; min-height: 54px; }
+.rf-prow:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--brand-ring); }
+.rf-pnum { width: 26px; height: 26px; flex: none; border-radius: 50%; background: var(--accent-soft); border: 1px solid var(--accent-bd); color: var(--accent); font-family: var(--font-display); font-weight: 800; font-size: 12.5px; display: flex; align-items: center; justify-content: center; }
+.rf-pinput { flex: 1 1 auto; min-width: 0; border: none; background: none; font-family: inherit; font-size: 16px; font-weight: 600; color: var(--ink); padding: 14px 13px 14px 12px; }
+.rf-pinput:focus { outline: none; }
+.rf-pinput::placeholder { color: var(--faint); font-weight: 500; }
+.rf-divlab { display: flex; align-items: center; gap: 12px; margin: 28px 0 2px; }
+.rf-divlab::before, .rf-divlab::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.rf-divlab span { font-family: var(--font-display); font-weight: 800; font-size: 12.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); }
+.rf-payline { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; margin-top: 14px; }
+.rf-amt { font-family: var(--font-display); font-weight: 800; font-size: 23px; color: var(--ink); letter-spacing: -.2px; flex: none; }
+.rf-payd { font-size: 12px; color: var(--muted); text-align: right; line-height: 1.3; }
+.rf-venmo { display: flex; align-items: center; justify-content: center; gap: 9px; width: 100%; margin-top: 14px; min-height: 50px; padding: 13px 0; border: 1.5px solid var(--accent-bd); border-radius: var(--r-md); color: var(--accent); font-family: inherit; font-size: 15px; font-weight: 600; background: var(--accent-soft); text-decoration: none; box-sizing: border-box; }
+.rf-venmo svg { width: 18px; height: 18px; flex: none; }
+.rf-venmo.is-disabled { opacity: .55; color: var(--muted); border-color: var(--border); background: var(--surface-3); cursor: not-allowed; }
+.rf-venmo-soon { text-align: center; font-size: 12px; font-weight: 500; color: var(--faint); margin-top: 7px; }
+.rf-paid { display: flex; align-items: center; gap: 11px; margin-top: 16px; font-size: 14.5px; color: var(--text); cursor: pointer; }
+.rf-paidbox { width: 22px; height: 22px; flex: none; accent-color: var(--accent); }
+.rf-paidt b { color: var(--ink); font-weight: 700; }
+.rf-msg { min-height: 0; margin: 14px 2px 0; font-size: 13px; font-weight: 600; text-align: center; }
+.rf-msg:empty { margin: 0; }
+.rf-cta { width: 100%; margin-top: 16px; min-height: 54px; border: none; border-radius: var(--r-lg); background: var(--accent); color: oklch(0.99 0.01 240); font-family: var(--font-display); font-weight: 700; font-size: 16px; letter-spacing: .01em; box-shadow: var(--shadow); }
+.rf-cta:hover { background: var(--brand-dark); }
+.rf-cta[disabled] { opacity: .45; box-shadow: none; cursor: not-allowed; }
+.rf-ctanote { text-align: center; font-size: 12px; font-weight: 500; color: var(--faint); margin-top: 9px; }
+
 @keyframes pd-reg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 @keyframes pd-reg-scrimin { from { opacity: 0; } to { opacity: 1; } }
 @keyframes pd-reg-sheetup { from { transform: translateY(100%); } to { transform: translateY(0); } }
@@ -3506,8 +3554,9 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
   /* ---- History: comfortable centred column ---- */
   body.pd-public-active #tab-history > .container > * { max-width: 760px; margin-left: auto; margin-right: auto; }
 
-  /* ---- Registration event card: centred (the hero sells before it asks — not a full-width band) ---- */
-  body.pd-public-active #tab-tournament > .container:has(> .pd-reg-card) > * { max-width: 600px; margin-left: auto; margin-right: auto; }
+  /* ---- Registration page (form / success): centred (a focused form, not a full-width band) ---- */
+  body.pd-public-active #tab-tournament > .container:has(> .pd-reg-card) > *,
+  body.pd-public-active #tab-tournament > .container:has(> .rf-card) > * { max-width: 600px; margin-left: auto; margin-right: auto; }
   /* (Bracket keeps its full-width tree + champions strip from the widened container; pan stays available.) */
 
   /* ---- atom-up Home (2026-07-10 spec §3): rail + board at >=1024, CSS-only ----
