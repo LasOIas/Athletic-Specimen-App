@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.22'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.23'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdHistoryTab = 'tournaments'; // public History page: 'tournaments' | 'leaderboard' | 'champions'
@@ -1364,7 +1364,7 @@ function escapeHTMLText(value) {
 function buildCheckinStatsHTML() {
   // Round 2 §12.3: the PUBLIC check-in surface shows only a quiet "N checked in" line (the admin
   // dashboard keeps the full stat hero + per-group breakdown below).
-  if (!state.isAdmin) return `<div class="ckh-count">${state.checkedIn.length} checked in</div>`;
+  if (!state.isAdmin) return `<div class="cik-count">${state.checkedIn.length} checked in</div>`;
   const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
   const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE
     ? UNGROUPED_FILTER_LABEL
@@ -8314,14 +8314,30 @@ function adminLoginHTML() {
 // on keystroke. Check In rework (Mike 2026-07-10): the "Admin" corner link moved off this page — the
 // adminLoginHTML() form now lives behind the sign-in page's quiet "Admin sign-in" link (renderAuthPageInner);
 // the standalone checkin.html kiosk keeps its own copy.
-function renderCheckinButton(row) {
+// Mike pick X (task-#10, 2026-07-10): big bordered tap ROW — matched prefix accent-bold, right-side
+// tag (TAP TO CHECK IN / grayed ALREADY IN). NO initials/avatar bubble (Mike's explicit delta — they
+// read as furniture). Same-name rows keep the group differentiator only (never skill). The tap attr
+// (data-checkin-id) is unchanged so the existing #checkin-results click handler keeps working.
+function renderCheckinButton(row, query) {
   const inClass = row.checkedIn ? ' is-in' : '';
-  const stateLabel = row.checkedIn ? 'Checked in · tap to undo' : ''; // C60: signal the tap undoes the check-in
-  const group = row.group ? `<span class="cik-gp">${escapeHTML(row.group)}</span>` : '';
-  return `<button class="cik-btn${inClass}" type="button" data-checkin-id="${escapeHTML(String(row.id))}">`
-    + `<span class="av">${escapeHTML(row.initials || '')}</span>`
-    + `<span class="cik-info"><span class="cik-nm">${escapeHTML(row.name)}</span>${group}</span>`
-    + `<span class="cik-state">${stateLabel}</span></button>`;
+  const tag = row.checkedIn ? 'ALREADY IN' : 'TAP TO CHECK IN';
+  const group = row.group ? `<span class="ckx-gp">${escapeHTML(row.group)}</span>` : '';
+  return `<button class="ckx-row${inClass}" type="button" data-checkin-id="${escapeHTML(String(row.id))}">`
+    + `<span class="ckx-nm">${highlightMatch(row.name, query)}${group}</span>`
+    + `<span class="ckx-go">${tag}</span></button>`;
+}
+
+// Bold the matched search substring inside a name (Mike pick X — the typed part reads accent-bold).
+// Escape FIRST, then wrap: slice the RAW name at the match and escape each segment independently, so a
+// <b> boundary can never fall inside an HTML entity (e.g. "&amp;"). Case-insensitive; falls back to the
+// plain escaped name when the query is empty or matches nowhere.
+function highlightMatch(name, query) {
+  const raw = String(name == null ? '' : name);
+  const q = String(query == null ? '' : query).trim();
+  if (!q) return escapeHTML(raw);
+  const pos = raw.toLowerCase().indexOf(q.toLowerCase());
+  if (pos < 0) return escapeHTML(raw);
+  return escapeHTML(raw.slice(0, pos)) + '<b>' + escapeHTML(raw.slice(pos, pos + q.length)) + '</b>' + escapeHTML(raw.slice(pos + q.length));
 }
 
 // Reliability fix (2026-06-20): module-level so BOTH the kiosk closure (renderCheckinResultsForQuery)
@@ -8336,7 +8352,7 @@ function buildKioskResultsHTML(query) {
   });
   if (!state.loaded && (query || '').trim()) return '<p class="cik-none">Loading roster&hellip;</p>'; // C1: don't flash "No match" pre-sync
   return list.length
-    ? list.map(renderCheckinButton).join('')
+    ? list.map((r) => renderCheckinButton(r, query)).join('')
     : ((query || '').trim() ? '<p class="cik-none">No match &mdash; tap &ldquo;I&rsquo;m new&rdquo; to add yourself.</p>' : '');
 }
 
@@ -8932,8 +8948,12 @@ function openAccountMenu() {
   });
 }
 
+// Mike pick X (task-#10, 2026-07-10): the in-app Check In tab is ANON-ONLY kiosk content — NO
+// signed-in hero here (most pickup players aren't signed in). This SUPERSEDES the session-5 one-tap
+// hero ON THIS TAB ONLY; state.myClaimedPlayer + loadMyClaimedPlayer still feed the account menu +
+// My team, and the standalone checkin.html kiosk keeps its own hero. Content = centered mark →
+// "Check in" title → search box → big tap rows (renderCheckinButton) → dashed "I'm new — add me".
 function publicCheckinHTML() {
-  const me = state.myClaimedPlayer;
   const searchBlock = `
     <div class="cik-search">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
@@ -8944,36 +8964,15 @@ function publicCheckinHTML() {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
       I'm new &mdash; add me
     </button>`;
-  const heroBlock = me ? `
-    <div class="ckh-card" id="ckh-card">${checkinHeroInnerHTML()}</div>
-    <div class="ckh-alts"><span class="ckh-alt-label">Checking in someone else? Use the search below.</span></div>` : `
-    <div class="cik-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12.5l2.5 2.5L15.5 9"/><circle cx="12" cy="12" r="9"/></svg></div>`;
   return `
-  <div class="ci-kiosk is-idle${me ? ' has-hero' : ''}">
-    ${heroBlock}
+  <div class="ci-kiosk is-idle">
+    <div class="cik-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12.5l2.5 2.5L15.5 9"/><circle cx="12" cy="12" r="9"/></svg></div>
     <h2 class="cik-h">Check in</h2>
     <p class="cik-sub">Type your name, then tap it</p>
     ${searchBlock}
     <div id="checkin-toast" class="cik-toast" role="status" aria-live="polite" hidden></div>
   </div>
   `;
-}
-
-// The hero card body — split out so the tap handler can refresh JUST the card in place.
-function checkinHeroInnerHTML() {
-  const me = state.myClaimedPlayer;
-  if (!me) return '';
-  const row = (state.players || []).find((p) => String(p.id) === String(me.id));
-  const isIn = row ? (state.checkedIn || []).includes(playerIdentityKey(row)) : false;
-  const initials = me.name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
-  return `
-      <span class="ckh-av">${escapeHTML(initials)}</span>
-      <span class="ckh-eyebrow">Signed in</span>
-      <div class="ckh-name">${escapeHTML(me.name)}</div>
-      <button type="button" class="ckh-btn${isIn ? ' is-in' : ''}" id="ckh-btn">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12.5l2.5 2.5L15.5 9"/><circle cx="12" cy="12" r="9"/></svg>
-        ${isIn ? "You're checked in" : 'Check in'}
-      </button>`;
 }
 
 // C26 item 2: Public surface shell — hardcodes the non-admin branch of every former interleaved
@@ -11121,21 +11120,9 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       openKioskConfirm(player, isIn, () => performKioskToggle(player, isIn));
     });
 
-    // Round 2: the one-tap hero. Tapping YOUR OWN signed-in card checks you in directly (no confirm —
-    // the confirm popup exists for mis-taps on OTHER people's names). Checked-in tap -> confirm check-OUT.
-    const heroCard = document.getElementById('ckh-card');
-    if (heroCard) {
-      heroCard.addEventListener('click', (e) => {
-        if (!e.target.closest('#ckh-btn')) return;
-        const me = state.myClaimedPlayer;
-        const player = me && (state.players || []).find((p) => String(p.id) === String(me.id));
-        if (!player) { showCheckinToast('Still loading — one second, then tap again'); return; }
-        const isIn = (state.checkedIn || []).includes(playerIdentityKey(player));
-        const after = () => { const c = document.getElementById('ckh-card'); if (c) c.innerHTML = checkinHeroInnerHTML(); };
-        if (isIn) { openKioskConfirm(player, true, () => { performKioskToggle(player, true); after(); }); }
-        else { performKioskToggle(player, false); after(); }
-      });
-    }
+    // Mike pick X (task-#10): the one-tap signed-in hero is retired ON THIS TAB (anon-only kiosk), so
+    // there is no hero card to bind here anymore. state.myClaimedPlayer still feeds the account menu +
+    // My team; the standalone checkin.html kiosk keeps its own hero + handler.
 
     // "I'm new — add me": reuse the EXACT register path, then check the new player in (kiosk intent).
     const newBtn = document.getElementById('btn-checkin-new');

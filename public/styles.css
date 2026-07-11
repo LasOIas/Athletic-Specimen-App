@@ -2181,28 +2181,10 @@ body.copilot-typing #bottom-nav { display: none; }
 #tab-players > .container:has(.ci-kiosk.is-idle) { position: relative; justify-content: center; }
 #tab-players > .container:has(.ci-kiosk.is-idle) > #js-checkin-stats { position: absolute; top: 0; left: 0; right: 0; }
 
-/* Round 2 — check-in one-tap hero (spec §12.3, Mike's locked pick A). Placed AFTER the .is-idle
-   centering rule above so this equal-specificity override wins by source order (the hero container
-   carries BOTH .is-idle and .has-hero). */
-#tab-players > .container:has(.ci-kiosk.has-hero) { justify-content: flex-start; }
-.ckh-card { background: oklch(0.98 0.004 75 / 0.30); -webkit-backdrop-filter: blur(3px) saturate(1.05);
-  backdrop-filter: blur(3px) saturate(1.05); border: 1.5px solid var(--accent-bd);
-  border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 24px 18px 18px;
-  text-align: center; width: 100%; max-width: 400px; margin: 4px auto 18px; }
-.ckh-av { width: 56px; height: 56px; border-radius: 50%; background: var(--accent-soft);
-  border: 1px solid var(--accent-bd); color: var(--accent); font-family: 'Sora','Inter',sans-serif;
-  font-weight: 800; font-size: 21px; display: inline-flex; align-items: center; justify-content: center; }
-.ckh-eyebrow { display: block; font-size: 11px; font-weight: 700; letter-spacing: .7px;
-  text-transform: uppercase; color: var(--muted); margin-top: 12px; }
-.ckh-name { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 23px; color: var(--ink); margin-top: 2px; }
-.ckh-btn { width: 100%; margin-top: 16px; min-height: 52px; border: none; border-radius: var(--r-md);
-  background: var(--accent); color: #fff; font-weight: 700; font-size: 17px;
-  display: inline-flex; align-items: center; justify-content: center; gap: 9px; }
-.ckh-btn svg { width: 20px; height: 20px; }
-.ckh-btn.is-in { background: var(--live-soft); color: var(--live-ink); border: 1px solid oklch(0.85 0.05 150); }
-.ckh-alts { text-align: center; margin-bottom: 6px; }
-.ckh-alt-label { font-size: 13px; font-weight: 600; color: var(--muted); }
-.ckh-count { text-align: center; font-size: 13px; font-weight: 600; color: var(--muted); padding: 10px 0 0; }
+/* Check In tab (Mike pick X, task-#10, 2026-07-10): the quiet "N checked in" stat pill above the
+   kiosk. The Round-2 one-tap signed-in hero (.ckh-* / .has-hero) is RETIRED on this anon-only tab —
+   the standalone checkin.html kiosk keeps its own inline hero. */
+.cik-count { text-align: center; font-size: 13px; font-weight: 600; color: var(--muted); padding: 10px 0 0; }
 
 .ci-kiosk.is-idle {
   flex: 0 0 auto;
@@ -2226,9 +2208,10 @@ body.copilot-typing #bottom-nav { display: none; }
    reads as one balanced unit rather than top-heavy. */
 .ci-kiosk.is-idle .cik-h { margin-top: 0; }
 .cik-h {
-  font-family: 'Sora', 'Inter', sans-serif;
-  font-size: 26px;
+  font-family: var(--font-display); /* Mike pick X: centered Barlow Semi Condensed title */
+  font-size: 28px;
   font-weight: 700;
+  letter-spacing: .01em;
   text-align: center;
   color: var(--text);
   margin: 14px 0 4px;
@@ -2244,11 +2227,13 @@ body.copilot-typing #bottom-nav { display: none; }
   align-items: center;
   gap: 10px;
   background: var(--surface);
-  border: 2px solid var(--accent);
-  border-radius: var(--r-md);
+  border: 1.5px solid oklch(0.86 0.03 240); /* Mike pick X: muted-blue rest border… */
+  border-radius: 12px;
   padding: 4px 14px;
   box-shadow: var(--shadow-sm);
+  transition: border-color .15s;
 }
+.cik-search:focus-within { border-color: var(--accent); } /* …accent border when active */
 .cik-search svg { width: 22px; height: 22px; color: var(--accent); flex-shrink: 0; }
 .cik-search input {
   border: none !important;
@@ -2262,7 +2247,36 @@ body.copilot-typing #bottom-nav { display: none; }
 }
 .cik-search input:focus { outline: none; box-shadow: none !important; }
 
-#checkin-results { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+#checkin-results { margin-top: 14px; }
+
+/* Mike pick X (task-#10, no bubbles): big bordered tap ROW. Kept as a <button> for keyboard/focus
+   a11y (the mockup drew a <div>; the visual is identical). The matched search prefix reads accent-bold
+   (renderCheckinButton/highlightMatch); right tag = TAP TO CHECK IN, or grayed ALREADY IN when the
+   person is checked in. NO initials/avatar bubble — Mike's explicit delta. Same-name rows keep a muted
+   group line (.ckx-gp) as the only differentiator (skill NEVER renders on a public surface). */
+.ckx-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 14px 12px;
+  border: 1.5px solid oklch(0.86 0.03 240);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  background: oklch(0.985 0.003 75 / .7);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.ckx-row:hover { border-color: var(--accent); }
+.ckx-row:active { transform: translateY(1px); }
+.ckx-nm { flex: 1; min-width: 0; font-size: 17px; font-weight: 600; color: var(--text); white-space: normal; overflow-wrap: anywhere; }
+.ckx-nm b { color: var(--accent); font-weight: 700; }
+.ckx-gp { display: block; font-size: 12.5px; font-weight: 500; color: var(--muted); margin-top: 2px; }
+.ckx-go { flex-shrink: 0; font: 700 12px var(--font-display); letter-spacing: .06em; color: var(--accent); white-space: nowrap; }
+.ckx-row.is-in { opacity: .55; }
+.ckx-row.is-in .ckx-go { color: var(--live-ink); }
 
 .cik-btn {
   display: flex;
@@ -2334,9 +2348,9 @@ body.copilot-typing #bottom-nav { display: none; }
   width: 100%;
   margin-top: 16px;
   background: transparent;
-  color: var(--text-2);
-  border: 1.5px dashed var(--border-2);
-  border-radius: var(--r-md);
+  color: var(--accent); /* Mike pick X: dashed accent "I'm new — add me" */
+  border: 1.5px dashed var(--accent);
+  border-radius: 12px;
   min-height: 52px;
   font-size: 16px;
   font-weight: 600;
@@ -2385,26 +2399,12 @@ body.copilot-typing #bottom-nav { display: none; }
   transform: translate(-50%, 10px);
 }
 
-.cik-adminpanel { margin-top: 18px; }
-.cik-adminpanel[hidden] { display: none; }
-
-.cik-admin {
-  display: block;
-  margin: 22px auto 0;
-  background: transparent;
-  border: none;
-  color: var(--text-4);
-  font-size: 13px;
-  font-weight: 500;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-  padding: 6px 10px;
-}
-.cik-admin:hover { color: var(--text-3); }
+/* The dead in-app Check In admin link + panel CSS was deleted (Mike pick X slice, v2026.07.10.23):
+   session 8 moved admin sign-in behind the sign-in page, leaving those rules unreferenced in both
+   app.js and checkin.html (the kiosk has its own markup). Verified orphaned by grep before deletion. */
 
 @media (min-width: 769px) {
-  .cik-h { font-size: 30px; }
+  .cik-h { font-size: 32px; } /* §41 desktop: the kiosk is already a centered max-width:560px column */
 }
 
 /* ===================================================================
