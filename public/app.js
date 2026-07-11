@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -110,8 +110,33 @@ function closePlayerEditPopup() {
   if (body) body.innerHTML = '';
 }
 
+// Task 3: the player edit sheet's DOM lives in the OLD admin players panel (adminPlayersHTML). The Manage
+// Players directory runs on the PUBLIC shell, which has no such panel — so ensure the modal container exists
+// (create + append to <body> once, mirroring ensureKioskConfirmModal) before openPlayerEditPopup populates
+// it. The Save/Cancel buttons inside the body are document-delegated (ensureSaveDelegationBound), so the
+// EXISTING popup works unchanged from either shell — nothing about the popup itself is rebuilt.
+function ensurePlayerEditModal() {
+  let el = document.getElementById('player-edit-modal');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'player-edit-modal';
+  el.className = 'popup-overlay';
+  el.style.display = 'none';
+  el.setAttribute('aria-hidden', 'true');
+  el.innerHTML = '<div class="popup-card card" role="dialog" aria-modal="true" aria-labelledby="player-edit-modal-title">'
+    + '<div class="popup-header"><h3 id="player-edit-modal-title">Edit Player</h3>'
+    + '<button type="button" class="secondary" data-role="close-popup" data-target="player-edit-modal">Cancel</button></div>'
+    + '<div class="popup-body" id="player-edit-modal-body"></div></div>';
+  document.body.appendChild(el);
+  // Close on an overlay-backdrop tap or the header Cancel (the body's own Cancel/Save are delegated).
+  el.addEventListener('click', (e) => {
+    if (e.target === el || (e.target.closest && e.target.closest('[data-role="close-popup"]'))) closePlayerEditPopup();
+  });
+  return el;
+}
+
 function openPlayerEditPopup(playerKey) {
-  const modal = document.getElementById('player-edit-modal');
+  const modal = ensurePlayerEditModal();
   const body  = document.getElementById('player-edit-modal-body');
   if (!modal || !body) return;
 
@@ -1451,6 +1476,18 @@ function partialRender() {
     if (manageView === 'pickup-form') {
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
       return;
+    }
+    // Task 3 EXCEPTION: the Players directory has a live search input + an in-progress bulk selection.
+    // Never clobber a half-typed query or the Select state on a background sync — bail (refresh the sync
+    // notice only) when Select mode is on, or the search box holds a value / is focused. When the directory
+    // is idle (no query, not selecting) a plain container repaint is safe and keeps the IN tags/counts live.
+    if (manageView === 'players') {
+      const searchEl = document.getElementById('mg-player-search');
+      const searching = searchEl && (document.activeElement === searchEl || ((searchEl.value || '').trim() !== ''));
+      if (mgSelectMode || searching) {
+        if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+        return;
+      }
     }
     const panel = document.getElementById('tab-manage');
     const c = panel ? panel.querySelector('.container') : null;
@@ -9239,8 +9276,16 @@ function buildHistoryPageHTML() {
 // background sync repaints the current Manage surface, never a full render(). `oldAdminMode` keeps the old
 // renderAdminShell reachable via the temporary Open-the-old-admin link (dies Task 14).
 let oldAdminMode = false; // admins boot on the public shell; the temporary Open-the-old-admin link flips this
-let manageView = 'lead';  // 'lead' = the needs-you lead; 'pickup'/'pickup-form' (Task 2); else an area id (placeholder)
+let manageView = 'lead';  // 'lead' = the needs-you lead; 'pickup'/'pickup-form' (Task 2); 'players' (Task 3); else an area id (placeholder)
 let pickupEditId = null;  // Task 2: the pickup_days row id being edited in 'pickup-form' (null = adding a new day)
+// Task 3 (Players directory, pick R4): the live-search value + Select(bulk) state. All survive the container-
+// swap repaint AND guard the poll-clobber (a background sync must never wipe a half-typed query or a selection).
+let mgPlayerQuery = '';         // the current #mg-player-search value
+let mgSelectMode = false;       // bulk Select mode on/off
+let mgSelected = new Set();     // selected player identity keys (playerIdentityKey) while in Select mode
+let mgGroupsOpen = false;       // the inline group manager (toggled from the meta group count)
+let mgMoveOpen = false;         // the Move-to-group chip row (toggled from the bar's "Move to group")
+let mgRenameGroup = null;       // the group name being inline-renamed in the group manager (null = none)
 
 const MG_CHEV = '<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
 
@@ -9428,6 +9473,7 @@ function manageContainerHTML() {
   if (manageView === 'lead') return buildManagePageHTML();
   if (manageView === 'pickup') return buildPickupDaysHTML();
   if (manageView === 'pickup-form') return buildPickupDayFormHTML();
+  if (manageView === 'players') return buildManagePlayersHTML();
   return manageAreaPlaceholderHTML(manageView);
 }
 
@@ -9485,6 +9531,314 @@ async function removePickupDay(id) {
   pickupEditId = null;
   manageView = 'pickup';
   repaintManage();
+}
+
+// ── Task 3: Players directory (session-10 pick R4-B) — one A–Z directory ─────────────────────────────
+// Mockup r10-manage/l-b. Reuses the manage-area chrome (pd-pagehdr/pd-back/pd-htitle) + MG_CHEV; the mgp-*
+// kit carries the search box, meta line, A–Z rows, IN tag, admin-only skill, Select(bulk) bar + group
+// manager. Tap a row → the EXISTING openPlayerEditPopup (body-level modal, poll-clobber-immune). Skill is
+// ADMIN-ONLY data (never on a public surface). NO initials bubbles anywhere.
+const MGP_SEARCH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>';
+const MGP_CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+
+// Admin skill glyph: a positive rating renders one-decimal; unrated (0/blank) is a faint en-dash, never "0.0".
+function mgpSkillText(skill) {
+  const n = Number(skill);
+  return (Number.isFinite(n) && n > 0) ? n.toFixed(1) : '–';
+}
+
+// The players currently selected in Select mode, resolved from mgSelected (identity keys) to live rows.
+function mgSelectedPlayers() {
+  return (state.players || []).filter((p) => mgSelected.has(playerIdentityKey(p)));
+}
+
+// The A–Z list body (id="mgp-list"): filtered by the live query, sorted, letter-anchored. A search MISS
+// (query set, zero rows) shows the dashed "Add <typed> as a new player" row. Re-rendered on its own on every
+// keystroke (the search input above it is never touched — no focus/caret loss). The IN tag is a LABEL, never
+// a dot; skill is right-aligned accent; no initials bubbles.
+function buildMgpListHTML() {
+  const q = String(mgPlayerQuery || '').trim();
+  const qLower = q.toLowerCase();
+  const inSet = new Set(state.checkedIn || []);
+  let list = (state.players || []).filter((p) => p && p.name);
+  if (qLower) list = list.filter((p) => String(p.name).toLowerCase().includes(qLower));
+  list = list.slice().sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' }));
+
+  if (!list.length) {
+    if (q) {
+      return `<button type="button" class="mgp-add" data-mgp-add="${escapeHTMLText(q)}">`
+        + `${PK_PLUS_SVG}Add &ldquo;${escapeHTML(q)}&rdquo; as a new player</button>`;
+    }
+    return `<div class="mgp-empty">No players on the roster yet.</div>`;
+  }
+
+  let lastLetter = '';
+  return list.map((p) => {
+    const key = playerIdentityKey(p);
+    const nm = String(p.name);
+    const first = (nm.trim()[0] || '').toUpperCase();
+    const letter = /[A-Z]/.test(first) ? first : '#';
+    const anchor = letter !== lastLetter ? letter : '';
+    lastLetter = letter;
+    const grp = getPlayerPrimaryGroup(p);
+    const gpHTML = grp ? `<span class="mgp-gp">${escapeHTML(grp)}</span>` : '';
+    const inHTML = inSet.has(key) ? `<span class="mgp-in">IN</span>` : '';
+    const skPos = Number(p.skill) > 0;
+    const skHTML = `<span class="mgp-sk${skPos ? '' : ' n'}">${mgpSkillText(p.skill)}</span>`;
+    const cb = mgSelectMode ? `<span class="mgp-cb">${MGP_CHECK_SVG}</span>` : '';
+    const on = (mgSelectMode && mgSelected.has(key)) ? ' on' : '';
+    const nameHTML = qLower ? highlightMatch(nm, q) : escapeHTML(nm);
+    return `<a class="mgp-row${on}" data-mgp-id="${escapeHTMLText(key)}">`
+      + `${cb}<span class="mgp-al">${anchor}</span>`
+      + `<span class="mgp-pn">${nameHTML}${gpHTML}</span>`
+      + `${inHTML}${skHTML}</a>`;
+  }).join('');
+}
+
+// The inline group manager (flat, under the meta) — opened from the meta group count. Reuses the group
+// catalog helpers (ensure/rename/delete). Rename toggles a per-row inline input via mgRenameGroup.
+function buildMgpGroupsHTML() {
+  const groups = getAvailableGroups();
+  const rows = groups.length
+    ? groups.map((g) => {
+        if (mgRenameGroup && normalizeGroupKey(mgRenameGroup) === normalizeGroupKey(g)) {
+          return `<div class="mgp-grow"><input class="mgp-grn" id="mgp-grename-input" type="text" value="${escapeHTMLText(g)}" autocomplete="off" />`
+            + `<button type="button" class="mgp-gact" data-mgp-grename-save="${escapeHTMLText(g)}">Save</button>`
+            + `<button type="button" class="mgp-gact" data-mgp-grename-cancel>Cancel</button></div>`;
+        }
+        return `<div class="mgp-grow"><span class="mgp-gname">${escapeHTML(g)}</span>`
+          + `<button type="button" class="mgp-gact" data-mgp-grename="${escapeHTMLText(g)}">Rename</button>`
+          + `<button type="button" class="mgp-gact del" data-mgp-gdelete="${escapeHTMLText(g)}">Delete</button></div>`;
+      }).join('')
+    : `<div class="mgp-gempty">No groups yet.</div>`;
+  return `<div class="mgp-grp"><div class="mgp-glabel">Groups</div>${rows}`
+    + `<div class="mgp-gadd"><input id="mgp-gadd-input" type="text" placeholder="New group name" autocomplete="off" />`
+    + `<button type="button" data-mgp-gadd>Add</button></div></div>`;
+}
+
+// The Players directory view (mockup l-b): header + Select toggle, search box, meta line, optional group
+// manager, the A–Z list, and (in Select mode) the bottom action bar.
+function buildManagePlayersHTML() {
+  const roster = (state.players || []).length;
+  const inNow = (state.checkedIn || []).length;
+  const groupCount = getAvailableGroups().length;
+
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">Players</div>`
+    + `<button type="button" class="mgp-selbtn" data-mgp-select>${mgSelectMode ? 'Cancel' : 'Select'}</button>`
+    + `</div>`;
+
+  const search = `<div class="mgp-srch">${MGP_SEARCH_SVG}`
+    + `<input id="mg-player-search" type="text" placeholder="Search or add a player" value="${escapeHTMLText(mgPlayerQuery)}" `
+    + `autocomplete="off" autocapitalize="words" spellcheck="false" aria-label="Search players" /></div>`;
+
+  const meta = `<div class="mgp-meta">`
+    + `<span class="mgp-m"><b>${roster}</b> ${roster === 1 ? 'player' : 'players'}</span>`
+    + `<span class="mgp-m"><b>${inNow}</b> checked in</span>`
+    + `<button type="button" class="mgp-m mgp-mg${mgGroupsOpen ? ' on' : ''}" data-mgp-groups><b>${groupCount}</b> ${groupCount === 1 ? 'group' : 'groups'}</button>`
+    + `</div>`;
+
+  const groupsSection = mgGroupsOpen ? buildMgpGroupsHTML() : '';
+  const listSection = `<div id="mgp-list">${buildMgpListHTML()}</div>`;
+
+  // Select-mode bottom bar (fixed above the nav). "Move to group" reveals a chip row of destination groups.
+  let bar = '';
+  if (mgSelectMode) {
+    const moveChips = mgMoveOpen
+      ? (getAvailableGroups().length
+          ? `<div class="mgp-movebar">${getAvailableGroups().map((g) => `<button type="button" class="mgp-movechip" data-mgp-movegrp="${escapeHTMLText(g)}">${escapeHTML(g)}</button>`).join('')}</div>`
+          : `<div class="mgp-movebar mgp-movehint">Add a group first (tap the group count above)</div>`)
+      : '';
+    bar = moveChips + `<div class="mgp-bar">`
+      + `<button type="button" class="pri" data-mgp-bulk="in">Check in</button>`
+      + `<button type="button" data-mgp-bulk="out">Check out</button>`
+      + `<button type="button" data-mgp-bulk="move">Move to group</button>`
+      + `<button type="button" class="mut" data-mgp-bulk="cancel">Cancel</button>`
+      + `</div>`;
+  }
+
+  return header + search + meta + groupsSection + listSection + bar;
+}
+
+// Bulk check-in / check-out over the Select-mode selection. Optimistic locally, then the per-id
+// check_in/check_out SECURITY DEFINER RPC loop (the ONLY writer that maintains the check_ins history table —
+// same contract as the kiosk + the old bulk bar). Check-OUT confirms first (the 44→0 footgun class).
+async function mgpBulkAttendance(shouldCheckIn) {
+  const targets = mgSelectedPlayers();
+  if (!targets.length) return;
+  if (!shouldCheckIn) {
+    const ok = await appConfirm({
+      title: `Check out ${targets.length} player${targets.length === 1 ? '' : 's'}?`,
+      message: 'They drop off the checked-in list.',
+      confirmText: 'Check out',
+      danger: true
+    });
+    if (!ok) return;
+  }
+  const remoteIds = [];
+  targets.forEach((p) => {
+    if (shouldCheckIn) checkInPlayer(p); else checkOutPlayer(p);
+    if (p.id) remoteIds.push(p.id);
+  });
+  saveLocal();
+  mgSelectMode = false; mgSelected = new Set(); mgMoveOpen = false;
+  repaintManage();
+  if (supabaseClient && remoteIds.length) {
+    try {
+      for (const id of remoteIds) {
+        const { error } = await supabaseClient.rpc(shouldCheckIn ? 'check_in' : 'check_out', { p_id: id });
+        if (error) throw error;
+      }
+      queueSupabaseRefresh();
+    } catch (err) {
+      console.error(shouldCheckIn ? 'mgp bulk check-in error' : 'mgp bulk check-out error', err);
+      await reconcileToSupabaseAuthority(shouldCheckIn ? 'mgp-bulk-check-in' : 'mgp-bulk-check-out');
+    }
+  }
+}
+
+// Bulk move the selection into a group (adds membership + promotes to primary), reusing
+// updatePlayerFieldsSupabase per row + ensureGroupCatalogEntriesSupabase for the catalog.
+async function mgpBulkGroup(dest) {
+  const name = normalizeGroupName(dest);
+  const targets = mgSelectedPlayers();
+  if (!name || !targets.length) return;
+  const idSet = new Set(targets.map((p) => playerIdentityKey(p)));
+  const remoteUpdates = [];
+  state.players = (state.players || []).map((p) => {
+    if (!idSet.has(playerIdentityKey(p))) return p;
+    const cur = getPlayerGroups(p);
+    const next = normalizeGroupList([name, ...cur.filter((g) => g !== name)]);
+    const primary = next[0] || '';
+    const np = { ...p, group: primary, groups: next };
+    if (np.id) remoteUpdates.push({ id: np.id, group: primary, groups: next });
+    return np;
+  });
+  if (!(state.groups || []).includes(name)) state.groups = Array.from(new Set([...(state.groups || []), name]));
+  saveLocal();
+  mgSelectMode = false; mgSelected = new Set(); mgMoveOpen = false;
+  repaintManage();
+  if (supabaseClient) {
+    let failed = false;
+    try {
+      await ensureGroupCatalogEntriesSupabase([name]);
+      for (const u of remoteUpdates) {
+        const ok = await updatePlayerFieldsSupabase(u.id, { group: u.group, groups: u.groups });
+        if (!ok) failed = true;
+      }
+      const synced = await syncFromSupabase();
+      if (!synced) failed = true;
+    } catch (err) { failed = true; console.error('mgp bulk group error', err); }
+    if (failed) await reconcileToSupabaseAuthority('mgp-bulk-group');
+  }
+}
+
+// Add a brand-new player from the search-miss dashed row: a first+last name is required (mix-up prevention),
+// duplicates are ignored, then the row is inserted (optimistic + Supabase) and the edit sheet opens to set
+// skill/group. Mirrors the admin add insert (name + skill 0 + group).
+async function mgpAddPlayer(rawName) {
+  const name = String(rawName || '').trim();
+  if (!name) return;
+  if (!isValidFullName(name)) { appNotice({ title: 'Add a player', message: 'Enter a first and last name.' }); return; }
+  const existing = (state.players || []).find((p) => normalize(p.name) === normalize(name));
+  if (existing) { mgPlayerQuery = ''; repaintManage(); openPlayerEditPopup(playerIdentityKey(existing)); return; }
+  const inserted = { name, skill: 0, group: '', groups: [], pending: true };
+  state.players = [...(state.players || []), inserted];
+  saveLocal();
+  mgPlayerQuery = '';
+  repaintManage();
+  if (supabaseClient) {
+    try {
+      const insertRow = HAS_TAG ? { name, skill: 0, group: '', tag: '' } : { name, skill: 0, group: '' };
+      const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
+      if (error) throw error;
+      if (Array.isArray(data) && data[0]) { inserted.id = data[0].id; inserted.pending = false; }
+      queueSupabaseRefresh();
+      repaintManage();
+    } catch (err) {
+      console.error('mgp add player error', err);
+      await reconcileToSupabaseAuthority('mgp-add-player');
+    }
+  } else {
+    inserted.pending = false;
+  }
+  const live = (state.players || []).find((p) => normalize(p.name) === normalize(name));
+  if (live) openPlayerEditPopup(playerIdentityKey(live));
+}
+
+// Group manager writes (reuse the catalog helpers). Add reads the inline field; rename/delete operate on a
+// named group and also fix player memberships locally so the roster stays consistent before the sync.
+async function mgpAddGroup() {
+  const inp = document.getElementById('mgp-gadd-input');
+  const name = normalizeGroupName(inp ? inp.value : '');
+  if (!name) return;
+  if (!(state.groups || []).some((g) => normalizeGroupKey(g) === normalizeGroupKey(name))) {
+    state.groups = ['All', ...normalizeGroupList([...(state.groups || []).filter((g) => g && g !== 'All'), name])];
+  }
+  saveLocal();
+  if (inp) inp.value = '';
+  repaintManage();
+  if (supabaseClient) { try { await ensureGroupCatalogEntrySupabase(name); } catch (err) { console.error('mgp add group error', err); } }
+}
+
+async function mgpRenameGroupCommit(oldName) {
+  const inp = document.getElementById('mgp-grename-input');
+  const next = normalizeGroupName(inp ? inp.value : '');
+  const old = normalizeGroupName(oldName);
+  if (!old || !next) { mgRenameGroup = null; repaintManage(); return; }
+  const oldKey = normalizeGroupKey(old);
+  const nextKey = normalizeGroupKey(next);
+  state.groups = ['All', ...normalizeGroupList((state.groups || [])
+    .filter((g) => g && g !== 'All')
+    .map((g) => (normalizeGroupKey(g) === oldKey ? next : g)))];
+  state.players = (state.players || []).map((p) => {
+    const gs = getPlayerGroups(p);
+    if (!gs.some((g) => normalizeGroupKey(g) === oldKey)) return p;
+    const ng = normalizeGroupList(gs.map((g) => (normalizeGroupKey(g) === oldKey ? next : g)));
+    return { ...p, group: ng[0] || '', groups: ng };
+  });
+  saveLocal();
+  mgRenameGroup = null;
+  repaintManage();
+  if (supabaseClient && oldKey !== nextKey) {
+    try {
+      await renameGroupCatalogEntrySupabase(old, next);
+      const updates = (state.players || []).filter((p) => p.id).map((p) => ({ id: p.id, group: getPlayerPrimaryGroup(p), groups: getPlayerGroups(p) }));
+      for (const u of updates) await updatePlayerFieldsSupabase(u.id, { group: u.group, groups: u.groups });
+      await syncFromSupabase();
+    } catch (err) { console.error('mgp rename group error', err); await reconcileToSupabaseAuthority('mgp-rename-group'); }
+  }
+}
+
+async function mgpDeleteGroup(groupName) {
+  const name = normalizeGroupName(groupName);
+  if (!name) return;
+  const ok = await appConfirm({
+    title: `Delete group "${name}"?`,
+    message: 'It is removed from every player. This cannot be auto-undone.',
+    confirmText: 'Delete',
+    danger: true
+  });
+  if (!ok) return;
+  const key = normalizeGroupKey(name);
+  state.groups = ['All', ...normalizeGroupList((state.groups || []).filter((g) => g && g !== 'All' && normalizeGroupKey(g) !== key))];
+  state.players = (state.players || []).map((p) => {
+    const gs = getPlayerGroups(p);
+    if (!gs.some((g) => normalizeGroupKey(g) === key)) return p;
+    const ng = gs.filter((g) => normalizeGroupKey(g) !== key);
+    return { ...p, group: ng[0] || '', groups: ng };
+  });
+  saveLocal();
+  repaintManage();
+  if (supabaseClient) {
+    try {
+      await deleteGroupCatalogEntrySupabase(name);
+      const updates = (state.players || []).filter((p) => p.id).map((p) => ({ id: p.id, group: getPlayerPrimaryGroup(p), groups: getPlayerGroups(p) }));
+      for (const u of updates) await updatePlayerFieldsSupabase(u.id, { group: u.group, groups: u.groups });
+      await syncFromSupabase();
+    } catch (err) { console.error('mgp delete group error', err); await reconcileToSupabaseAuthority('mgp-delete-group'); }
+  }
 }
 
 // Flip to the old admin shell (temporary — the whole path dies in Task 14). Runs the exact old render
@@ -11100,6 +11454,15 @@ function attachHandlers() {
   const appContent = document.getElementById('app-content');
   if (appContent && !appContent.dataset.navTabBound) {
     appContent.dataset.navTabBound = '1';
+    // Task 3: the Players directory search is a live filter. Delegated on the stable #app-content ancestor so
+    // it survives the container-swap repaints (the input element is re-created on each swap). Re-renders ONLY
+    // the #mgp-list sub-container — the input itself (and its focus/caret) is never touched.
+    appContent.addEventListener('input', (e) => {
+      if (!e.target || e.target.id !== 'mg-player-search') return;
+      mgPlayerQuery = e.target.value || '';
+      const listEl = document.getElementById('mgp-list');
+      if (listEl) listEl.innerHTML = buildMgpListHTML();
+    });
     appContent.addEventListener('click', (e) => {
       // Slice 3b: "claim your team" — signed-in → the claim page; signed-out → sign in first
       // (claimIntent re-opens the claim page automatically once SIGNED_IN lands).
@@ -11171,12 +11534,47 @@ function attachHandlers() {
       if (pkRemove) { void removePickupDay(pkRemove.getAttribute('data-pk-remove')); return; }
       if (e.target.closest('[data-pk-qr]')) { openQrModal(); return; }              // reuse the shared QR modal
       if (e.target.closest('[data-pk-fresh]')) { void startNewSessionFlow(); return; } // reuse start_new_session (no gate — all 4 admins)
+      // Players directory (Task 3, pick R4): Select toggle, group manager, bulk bar, add-a-player, row taps.
+      // All are container-swap partial repaints (the mg* players module vars survive); a normal row tap opens
+      // the EXISTING body-level edit sheet. Checked BEFORE the generic data-mg-area so a row/button here never
+      // falls through to navigation (the page's own back button carries data-mg-area="lead", handled below).
+      if (manageView === 'players') {
+        if (e.target.closest('[data-mgp-select]')) { mgSelectMode = !mgSelectMode; mgSelected = new Set(); mgMoveOpen = false; repaintManage(); return; }
+        if (e.target.closest('[data-mgp-groups]')) { mgGroupsOpen = !mgGroupsOpen; mgRenameGroup = null; repaintManage(); return; }
+        if (e.target.closest('[data-mgp-gadd]')) { void mgpAddGroup(); return; }
+        const gRen = e.target.closest('[data-mgp-grename]'); if (gRen) { mgRenameGroup = gRen.getAttribute('data-mgp-grename'); repaintManage(); return; }
+        const gRenSave = e.target.closest('[data-mgp-grename-save]'); if (gRenSave) { void mgpRenameGroupCommit(gRenSave.getAttribute('data-mgp-grename-save')); return; }
+        if (e.target.closest('[data-mgp-grename-cancel]')) { mgRenameGroup = null; repaintManage(); return; }
+        const gDel = e.target.closest('[data-mgp-gdelete]'); if (gDel) { void mgpDeleteGroup(gDel.getAttribute('data-mgp-gdelete')); return; }
+        if (e.target.closest('[data-mgp-bulk="in"]')) { void mgpBulkAttendance(true); return; }
+        if (e.target.closest('[data-mgp-bulk="out"]')) { void mgpBulkAttendance(false); return; }
+        if (e.target.closest('[data-mgp-bulk="move"]')) { mgMoveOpen = !mgMoveOpen; repaintManage(); return; }
+        if (e.target.closest('[data-mgp-bulk="cancel"]')) { mgSelectMode = false; mgSelected = new Set(); mgMoveOpen = false; repaintManage(); return; }
+        const moveChip = e.target.closest('[data-mgp-movegrp]'); if (moveChip) { void mgpBulkGroup(moveChip.getAttribute('data-mgp-movegrp')); return; }
+        const addRow = e.target.closest('[data-mgp-add]'); if (addRow) { void mgpAddPlayer(addRow.getAttribute('data-mgp-add') || ''); return; }
+        const mgpRow = e.target.closest('[data-mgp-id]');
+        if (mgpRow) {
+          const key = mgpRow.getAttribute('data-mgp-id') || '';
+          if (mgSelectMode) {
+            if (mgSelected.has(key)) mgSelected.delete(key); else mgSelected.add(key);
+            mgpRow.classList.toggle('on'); // targeted flip — no full repaint (keeps scroll + the rest of the list)
+          } else {
+            openPlayerEditPopup(key);
+          }
+          return;
+        }
+      }
       // Manage tab (session-10 R1): flat-row navigation is a container-swap partial repaint (module var
       // manageView survives; NO full render()). data-mg-area="lead" returns to the lead; an area id opens its
       // (placeholder this slice) page. data-mg-old is the TEMPORARY escape hatch into the old admin shell.
       const mgArea = e.target.closest('[data-mg-area]');
       if (mgArea) {
-        manageView = mgArea.getAttribute('data-mg-area') || 'lead';
+        const nextArea = mgArea.getAttribute('data-mg-area') || 'lead';
+        // Entering the Players directory fresh: reset the search + Select state so a re-open starts clean.
+        if (nextArea === 'players' && manageView !== 'players') {
+          mgPlayerQuery = ''; mgSelectMode = false; mgSelected = new Set(); mgGroupsOpen = false; mgMoveOpen = false; mgRenameGroup = null;
+        }
+        manageView = nextArea;
         const c = document.querySelector('#tab-manage .container');
         if (c) c.innerHTML = manageContainerHTML();
         const mgPanel = document.getElementById('tab-manage');

@@ -68,6 +68,15 @@ function loadApp() {
       buildPickup: () => buildPickupDaysHTML(),
       buildPickupForm: (id) => { pickupEditId = (id == null ? null : id); manageView = 'pickup-form'; return buildPickupDayFormHTML(); },
       checkinNav: () => checkinNavVisible(),
+      buildPlayers: (opts) => {
+        opts = opts || {};
+        mgPlayerQuery = opts.query || '';
+        mgSelectMode = !!opts.select;
+        mgSelected = new Set(opts.selected || []);
+        mgGroupsOpen = !!opts.groups;
+        mgMoveOpen = !!opts.move;
+        return buildManagePlayersHTML();
+      },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -342,5 +351,135 @@ describe('checkinNavVisible — day-of gate reads the pickup SET', () => {
     const st = bridge.getState();
     Object.assign(st, { pickupDays: [], pickupDaysLoaded: false, currentSession: { date: todayStr } });
     expect(bridge.checkinNav()).toBe(true);
+  });
+});
+
+// ── Task 3: Players directory (session-10 pick R4-B) — one A–Z directory ──────
+// A small named roster for the A–Z / IN / skill assertions; a 233-row roster for the meta-count assertion.
+function setPlayersNamed(extra = {}) {
+  const st = bridge.getState();
+  Object.assign(st, {
+    players: [
+      { id: 'p1', name: 'Aaron Wells', skill: 3.0, groups: ['Club'] },
+      { id: 'p2', name: 'Abby Chen',   skill: 3.5, groups: ['Club'] },
+      { id: 'p3', name: 'Ben Okafor',  skill: 4.0, groups: ['Club'] },
+      { id: 'p4', name: 'Mikey Olas',  skill: 4.5, groups: ['Club'] },
+    ],
+    checkedIn: ['id:p4'],           // playerIdentityKey({id:'p4'}) === 'id:p4' → Mikey shows IN
+    groups: ['All', 'Club'],        // getAvailableGroups() drops 'All' → 1 group
+    isAdmin: true,
+    ...extra,
+  });
+}
+function setPlayers233(extra = {}) {
+  const st = bridge.getState();
+  Object.assign(st, {
+    players: Array.from({ length: 233 }, (_, i) => ({ id: 'p' + i, name: 'P' + i + ' Player', skill: 3 })),
+    checkedIn: Array.from({ length: 19 }, (_, i) => 'k' + i),
+    groups: ['All', 'Club'],
+    isAdmin: true,
+    ...extra,
+  });
+}
+
+describe('buildManagePlayersHTML — the A–Z directory (mockup l-b)', () => {
+  it('renders the search box, the meta counts, and no card/kiosk chrome', () => {
+    setPlayers233();
+    const html = bridge.buildPlayers({});
+    expect(html).toContain('id="mg-player-search"');
+    expect(html).toContain('Search or add a player');
+    expect(html).toContain('<b>233</b>');            // roster count from the fixture
+    expect(html).toContain('<b>19</b> checked in');  // state.checkedIn.length
+    expect(html).toContain('<b>1</b> group');        // catalog count (Club); singular grammar
+    expect(html).not.toContain('pd-card');
+    expect(html).not.toContain('ckx-');
+    expect(html).not.toMatch(/avatar|initial/i);     // NO initials bubbles anywhere
+  });
+
+  it('renders one letter anchor per letter over an alphabetical list', () => {
+    setPlayersNamed();
+    const html = bridge.buildPlayers({});
+    // sorted: Aaron, Abby, Ben, Mikey → A (once, for two A-names), B, M
+    expect(count(html, 'class="mgp-al">A</span>')).toBe(1);
+    expect(count(html, 'class="mgp-al">B</span>')).toBe(1);
+    expect(count(html, 'class="mgp-al">M</span>')).toBe(1);
+    // Aaron sorts before Ben
+    expect(html.indexOf('Aaron Wells')).toBeLessThan(html.indexOf('Ben Okafor'));
+  });
+
+  it('marks the checked-in player with a quiet IN label — never a bare dot', () => {
+    setPlayersNamed();
+    const html = bridge.buildPlayers({});
+    expect(html).toContain('class="mgp-in">IN</span>');
+    expect(count(html, '>IN<')).toBe(1);             // only Mikey (id:p4) is checked in
+    expect(html).not.toContain('•');                 // the tag is a label, never a bullet
+  });
+
+  it('renders skill values right-aligned (admin-only surface)', () => {
+    setPlayersNamed();
+    const html = bridge.buildPlayers({});
+    expect(html).toContain('class="mgp-sk"');
+    expect(html).toContain('>3.0<');
+    expect(html).toContain('>4.5<');
+  });
+
+  it('exposes the group count as a tappable group-manager trigger', () => {
+    setPlayersNamed();
+    const html = bridge.buildPlayers({});
+    expect(html).toContain('data-mgp-groups');
+    // opening it renders the inline group section with the existing group + an add field
+    const open = bridge.buildPlayers({ groups: true });
+    expect(open).toContain('Club');
+    expect(open).toContain('data-mgp-gadd');
+  });
+});
+
+describe('buildManagePlayersHTML — live search + add-a-player', () => {
+  it('filters case-insensitively and highlights the match; no add-row on a hit', () => {
+    setPlayersNamed();
+    const html = bridge.buildPlayers({ query: 'aa' });
+    expect(html).toContain('data-mgp-id="id:p1"');   // Aaron Wells matched
+    expect(html).toContain('<b>Aa</b>ron Wells');    // highlightMatch bolds the matched prefix
+    expect(html).not.toContain('Ben Okafor');
+    expect(html).not.toContain('data-mgp-add');
+  });
+
+  it('offers the dashed "Add …" row when the search has no match', () => {
+    setPlayersNamed();
+    const html = bridge.buildPlayers({ query: 'Zztop Nobody' });
+    expect(html).toContain('data-mgp-add="Zztop Nobody"');
+    expect(html).toContain('as a new player');
+    expect(html).not.toContain('Aaron Wells');
+  });
+});
+
+describe('buildManagePlayersHTML — Select (bulk) mode', () => {
+  it('reveals per-row checkboxes and the four-action bottom bar', () => {
+    setPlayersNamed();
+    const html = bridge.buildPlayers({ select: true });
+    expect(html).toContain('class="mgp-cb"');
+    expect(html).toContain('class="mgp-bar"');
+    expect(html).toContain('data-mgp-bulk="in"');
+    expect(html).toContain('data-mgp-bulk="out"');
+    expect(html).toContain('data-mgp-bulk="move"');
+    expect(html).toContain('data-mgp-bulk="cancel"');
+    expect(html).toContain('Check in');
+    expect(html).toContain('Check out');
+    expect(html).toContain('Move to group');
+    expect(html).toContain('>Cancel<');              // the header Select button flips to Cancel
+  });
+
+  it('a selected row carries the .on state', () => {
+    setPlayersNamed();
+    const html = bridge.buildPlayers({ select: true, selected: ['id:p1'] });
+    expect(html).toContain('class="mgp-row on" data-mgp-id="id:p1"');
+  });
+
+  it('normal mode has no bar and no checkboxes', () => {
+    setPlayersNamed();
+    const html = bridge.buildPlayers({});
+    expect(html).not.toContain('class="mgp-bar"');
+    expect(html).not.toContain('class="mgp-cb"');
+    expect(html).toContain('>Select<');              // header button reads Select
   });
 });
