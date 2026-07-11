@@ -77,6 +77,13 @@ function loadApp() {
         mgMoveOpen = !!opts.move;
         return buildManagePlayersHTML();
       },
+      buildTeams: (opts) => {
+        opts = opts || {};
+        mgtSize = (opts.size == null ? 4 : opts.size);
+        mgtSwapKey = opts.swapKey || null;
+        mgtSwapFrom = (opts.swapFrom == null ? null : opts.swapFrom);
+        return buildManageTeamsHTML();
+      },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -481,5 +488,115 @@ describe('buildManagePlayersHTML — Select (bulk) mode', () => {
     expect(html).not.toContain('class="mgp-bar"');
     expect(html).not.toContain('class="mgp-cb"');
     expect(html).toContain('>Select<');              // header button reads Select
+  });
+});
+
+// ── Task 4: Teams page (session-10 pick R5 TRIMMED) — chips + generate + stacked teams ────────
+// Mockup r10-manage/k-h1: MAKE TEAMS · N CHECKED IN (size chips 2s/3s/4s/6s, 4s default) + Generate
+// balanced teams + TODAY'S TEAMS (TEAM n label + names STACKED one-per-line) + tap a name → swap sheet.
+// The casual live-courts board is CUT (Mike): NO net cards, NO report/clear result, skills manual-only.
+function setTeams(extra = {}) {
+  const st = bridge.getState();
+  Object.assign(st, {
+    players: [
+      { id: 'p1', name: 'Mikey Olas', skill: 4.5 }, { id: 'p2', name: 'Sam Pat', skill: 3.0 },
+      { id: 'p3', name: 'Vaughn Dickey', skill: 3.5 }, { id: 'p4', name: 'Abby Chen', skill: 3.0 },
+      { id: 'p5', name: 'Aaron Wells', skill: 4.0 }, { id: 'p6', name: 'Bri Halloway', skill: 3.5 },
+    ],
+    checkedIn: Array.from({ length: 19 }, (_, i) => 'k' + i),
+    generatedTeams: [],
+    isAdmin: true,
+    ...extra,
+  });
+}
+const twoTeams = [
+  [{ id: 'p1', name: 'Mikey Olas' }, { id: 'p2', name: 'Sam Pat' }],
+  [{ id: 'p5', name: 'Aaron Wells' }, { id: 'p6', name: 'Bri Halloway' }],
+];
+
+describe('buildManageTeamsHTML — the Teams page (mockup k-h1, R5 trimmed)', () => {
+  it('renders the back header + MAKE TEAMS section with the live checked-in count, no card', () => {
+    setTeams();
+    const html = bridge.buildTeams({});
+    expect(html).toContain('data-mg-area="lead"');       // back to the Manage lead
+    expect(html).toContain('>Teams<');                    // page title
+    expect(html).toContain('Make teams · 19 checked in');  // header count from state.checkedIn.length
+    expect(html).not.toContain('pd-card');
+  });
+
+  it('renders the four size chips with 4s active by default', () => {
+    setTeams();
+    const html = bridge.buildTeams({});                    // default size = 4
+    ['2', '3', '4', '6'].forEach((s) => expect(html).toContain(`data-mgt-size="${s}"`));
+    expect(html).toContain('>2s<');
+    expect(html).toContain('>4s<');
+    // exactly one chip is active, and it is the 4s chip
+    expect(count(html, 'pl-on')).toBe(1);
+    expect(html).toContain('pl-tab pl-on" data-mgt-size="4"');
+  });
+
+  it('honors a different selected size (6s active)', () => {
+    setTeams();
+    const html = bridge.buildTeams({ size: 6 });
+    expect(html).toContain('pl-tab pl-on" data-mgt-size="6"');
+    expect(count(html, 'pl-on')).toBe(1);
+  });
+
+  it('offers the Generate balanced teams CTA', () => {
+    setTeams();
+    const html = bridge.buildTeams({});
+    expect(html).toContain('data-mgt-generate');
+    expect(html).toContain('Generate balanced teams');
+  });
+
+  it('shows an honest empty state (still chips + CTA) when no teams are generated', () => {
+    setTeams({ generatedTeams: [] });
+    const html = bridge.buildTeams({});
+    expect(html).toContain('No teams yet');
+    expect(html).toContain('data-mgt-generate');          // can still generate
+    expect(html).not.toContain("Today's teams");          // no teams section header when empty
+  });
+
+  it("labels the roster section Today's teams (NEVER tonight) and stacks names one per line", () => {
+    setTeams({ generatedTeams: twoTeams });
+    const html = bridge.buildTeams({});
+    expect(html).toContain("Today's teams");
+    expect(html.toLowerCase()).not.toContain('tonight');
+    expect(html).toContain('>TEAM 1<');
+    expect(html).toContain('>TEAM 2<');
+    // each name is its own stacked line element (mgt-nm), not comma-joined on one line
+    expect(html).toContain('class="mgt-nm"');
+    expect(count(html, 'class="mgt-nm"')).toBe(4);         // 2 teams × 2 players
+    expect(html).toContain('Mikey Olas');
+    expect(html).toContain('Aaron Wells');
+  });
+
+  it('makes each name tappable to open the swap sheet (carries player key + from-team)', () => {
+    setTeams({ generatedTeams: twoTeams });
+    const html = bridge.buildTeams({});
+    expect(html).toContain('data-mgt-swap="id:p1"');
+    expect(html).toContain('data-mgt-from="0"');
+    expect(html).toContain('Tap a name to swap');         // the helper note
+  });
+
+  it('has NO casual courts / report-result / net-card strings anywhere', () => {
+    setTeams({ generatedTeams: twoTeams });
+    const html = bridge.buildTeams({});
+    expect(html).not.toMatch(/REPORT/i);
+    expect(html).not.toContain('report-live-match-result');
+    expect(html).not.toContain('court-stat');
+    expect(html).not.toContain('live-net');
+    expect(html).not.toMatch(/\bNet \d/);                  // no "Net 1" court labels
+    expect(html).not.toContain('Won</button>');
+  });
+
+  it('opens the swap sheet listing the OTHER teams when a name is being swapped', () => {
+    setTeams({ generatedTeams: twoTeams });
+    // swapping Mikey (id:p1) out of team 0 → the sheet offers team 1 (TEAM 2) as a destination
+    const html = bridge.buildTeams({ swapKey: 'id:p1', swapFrom: 0 });
+    expect(html).toContain('data-mgt-to="1"');            // destination = the other team
+    expect(html).not.toContain('data-mgt-to="0"');        // never the team the player is already on
+    expect(html).toContain('Mikey Olas');                 // names the player being moved
+    expect(html).toContain('data-mgt-cancel');            // a way out
   });
 });

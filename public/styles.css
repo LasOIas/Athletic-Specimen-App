@@ -3250,6 +3250,30 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgp-movechip { font: 600 12.5px 'Inter', sans-serif; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-bd); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
 .mgp-movehint { font-size: 12px; color: var(--muted); }
 
+/* ── Manage → Teams (Task 4, session-10 pick R5 TRIMMED) — chips + generate + stacked teams. mgt-* kit from
+   the r10-manage k-h1 mockup. Size chips reuse the pl-tab grammar; the casual courts board is CUT (no net
+   cards, no report/clear). Team label Barlow 800 muted; names STACKED one per line with faint hairlines. ── */
+.mgt-chips { margin: 6px 0 0; }
+.mgt-cta { display: block; width: 100%; margin-top: 12px; padding: 14px; border: none; border-radius: 11px; background: var(--accent); color: #fff; font: 700 15px 'Inter', sans-serif; text-align: center; cursor: pointer; }
+.mgt-trow { display: flex; align-items: flex-start; gap: 10px; padding: 11px 2px; border-top: 1px solid var(--border); }
+.pl-sect + .mgt-trow { border-top: none; }
+.mgt-tt { flex: none; font: 800 12px var(--font-display); color: var(--muted); width: 52px; padding-top: 2px; }
+.mgt-names { flex: 1; min-width: 0; font-size: 14.5px; color: var(--ink); font-weight: 500; line-height: 1.75; }
+.mgt-nm { border-bottom: 1px solid var(--border); padding: 2px 0; cursor: pointer; }
+.mgt-nm:last-child { border-bottom: none; }
+.mgt-note { font-size: 12px; color: var(--muted); text-align: center; margin-top: 10px; }
+.mgt-empty { padding: 26px 16px; text-align: center; color: var(--muted); font-size: 13px; }
+/* swap sheet (fixed above the floating nav; backdrop dims the page) */
+.mgt-sheet-backdrop { position: fixed; inset: 0; z-index: 45; background: oklch(0.18 0.005 75 / .35); }
+.mgt-sheet { position: fixed; left: 12px; right: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 46; padding: 12px; border-radius: 16px; border: 1px solid var(--border); background: var(--card); box-shadow: 0 6px 20px oklch(0.18 0.005 75 / .16); }
+.mgt-sheet-h { font: 700 15px var(--font-display); color: var(--ink); margin-bottom: 2px; }
+.mgt-sheet-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.mgt-to { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 6px; border: none; border-top: 1px solid var(--border); background: none; cursor: pointer; }
+.mgt-to:first-of-type { border-top: none; }
+.mgt-to-t { flex: none; font: 800 12px var(--font-display); color: var(--muted); width: 52px; }
+.mgt-to-r { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgt-cancel { display: block; width: 100%; margin-top: 8px; padding: 10px; border: none; background: none; color: var(--muted); font: 600 13px 'Inter', sans-serif; cursor: pointer; }
+
 .pl-colh { display: flex; align-items: center; gap: 10px; padding: 0 2px 5px; font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--faint); }
 .pl-srow { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-top: 1px solid var(--border); }
 .pl-colh + .pl-srow { border-top: none; }
@@ -3650,7 +3674,8 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   /* Task 3 (§41): the Players Select-mode action bar + move-chip row are position:fixed — clamp them to the
      centered Manage column on desktop instead of spanning the full viewport. */
   body.pd-public-active .mgp-bar,
-  body.pd-public-active .mgp-movebar { left: 50%; right: auto; transform: translateX(-50%); width: min(696px, calc(100vw - 24px)); }
+  body.pd-public-active .mgp-movebar,
+  body.pd-public-active .mgt-sheet { left: 50%; right: auto; transform: translateX(-50%); width: min(696px, calc(100vw - 24px)); }
 
   /* ---- typography: Sora titles up a notch on the surfaces that go wide (A direction) ---- */
   body.pd-public-active .pd-thero .pd-h { font-size: 22px; }
@@ -3764,7 +3789,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 .hm-teams .hm-nm{ font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hm-teams .hm-sc{ font-family: var(--font-display); font-size: 15px; font-weight: 700; margin-left: 12px; }
 .hm-pill{ font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 99px; margin-left: 12px; background: var(--live-soft); color: var(--live-ink); }
-.hm-pill.is-done{ background: oklch(0.94 0.004 75); color: var(--muted); }
+/* [Task 4 — R5 cut] .hm-pill.is-done removed — only the deleted hmCasualCourtsHTML "Team N won" pill used it. */
 .hm-mini{ display: flex; justify-content: space-between; align-items: baseline; padding: 8px 2px; border-bottom: 1px solid var(--border); font-size: 14px; }
 .hm-mini:last-of-type{ border-bottom: none; }
 .hm-mini .hm-rk{ color: var(--muted); font: 700 12px var(--font-display); margin-right: 8px; }

@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2488,44 +2488,8 @@ function normalizeLiveMatchResults(resultsByMatch, matchups) {
   return normalized;
 }
 
-function areAllLiveMatchResultsRecorded(matchups, resultsByMatch) {
-  const pairs = Array.isArray(matchups) ? matchups : [];
-  if (!pairs.length) return false;
-  return pairs.every((match) => {
-    const matchKey = liveMatchupKey(match.teamA, match.teamB);
-    const winner = Number((resultsByMatch || {})[matchKey]);
-    return winner === match.teamA || winner === match.teamB;
-  });
-}
-
-function deriveNextLiveCourtOrder(courtOrder, liveMatchups, resultsByMatch) {
-  const currentOrder = Array.isArray(courtOrder) ? courtOrder : [];
-  const pairs = Array.isArray(liveMatchups && liveMatchups.matchups) ? liveMatchups.matchups : [];
-  if (!currentOrder.length || !pairs.length) return null;
-
-  const winners = [];
-  const losers = [];
-
-  pairs.forEach((match) => {
-    const matchKey = liveMatchupKey(match.teamA, match.teamB);
-    const winner = Number((resultsByMatch || {})[matchKey]);
-    if (winner !== match.teamA && winner !== match.teamB) return;
-    winners.push(winner);
-    losers.push(winner === match.teamA ? match.teamB : match.teamA);
-  });
-
-  if (winners.length !== pairs.length || losers.length !== pairs.length) return null;
-
-  const waiting = (Array.isArray(liveMatchups && liveMatchups.waitingTeams) ? liveMatchups.waitingTeams : [])
-    .filter((teamNo) => Number.isInteger(teamNo) && currentOrder.includes(teamNo));
-
-  // First version rule: winners stay/shift left, waiting teams slot between winners and losers,
-  // losers shift away from the left winners court.
-  const orderedTeamNumbers = [...winners, ...waiting, ...losers];
-  if (orderedTeamNumbers.length !== currentOrder.length) return null;
-  if (new Set(orderedTeamNumbers).size !== currentOrder.length) return null;
-  return orderedTeamNumbers;
-}
+// [Task 4 — R5 cut] areAllLiveMatchResultsRecorded + deriveNextLiveCourtOrder deleted with the casual
+// courts board (court rotation/advancement). Team generation stays; skills are admin-edit only now.
 
 // C26 item 3a: read-only public live-courts data, derived from the synced live_state.
 // Truthful only — Live Nets records WIN/LOSS (no running score); rows show team NUMBERS +
@@ -2696,28 +2660,9 @@ function hmNetBlockHTML(b) {
     </div>`;
 }
 
-// Casual ON THE COURTS blocks — reuse getPublicLiveData (team NUMBERS + win/loss, NO scores) restyled into
-// the same net-block grammar with COURT N headers. Truthful: no fabricated score, just matchup + status pill.
-function hmCasualCourtsHTML() {
-  const { matchups, results } = getPublicLiveData();
-  if (!matchups.length) return '';
-  return matchups.map((m, idx) => {
-    const winner = Number(results[liveMatchupKey(m.teamA, m.teamB)]) || 0;
-    const pill = winner
-      ? `<span class="hm-pill is-done">Team ${escapeHTML(String(winner))} won</span>`
-      : '<span class="hm-pill">Playing</span>';
-    return `<div class="hm-netblock">
-        <div class="hm-nethead">COURT ${idx + 1}</div>
-        <div class="hm-game">
-          <div class="hm-teams">
-            <div class="hm-row"><span class="hm-nm">Team ${escapeHTML(String(m.teamA))}</span></div>
-            <div class="hm-row"><span class="hm-nm">Team ${escapeHTML(String(m.teamB))}</span></div>
-          </div>
-          ${pill}
-        </div>
-      </div>`;
-  }).join('');
-}
+// [Task 4 — R5 cut] hmCasualCourtsHTML deleted with the casual courts board. The public Home casual state
+// (hmSessionLiveHTML) no longer shows "ON THE COURTS" net cards — it leads with the headcount + Check In CTA.
+// The public Home TOURNAMENT live board (hmTournamentLiveHTML) is a separate function and is untouched.
 
 // Local weekday for a 'YYYY-MM-DD' session date → the "<Weekday> Pick-up" title (spec §2c example format).
 function hmSessionWeekday(dateStr) {
@@ -2783,23 +2728,21 @@ function hmSessionLiveHTML(reg) {
   const weekday = hmSessionWeekday(sess.date);
   const checkedIn = (state.checkedIn || []).length;
   const teamCount = (state.generatedTeams || []).length;
-  const courtCount = getPublicLiveData().matchups.length;
+  // [Task 4 — R5 cut] the casual courts board is gone: the public session-day Home leads with the headcount
+  // (+ team count) and the Check In CTA — no "ON THE COURTS" net cards, no court count.
   const meta = [
     checkedIn ? (checkedIn + ' checked in') : '',
     teamCount ? (teamCount + (teamCount === 1 ? ' team' : ' teams')) : '',
-    courtCount ? (courtCount + (courtCount === 1 ? ' court' : ' courts')) : '',
   ].filter(Boolean).join(' · ');
   const cta = '<button type="button" class="hm-cta" data-nav-tab="players">Check in</button>';
   const lead = hmLeadHTML({ eyebrow: 'Session live', title: weekday ? (weekday + ' Pick-up') : 'Pick-up session', meta, ctaHTML: cta });
 
-  const courts = hmCasualCourtsHTML();
-  const courtsSection = courts ? `<div class="hm-sect">On the courts</div>${courts}` : '';
   // Cross-state link only when registration is ACTUALLY open — reg can now be a CLOSED upcoming tournament.
   const regLink = (reg && reg.registration_open)
     ? `<button type="button" class="hm-link" data-tn-view="register"><span>Registration open — ${escapeHTML(reg.name || 'Tournament')}</span>${HM_CHEV}</button>`
     : '';
 
-  return `<div class="hm">${lead}${courtsSection}${regLink}</div>`;
+  return `<div class="hm">${lead}${regLink}</div>`;
 }
 
 // ── State 2b: registration open. Lead + Register CTA (routes into the SHIPPED register event card/join
@@ -2890,35 +2833,8 @@ function publicHomeHTML() {
   return hmQuietHTML();
 }
 
-function maybeAdvanceLiveCourtsFromResults() {
-  const teamCount = Array.isArray(state.generatedTeams) ? state.generatedTeams.length : 0;
-  const currentOrder = normalizeLiveCourtOrder(state.liveCourtOrder, teamCount);
-  state.liveCourtOrder = currentOrder;
-  const liveMatchups = deriveLiveTeamMatchupsFromOrder(currentOrder);
-  if (!liveMatchups.matchups.length) return false;
-
-  const normalizedResults = normalizeLiveMatchResults(state.liveMatchResults, liveMatchups.matchups);
-  state.liveMatchResults = normalizedResults;
-  state.liveMatchSkillSnapshots = normalizeLiveMatchSkillSnapshots(
-    state.liveMatchSkillSnapshots,
-    normalizedResults
-  );
-
-  if (!areAllLiveMatchResultsRecorded(liveMatchups.matchups, normalizedResults)) return false;
-  // Single-court rounds have no meaningful court movement; keep the
-  // recorded result visible so it can be reviewed/cleared.
-  if (liveMatchups.matchups.length < 2) return false;
-
-  const nextOrder = deriveNextLiveCourtOrder(currentOrder, liveMatchups, normalizedResults);
-  if (!nextOrder) return false;
-  const orderChanged = nextOrder.some((teamNo, idx) => teamNo !== currentOrder[idx]);
-  if (!orderChanged) return false;
-
-  state.liveCourtOrder = nextOrder;
-  state.liveMatchResults = {};
-  state.liveMatchSkillSnapshots = {};
-  return true;
-}
+// [Task 4 — R5 cut] maybeAdvanceLiveCourtsFromResults deleted with the casual courts board (winners-move-left
+// court rotation was driven by the now-deleted report-result handler).
 
 function normalizeLiveMatchSkillSnapshots(snapshotsByMatch, resultsByMatch) {
   const source = snapshotsByMatch && typeof snapshotsByMatch === 'object' ? snapshotsByMatch : {};
@@ -2955,139 +2871,10 @@ function clampSkillOneDecimal(value) {
   return Math.max(0, Math.min(10, rounded));
 }
 
-function parseLiveMatchKey(matchKey) {
-  const raw = String(matchKey || '').trim();
-  const match = /^(\d+)-(\d+)$/.exec(raw);
-  if (!match) return null;
-  return {
-    teamA: Number(match[1]),
-    teamB: Number(match[2])
-  };
-}
-
-function captureLiveMatchSkillSnapshot(teamA, teamB) {
-  ensurePlayerIdentityKeys();
-  const teamNumbers = [teamA, teamB].filter((value) => Number.isInteger(value) && value > 0);
-  if (!teamNumbers.length) return {};
-
-  const playerByKey = new Map();
-  (state.players || []).forEach((player) => {
-    const key = playerIdentityKey(player);
-    if (key) playerByKey.set(key, player);
-  });
-
-  const snapshot = {};
-  teamNumbers.forEach((teamNumber) => {
-    const teamIndex = teamNumber - 1;
-    const team = Array.isArray(state.generatedTeams) ? state.generatedTeams[teamIndex] : null;
-    if (!Array.isArray(team)) return;
-
-    team.forEach((member) => {
-      const key = playerIdentityKey(member);
-      if (!key || Object.prototype.hasOwnProperty.call(snapshot, key)) return;
-      const source = playerByKey.get(key) || member;
-      snapshot[key] = clampSkillOneDecimal(Number(source.skill) || 0);
-    });
-  });
-
-  return snapshot;
-}
-
-function restoreLiveMatchSkillSnapshot(snapshot) {
-  if (!snapshot || typeof snapshot !== 'object') return false;
-
-  const normalized = {};
-  Object.entries(snapshot).forEach(([playerKeyRaw, skillRaw]) => {
-    const playerKey = String(playerKeyRaw || '').trim();
-    if (!playerKey) return;
-    const skill = Number(skillRaw);
-    if (!Number.isFinite(skill)) return;
-    normalized[playerKey] = clampSkillOneDecimal(skill);
-  });
-
-  const keys = Object.keys(normalized);
-  if (!keys.length) return false;
-  const keySet = new Set(keys);
-
-  state.players = (state.players || []).map((player) => {
-    const key = playerIdentityKey(player);
-    if (!keySet.has(key)) return player;
-    return { ...player, skill: normalized[key] };
-  });
-
-  state.generatedTeams = (state.generatedTeams || []).map((team) => (
-    (Array.isArray(team) ? team : []).map((member) => {
-      const key = playerIdentityKey(member);
-      if (!keySet.has(key)) return member;
-      return { ...member, skill: normalized[key] };
-    })
-  ));
-
-  return true;
-}
-
-function applySkillDeltaToGeneratedTeam(teamNumber, delta) {
-  const teamIndex = Number(teamNumber) - 1;
-  if (!Number.isInteger(teamIndex) || teamIndex < 0) return;
-  const team = Array.isArray(state.generatedTeams) ? state.generatedTeams[teamIndex] : null;
-  if (!Array.isArray(team) || !team.length) return;
-
-  const keySet = new Set(team.map((player) => playerIdentityKey(player)).filter(Boolean));
-  if (!keySet.size) return;
-
-  state.players = (state.players || []).map((player) => {
-    const key = playerIdentityKey(player);
-    if (!keySet.has(key)) return player;
-    return { ...player, skill: clampSkillOneDecimal((Number(player.skill) || 0) + delta) };
-  });
-
-  state.generatedTeams = (state.generatedTeams || []).map((members) => (
-    (Array.isArray(members) ? members : []).map((member) => {
-      const key = playerIdentityKey(member);
-      if (!keySet.has(key)) return member;
-      return { ...member, skill: clampSkillOneDecimal((Number(member.skill) || 0) + delta) };
-    })
-  ));
-}
-
-async function syncLiveMatchSkillsToSupabase(teamNumbers) {
-  if (!supabaseClient) return true;
-
-  const normalizedTeams = Array.from(new Set(
-    (Array.isArray(teamNumbers) ? teamNumbers : [])
-      .map((value) => Number(value))
-      .filter((value) => Number.isInteger(value) && value > 0)
-  ));
-  if (!normalizedTeams.length) return true;
-
-  const keySet = new Set();
-  normalizedTeams.forEach((teamNumber) => {
-    const teamIndex = teamNumber - 1;
-    const team = Array.isArray(state.generatedTeams) ? state.generatedTeams[teamIndex] : null;
-    if (!Array.isArray(team)) return;
-    team.forEach((member) => {
-      const key = playerIdentityKey(member);
-      if (key) keySet.add(key);
-    });
-  });
-  if (!keySet.size) return true;
-
-  const targets = (state.players || []).filter((player) => {
-    if (!player || !player.id) return false;
-    const key = playerIdentityKey(player);
-    return keySet.has(key);
-  });
-  if (!targets.length) return true;
-
-  let allOK = true;
-  for (const player of targets) {
-    const ok = await updatePlayerFieldsSupabase(player.id, {
-      skill: clampSkillOneDecimal(Number(player.skill) || 0)
-    });
-    if (!ok) allOK = false;
-  }
-  return allOK;
-}
+// [Task 4 — R5 cut] parseLiveMatchKey + captureLiveMatchSkillSnapshot + restoreLiveMatchSkillSnapshot +
+// applySkillDeltaToGeneratedTeam + syncLiveMatchSkillsToSupabase deleted with the casual courts board. These
+// were the ±0.1-per-casual-result skill machinery (Mike: skills now change by admin edit only). clampSkill-
+// OneDecimal stays (shared skill helper); normalizeLiveMatchSkillSnapshots stays (localStorage plumbing).
 
 
 function updateGeneratedTeamsSummaryFromCurrent(teams) {
@@ -6960,11 +6747,12 @@ function saveGeneratedTeamsToLocal() {
 }
 
 // --- C22 item 1: Live Nets persistence (DB-authoritative, write-through) ----------------------
-// The night's SHAREABLE state (generated team keys, court order, "Won" tallies) is persisted to a
-// single `live_state` row so it survives a browser clear and a co-admin / spectator sees the same
-// night. SKILL data (skill snapshots, fairness summary) is intentionally NOT persisted here — this
-// row is anon-readable and skill is admin-only. The admin (a real authenticated session) is the
-// SOLE writer; spectators read only. localStorage stays as the write-through cache.
+// The SHAREABLE team state (generated team keys) is persisted to a single `live_state` row so it
+// survives a browser clear and a co-admin / spectator sees the same teams. [Task 4 — R5 cut] the casual
+// COURT payload (court order + "Won" tallies) is no longer written with the courts board; the load path
+// still tolerates old rows that carry those fields. SKILL data (snapshots, fairness) is intentionally NOT
+// persisted here — this row is anon-readable and skill is admin-only. The admin (a real authenticated
+// session) is the SOLE writer; spectators read only. localStorage stays as the write-through cache.
 let liveStateSaveTimer = null;
 let liveStateHydratedOnce = false;
 
@@ -6980,11 +6768,9 @@ async function saveLiveStateToSupabase() {
     const hasTeams = Array.isArray(state.generatedTeams) && state.generatedTeams.length > 0;
     const teamKeys = serializeGeneratedTeamsForStorage(state.generatedTeams);
     if (hasTeams && !teamKeys) return; // transient invalid state (checked-in mismatch) — don't clobber the DB
-    const payload = {
-      teamKeys: teamKeys || [],
-      courtOrder: Array.isArray(state.liveCourtOrder) ? state.liveCourtOrder : [],
-      results: (state.liveMatchResults && typeof state.liveMatchResults === 'object') ? state.liveMatchResults : {}
-    };
+    // [Task 4 — R5 cut] TEAM persistence stays (cross-device); the casual COURT payload (courtOrder/results)
+    // is dropped with the courts board. The load path still tolerates old rows that carry those fields.
+    const payload = { teamKeys: teamKeys || [] };
     const { error } = await supabaseClient
       .from('live_state')
       .upsert({ id: 'current', data: payload, updated_at: new Date().toISOString() }, { onConflict: 'id' });
@@ -9286,6 +9072,11 @@ let mgSelected = new Set();     // selected player identity keys (playerIdentity
 let mgGroupsOpen = false;       // the inline group manager (toggled from the meta group count)
 let mgMoveOpen = false;         // the Move-to-group chip row (toggled from the bar's "Move to group")
 let mgRenameGroup = null;       // the group name being inline-renamed in the group manager (null = none)
+// Task 4 (Teams page, pick R5 trimmed): the selected team-SIZE chip (4s default) + the open swap sheet.
+// All survive the container-swap repaint (a background sync must not reset a chosen size or a half-open swap).
+let mgtSize = 4;                // the active size chip (2/3/4/6); 4s default per the mockup
+let mgtSwapKey = null;          // the playerIdentityKey being swapped (null = swap sheet closed)
+let mgtSwapFrom = null;         // the team index the swapped player currently sits on
 
 const MG_CHEV = '<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
 
@@ -9474,6 +9265,7 @@ function manageContainerHTML() {
   if (manageView === 'pickup') return buildPickupDaysHTML();
   if (manageView === 'pickup-form') return buildPickupDayFormHTML();
   if (manageView === 'players') return buildManagePlayersHTML();
+  if (manageView === 'teams') return buildManageTeamsHTML();
   return manageAreaPlaceholderHTML(manageView);
 }
 
@@ -9839,6 +9631,106 @@ async function mgpDeleteGroup(groupName) {
       await syncFromSupabase();
     } catch (err) { console.error('mgp delete group error', err); await reconcileToSupabaseAuthority('mgp-delete-group'); }
   }
+}
+
+// ── Task 4: Teams page (session-10 pick R5 TRIMMED) — chips + generate + stacked teams ───────────────
+// Mockup r10-manage/k-h1. Reuses the manage-area chrome (pd-pagehdr/pd-back/pd-htitle) + pl-sect labels +
+// the pl-tab chip grammar; the mgt-* kit carries the CTA / stacked team rows / swap sheet. MAKE TEAMS ·
+// N CHECKED IN (size chips 2/3/4/6, 4s default) → Generate balanced teams (reuses generateBalancedGroups) →
+// TODAY'S TEAMS (TEAM n label + names STACKED one per line, faint hairlines). Tap a name → a swap sheet
+// listing the OTHER teams; tapping one reuses the drag-drop mutation moveGeneratedPlayerBetweenTeams. The
+// casual live-courts board is CUT (Mike): no net cards, no report/clear result, skills change by admin edit
+// only. Team persistence rides the normal saveLocal → queueLiveStateSave path (courts stripped from it).
+function buildManageTeamsHTML() {
+  const inNow = (state.checkedIn || []).length;
+  const teams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
+
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">Teams</div></div>`;
+
+  // MAKE TEAMS — size chips (pl-tab grammar; 4s default) + the Generate CTA. Chip just SELECTS the size;
+  // the CTA generates from the checked-in players.
+  const chips = `<div class="pl-tabs mgt-chips">`
+    + [2, 3, 4, 6].map((s) => `<button type="button" class="pl-tab${s === mgtSize ? ' pl-on' : ''}" data-mgt-size="${s}">${s}s</button>`).join('')
+    + `</div>`;
+  const makeSect = `<div class="pl-sect">Make teams · ${inNow} checked in</div>`
+    + chips
+    + `<button type="button" class="mgt-cta" data-mgt-generate>Generate balanced teams</button>`;
+
+  // TODAY'S TEAMS — omitted entirely until teams exist. Names STACKED one per line; each name is tappable
+  // (carries its identity key + current team index) to open the swap sheet. Never "tonight" (§ style rule).
+  let teamsSect;
+  if (teams.length) {
+    const rows = teams.map((team, idx) => {
+      const names = (Array.isArray(team) ? team : []).map((p) => {
+        const key = playerIdentityKey(p);
+        return `<div class="mgt-nm" data-mgt-swap="${escapeHTMLText(key)}" data-mgt-from="${idx}">${escapeHTML(String((p && p.name) || 'Player'))}</div>`;
+      }).join('');
+      return `<div class="mgt-trow"><span class="mgt-tt">TEAM ${idx + 1}</span><div class="mgt-names">${names}</div></div>`;
+    }).join('');
+    teamsSect = `<div class="pl-sect">Today's teams</div>${rows}`
+      + `<div class="mgt-note">Tap a name to swap players between teams · regenerate any time</div>`;
+  } else {
+    teamsSect = `<div class="mgt-empty">No teams yet — pick a size and generate.</div>`;
+  }
+
+  return header + makeSect + teamsSect + buildMgtSwapSheetHTML();
+}
+
+// The swap sheet (module-var gated so it survives the container-swap repaint). Lists the OTHER teams as
+// destinations; a tap reuses moveGeneratedPlayerBetweenTeams (simple move when uneven, auto-swap when even).
+function buildMgtSwapSheetHTML() {
+  if (mgtSwapKey == null || mgtSwapFrom == null) return '';
+  const teams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
+  const from = Number(mgtSwapFrom);
+  const fromTeam = teams[from];
+  if (!Array.isArray(fromTeam)) return '';
+  const player = fromTeam.find((p) => playerIdentityKey(p) === mgtSwapKey);
+  const name = (player && player.name) ? String(player.name) : 'this player';
+  const dests = teams.map((team, idx) => ({ team, idx }))
+    .filter((x) => x.idx !== from)
+    .map((x) => {
+      const preview = (Array.isArray(x.team) ? x.team : [])
+        .map((p) => escapeHTML(String((p && p.name) || ''))).filter(Boolean).join(', ');
+      return `<button type="button" class="mgt-to" data-mgt-to="${x.idx}"><span class="mgt-to-t">TEAM ${x.idx + 1}</span><span class="mgt-to-r">${preview}</span></button>`;
+    }).join('');
+  return `<div class="mgt-sheet-backdrop" data-mgt-cancel></div>`
+    + `<div class="mgt-sheet" role="dialog" aria-label="Swap player">`
+    + `<div class="mgt-sheet-h">Move ${escapeHTML(name)}</div>`
+    + `<div class="mgt-sheet-sub">Pick a team — even sizes swap the closest player back.</div>`
+    + (dests || `<div class="mgt-empty">No other team to move to yet.</div>`)
+    + `<button type="button" class="mgt-cancel" data-mgt-cancel>Cancel</button></div>`;
+}
+
+// Generate balanced teams from the checked-in players at the selected size (reuses generateBalancedGroups +
+// the groupCount/lastTeamSize chip state). Team count = floor(checked-in / size), min 2; remainders ride
+// along per the balancer. Persists via saveLocal (→ queueLiveStateSave, teams only) + a partial repaint.
+function mgtGenerateTeams() {
+  const size = Number(mgtSize) || 4;
+  const inNow = (state.checkedIn || []).length;
+  const numTeams = Math.max(2, Math.floor(inNow / size));
+  const gen = generateBalancedGroups(state.players, state.checkedIn, numTeams, state.generatedTeams);
+  state.generatedTeams = gen.teams;
+  state.generatedTeamsSummary = gen.summary;
+  state.groupCount = numTeams;
+  state.lastTeamSize = size;
+  state.liveCourtOrder = defaultLiveCourtOrder(gen.teams.length); // kept coherent for the dormant old shell
+  state.liveMatchResults = {};
+  state.liveMatchSkillSnapshots = {};
+  mgtSwapKey = null; mgtSwapFrom = null;
+  saveLocal();
+  repaintManage();
+}
+
+// Apply the open swap: move the swapped player onto the tapped team (reuses the drag-drop mutation), persist,
+// close the sheet, repaint.
+function mgtApplySwap(toTeamIndex) {
+  if (mgtSwapKey == null || mgtSwapFrom == null) return;
+  const result = moveGeneratedPlayerBetweenTeams(Number(mgtSwapFrom), Number(toTeamIndex), mgtSwapKey);
+  mgtSwapKey = null; mgtSwapFrom = null;
+  if (result && result.changed) saveLocal();
+  repaintManage();
 }
 
 // Flip to the old admin shell (temporary — the whole path dies in Task 14). Runs the exact old render
@@ -11564,6 +11456,20 @@ function attachHandlers() {
           return;
         }
       }
+      // Teams page (Task 4, pick R5): size chips select the size, Generate builds teams, tapping a name opens
+      // the swap sheet, a destination tap moves the player. All container-swap partial repaints (the mgt*
+      // module vars survive). Checked BEFORE the generic data-mg-area so these never fall through to nav; the
+      // page's own back button carries data-mg-area="lead" (handled below).
+      if (manageView === 'teams') {
+        const sizeBtn = e.target.closest('[data-mgt-size]');
+        if (sizeBtn) { mgtSize = Number(sizeBtn.getAttribute('data-mgt-size')) || 4; repaintManage(); return; }
+        if (e.target.closest('[data-mgt-generate]')) { mgtGenerateTeams(); return; }
+        const toBtn = e.target.closest('[data-mgt-to]');
+        if (toBtn) { mgtApplySwap(Number(toBtn.getAttribute('data-mgt-to'))); return; }
+        if (e.target.closest('[data-mgt-cancel]')) { mgtSwapKey = null; mgtSwapFrom = null; repaintManage(); return; }
+        const swapName = e.target.closest('[data-mgt-swap]');
+        if (swapName) { mgtSwapKey = swapName.getAttribute('data-mgt-swap') || null; mgtSwapFrom = Number(swapName.getAttribute('data-mgt-from')); repaintManage(); return; }
+      }
       // Manage tab (session-10 R1): flat-row navigation is a container-swap partial repaint (module var
       // manageView survives; NO full render()). data-mg-area="lead" returns to the lead; an area id opens its
       // (placeholder this slice) page. data-mg-old is the TEMPORARY escape hatch into the old admin shell.
@@ -11574,6 +11480,8 @@ function attachHandlers() {
         if (nextArea === 'players' && manageView !== 'players') {
           mgPlayerQuery = ''; mgSelectMode = false; mgSelected = new Set(); mgGroupsOpen = false; mgMoveOpen = false; mgRenameGroup = null;
         }
+        // Entering the Teams page fresh: 4s default + no open swap sheet.
+        if (nextArea === 'teams' && manageView !== 'teams') { mgtSize = 4; mgtSwapKey = null; mgtSwapFrom = null; }
         manageView = nextArea;
         const c = document.querySelector('#tab-manage .container');
         if (c) c.innerHTML = manageContainerHTML();
@@ -12062,101 +11970,11 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
     });
   }
 
-  document.querySelectorAll('[data-role="report-live-match-result"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const matchKey = String(btn.getAttribute('data-match-key') || '').trim();
-      const winnerTeam = Number(btn.getAttribute('data-winner-team'));
-      if (!matchKey || !Number.isInteger(winnerTeam)) return;
-
-      const parsed = parseLiveMatchKey(matchKey);
-      if (!parsed) return;
-      const { teamA, teamB } = parsed;
-      if (winnerTeam !== teamA && winnerTeam !== teamB) return;
-
-      const existingResults = state.liveMatchResults || {};
-      const existingSnapshots = state.liveMatchSkillSnapshots || {};
-      const loserTeam = winnerTeam === teamA ? teamB : teamA;
-      const previousWinner = Number(existingResults[matchKey]) || 0;
-      if (previousWinner === winnerTeam) return; // prevent duplicate stacking on same result click
-
-      if (previousWinner === teamA || previousWinner === teamB) {
-        const restored = restoreLiveMatchSkillSnapshot(existingSnapshots[matchKey]);
-        if (!restored) {
-          const previousLoser = previousWinner === teamA ? teamB : teamA;
-          applySkillDeltaToGeneratedTeam(previousWinner, -0.1);
-          applySkillDeltaToGeneratedTeam(previousLoser, +0.1);
-        }
-      }
-
-      const baselineSnapshot = captureLiveMatchSkillSnapshot(teamA, teamB);
-      applySkillDeltaToGeneratedTeam(winnerTeam, +0.1);
-      applySkillDeltaToGeneratedTeam(loserTeam, -0.1);
-
-      state.liveMatchResults = {
-        ...existingResults,
-        [matchKey]: winnerTeam
-      };
-      state.liveMatchSkillSnapshots = {
-        ...existingSnapshots,
-        [matchKey]: baselineSnapshot
-      };
-      const courtsAdvanced = maybeAdvanceLiveCourtsFromResults();
-      saveLocal();
-      render();
-      if (courtsAdvanced) {
-        showTeamMoveToast('Courts advanced. Winners moved left.');
-      }
-      if (supabaseClient) {
-        (async () => {
-          const synced = await syncLiveMatchSkillsToSupabase([teamA, teamB]);
-          if (synced) queueSupabaseRefresh();
-          else await reconcileToSupabaseAuthority('live-match-result-skill-sync');
-        })();
-      }
-    });
-  });
-
-  document.querySelectorAll('[data-role="clear-live-match-result"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const matchKey = String(btn.getAttribute('data-match-key') || '').trim();
-      if (!matchKey) return;
-
-      const existingResults = state.liveMatchResults || {};
-      if (!Object.prototype.hasOwnProperty.call(existingResults, matchKey)) return;
-
-      const parsed = parseLiveMatchKey(matchKey);
-      if (!parsed) return;
-      const { teamA, teamB } = parsed;
-
-      const existingSnapshots = state.liveMatchSkillSnapshots || {};
-      const previousWinner = Number(existingResults[matchKey]) || 0;
-      const restored = restoreLiveMatchSkillSnapshot(existingSnapshots[matchKey]);
-      if (previousWinner === teamA || previousWinner === teamB) {
-        if (!restored) {
-          const previousLoser = previousWinner === teamA ? teamB : teamA;
-          applySkillDeltaToGeneratedTeam(previousWinner, -0.1);
-          applySkillDeltaToGeneratedTeam(previousLoser, +0.1);
-        }
-      }
-
-      const nextResults = { ...existingResults };
-      delete nextResults[matchKey];
-      const nextSnapshots = { ...existingSnapshots };
-      delete nextSnapshots[matchKey];
-      state.liveMatchResults = nextResults;
-      state.liveMatchSkillSnapshots = nextSnapshots;
-
-      saveLocal();
-      render();
-      if (supabaseClient) {
-        (async () => {
-          const synced = await syncLiveMatchSkillsToSupabase([teamA, teamB]);
-          if (synced) queueSupabaseRefresh();
-          else await reconcileToSupabaseAuthority('live-match-clear-skill-sync');
-        })();
-      }
-    });
-  });
+  // [Task 4 — R5 cut] the report-live-match-result + clear-live-match-result handlers deleted with the casual
+  // courts board. They recorded a casual net win/loss, nudged skills ±0.1, and advanced the court order — all
+  // cut by Mike ("show the teams, not what court is playing"). Skills change by admin edit only now. The old
+  // admin shell's Live-Nets card markup (render() → adminTeamsHTML) stays DORMANT until the Task 14 sweep; its
+  // buttons are now inert. Team generation + cross-device team persistence are unaffected.
 
   // --- Session tab handlers ---
   const btnSaveSession = document.getElementById('btn-save-session');
