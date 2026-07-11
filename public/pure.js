@@ -1393,6 +1393,51 @@ function sessionIsToday(dateStr, todayStr) {
   return d === today;
 }
 
+// Manage lead — the "needs you" attention model (session-10 pick R1, admin Manage tab). PURE: no state,
+// no DOM, no Date. Returns the ordered action items that need the admin's attention, each with a deep-link
+// `area` into the Manage screen that fixes it. Order is fixed (venmo -> unpaid -> noday) so the lead reads
+// the same every render.
+//   t          — the live/registering tournament row (or null) — { registration_open, venmo_link, ... }
+//   teams      — that tournament's team rows — [{ name, paid }]
+//   pickupDays — the ALREADY-UPCOMING pickup days (caller pre-filters via sessionIsUpcoming); empty = none
+// Rules: reg open + no venmo_link -> venmo; any team with paid falsey -> unpaid ("N teams haven't paid");
+// no upcoming pickup day -> noday; nothing pending -> [].
+function manageNeedsYouModel(t, teams, pickupDays) {
+  const items = [];
+  const tRow = t || {};
+  const teamRows = Array.isArray(teams) ? teams : [];
+  const days = Array.isArray(pickupDays) ? pickupDays : [];
+
+  const venmo = tRow.venmo_link == null ? '' : String(tRow.venmo_link).trim();
+  if (tRow.registration_open && !venmo) {
+    items.push({
+      id: 'venmo', area: 'tournament',
+      title: 'Add the Venmo link',
+      sub: 'The register page\'s pay button says "coming soon"',
+    });
+  }
+
+  const unpaid = teamRows.filter((tm) => tm && !tm.paid);
+  if (unpaid.length) {
+    const names = unpaid.map((tm) => (tm && tm.name) ? String(tm.name) : 'Team').join(' · ');
+    items.push({
+      id: 'unpaid', area: 'tournament',
+      title: unpaid.length + ' team' + (unpaid.length === 1 ? ' hasn\'t' : 's haven\'t') + ' paid',
+      sub: names + ' — registered without the checkbox',
+    });
+  }
+
+  if (!days.length) {
+    items.push({
+      id: 'noday', area: 'pickup',
+      title: 'No pickup day set',
+      sub: 'The Check In tab stays hidden until one exists',
+    });
+  }
+
+  return items;
+}
+
 // ── Public Home state machine + view-models (atom-up spec 2026-07-10 §2) ──
 // PURE: no state access, no DOM, no Date.now(); todayStr comes in as a parameter.
 // Consume the TOURNAMENT match-row shape (verified vs buildPublicTournamentLiveHTML /
@@ -1586,7 +1631,7 @@ if (typeof module !== "undefined" && module.exports) {
     teamPeekModel, checkinHeroModel,
     bracketOutcome, bracketRoundLabel, bracketStatusLine,
     registerEventModel, joinSheetValidate, registerFormValidate, teamNameTaken,
-    computeTeamRunEnded, sessionIsUpcoming, sessionIsToday,
+    computeTeamRunEnded, sessionIsUpcoming, sessionIsToday, manageNeedsYouModel,
     publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel,
     tournamentStageModel, rulesToHTML
   };

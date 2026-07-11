@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.26'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1436,6 +1436,21 @@ function partialRender() {
       const saved = panel.scrollTop;
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
       c.innerHTML = publicHomeHTML();
+      if (saved > 0 && panel.scrollTop !== saved) panel.scrollTop = saved;
+      return;
+    }
+  }
+
+  // Session-10 R1: the admin Manage tab repaints IN PLACE on a background sync — the needs-you rows +
+  // status subs recompute from live state via a single container swap that preserves manageView + scrollTop.
+  // No form lives on the lead and the area placeholders are static, so rebuilding either is safe (no clobber).
+  if (!playersEl && activeMainTab === 'manage') {
+    const panel = document.getElementById('tab-manage');
+    const c = panel ? panel.querySelector('.container') : null;
+    if (c) {
+      const saved = panel.scrollTop;
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      c.innerHTML = manageContainerHTML();
       if (saved > 0 && panel.scrollTop !== saved) panel.scrollTop = saved;
       return;
     }
@@ -4202,10 +4217,10 @@ async function refreshTournamentLive() {
       // Wave 1b (2026-06-25): the Bracket nav button shows/hides when a tournament goes live or ends on
       // another device. Rebuild ONLY #bottom-nav (the click handler is delegated on the nav element, so
       // an innerHTML swap keeps it working) instead of a full render() that resets a spectator's scroll —
-      // exactly at the peak-attention moment a tournament starts. Public-only: admin's tournamentNavVisible()
-      // is always true (isAdmin) so prevNav never flips for admin; fall back to render() defensively.
+      // exactly at the peak-attention moment a tournament starts. Session-10 R1: admins are on the public
+      // shell now, so this surgical swap covers them too (keyed !oldAdminMode); the old shell full-renders.
       const nav = document.getElementById('bottom-nav');
-      if (nav && !state.isAdmin) { nav.innerHTML = buildPublicNavInnerHTML(); activateMainTab(activeMainTab); }
+      if (nav && !oldAdminMode) { nav.innerHTML = buildPublicNavInnerHTML(); activateMainTab(activeMainTab); }
       else render();
     }
   }
@@ -8919,6 +8934,14 @@ function buildPublicNavInnerHTML() {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/></svg>
       <span>Check In</span>
     </button>` : '';
+  // Manage (session-10 R1): the 4th nav item, ONLY for admins — the whole admin surface now lives on the
+  // public shell. Sliders SVG. Every nav rebuild path (shell render, refreshTournamentLive swap, day-of
+  // check-in gate rebuild) goes through this builder, so the item appears/vanishes consistently.
+  const manageBtn = state.isAdmin ? `
+    <button class="nav-btn" data-nav-tab="manage">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
+      <span>Manage</span>
+    </button>` : '';
   return `
     <button class="nav-btn" data-nav-tab="home">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
@@ -8927,7 +8950,7 @@ function buildPublicNavInnerHTML() {
     <button class="nav-btn" data-nav-tab="tournament">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>
       <span>Tournament</span>
-    </button>`;
+    </button>${manageBtn}`;
 }
 
 // Public header (atom-up 2026-07-10, spec §1): wordmark + spectator account icon only. Sport-pill removed.
@@ -9109,6 +9132,113 @@ function buildHistoryPageHTML() {
   return `${header}${body}`;
 }
 
+// ── Manage tab (session-10 pick R1) — admin-only, lives on the PUBLIC shell as a 4th nav item. ──
+// The lead: title flush top -> NEEDS YOU (omitted when nothing is pending) -> EVERYTHING rows
+// (Tournament · Pickup days · Players · Teams · Admins), each a flat tappable row with a one-line status
+// sub + chevron. Flat on stone (NO pd-card), pl-sect section labels, mg-* kit, SVG chevrons, plain English.
+// `manageView` ('lead' | area) is a MODULE var (distinct from state.manageView — the OLD admin
+// tournament-mode sub-view that dies with the old shell in Task 14); it survives partialRender so a
+// background sync repaints the current Manage surface, never a full render(). `oldAdminMode` keeps the old
+// renderAdminShell reachable via the temporary Open-the-old-admin link (dies Task 14).
+let oldAdminMode = false; // admins boot on the public shell; the temporary Open-the-old-admin link flips this
+let manageView = 'lead';  // 'lead' = the needs-you lead; else an area id (honest placeholder this slice)
+
+const MG_CHEV = '<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
+
+// The tournament the Manage lead reports on: a live event, else the open-for-registration setup row.
+function manageLeadTournament() {
+  return publicLiveTournament()
+    || (state.tournaments || []).find((x) => x.registration_open && x.status === 'setup') || null;
+}
+
+// Shape the pickup-day set for the pure model. state.pickupDays lands in Task 2; until then a single
+// upcoming currentSession stands in (empty when none is upcoming), so `noday` fires honestly today.
+function manageUpcomingPickupDays() {
+  return state.pickupDays
+    || (state.currentSession && state.currentSession.date && sessionIsUpcoming(state.currentSession.date)
+      ? [state.currentSession] : []);
+}
+
+// Thin caller over the pure attention model (pure.js).
+function manageNeedsYou() {
+  return manageNeedsYouModel(manageLeadTournament(), state.tournamentTeams || [], manageUpcomingPickupDays());
+}
+
+// One flat Manage row. name + subHTML are emitted RAW — callers pre-escape any user-derived content
+// (apostrophes in the fixed/model copy are valid in text content and must survive verbatim for §27).
+function mgRowHTML(area, name, subHTML) {
+  return `<a class="mg-row" data-mg-area="${area}">
+      <div class="mg-rb"><div class="mg-rn">${name}</div><div class="mg-rs">${subHTML}</div></div>
+      ${MG_CHEV}
+    </a>`;
+}
+
+function buildManagePageHTML() {
+  const t = manageLeadTournament();
+  const teams = state.tournamentTeams || [];
+  const needs = manageNeedsYou();
+
+  // NEEDS YOU — omitted entirely when empty (R1). Titles are model-controlled (no user input) so they emit
+  // raw; subs may embed team/tournament names so they are escaped.
+  const needsHTML = needs.length
+    ? `<div class="pl-sect">Needs you</div>`
+      + needs.map((it) => mgRowHTML(it.area, it.title, escapeHTML(it.sub))).join('')
+    : '';
+
+  // EVERYTHING — five flat rows with honest one-line status subs derived from state.
+  const stageWord = ({ setup: 'Setup', pools: 'Pools & schedule', bracket: 'Bracket', completed: 'Completed' });
+  const tourSub = t
+    ? [t.name || 'Tournament', t.registration_open ? 'Registration open' : (stageWord[t.status] || 'Setup'),
+       teams.length + ' team' + (teams.length === 1 ? '' : 's') + ' in'].filter(Boolean).join(' · ')
+    : 'No tournament yet';
+  const days = manageUpcomingPickupDays();
+  const pickupSub = days.length
+    ? (days.length === 1 ? 'Next up ' + formatSessionDate(days[0].date) : days.length + ' scheduled')
+    : 'None scheduled';
+  const roster = (state.players || []).length;
+  const inNow = (state.checkedIn || []).length;
+  const playersSub = roster + ' on the roster · ' + inNow + ' checked in';
+  const teamsSub = inNow ? inNow + ' checked in — ready to make teams' : 'Quiet — no live session';
+
+  const everythingHTML = `<div class="pl-sect">Everything</div>`
+    + mgRowHTML('tournament', 'Tournament', escapeHTML(tourSub))
+    + mgRowHTML('pickup', 'Pickup days', escapeHTML(pickupSub))
+    + mgRowHTML('players', 'Players', escapeHTML(playersSub))
+    + mgRowHTML('teams', 'Teams', escapeHTML(teamsSub))
+    + mgRowHTML('admins', 'Admins', 'Seats &amp; activity log');
+
+  // The temporary escape hatch back to the old admin shell (dies Task 14).
+  return `<div class="mg-h1">Manage</div>
+    ${needsHTML}
+    ${everythingHTML}
+    <button type="button" class="mg-oldlink" data-mg-old>Open the old admin</button>`;
+}
+
+// Area placeholders (Task 1): the real Pickup/Players/Teams/Tournament/Admins screens land in Tasks 2-11.
+// Each carries a back-to-Manage header (data-mg-area="lead") so a row tap is never a dead end.
+const MG_AREA_TITLES = { tournament: 'Tournament', pickup: 'Pickup days', players: 'Players', teams: 'Teams', admins: 'Admins' };
+function manageAreaPlaceholderHTML(area) {
+  const title = MG_AREA_TITLES[area] || 'Manage';
+  return `<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+      <div class="pd-htitle">${escapeHTML(title)}</div>
+    </div>
+    <div class="pd-empty">Coming in the next slices.</div>`;
+}
+
+// The Manage panel content dispatches on manageView (lead vs an area page). Used by renderPublicShell,
+// the partialRender 'manage' branch, and the data-mg-area container-swap — one source, no full render().
+function manageContainerHTML() {
+  return manageView === 'lead' ? buildManagePageHTML() : manageAreaPlaceholderHTML(manageView);
+}
+
+// Flip to the old admin shell (temporary — the whole path dies in Task 14). Runs the exact old render
+// branch so the old shell's auth/sign-out wiring stays byte-identical; a reload returns to the public shell.
+function renderOldAdminShell() {
+  oldAdminMode = true;
+  render();
+}
+
 function renderPublicShell() {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
   return `
@@ -9146,6 +9276,11 @@ function renderPublicShell() {
         ${buildHistoryPageHTML()}
       </div>
     </div>
+    ${state.isAdmin ? `<div id="tab-manage" class="tab-panel">
+      <div class="container">
+        ${manageContainerHTML()}
+      </div>
+    </div>` : ''}
   </div>
   <nav id="bottom-nav">${buildPublicNavInnerHTML()}</nav>
 </div>
@@ -9887,25 +10022,28 @@ function render() {
   }
 
   // C26 item 2: per-surface active-tab memory (set just before activateMainTab below).
-  // C26 item 3b: PUBLIC defaults to 'home'; admin defaults to 'dashboard' (the run-the-night Home).
-  // No admin stale-key guard needed: session/tournament/teams are all still valid admin panels (reachable
-  // via the Dashboard quick-actions), so a stored value for any of them is fine.
-  activeMainTab = sessionStorage.getItem(currentTabKey()) || (state.isAdmin ? 'dashboard' : 'home');
-  // C26 item 3a + Round 2: public 'teams'/'session' and the removed 'scores' (Live) tab fall back to 'home'.
-  if (!state.isAdmin && ['teams', 'session', 'scores'].includes(activeMainTab)) activeMainTab = 'home';
-  // Check In rework (Mike 2026-07-10): a saved 'players' tab from a session day bounces to Home when the
-  // Check In nav button is hidden (session deleted / date passed) — mirrors the retired-'scores' bounce.
-  if (!state.isAdmin && activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
+  // Session-10 R1: admins now boot on the PUBLIC shell — only the temporary Open-the-old-admin link
+  // (oldAdminMode) reaches renderAdminShell. So the tab guards below run for admins-on-public-shell too,
+  // keyed on !oldAdminMode (was !state.isAdmin). The old shell still defaults to its 'dashboard' Home.
+  activeMainTab = sessionStorage.getItem(currentTabKey()) || (oldAdminMode ? 'dashboard' : 'home');
+  // On the public shell the old-admin-only tabs (dashboard/session/teams/live) and the removed public
+  // 'scores' tab have no panel — bounce them Home. (A non-admin never stores these; harmless.)
+  if (!oldAdminMode && ['dashboard', 'session', 'teams', 'scores', 'live'].includes(activeMainTab)) activeMainTab = 'home';
+  // Manage is admin-only: a non-admin's stale/forged 'manage' tab bounces Home (admins keep it).
+  if (!oldAdminMode && activeMainTab === 'manage' && !state.isAdmin) activeMainTab = 'home';
+  // Check In rework (Mike 2026-07-10): a saved 'players' tab bounces to Home when the Check In nav button
+  // is hidden (session deleted / date passed) — mirrors the retired-'scores' bounce (public shell, incl. admins).
+  if (!oldAdminMode && activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
   // Mike K (2026-07-10): the public Standings page folded into the Pools & schedule Seeding tab, so a saved
   // 'standings' tab has no panel — bounce it to the Tournament tab (the Seeding tab lives inside it). Runs
   // BEFORE the tournament→home guard below, so a standings-saved fan with no live tournament cascades to Home.
-  if (!state.isAdmin && activeMainTab === 'standings') activeMainTab = 'tournament';
+  if (!oldAdminMode && activeMainTab === 'standings') activeMainTab = 'tournament';
   // Wave 1e: a fan last on the Bracket tab who returns after the tournament was deleted would land on
   // an empty 'tournament' panel with no nav button to highlight (the Bracket button is gone). Reset to
   // Home unless a tournament is actually live.
-  if (!state.isAdmin && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
+  if (!oldAdminMode && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 
-  const shellHtml = state.isAdmin
+  const shellHtml = (state.isAdmin && oldAdminMode)
     ? renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML)
     : renderPublicShell();
   root.innerHTML = shellHtml.replace(/\n?\]\s*$/, '');
@@ -10185,13 +10323,15 @@ bindTournamentTabV2();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
-if (!state.isAdmin && ['teams', 'session', 'scores'].includes(activeMainTab)) activeMainTab = 'home';
-// Check In rework (Mike 2026-07-10): bounce a stranded public 'players' tab to Home when the Check In nav button is hidden.
-if (!state.isAdmin && activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
+// Session-10 R1: these mirror the pre-shell guards above; keyed on !oldAdminMode so admins-on-public-shell get them too.
+if (!oldAdminMode && ['dashboard', 'session', 'teams', 'scores', 'live'].includes(activeMainTab)) activeMainTab = 'home';
+if (!oldAdminMode && activeMainTab === 'manage' && !state.isAdmin) activeMainTab = 'home'; // Manage is admin-only
+// Check In rework (Mike 2026-07-10): bounce a stranded 'players' tab to Home when the Check In nav button is hidden.
+if (!oldAdminMode && activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
 // Mike K (2026-07-10): Standings folded into the Pools Seeding tab — a saved 'standings' tab has no panel; bounce it to Tournament (the guard below re-routes to Home if none is live).
-if (!state.isAdmin && activeMainTab === 'standings') activeMainTab = 'tournament';
-// Wave 1e: reset a stale public 'tournament' tab to Home when no tournament is live (else an empty panel + no nav button).
-if (!state.isAdmin && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
+if (!oldAdminMode && activeMainTab === 'standings') activeMainTab = 'tournament';
+// Wave 1e: reset a stale 'tournament' tab to Home when no tournament is live (else an empty panel + no nav button).
+if (!oldAdminMode && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 activateMainTab(activeMainTab);
 restoreTransientInteractionState(interactionSnapshot);
 refreshAzStripAvailability();
@@ -10595,11 +10735,12 @@ function bindTournamentTabV2() {
 }
 
 function activateMainTab(tab) {
-  // Tournament-mode tabs (manage/live) only exist while in the mode — fall back if stale (e.g. after a reload).
-  if ((tab === 'manage' || tab === 'live') && !state.tournamentMode) tab = 'dashboard';
+  // OLD admin tournament-mode tabs (manage/live) only exist while in the mode — fall back if stale. Gated on
+  // oldAdminMode so the PUBLIC shell's real Manage tab (session-10 R1, admin) is never bounced to dashboard.
+  if ((tab === 'manage' || tab === 'live') && !state.tournamentMode && oldAdminMode) tab = 'dashboard';
   // Check In rework (Mike 2026-07-10): the public Check In tab only exists on the pickup-session day —
   // any stale route to it (saved tab, mid-visit nav rebuild after the session hides) bounces to Home.
-  if (tab === 'players' && !state.isAdmin && !checkinNavVisible()) tab = 'home';
+  if (tab === 'players' && !oldAdminMode && !checkinNavVisible()) tab = 'home';
   activeMainTab = tab;
   sessionStorage.setItem(currentTabKey(), tab);
   // Slice 1: lazy-load completed-tournament history the first time History opens (read-only, cached on state).
@@ -10612,7 +10753,7 @@ function activateMainTab(tab) {
     });
   }
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
-  document.body.classList.toggle('pd-public-active', !state.isAdmin); // Mike (2026-07-09): the logo backdrop shows on EVERY public page (was Home-only); frosted cards + bolder outlines keep content readable
+  document.body.classList.toggle('pd-public-active', !oldAdminMode); // Mike (2026-07-09): the logo backdrop shows on EVERY public page; session-10 R1: admins are on the public shell now, so keyed on !oldAdminMode (the old shell keeps its own styling)
   // Reliability fix (2026-06-20): expose the current tab to assistive tech, not just a visual .active
   // class (this is the single place nav active state is set — first paint via activateMainTab(activeMainTab)
   // and on click — so aria-current stays correct everywhere).
@@ -10626,7 +10767,7 @@ function activateMainTab(tab) {
   // Public tile-pages (Standings/My Team/History) have no bottom-nav button of their own -> anchor their
   // highlight to the Tournament nav button (they are Tournament content now). (Admin keeps
   // tournament/session -> dashboard; the public 'tournament' Bracket tab has its own nav button again.)
-  const NAV_ANCHOR = state.isAdmin
+  const NAV_ANCHOR = oldAdminMode
     ? { tournament: 'dashboard', session: 'dashboard' }
     : { standings: 'tournament', history: 'tournament', myteam: 'tournament' };
   const navActive = hasOwnButton ? tab : (NAV_ANCHOR[tab] || tab);
@@ -10764,6 +10905,19 @@ function attachHandlers() {
         if (panel) panel.scrollTop = 0; // a sub-page open/back is an explicit user action — top is correct
         return;
       }
+      // Manage tab (session-10 R1): flat-row navigation is a container-swap partial repaint (module var
+      // manageView survives; NO full render()). data-mg-area="lead" returns to the lead; an area id opens its
+      // (placeholder this slice) page. data-mg-old is the TEMPORARY escape hatch into the old admin shell.
+      const mgArea = e.target.closest('[data-mg-area]');
+      if (mgArea) {
+        manageView = mgArea.getAttribute('data-mg-area') || 'lead';
+        const c = document.querySelector('#tab-manage .container');
+        if (c) c.innerHTML = manageContainerHTML();
+        const mgPanel = document.getElementById('tab-manage');
+        if (mgPanel) mgPanel.scrollTop = 0;
+        return;
+      }
+      if (e.target.closest('[data-mg-old]')) { renderOldAdminShell(); return; }
       const navBtn = e.target.closest('[data-nav-tab]');
       if (navBtn) activateMainTab(navBtn.dataset.navTab);
     });
@@ -10852,6 +11006,7 @@ const logoutBtn = document.getElementById('btn-logout');
   if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
     state.isAdmin = false;
+    oldAdminMode = false; // session-10 R1: leaving admin drops the old-shell escape hatch, so a re-login lands on the public shell
     state.masterAdminAuthenticated = false;
     state.limitedGroup = null;                   // clear tenant lock
     state.activeGroup = 'All';                   // reset view

@@ -3160,6 +3160,18 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .pl-sect { display: flex; align-items: center; gap: 10px; margin: 20px 0 10px; font: 700 13px var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
 .pl-sect::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
+/* ── Manage tab (session-10 pick R1) — admin-only lead on the public shell. Flat rows on stone (NO card),
+   pl-sect section labels, mg-* kit per the r10-manage mockup. The .mg-oldlink is TEMPORARY (dies Task 14). ── */
+.mg-h1 { font: 700 22px/1.05 var(--font-display); color: var(--ink); }
+.mg-row { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-top: 1px solid var(--border); text-decoration: none; color: inherit; cursor: pointer; }
+.pl-sect + .mg-row { border-top: none; }
+.mg-rb { flex: 1; min-width: 0; }
+.mg-rn { font-size: 15px; font-weight: 600; color: var(--ink); }
+.mg-rs { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.mg-rs b { color: var(--warn-ink); font-weight: 600; }
+.mg-chev { flex: none; width: 16px; height: 16px; color: var(--faint); }
+.mg-oldlink { display: block; width: 100%; margin-top: 26px; background: none; border: none; color: var(--faint); font-size: 12.5px; text-align: center; cursor: pointer; }
+
 .pl-colh { display: flex; align-items: center; gap: 10px; padding: 0 2px 5px; font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--faint); }
 .pl-srow { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-top: 1px solid var(--border); }
 .pl-colh + .pl-srow { border-top: none; }
@@ -3555,6 +3567,8 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   body.pd-public-active .container { max-width: 1140px; }
   /* the Check In kiosk stays a comfortable narrow column (its card is centred, no reflow this slice) */
   body.pd-public-active #tab-players > .container { max-width: 640px; }
+  /* Manage (session-10 R1): the admin Manage lead + area pages stay a centered ~720px reading column. */
+  body.pd-public-active #tab-manage > .container { max-width: 720px; }
 
   /* ---- typography: Sora titles up a notch on the surfaces that go wide (A direction) ---- */
   body.pd-public-active .pd-thero .pd-h { font-size: 22px; }
