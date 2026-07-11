@@ -89,6 +89,9 @@ function loadApp() {
       mgtContainer: (view) => { manageView = 'tournament'; mgtView = (view === undefined ? null : view); return manageContainerHTML(); },
       defaultAnnouncement: (t) => mgDefaultAnnouncement(t),
       annValue: (t) => mgAnnouncementValue(t),
+      leadTournament: () => manageLeadTournament(),
+      buildMgTeams: () => { manageView = 'tournament'; mgtView = 'teams'; return buildMgTeamsHTML(); },
+      buildTeamSheet: (id) => buildMgTeamSheetHTML(mgFindTeam(id)),
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -674,12 +677,13 @@ describe('buildManageTournamentHTML — the tournament sub-hub (pick R2, mockup 
     expect(html).toContain('No tournament yet');
   });
 
-  it('the container dispatch shows the hub for null mgtView and a placeholder for the unbuilt sub-views', () => {
+  it('the container dispatch shows the hub for null mgtView and a placeholder for the still-unbuilt sub-views', () => {
     setTournamentState(setupOpen);
     expect(bridge.mgtContainer()).toContain('data-mgt-view="registration"'); // hub
-    const teamsView = bridge.mgtContainer('teams');
-    expect(teamsView).toContain('Coming in the next slices.');
-    expect(teamsView).toContain('data-mgt-back'); // placeholder returns to the hub, not the lead
+    // Task 6 built the teams view; 'pools' is still a placeholder until Task 7.
+    const poolsView = bridge.mgtContainer('pools');
+    expect(poolsView).toContain('Coming in the next slices.');
+    expect(poolsView).toContain('data-mgt-back'); // placeholder returns to the hub, not the lead
   });
 });
 
@@ -739,5 +743,169 @@ describe('buildMgRegistrationHTML — the Registration view (pick R7, mockup r-b
   it('honestly flags a missing Venmo link (pay button says coming soon)', () => {
     setTournamentState(setupOpen); // venmo_link ''
     expect(bridge.buildReg()).toContain('coming soon');
+  });
+});
+
+// ── Named fix (T5 flag): manageLeadTournament must not strand the Manage → Tournament workflow ───────
+// The old resolver was `publicLiveTournament() || setup+registration_open`. A setup tournament with
+// registration CLOSED (the gap between "close registration" and "draw pools") resolved to null → the
+// sub-hub + needs-you went blank mid-setup. Widened: live (pools/bracket) || most-recent SETUP regardless
+// of registration_open ('completed' still excluded). state.tournaments loads created_at DESC, so the first
+// setup match is the most-recent one.
+describe('manageLeadTournament — the closed-setup fix', () => {
+  const setLead = (tournaments, activeId = null) => Object.assign(bridge.getState(), {
+    tournaments, activeTournamentId: activeId, isAdmin: true,
+  });
+
+  it('resolves a SETUP tournament even after registration is CLOSED (the strand fix)', () => {
+    const closedSetup = { id: 'S', name: 'July 2026', status: 'setup', registration_open: false };
+    setLead([closedSetup]);
+    expect(bridge.leadTournament()).toBe(closedSetup);
+  });
+
+  it('still resolves an open-registration setup tournament', () => {
+    const openSetup = { id: 'S', name: 'July 2026', status: 'setup', registration_open: true };
+    setLead([openSetup]);
+    expect(bridge.leadTournament()).toBe(openSetup);
+  });
+
+  it('prefers a live pools/bracket tournament over a setup draft', () => {
+    const live = { id: 'L', name: 'Live', status: 'pools', registration_open: false };
+    const setup = { id: 'S', name: 'Draft', status: 'setup', registration_open: false };
+    // list is created_at DESC; live is followed regardless of order
+    setLead([setup, live]);
+    expect(bridge.leadTournament()).toBe(live);
+  });
+
+  it('picks the MOST-RECENT setup (first in the created_at-DESC list) when several exist', () => {
+    const newer = { id: 'N', name: 'Newer', status: 'setup', registration_open: false };
+    const older = { id: 'O', name: 'Older', status: 'setup', registration_open: true };
+    setLead([newer, older]); // DESC → newer first
+    expect(bridge.leadTournament()).toBe(newer);
+  });
+
+  it('excludes a completed tournament (returns null when only completed exists)', () => {
+    setLead([{ id: 'C', name: 'Done', status: 'completed', registration_open: false }]);
+    expect(bridge.leadTournament()).toBe(null);
+  });
+});
+
+// ── Task 6: Teams & payment list + full-edit team sheet (pick R8, mockup tp-a) ────────────────────────
+// buildMgTeamsHTML() = the list (name + first-name roster preview + PAID/TAP-WHEN-PAID tag + chevron +
+// dashed "Add a team yourself"). buildMgTeamSheetHTML(team) = the body-level full-edit sheet (name, stacked
+// editable roster, paid switch, move-to-pool ONLY when pools exist, withdraw ONLY mid-play, type-DELETE
+// remove). Flat on stone, no pd-card.
+function setTeamsFixture(extra = {}) {
+  const st = bridge.getState();
+  Object.assign(st, {
+    tournaments: [{ id: 'T', name: 'July 2026', status: 'setup', registration_open: true, team_size: 4 }],
+    activeTournamentId: 'T',
+    tournamentTeams: [
+      { id: 't1', name: 'Dink Responsibly', paid: true, roster: ['Riley Smith', 'Sam Lee', 'Jo Park', 'Casey Ng'] },
+      { id: 't2', name: 'Sets & Reps', paid: false, roster: ['Drew Alton', 'Pat Boyd'] },
+    ],
+    tournamentPools: [], tournamentMatches: [], teamMembers: null,
+    players: [], checkedIn: [], isAdmin: true,
+    ...extra,
+  });
+}
+
+describe('buildMgTeamsHTML — Teams & payment list (pick R8, mockup tp-a)', () => {
+  it('renders the header (back to the sub-hub) and the N-in / N-paid section label', () => {
+    setTeamsFixture();
+    const html = bridge.buildMgTeams();
+    expect(html).toContain('class="pd-htitle">Teams &amp; payment<');
+    expect(html).toContain('data-mgt-back');           // back returns to the Tournament sub-hub
+    expect(html).toContain('2 in · 1 paid');           // 2 registered, 1 paid
+    expect(html).not.toContain('pd-card');
+  });
+
+  it('renders one row per team with the team name + a first-names roster preview', () => {
+    setTeamsFixture();
+    const html = bridge.buildMgTeams();
+    expect(count(html, 'data-mgtp-team="t1"')).toBe(1);
+    expect(count(html, 'data-mgtp-team="t2"')).toBe(1);
+    expect(html).toContain('Dink Responsibly');
+    expect(html).toContain('Sets &amp; Reps');
+    expect(html).toContain('Riley · Sam · Jo · Casey'); // first names, joined by ' · ', from teams.roster
+  });
+
+  it('prefers team_members names for the preview when they are loaded', () => {
+    setTeamsFixture({ teamMembers: [
+      { id: 'p1', name: 'Alex Rivera', teamId: 't1', teamName: 'Dink Responsibly' },
+      { id: 'p2', name: 'Bailey Fox', teamId: 't1', teamName: 'Dink Responsibly' },
+    ] });
+    expect(bridge.buildMgTeams()).toContain('Alex · Bailey'); // members override the roster jsonb
+  });
+
+  it('shows the PAID / TAP WHEN PAID tag as a tappable toggle (never a bare dot)', () => {
+    setTeamsFixture();
+    const html = bridge.buildMgTeams();
+    expect(html).toContain('data-mgtp-paid="t1"');
+    expect(html).toContain('data-mgtp-paid="t2"');
+    expect(html).toContain('mgtp-tag paid');   // t1 is paid
+    expect(html).toContain('>PAID<');
+    expect(html).toContain('mgtp-tag unpaid');  // t2 is not
+    expect(html).toContain('>TAP WHEN PAID<');
+    expect(html).not.toMatch(/mt-pip|•/);       // no bare dots
+  });
+
+  it('offers the dashed "Add a team yourself" affordance', () => {
+    setTeamsFixture();
+    const html = bridge.buildMgTeams();
+    expect(html).toContain('data-mgtp-add');
+    expect(html).toContain('Add a team yourself');
+  });
+
+  it('honest empty state when no team has registered', () => {
+    setTeamsFixture({ tournamentTeams: [] });
+    const html = bridge.buildMgTeams();
+    expect(html).toContain('No teams yet');
+    expect(html).toContain('data-mgtp-add'); // can still add one by hand
+    expect(html).not.toContain('data-mgtp-team');
+  });
+});
+
+describe('buildMgTeamSheetHTML — the full-edit team sheet (pick R8)', () => {
+  it('renders the editable name + a stacked, editable roster (one line per player + a blank add line)', () => {
+    setTeamsFixture();
+    const html = bridge.buildTeamSheet('t1');
+    expect(html).toContain('id="mgts-name"');
+    expect(html).toContain('value="Dink Responsibly"');
+    expect(count(html, 'class="mgts-rline"')).toBe(5); // 4 players + 1 blank add line
+    expect(html).toContain('value="Riley Smith"');
+    expect(html).toContain('value="Casey Ng"');
+  });
+
+  it('shows the paid switch reflecting the team state', () => {
+    setTeamsFixture();
+    expect(bridge.buildTeamSheet('t1')).toContain('mg-sw on');  // t1 paid → on
+    expect(bridge.buildTeamSheet('t2')).not.toContain('mg-sw on'); // t2 unpaid → off
+  });
+
+  it('shows the move-to-pool row ONLY when pools exist', () => {
+    setTeamsFixture(); // no pools
+    expect(bridge.buildTeamSheet('t1')).not.toContain('data-mgts="pool"');
+    setTeamsFixture({ tournamentPools: [ { id: 'pa', label: 'A', display_order: 0 }, { id: 'pb', label: 'B', display_order: 1 } ] });
+    const withPools = bridge.buildTeamSheet('t1');
+    expect(withPools).toContain('data-mgts="pool"');
+    expect(withPools).toContain('data-mgts-pool="pa"');
+  });
+
+  it('shows the withdraw row ONLY mid-play and states plainly that it forfeits remaining games', () => {
+    setTeamsFixture(); // setup → no withdraw
+    expect(bridge.buildTeamSheet('t1')).not.toContain('data-mgts="withdraw"');
+    setTeamsFixture({ tournaments: [{ id: 'T', name: 'July 2026', status: 'pools', registration_open: false }] });
+    const midPlay = bridge.buildTeamSheet('t1');
+    expect(midPlay).toContain('data-mgts="withdraw"');
+    expect(midPlay).toContain('Forfeits their remaining games');
+  });
+
+  it('always offers a type-DELETE remove and a quiet Done/close', () => {
+    setTeamsFixture();
+    const html = bridge.buildTeamSheet('t1');
+    expect(html).toContain('data-mgts="remove"');
+    expect(html).toContain('Remove this team');
+    expect(html).toContain('data-mgts="close"'); // backdrop + Done both close
   });
 });

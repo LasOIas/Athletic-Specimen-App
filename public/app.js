@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -9092,10 +9092,16 @@ let mgtView = null;
 
 const MG_CHEV = '<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
 
-// The tournament the Manage lead reports on: a live event, else the open-for-registration setup row.
+// The tournament the Manage lead reports on: a live event (pools/bracket), else the most-recent SETUP
+// tournament — REGARDLESS of registration_open. The old filter (`registration_open && status==='setup'`)
+// stranded the whole Manage → Tournament workflow in the gap between "close registration" and "draw pools":
+// the moment an admin closed registration on a still-setup tournament it resolved to null, so the sub-hub,
+// the Teams/Registration views, and the needs-you lead all went blank mid-setup. state.tournaments loads
+// created_at DESC (tdbListTournaments), so the first `setup` match IS the most-recent one. 'completed' stays
+// excluded (a finished event isn't the thing you're managing next).
 function manageLeadTournament() {
   return publicLiveTournament()
-    || (state.tournaments || []).find((x) => x.registration_open && x.status === 'setup') || null;
+    || (state.tournaments || []).find((x) => x && x.status === 'setup') || null;
 }
 
 // The effective pickup-day SET, read by every day-of gate (checkinNavVisible, publicHomeState) and the
@@ -9871,6 +9877,7 @@ function mgtSubPlaceholderHTML(view) {
 // sub-view id → an honest placeholder.
 function buildManageTournamentContainerHTML() {
   if (mgtView === 'registration') return buildMgRegistrationHTML();
+  if (mgtView === 'teams') return buildMgTeamsHTML();
   if (mgtView) return mgtSubPlaceholderHTML(mgtView);
   return buildManageTournamentHTML();
 }
@@ -9972,6 +9979,234 @@ async function mgrSaveField(id) {
     await tdbSetTournamentFields(t.id, fields);
     await tdbRefreshTournaments();
   } catch (err) { console.warn('mgrSaveField', err); }
+}
+
+// ── Task 6: Teams & payment (session-10 pick R8) — the list + the body-level full-edit team sheet ─────
+// Mockup r10-manage/tp-a. The list (mgtView==='teams') is one flat row per registered team: name + a
+// first-names roster preview + a PAID / TAP-WHEN-PAID tag that IS the paid toggle (tap the tag, don't open
+// the sheet) + a chevron; the ROW opens the sheet; a dashed "Add a team yourself" prompts for a name. The
+// sheet (openMgTeamSheet) lives on document.body — OUTSIDE #tab-manage — so the 15s poll / partialRender can
+// never wipe a half-typed roster (same discipline as openJoinSheet). It edits name (tdbRenameTeam), the full
+// stacked roster (tdbSetTeamRoster), paid (tdbSetTeamPaid), pool when pools exist (tdbMoveTeamToPool),
+// withdraw when mid-play (tdbWithdrawTeam), and a type-DELETE remove (tdbDeleteTeam).
+
+// The team row from live state (string-id match — team ids are uuids, data attrs are strings).
+function mgFindTeam(teamId) {
+  return (state.tournamentTeams || []).find((t) => t && String(t.id) === String(teamId)) || null;
+}
+// A team's roster names for display. Prefer team_members (loaded for ANY signed-in account — admins too —
+// carrying every team's members, so an edited-but-freshly-synced roster shows real linked players); fall
+// back to the teams.roster jsonb when members aren't loaded or this team has none.
+function mgTeamRosterNames(team) {
+  if (!team) return [];
+  const members = Array.isArray(state.teamMembers)
+    ? state.teamMembers.filter((c) => c && String(c.teamId) === String(team.id)).map((c) => c.name)
+    : [];
+  const src = members.length ? members : (Array.isArray(team.roster) ? team.roster : []);
+  return src.map((n) => String(n || '').trim()).filter(Boolean);
+}
+// First names only, for the compact list preview ("Riley · Sam · Jo · Casey").
+function mgTeamFirstNames(team) {
+  return mgTeamRosterNames(team).map((n) => n.split(/\s+/)[0]).filter(Boolean);
+}
+
+// The Teams & payment LIST (mockup tp-a). Header (back to the sub-hub) + "N in · N paid" + a row per team.
+function buildMgTeamsHTML() {
+  const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];
+  const paidCt = teams.filter((x) => x && x.paid).length;
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">${escapeHTML(MGT_SUB_TITLES.teams)}</div></div>`;
+  const add = `<button type="button" class="pk-add" data-mgtp-add>${PK_PLUS_SVG}Add a team yourself</button>`;
+  if (!teams.length) {
+    return header + `<div class="pd-empty">No teams yet — teams land here as they register.</div>` + add;
+  }
+  const label = `<div class="pl-sect">${teams.length} in · ${paidCt} paid</div>`;
+  const rows = teams.map((tm) => {
+    const first = mgTeamFirstNames(tm);
+    const preview = first.length ? escapeHTML(first.join(' · ')) : 'No players yet';
+    const paid = !!tm.paid;
+    const idAttr = escapeHTMLText(String(tm.id));
+    return `<div class="mgtp-row" data-mgtp-team="${idAttr}">
+        <div class="mgtp-tn"><div class="mgtp-nm">${escapeHTML(tm.name || 'Team')}</div><div class="mgtp-rs">${preview}</div></div>
+        <button type="button" class="mgtp-tag ${paid ? 'paid' : 'unpaid'}" data-mgtp-paid="${idAttr}" aria-label="${paid ? 'Paid — tap to unmark' : 'Tap when this team has paid'}">${paid ? 'PAID' : 'TAP WHEN PAID'}</button>
+        ${MG_CHEV}
+      </div>`;
+  }).join('');
+  return header + label + rows + add;
+}
+
+// The full-edit team sheet CONTENT (pure string; openMgTeamSheet wraps it in the body-level scrim). Reads
+// the lead tournament's status + pools from state so move-to-pool / withdraw only appear when they apply.
+function buildMgTeamSheetHTML(team) {
+  if (!team) return '';
+  const t = manageLeadTournament();
+  const status = t ? t.status : 'setup';
+  const midPlay = status === 'pools' || status === 'bracket';
+  const pools = Array.isArray(state.tournamentPools) ? state.tournamentPools : [];
+  const paid = !!team.paid;
+  const names = mgTeamRosterNames(team);
+  const rosterInit = names.join('\n'); // change-detection snapshot (newline sep — never appears in a name)
+  const rlines = names.concat(['']).map((n, i) =>
+    `<input class="mgts-rline" type="text" autocomplete="off" autocapitalize="words" spellcheck="false"`
+    + ` placeholder="${i >= names.length ? 'Add a player' : ''}" value="${escapeHTMLText(n)}" aria-label="Player ${i + 1}" />`).join('');
+  const head = `<div class="pd-reg-grip"></div>`
+    + `<div class="mgts-head"><div class="mgts-eyebrow">Edit team</div>`
+    + `<button type="button" class="pd-reg-sheetx" data-mgts="close" aria-label="Close">`
+    + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
+  const nameFld = `<label class="pk-fl" for="mgts-name">Team name</label>`
+    + `<input class="pk-fv mgts-name" id="mgts-name" type="text" autocomplete="off" autocapitalize="words" spellcheck="false"`
+    + ` value="${escapeHTMLText(team.name || '')}" data-init="${escapeHTMLText(team.name || '')}" />`;
+  const rosterBlock = `<div class="pl-sect">Roster</div>`
+    + `<div class="mgts-roster" data-roster-init="${escapeHTMLText(rosterInit)}">${rlines}</div>`;
+  const paidRow = `<div class="mgts-row"><div class="mg-rb"><div class="mg-rn">Paid</div>`
+    + `<div class="mg-rs">Tap to mark the buy-in received</div></div>`
+    + `<button type="button" class="mg-sw${paid ? ' on' : ''}" data-mgts="paid" role="switch" aria-checked="${paid ? 'true' : 'false'}" aria-label="Paid"></button></div>`;
+  const poolRow = pools.length
+    ? `<div class="pl-sect">Pool</div><div class="mgts-pools">`
+      + pools.slice().sort((a, b) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0)).map((p) =>
+        `<button type="button" class="mgts-pchip${String(team.pool_id || '') === String(p.id) ? ' on' : ''}" data-mgts="pool" data-mgts-pool="${escapeHTMLText(String(p.id))}">Pool ${escapeHTML(String(p.label || ''))}</button>`).join('')
+      + `<button type="button" class="mgts-pchip${team.pool_id ? '' : ' on'}" data-mgts="pool" data-mgts-pool="">No pool</button></div>`
+    : '';
+  const withdrawRow = midPlay
+    ? `<button type="button" class="mgts-warn" data-mgts="withdraw">Withdraw from the tournament<span class="mgts-sub">Forfeits their remaining games</span></button>`
+    : '';
+  const removeRow = `<button type="button" class="mgts-danger" data-mgts="remove">Remove this team</button>`;
+  const done = `<button type="button" class="mgts-done" data-mgts="close">Done</button>`;
+  return head + nameFld + rosterBlock + paidRow + poolRow + withdrawRow + removeRow + done;
+}
+
+// ── Teams-list actions (delegated via #app-content when manageView==='tournament' && mgtView==='teams') ──
+// Tapping the tag toggles paid without opening the sheet (optimistic in-place flip, then refresh + repaint).
+async function mgTeamTogglePaid(teamId, tagEl) {
+  if (!state.isAdmin || !teamId) return;
+  const team = mgFindTeam(teamId);
+  if (!team) return;
+  const next = !team.paid;
+  if (tagEl) {
+    tagEl.classList.toggle('paid', next);
+    tagEl.classList.toggle('unpaid', !next);
+    tagEl.textContent = next ? 'PAID' : 'TAP WHEN PAID';
+  }
+  try { await tdbSetTeamPaid(teamId, next); await tdbRefreshTournaments(); } catch (err) { console.warn('mgTeamTogglePaid', err); }
+  repaintManage();
+}
+// The dashed "Add a team yourself" — a house text-input dialog (never window.prompt), then tdbAddTeam.
+async function mgTeamAddPrompt() {
+  if (!state.isAdmin) return;
+  const t = manageLeadTournament();
+  if (!t) { appNotice({ title: 'No tournament', message: 'Create a tournament first, then add teams.' }); return; }
+  const name = await appPrompt({ title: 'Add a team', message: 'Enter the team name.', confirmText: 'Add team', placeholder: 'Team name' });
+  if (name == null) return;                       // cancelled
+  const nm = String(name).trim();
+  if (!nm) return;
+  try {
+    await tdbAddTeam(t.id, nm);
+    await tdbRefreshTournaments();
+    repaintManage();
+  } catch (err) { appNotice({ title: 'Could not add team', message: (err && err.message) || 'Try again.' }); }
+}
+
+// ── The body-level team sheet ────────────────────────────────────────────────────────────────────────
+function closeMgTeamSheet() { const el = document.getElementById('mgts-sheet'); if (el) el.remove(); }
+
+// Run a sheet write, refresh state, repaint the list UNDER the sheet (the sheet is body-level → untouched).
+async function mgtsWrite(fn) {
+  if (!state.isAdmin) return;
+  try { await fn(); await tdbRefreshTournaments(); } catch (err) { console.warn('mgts write', err); }
+  repaintManage();
+}
+async function mgtsSaveName(teamId, el) {
+  const val = String((el && el.value) || '').trim();
+  if (!val || val === ((el && el.getAttribute('data-init')) || '')) return; // unchanged / empty → no write
+  try {
+    await tdbRenameTeam(teamId, val);
+    if (el) el.setAttribute('data-init', val);
+    await tdbRefreshTournaments();
+    repaintManage();
+  } catch (err) { console.warn('mgtsSaveName', err); }
+}
+async function mgtsSaveRoster(teamId, scrim) {
+  const box = scrim && scrim.querySelector('.mgts-roster');
+  const lines = Array.from((scrim || document).querySelectorAll('.mgts-rline'))
+    .map((i) => String(i.value || '').trim()).filter(Boolean);
+  const init = box ? (box.getAttribute('data-roster-init') || '') : '';
+  if (lines.join('\n') === init) return; // unchanged → no write
+  try {
+    await tdbSetTeamRoster(teamId, lines);
+    if (box) box.setAttribute('data-roster-init', lines.join('\n'));
+    await tdbRefreshTournaments();
+    repaintManage();
+  } catch (err) { console.warn('mgtsSaveRoster', err); }
+}
+async function mgtsWithdraw(teamId) {
+  if (!state.isAdmin) return;
+  const t = manageLeadTournament();
+  const team = mgFindTeam(teamId);
+  const nm = team ? (team.name || 'This team') : 'This team';
+  const ok = await appConfirm({ title: 'Withdraw team', message: `${nm} forfeits their remaining games (opponents win by the pool target). This can't be undone.`, confirmText: 'Withdraw', danger: true });
+  if (!ok) return;
+  try { await tdbWithdrawTeam(teamId, t); await tdbRefreshTournaments(); } catch (err) { console.warn('mgtsWithdraw', err); }
+  closeMgTeamSheet();
+  repaintManage();
+}
+// Type-DELETE remove — reuses the player-delete "type the word to confirm" pattern, but via the house
+// appPrompt modal (the old confirmDangerousActionOrAbort uses window.prompt, which the shell has retired).
+async function mgtsRemove(teamId) {
+  if (!state.isAdmin) return;
+  const team = mgFindTeam(teamId);
+  const nm = team ? (team.name || 'this team') : 'this team';
+  const typed = await appPrompt({ title: `Remove ${nm}?`, message: 'This permanently removes the team. Type DELETE to confirm.', confirmText: 'Remove team', placeholder: 'DELETE' });
+  if (String(typed || '').trim().toUpperCase() !== 'DELETE') return;
+  try { await tdbDeleteTeam(teamId); await tdbRefreshTournaments(); } catch (err) { console.warn('mgtsRemove', err); }
+  closeMgTeamSheet();
+  repaintManage();
+}
+
+function openMgTeamSheet(teamId) {
+  const team = mgFindTeam(teamId);
+  if (!team || !state.isAdmin) return;
+  closeMgTeamSheet();
+  const scrim = document.createElement('div');
+  scrim.id = 'mgts-sheet';
+  scrim.className = 'pd-reg-scrim';
+  scrim.setAttribute('role', 'dialog');
+  scrim.setAttribute('aria-modal', 'true');
+  scrim.setAttribute('aria-label', 'Edit team');
+  scrim.innerHTML = `<div class="pd-reg-sheet">${buildMgTeamSheetHTML(team)}</div>`;
+  document.body.appendChild(scrim);
+  // The sheet lives on document.body (outside #app-content's delegated listeners) → bind its own handlers.
+  scrim.addEventListener('click', (ev) => {
+    if (ev.target === scrim) { closeMgTeamSheet(); return; } // backdrop tap dismisses
+    const r = ev.target.closest('[data-mgts]');
+    if (!r) return;
+    const role = r.getAttribute('data-mgts');
+    if (role === 'close') { closeMgTeamSheet(); return; }
+    if (role === 'paid') {
+      const on = !r.classList.contains('on');
+      r.classList.toggle('on', on);
+      r.setAttribute('aria-checked', on ? 'true' : 'false');
+      void mgtsWrite(() => tdbSetTeamPaid(teamId, on));
+      return;
+    }
+    if (role === 'pool') {
+      const pid = r.getAttribute('data-mgts-pool') || '';
+      scrim.querySelectorAll('[data-mgts="pool"]').forEach((b) => b.classList.remove('on'));
+      r.classList.add('on');
+      void mgtsWrite(() => tdbMoveTeamToPool(teamId, pid || null));
+      return;
+    }
+    if (role === 'withdraw') { void mgtsWithdraw(teamId); return; }
+    if (role === 'remove') { void mgtsRemove(teamId); return; }
+  });
+  // Save name / roster on blur (the poll can't wipe them — the sheet is body-level).
+  scrim.addEventListener('focusout', (ev) => {
+    const el = ev.target;
+    if (!el) return;
+    if (el.id === 'mgts-name') { void mgtsSaveName(teamId, el); return; }
+    if (el.classList && el.classList.contains('mgts-rline')) { void mgtsSaveRoster(teamId, scrim); return; }
+  });
+  setTimeout(() => { const n = document.getElementById('mgts-name'); if (n) { try { n.focus({ preventScroll: true }); } catch (_) { try { n.focus(); } catch (_e) {} } } }, 60);
 }
 
 // Flip to the old admin shell (temporary — the whole path dies in Task 14). Runs the exact old render
@@ -11725,6 +11960,17 @@ function attachHandlers() {
       // (data-mgr-copy) act inline. All container-swap repaints (mgtView survives). Checked BEFORE the generic
       // data-mg-area so these never fall through to nav; the hub's own back carries data-mg-area="lead".
       if (manageView === 'tournament') {
+        // Teams & payment (Task 6, pick R8): the tag toggles paid WITHOUT opening the sheet (checked first,
+        // even though it sits inside the row); the row opens the body-level edit sheet; the dashed row adds a
+        // team by name. The sheet binds its own listeners (body-level → poll-clobber-immune). The teams-list
+        // header's back button carries data-mgt-back (handled below → returns to the sub-hub).
+        if (mgtView === 'teams') {
+          const paidTag = e.target.closest('[data-mgtp-paid]');
+          if (paidTag) { void mgTeamTogglePaid(paidTag.getAttribute('data-mgtp-paid'), paidTag); return; }
+          if (e.target.closest('[data-mgtp-add]')) { void mgTeamAddPrompt(); return; }
+          const teamRow = e.target.closest('[data-mgtp-team]');
+          if (teamRow) { openMgTeamSheet(teamRow.getAttribute('data-mgtp-team')); return; }
+        }
         if (e.target.closest('[data-mgt-back]')) { mgtView = null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
         const mgtRow = e.target.closest('[data-mgt-view]');
         if (mgtRow) { mgtView = mgtRow.getAttribute('data-mgt-view') || null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
