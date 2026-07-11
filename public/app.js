@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.13'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.14'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -9319,6 +9319,17 @@ function manageNeedsYou() {
 // shows one tournament's NAME over another tournament's DATA. Follow the resolver: when they differ, adopt
 // the resolved id + refresh the collections, then repaint. Re-entrancy-guarded so poll/tap storms can't
 // stack refreshes.
+// The tournament AREA's resolver (e2e catch #2, 2026-07-11): every sub-view under Manage → Tournament
+// keys on the ACTIVE tournament first so the area stays on ONE tournament mid-flow — closing a tournament
+// must not silently swap the close-out page to the next setup tournament (which made Reopen unreachable).
+// Fresh entries re-glue active to the lead resolver via mgSyncActiveTournament, so the two agree except
+// during an in-flow transition, which is exactly when active must win. The LEAD page + needs-you keep
+// manageLeadTournament() (the front page follows the resolver, deliberately).
+function mgActiveTournament() {
+  const byActive = state.activeTournamentId ? (state.tournaments || []).find((x) => x.id === state.activeTournamentId) : null;
+  return byActive || manageLeadTournament();
+}
+
 let mgSyncingTournament = false;
 function mgSyncActiveTournament() {
   const t = manageLeadTournament();
@@ -10197,7 +10208,7 @@ function mgtRowHTML(view, name, subHTML) {
 // The plain sub-hub (mockup t-b): header (back-to-Manage + the active tournament name, Barlow 22 via
 // pd-htitle) + a muted stage sub-line + SEVEN status-inline rows. No cards, no inline controls at this level.
 function buildManageTournamentHTML() {
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   const header = `<div class="pd-pagehdr">`
     + `<button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>`
     + `<div class="pd-htitle">${escapeHTML(t ? (t.name || 'Tournament') : 'Tournament')}</div></div>`;
@@ -10231,7 +10242,7 @@ function buildManageTournamentHTML() {
 // or the composed default) + Copy for GroupMe + CONTROLS (the Registration-open switch + venmo/buy-in/team-
 // size fields). The switch/copy act via the click delegate; the fields save on blur (focusout delegate).
 function buildMgRegistrationHTML() {
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   const header = `<div class="pd-pagehdr">`
     + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
     + `<div class="pd-htitle">Registration</div></div>`;
@@ -10292,7 +10303,7 @@ function buildManageTournamentContainerHTML() {
 }
 
 // The tournament the Registration view reads/writes (same resolver as the sub-hub header).
-function mgRegTournament() { return manageLeadTournament(); }
+function mgRegTournament() { return mgActiveTournament(); }
 
 // True when the Registration view has an in-progress edit the background poll must not clobber: a focused
 // input/textarea inside #tab-manage, or an announcement textarea whose value differs from what was last
@@ -10402,7 +10413,7 @@ async function mgrSaveField(id) {
 // (TEXT). net_count is the ONE field that still routes through the ATOMIC re-net (migration 0031 /
 // apply_net_count_change) when a tournament is mid pools/bracket — a plain write there would drift
 // matches.net from net_count (the closed F7/F8 bug class); this keeps that invariant with no added lock.
-function mgSettingsTournament() { return manageLeadTournament(); }
+function mgSettingsTournament() { return mgActiveTournament(); }
 
 function buildMgSettingsHTML() {
   const t = mgSettingsTournament();
@@ -10606,7 +10617,7 @@ function mgCloseoutChampionChoice(teams, mainMatches) {
 }
 
 function buildMgCloseoutHTML() {
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   const header = `<div class="pd-pagehdr">`
     + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
     + `<div class="pd-htitle">Close out</div></div>`;
@@ -10703,7 +10714,7 @@ function openMgChampionPicker() {
 // override so a future tournament starts from its own computed suggestion.
 async function mgCloseoutEnd() {
   if (!state.isAdmin) return;
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   if (!t) return;
   const teams = state.tournamentTeams || [];
   const choice = mgCloseoutChampionChoice(teams, mgCloseoutMainMatches());
@@ -10727,7 +10738,7 @@ async function mgCloseoutEnd() {
 // → refresh + repaint.
 async function mgCloseoutReopen() {
   if (!state.isAdmin) return;
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   if (!t) return;
   const ok = await appConfirm({
     title: 'Reopen the tournament',
@@ -10803,7 +10814,7 @@ function buildMgTeamsHTML() {
 // the lead tournament's status + pools from state so move-to-pool / withdraw only appear when they apply.
 function buildMgTeamSheetHTML(team) {
   if (!team) return '';
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   const status = t ? t.status : 'setup';
   const midPlay = status === 'pools' || status === 'bracket';
   const pools = Array.isArray(state.tournamentPools) ? state.tournamentPools : [];
@@ -10857,7 +10868,7 @@ async function mgTeamTogglePaid(teamId, tagEl) {
 // The dashed "Add a team yourself" — a house text-input dialog (never window.prompt), then tdbAddTeam.
 async function mgTeamAddPrompt() {
   if (!state.isAdmin) return;
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   if (!t) { appNotice({ title: 'No tournament', message: 'Create a tournament first, then add teams.' }); return; }
   const name = await appPrompt({ title: 'Add a team', message: 'Enter the team name.', confirmText: 'Add team', placeholder: 'Team name' });
   if (name == null) return;                       // cancelled
@@ -10904,7 +10915,7 @@ async function mgtsSaveRoster(teamId, scrim) {
 }
 async function mgtsWithdraw(teamId) {
   if (!state.isAdmin) return;
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   const team = mgFindTeam(teamId);
   const nm = team ? (team.name || 'This team') : 'This team';
   const ok = await appConfirm({ title: 'Withdraw team', message: `${nm} forfeits their remaining games (opponents win by the pool target). This can't be undone.`, confirmText: 'Withdraw', danger: true });
@@ -10979,7 +10990,7 @@ function openMgTeamSheet(teamId) {
 // Start pool play) through the atomic RPCs. Post-draw also carries a Pool controls panel (move teams via the
 // T6 team sheet / edit nets / reset pools). §51 matte, Barlow display, single --accent, flat on stone.
 function buildMgPoolsHTML() {
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   const header = `<div class="pd-pagehdr">`
     + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
     + `<div class="pd-htitle">Pools &amp; schedule</div></div>`;
@@ -11140,7 +11151,7 @@ function buildMgScoreSheetHTML(match) {
   const a = Math.max(0, Number(match.score_a) || 0);
   const b = Math.max(0, Number(match.score_b) || 0);
   const isFinal = match.status === 'final';
-  const t = (Array.isArray(state.tournaments) ? state.tournaments : []).find((x) => x.id === match.tournament_id) || manageLeadTournament() || {};
+  const t = (Array.isArray(state.tournaments) ? state.tournaments : []).find((x) => x.id === match.tournament_id) || mgActiveTournament() || {};
   const rules = scoringRulesFor(match.phase, t);
   const ruleText = 'First to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ' (cap ' + rules.cap + ')' : '');
   const bits = [];
@@ -11267,7 +11278,7 @@ function openMgScoreSheet(matchId) {
 // ── Task 7 pool-setup handlers (wired from the manage click delegate under mgtView==='pools') ────────────
 async function mgPoolsDraw() {
   if (!state.isAdmin) return;
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   if (!t) return;
   const teams = state.tournamentTeams || [];
   if (teams.length < 2) { appNotice({ title: 'Add teams first', message: 'You need at least 2 teams to draw pools.' }); return; }
@@ -11285,7 +11296,7 @@ async function mgPoolsDraw() {
 
 async function mgPoolsStart() {
   if (!state.isAdmin) return;
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   if (!t) return;
   const unpaid = (state.tournamentTeams || []).filter((tm) => !tm.paid).length;
   if (unpaid > 0 && !(await appConfirm({ title: 'Unpaid teams', message: `${unpaid} team${unpaid === 1 ? '' : 's'} not marked paid. Start pool play anyway?`, confirmText: 'Start anyway' }))) return;
@@ -11298,7 +11309,7 @@ async function mgPoolsStart() {
 
 async function mgPoolsRedraw() {
   if (!state.isAdmin) return;
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   if (!t) return;
   if (!(await appConfirm({ title: 'Draw again', message: 'Shuffle the teams into new pools?', confirmText: 'Draw again' }))) return;
   try {
@@ -11325,7 +11336,7 @@ async function mgPoolsEditNets(poolId) {
 
 async function mgPoolsResetPools() {
   if (!state.isAdmin) return;
-  const t = manageLeadTournament();
+  const t = mgActiveTournament();
   if (!t) return;
   const nm = (t.name || '').trim() || 'this tournament';
   const typed = await appPrompt({ title: 'Reset pools', message: `This clears every pool result and re-draws. Type the tournament name to confirm.`, placeholder: nm, confirmText: 'Reset pools' });
