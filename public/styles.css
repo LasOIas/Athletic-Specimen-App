@@ -3211,6 +3211,7 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgp-m { font-size: 12px; color: var(--muted); background: none; border: none; padding: 0; }
 .mgp-m b { color: var(--ink); font-weight: 700; }
 .mgp-mg { cursor: pointer; }
+.mgp-mg b { margin-right: 4px; } /* §27 catch: the global button reset collapses the <b>N</b> / "groups" gap */
 .mgp-mg.on, .mgp-mg.on b { color: var(--accent); }
 .mgp-row { display: flex; align-items: center; gap: 11px; padding: 9px 2px; border-top: 1px solid var(--border); text-decoration: none; color: inherit; cursor: pointer; width: 100%; text-align: left; background: none; }
 .mgp-al { font: 800 12px var(--font-display); color: var(--faint); width: 20px; flex: none; text-align: center; }
@@ -3316,6 +3317,34 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgts-warn .mgts-sub { font-size: 12px; font-weight: 500; color: var(--muted); }
 .mgts-danger { width: 100%; margin-top: 12px; padding: 12px 14px; border: 1px solid oklch(0.55 0.16 25 / .4); border-radius: 12px; background: transparent; color: var(--danger); font: 600 14.5px 'Inter', sans-serif; cursor: pointer; }
 .mgts-done { width: 100%; margin-top: 18px; padding: 12px; border: none; border-radius: 12px; background: var(--surface-3); color: var(--muted); font: 600 14px 'Inter', sans-serif; cursor: pointer; }
+
+/* Pools & schedule admin (Task 7, pick R9). The schedule reuses the public pl-* grammar (tabs / standings-
+   lite / net-hairline games); these are the admin-only additions: the SCORE verb, the read-only preset sub,
+   the drawn-pool team rows, the Pool-controls collapse, and the body-level score sheet (mgss-*). §51 matte. */
+.mgps-score { flex: none; font: 700 11.5px var(--font-display); letter-spacing: .05em; color: var(--accent); border: 1.5px solid var(--accent-bd); border-radius: 9px; padding: 6px 11px; background: transparent; cursor: pointer; }
+.mgps-sub { font-size: 13px; color: var(--muted); padding: 3px 2px; }
+.mgps-note { font-size: 12.5px; color: var(--faint); margin-top: 6px; }
+.mgps-pteam { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 2px; border-top: 1px solid var(--border); background: none; text-align: left; cursor: pointer; }
+.pl-sect + .mgps-pteam { border-top: none; }
+.mgps-ptn { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgps-editnets { margin-top: 8px; padding: 8px 12px; border: 1.5px solid var(--accent-bd); border-radius: 10px; background: transparent; color: var(--accent); font: 600 13px 'Inter', sans-serif; cursor: pointer; }
+.mgps-ctrlrow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 2px; background: none; border: none; text-align: left; cursor: pointer; }
+.mgps-quiet { display: block; width: 100%; margin-top: 12px; padding: 11px; border: none; background: none; color: var(--muted); font: 600 13px 'Inter', sans-serif; cursor: pointer; }
+
+/* The body-level score sheet (mockup: T6 pd-reg sheet chrome + steppers). Match-generic — pool + bracket. */
+.mgss-title { font: 700 20px var(--font-display); color: var(--ink); margin-top: 2px; }
+.mgss-vs { font-size: 14px; font-weight: 600; color: var(--faint); }
+.mgss-meta { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+.mgss-steps { display: flex; gap: 14px; margin: 20px 0 4px; }
+.mgss-step { flex: 1; min-width: 0; text-align: center; }
+.mgss-sname { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 10px; min-height: 34px; display: flex; align-items: center; justify-content: center; }
+.mgss-srow { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.mgss-sbtn { width: 40px; height: 40px; border-radius: 11px; border: 1.5px solid var(--accent-bd); background: transparent; color: var(--accent); font: 700 22px var(--font-display); line-height: 1; cursor: pointer; }
+.mgss-sval { font: 800 32px var(--font-display); color: var(--ink); min-width: 44px; }
+.mgss-final { margin-top: 20px; }
+.mgss-final[disabled] { opacity: .45; cursor: default; }
+.mgss-note { font-size: 12.5px; color: var(--faint); margin-top: 12px; text-align: center; }
+.mgss-err { margin-top: 12px; padding: 9px 11px; border-radius: 9px; background: oklch(0.55 0.16 25 / .08); color: var(--danger); font-size: 12.5px; }
 
 .pl-colh { display: flex; align-items: center; gap: 10px; padding: 0 2px 5px; font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--faint); }
 .pl-srow { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-top: 1px solid var(--border); }

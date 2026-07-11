@@ -92,6 +92,8 @@ function loadApp() {
       leadTournament: () => manageLeadTournament(),
       buildMgTeams: () => { manageView = 'tournament'; mgtView = 'teams'; return buildMgTeamsHTML(); },
       buildTeamSheet: (id) => buildMgTeamSheetHTML(mgFindTeam(id)),
+      buildMgPools: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'pools'; mgpPoolFilter = (opts.filter === undefined ? null : opts.filter); mgpControlsOpen = !!opts.controls; return buildMgPoolsHTML(); },
+      buildScoreSheet: (m) => buildMgScoreSheetHTML(m),
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -680,10 +682,14 @@ describe('buildManageTournamentHTML — the tournament sub-hub (pick R2, mockup 
   it('the container dispatch shows the hub for null mgtView and a placeholder for the still-unbuilt sub-views', () => {
     setTournamentState(setupOpen);
     expect(bridge.mgtContainer()).toContain('data-mgt-view="registration"'); // hub
-    // Task 6 built the teams view; 'pools' is still a placeholder until Task 7.
+    // Task 7 filled the 'pools' placeholder; 'bracket' is still a placeholder until Task 8.
+    const bracketView = bridge.mgtContainer('bracket');
+    expect(bracketView).toContain('Coming in the next slices.');
+    expect(bracketView).toContain('data-mgt-back'); // placeholder returns to the hub, not the lead
+    // 'pools' now dispatches to the real Pools & schedule view (its own back button, no placeholder copy).
     const poolsView = bridge.mgtContainer('pools');
-    expect(poolsView).toContain('Coming in the next slices.');
-    expect(poolsView).toContain('data-mgt-back'); // placeholder returns to the hub, not the lead
+    expect(poolsView).not.toContain('Coming in the next slices.');
+    expect(poolsView).toContain('data-mgt-back');
   });
 });
 
@@ -907,5 +913,150 @@ describe('buildMgTeamSheetHTML — the full-edit team sheet (pick R8)', () => {
     expect(html).toContain('data-mgts="remove"');
     expect(html).toContain('Remove this team');
     expect(html).toContain('data-mgts="close"'); // backdrop + Done both close
+  });
+});
+
+// ── Task 7 (pick R9): Pools & schedule admin — score on the schedule ──────────
+const EN = '–'; // EN DASH — the score / record separator the builders emit
+
+function setPoolsFixture(extra = {}) {
+  const st = bridge.getState();
+  Object.assign(st, {
+    tournaments: [{
+      id: 'T', name: 'July 2026', status: 'pools', registration_open: false,
+      team_size: 4, net_count: 2, pool_count: 2,
+      pool_target: 15, pool_cap: 20, bracket_target: 21, bracket_cap: 25, win_by_2: true,
+    }],
+    activeTournamentId: 'T',
+    tournamentTeams: [
+      { id: 't1', name: 'Dink Responsibly', pool_id: 'p1', paid: true },
+      { id: 't2', name: 'Sets & Reps', pool_id: 'p1', paid: true },
+      { id: 't3', name: 'Block Party', pool_id: 'p2', paid: true },
+      { id: 't4', name: 'Net Gains', pool_id: 'p2', paid: true },
+    ],
+    tournamentPools: [{ id: 'p1', label: 'A', display_order: 0 }, { id: 'p2', label: 'B', display_order: 1 }],
+    tournamentMatches: [
+      { id: 'gA1', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 1, queue_order: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 15, score_b: 12, version: 1 },
+      { id: 'gA2', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 1, queue_order: 2, status: 'live', team_a_id: 't1', team_b_id: 't2', score_a: 12, score_b: 9, version: 1 },
+      { id: 'gA3', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 1, queue_order: 3, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', version: 0 },
+      { id: 'gB1', tournament_id: 'T', pool_id: 'p2', phase: 'pool', net: 2, queue_order: 1, status: 'scheduled', team_a_id: 't3', team_b_id: 't4', version: 0 },
+    ],
+    players: [], checkedIn: [], teamMembers: null, isAdmin: true,
+    ...extra,
+  });
+}
+
+describe('buildMgPoolsHTML — post-draw scored schedule (reuses the public pl-* grammar)', () => {
+  let html;
+  beforeEach(() => { setPoolsFixture(); html = bridge.buildMgPools({ filter: 'A' }); });
+
+  it('renders Pool A / Pool B / Seeding tabs with the admin data-mgps-tab hook', () => {
+    expect(html).toContain('data-mgps-tab="A"');
+    expect(html).toContain('data-mgps-tab="B"');
+    expect(html).toContain('data-mgps-tab="seeding"');
+    expect(html).toContain('class="pl-tab'); // reuses the locked public tab grammar
+  });
+
+  it('reuses standings-lite (pl-srow) and the net hairline (pl-net)', () => {
+    expect(html).toContain('class="pl-srow');
+    expect(html).toContain('class="pl-colh"');
+    expect(html).toContain('class="pl-net"');
+    expect(html).toContain('>NET 1<');
+  });
+
+  it('puts a SCORE button only on unscored rows, EDIT on finals, LIVE on live', () => {
+    expect(html).toContain('class="mgps-score"');
+    expect(html).toContain('data-mgps-score="gA3"');
+    expect(html).toContain('data-mgps-score="gA1"');
+    expect(html).toContain('>EDIT<');
+    expect(html).toContain('class="pl-g live"');
+    expect(html).toContain('data-mgps-score="gA2"');
+    expect(count(html, '>LIVE<')).toBe(1);
+    expect(html).not.toContain('data-team-peek'); // no read-only public peek in admin rows
+  });
+
+  it('offers the Pool controls entry and never uses pd-card chrome', () => {
+    expect(html).toContain('Pool controls');
+    expect(html).toContain('data-mgps-controls');
+    expect(html).not.toContain('pd-card');
+  });
+
+  it('expands the controls to per-team taps + edit nets + a type-name reset', () => {
+    const open = bridge.buildMgPools({ filter: 'A', controls: true });
+    expect(open).toContain('data-mgps-team="t1"');     // tap a team → the T6 team sheet
+    expect(open).toContain('data-mgps-editnets="p1"'); // edit a pool's nets
+    expect(open).toContain('data-mgps-reset');         // reset pools (type-name unlock)
+  });
+});
+
+describe('buildMgPoolsHTML — pre-draw and drawn-not-started (two-step flow)', () => {
+  it('pre-draw shows a pools-count field, a read-only format preset, and the Draw CTA', () => {
+    setPoolsFixture({
+      tournaments: [{ id: 'T', name: 'July 2026', status: 'setup', team_size: 4, net_count: 2, pool_count: 2, pool_target: 15, pool_cap: 20, bracket_target: 21, bracket_cap: 25, win_by_2: true }],
+      tournamentPools: [], tournamentMatches: [],
+    });
+    const html = bridge.buildMgPools();
+    expect(html).toContain('id="mgps-poolcount"');
+    expect(html).toContain('data-mgps-draw');
+    expect(html).toContain('Draw pools');
+    expect(html).toContain('Event settings'); // preset-edit-lives-there note
+    expect(html).toContain('First to 15');     // read-only preset sub reflects the row
+    expect(html).not.toContain('data-mgps-tab');
+  });
+
+  it('drawn-but-not-started shows the pools + a Start pool play CTA (step two)', () => {
+    setPoolsFixture({
+      tournaments: [{ id: 'T', name: 'July 2026', status: 'setup', team_size: 4, net_count: 2, pool_count: 2 }],
+      tournamentMatches: [],
+    });
+    const html = bridge.buildMgPools();
+    expect(html).toContain('data-mgps-start');
+    expect(html).toContain('Start pool play');
+    expect(html).toContain('data-mgps-team="t1"');
+    expect(html).not.toContain('data-mgps-tab');
+  });
+});
+
+describe('buildMgScoreSheetHTML — the shared score sheet (T7 defines, T8 reuses)', () => {
+  it('a live pool row: matchup title, meta line, two steppers, final CTA + quiet live', () => {
+    setPoolsFixture();
+    const html = bridge.buildScoreSheet(bridge.getState().tournamentMatches.find((m) => m.id === 'gA2'));
+    expect(html).toContain('Dink Responsibly');
+    expect(html).toContain('Sets &amp; Reps');
+    expect(html).toContain('Pool A');
+    expect(html).toContain('Net 1');
+    expect(html).toContain('First to 15'); // targets from the tournament fields
+    expect(html).toContain('data-mgss-step="a"');
+    expect(html).toContain('data-mgss-step="b"');
+    expect(html).toContain('id="mgss-a"');
+    expect(html).toContain('id="mgss-b"');
+    expect(html).toContain('Dink Responsibly wins 12' + EN + '9'); // leader-first final label
+    expect(html).toContain('data-mgss="final"');
+    expect(html).toContain('Just update the live score');
+    expect(html).toContain('data-mgss="live"');
+  });
+
+  it('disables the final CTA on a tie (0-0 scheduled game)', () => {
+    setPoolsFixture();
+    const html = bridge.buildScoreSheet(bridge.getState().tournamentMatches.find((m) => m.id === 'gA3'));
+    expect(html).toContain('disabled');
+  });
+
+  it('a final row opens in EDIT mode (edit write, same-winner note, no live link)', () => {
+    setPoolsFixture();
+    const html = bridge.buildScoreSheet(bridge.getState().tournamentMatches.find((m) => m.id === 'gA1'));
+    expect(html).toContain('data-mgss="edit"');
+    expect(html).toContain('same winner');
+    expect(html).not.toContain('Just update the live score');
+  });
+
+  it('is match-generic — a bracket (phase main) row renders with the bracket target', () => {
+    const bm = { id: 'bm1', tournament_id: 'T', phase: 'main', round_label: 'WB R1 M1', net: 3, status: 'scheduled', team_a_id: 't1', team_b_id: 't3', version: 0 };
+    setPoolsFixture({ tournamentMatches: [bm] });
+    const html = bridge.buildScoreSheet(bm);
+    expect(html).toContain('Dink Responsibly');
+    expect(html).toContain('Net 3');
+    expect(html).toContain('First to 21'); // bracket_target from the fixture → proves phase-generic
+    expect(html).toContain('data-mgss="final"');
   });
 });

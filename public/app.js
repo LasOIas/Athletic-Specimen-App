@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1495,6 +1495,17 @@ function partialRender() {
     if (manageView === 'tournament' && mgtView === 'registration' && manageRegDirty()) {
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
       return;
+    }
+    // Task 7 EXCEPTION: the Tournament → Pools pre-draw setup carries live pool-count / nets inputs. Bail the
+    // background repaint (refresh the sync notice only) while one is focused so a half-typed value survives.
+    // (The score sheet is body-level → already immune to the container swap.)
+    if (manageView === 'tournament' && mgtView === 'pools') {
+      const mp = document.getElementById('tab-manage');
+      const active = mp ? document.activeElement : null;
+      if (active && mp.contains(active) && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+        if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+        return;
+      }
     }
     const panel = document.getElementById('tab-manage');
     const c = panel ? panel.querySelector('.container') : null;
@@ -3541,6 +3552,67 @@ async function tdbStartPoolPlay(tournament) {
     .update({ status: 'pools', updated_at: new Date().toISOString() }).eq('id', tournament.id);
   if (upErr) throw upErr;
   } finally { _poolSetupInFlight = false; }
+}
+
+// Task 7 (pick R9) — atomic pool setup. draw_pools_atomic / start_pool_play_atomic (migration 0048) wrap
+// today's non-atomic client sequences in ONE transaction each, closing the "3-write landmine" (a failure
+// mid-sequence used to leave pools/matches half-built). DESIGN CHOICE: the RPCs take the CLIENT-COMPUTED
+// rows as a jsonb payload rather than regenerating server-side — the draw uses Math.random and the schedule
+// is nontrivial (generateRoundRobin + splitNetsAcrossPools + distributeGamesOnNets, all tested pure helpers),
+// so porting the generation to PL/pgSQL would create a second source of truth that could drift. This mirrors
+// generate_bracket_atomic (0021), which takes p_matches jsonb for the same reason. The RPCs do only the
+// atomic DELETE + INSERT + status flip.
+function isFnMissingError(err) {
+  if (!err) return false;
+  const code = String(err.code || '');
+  const msg = String((err.message || '') + ' ' + (err.details || '') + ' ' + (err.hint || ''));
+  return code === 'PGRST202' || code === '42883' || /could not find the function|function .* does not exist|schema cache/i.test(msg);
+}
+const RPC_NOT_READY_MSG = 'Pool setup isn\'t available yet — the server is still updating. Try again in a minute.';
+
+async function tdbDrawPoolsAtomic(tournament) {
+  if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  const teams = await tdbListTeams(tournament.id);
+  if (teams.length < 2) throw new Error('Add at least 2 teams first.');
+  // Same clamp as the classic tdbDrawPools: every pool gets ≥2 teams (no 1-team / 0-match pools).
+  const poolCount = Math.max(1, Math.min(Number(tournament.pool_count) || 1, Math.floor(teams.length / 2)));
+  const pools = [];
+  for (let i = 0; i < poolCount; i++) pools.push({ label: String.fromCharCode(65 + i), display_order: i });
+  const shuffled = teams.slice();
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = shuffled[i]; shuffled[i] = shuffled[j]; shuffled[j] = tmp;
+  }
+  // Round-robin-assign shuffled teams to pools by display_order; the RPC resolves display_order → new pool id.
+  const assignments = shuffled.map((tm, i) => ({ team_id: tm.id, display_order: i % poolCount }));
+  const { error } = await supabaseClient.rpc('draw_pools_atomic', {
+    p_tournament_id: tournament.id, p_pools: pools, p_assignments: assignments,
+  });
+  if (error) { if (isFnMissingError(error)) throw new Error(RPC_NOT_READY_MSG); throw error; }
+}
+
+async function tdbStartPoolPlayAtomic(tournament) {
+  if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  const pools = await tdbListPools(tournament.id);
+  if (!pools.length) throw new Error('Draw pools first.');
+  const teams = await tdbListTeams(tournament.id);
+  const netCount = Math.max(1, Number(tournament.net_count) || 1);
+  const netBlocks = splitNetsAcrossPools(netCount, pools.length);
+  const rows = [];
+  pools.forEach((pool, pi) => {
+    const ids = teams.filter((tm) => tm.pool_id === pool.id).map((tm) => tm.id);
+    const pairs = generateRoundRobin(ids);
+    const slots = distributeGamesOnNets(pairs.length, netBlocks[pi] || [pi + 1]);
+    pairs.forEach((pair, gi) => rows.push({
+      pool_id: pool.id, team_a_id: pair[0], team_b_id: pair[1],
+      net: slots[gi].net, queue_order: slots[gi].queue_order,
+    }));
+  });
+  if (!rows.length) throw new Error('No pool games to schedule — each pool needs at least 2 teams.');
+  const { error } = await supabaseClient.rpc('start_pool_play_atomic', {
+    p_tournament_id: tournament.id, p_matches: rows,
+  });
+  if (error) { if (isFnMissingError(error)) throw new Error(RPC_NOT_READY_MSG); throw error; }
 }
 
 // C25 item 3: before submitting, sanity-check a lopsided score that still passes validation
@@ -5654,6 +5726,18 @@ function pdOrdinal(n) {
   return v + (s[(m - 20) % 10] || s[m] || s[0]);
 }
 
+// One standings-lite row (# / Team / W–L / Diff) — the shared grammar for BOTH the public Pools page and the
+// admin Manage → Pools view (Task 7). `badge` prefixes the team cell (the pool chip on the Seeding tab);
+// `myTeamId` lights the spectator's own row ("You") — admin passes null (an operator has no "You").
+function poolStandRowHTML(rank, teamId, name, wins, losses, diff, badge, myTeamId) {
+  const EN = '–';
+  const mine = myTeamId && teamId === myTeamId;
+  const diffCls = diff > 0 ? 'c4' : 'c4 n';
+  const diffTxt = (diff > 0 ? '+' : '') + diff;
+  const youTag = mine ? '<span class="pl-youtag">You</span>' : '';
+  return `<div class="pl-srow${mine ? ' pl-you' : ''}"><span class="c1">${escapeHTML(String(rank))}</span><span class="c2">${badge || ''}${escapeHTML(name)}${youTag}</span><span class="c3">${escapeHTML(String(wins))}${EN}${escapeHTML(String(losses))}</span><span class="${diffCls}">${escapeHTML(diffTxt)}</span></div>`;
+}
+
 function buildPoolsSchedulePageHTML() {
   // Rebuilt to Mike's session-9 "H" pick (atom-up 2026-07-10): POOL + SEEDING tabs -> standings-lite
   // (# / Team / W-L / Diff) -> per-net hairline games. §51 matte, Barlow display, single --accent, flat on
@@ -5697,15 +5781,12 @@ function buildPoolsSchedulePageHTML() {
 
   const myTeam = myTeamInfo();
   const myTeamId = myTeam ? myTeam.teamId : null;
-  const youTag = '<span class="pl-youtag">You</span>';
   const colh = `<div class="pl-colh"><span class="c1">#</span><span class="c2">Team</span><span class="c3">W${EN}L</span><span class="c4">Diff</span></div>`;
   // One standings-lite row (# / Team / W-L / Diff). `badge` prefixes the team cell (pool chip on Seeding).
-  const srow = (rank, teamId, name, wins, losses, diff, badge) => {
-    const mine = myTeamId && teamId === myTeamId;
-    const diffCls = diff > 0 ? 'c4' : 'c4 n';
-    const diffTxt = (diff > 0 ? '+' : '') + diff;
-    return `<div class="pl-srow${mine ? ' pl-you' : ''}"><span class="c1">${escapeHTML(String(rank))}</span><span class="c2">${badge || ''}${escapeHTML(name)}${mine ? youTag : ''}</span><span class="c3">${escapeHTML(String(wins))}${EN}${escapeHTML(String(losses))}</span><span class="${diffCls}">${escapeHTML(diffTxt)}</span></div>`;
-  };
+  // Task 7: the row markup is now the shared poolStandRowHTML() so the admin Manage → Pools view reuses the
+  // EXACT standings-lite grammar (the "You" highlight is public-only — admin passes myTeamId null).
+  const srow = (rank, teamId, name, wins, losses, diff, badge) =>
+    poolStandRowHTML(rank, teamId, name, wins, losses, diff, badge, myTeamId);
 
   let body;
   if (selected === 'seeding') {
@@ -9089,6 +9170,11 @@ let mgtSwapFrom = null;         // the team index the swapped player currently s
 // now); 'teams'|'pools'|'bracket'|'settings'|'rules'|'closeout' render honest placeholders until Tasks 6-10
 // fill them. Survives the container-swap repaint (a background sync never resets which sub-view is open).
 let mgtView = null;
+// Task 7 (Pools & schedule admin, pick R9): the active pool tab in the post-draw schedule
+// ('A'|'B'|…|'seeding'; null → the first pool) + whether the Pool-controls section is expanded. Both
+// survive the container-swap repaint (a background score sync must not reset the tab or collapse the panel).
+let mgpPoolFilter = null;
+let mgpControlsOpen = false;
 
 const MG_CHEV = '<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
 
@@ -9878,6 +9964,7 @@ function mgtSubPlaceholderHTML(view) {
 function buildManageTournamentContainerHTML() {
   if (mgtView === 'registration') return buildMgRegistrationHTML();
   if (mgtView === 'teams') return buildMgTeamsHTML();
+  if (mgtView === 'pools') return buildMgPoolsHTML();
   if (mgtView) return mgtSubPlaceholderHTML(mgtView);
   return buildManageTournamentHTML();
 }
@@ -10207,6 +10294,374 @@ function openMgTeamSheet(teamId) {
     if (el.classList && el.classList.contains('mgts-rline')) { void mgtsSaveRoster(teamId, scrim); return; }
   });
   setTimeout(() => { const n = document.getElementById('mgts-name'); if (n) { try { n.focus({ preventScroll: true }); } catch (_) { try { n.focus(); } catch (_e) {} } } }, 60);
+}
+
+// ── Task 7 (pick R9): Pools & schedule admin — score on the schedule ──────────────────────────────────
+// The public Pools page grammar (pl-* tabs + Seeding, standings-lite, net-hairline games) reused inside
+// #tab-manage with admin verbs: SCORE on unscored rows, tap-to-update on live, quiet EDIT on finals — all
+// open the shared body-level openMgScoreSheet(matchId). Pre-draw = the two-step draw setup (Draw pools →
+// Start pool play) through the atomic RPCs. Post-draw also carries a Pool controls panel (move teams via the
+// T6 team sheet / edit nets / reset pools). §51 matte, Barlow display, single --accent, flat on stone.
+function buildMgPoolsHTML() {
+  const t = manageLeadTournament();
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">Pools &amp; schedule</div></div>`;
+  if (!t) return header + `<div class="pd-empty">No tournament to set up pools for yet.</div>`;
+  const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];
+  const pools = (Array.isArray(state.tournamentPools) ? state.tournamentPools : [])
+    .slice().sort((a, b) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0));
+  const matches = Array.isArray(state.tournamentMatches) ? state.tournamentMatches : [];
+  const poolMatches = matches.filter((m) => (m.phase ? m.phase === 'pool' : !!m.pool_id));
+  if (!poolMatches.length) return header + mgPoolsSetupHTML(t, teams, pools);
+  return header + mgPoolsScheduleHTML(t, teams, pools, matches) + mgPoolsControlsHTML(t, teams, pools, matches);
+}
+
+// Pre-draw setup (status setup, no pools) OR drawn-not-started (pools exist, no matches) — two steps like
+// today's tv2 flow: Draw pools first (shows the drawn pools), then Start pool play once you're happy.
+function mgPoolsSetupHTML(t, teams, pools) {
+  if (!pools.length) {
+    const teamCt = teams.length;
+    const defPools = Number(t.pool_count) > 0 ? Number(t.pool_count) : Math.max(1, Math.round(teamCt / 6) || 1);
+    const defNets = Number(t.net_count) > 0 ? Number(t.net_count) : 1;
+    const size = Number(t.team_size) || 4;
+    const pr = scoringRulesFor('pool', t);
+    const br = scoringRulesFor('main', t);
+    const rline = (r) => 'First to ' + r.target + (r.winBy2 ? ', win by 2' : '') + (r.cap != null ? ' (cap ' + r.cap + ')' : '');
+    const preset = [`${size}s co-ed`, `Pool: ${rline(pr)}`, `Bracket: ${rline(br)}`];
+    const enough = teamCt >= 2;
+    return `<div class="pl-sect">Draw setup</div>`
+      + `<div class="pk-fld"><label class="pk-fl" for="mgps-poolcount">Pools</label>`
+        + `<input class="pk-fv" id="mgps-poolcount" type="number" min="1" inputmode="numeric" value="${escapeHTMLText(String(defPools))}" /></div>`
+      + `<div class="pk-fld"><label class="pk-fl" for="mgps-nets">Nets</label>`
+        + `<input class="pk-fv" id="mgps-nets" type="number" min="1" inputmode="numeric" value="${escapeHTMLText(String(defNets))}" /></div>`
+      + `<div class="pl-sect">Format</div>`
+      + preset.map((p) => `<div class="mgps-sub">${escapeHTML(p)}</div>`).join('')
+      + `<div class="mgps-note">Edit these in Event settings.</div>`
+      + `<button type="button" class="mgt-cta" data-mgps-draw${enough ? '' : ' disabled'}>Draw pools</button>`
+      + (enough ? '' : `<div class="mgps-note">Add at least 2 teams first.</div>`);
+  }
+  return `<div class="pl-sect">Pools drawn</div>`
+    + pools.map((p) => mgPoolTeamsBlockHTML(p, teams, null, false)).join('')
+    + `<button type="button" class="mgt-cta" data-mgps-start>Start pool play</button>`
+    + `<button type="button" class="mgps-quiet" data-mgps-redraw>Draw again</button>`;
+}
+
+// One pool's teams (each tappable → the T6 openMgTeamSheet for move/edit). Shared by the drawn-not-started
+// step and the expanded Pool controls; `showEditNets` adds the Edit-nets action in the controls context.
+function mgPoolTeamsBlockHTML(pool, teams, matches, showEditNets) {
+  const label = pool.label || '';
+  const mine = teams.filter((tm) => String(tm.pool_id || '') === String(pool.id));
+  let sub = `Pool ${escapeHTML(label)}`;
+  if (matches) {
+    const nets = [...new Set(matches.filter((m) => m.pool_id === pool.id && m.net != null).map((m) => m.net))].sort((a, b) => a - b);
+    if (nets.length) sub += ` · Net${nets.length > 1 ? 's' : ''} ${escapeHTML(formatNetList(nets))}`;
+  }
+  const rows = mine.length
+    ? mine.map((tm) => `<button type="button" class="mgps-pteam" data-mgps-team="${escapeHTMLText(String(tm.id))}"><span class="mgps-ptn">${escapeHTML(tm.name || 'Team')}</span>${MG_CHEV}</button>`).join('')
+    : `<div class="mgps-note">No teams in this pool.</div>`;
+  const editNets = showEditNets
+    ? `<button type="button" class="mgps-editnets" data-mgps-editnets="${escapeHTMLText(String(pool.id))}">Edit nets</button>`
+    : '';
+  return `<div class="pl-sect">${sub}</div>${rows}${editNets}`;
+}
+
+// The post-draw schedule — reuses the public buildPoolsSchedulePageHTML shape (pool + Seeding tabs,
+// standings-lite via the shared poolStandRowHTML, per-net hairline games) with admin game rows.
+function mgPoolsScheduleHTML(t, teams, pools, matches) {
+  const EN = '–';
+  const activePools = pools.filter((p) => matches.some((m) => m.pool_id === p.id));
+  if (!activePools.length) return `<div class="pl-empty">No scheduled games yet.</div>`;
+  const poolLabels = activePools.map((p) => p.label || '');
+  const selected = mgpPoolFilter === 'seeding'
+    ? 'seeding'
+    : (poolLabels.includes(mgpPoolFilter) ? mgpPoolFilter : poolLabels[0]);
+  const tab = (label, val) => `<button type="button" class="pl-tab${selected === val ? ' pl-on' : ''}" data-mgps-tab="${escapeHTMLText(val)}"${selected === val ? ' aria-current="true"' : ''}>${escapeHTML(label)}</button>`;
+  const tabs = `<div class="pl-tabs" role="group" aria-label="Pools and seeding">${activePools.map((p) => tab('Pool ' + (p.label || ''), p.label || '')).join('')}${tab('Seeding', 'seeding')}</div>`;
+
+  const poolGames = matches.filter((m) => m.pool_id && m.team_a_id && m.team_b_id && (m.phase ? m.phase === 'pool' : true));
+  const total = poolGames.length;
+  const done = poolGames.filter((m) => m.status === 'final').length;
+  const maxRound = Math.max(1, ...poolGames.map((m) => m.queue_order || 0));
+  const finalOrders = poolGames.filter((m) => m.status === 'final').map((m) => m.queue_order || 0);
+  const curRound = Math.min(maxRound, (finalOrders.length ? Math.max(...finalOrders) : 0) + 1);
+  const meta = `<p class="pl-meta">Round ${curRound} of ${maxRound} · ${done} of ${total} game${total === 1 ? '' : 's'} final</p>`;
+  const colh = `<div class="pl-colh"><span class="c1">#</span><span class="c2">Team</span><span class="c3">W${EN}L</span><span class="c4">Diff</span></div>`;
+
+  let body;
+  if (selected === 'seeding') {
+    const poolByTeam = {};
+    teams.forEach((tm) => { const p = pools.find((pp) => pp.id === tm.pool_id); if (p) poolByTeam[tm.id] = p.label || ''; });
+    const rows = computeSeeding(teams, matches).map((r) => {
+      const badge = poolByTeam[r.teamId] ? `<span class="pl-pl">${escapeHTML(poolByTeam[r.teamId])}</span> ` : '';
+      return poolStandRowHTML(r.seed, r.teamId, r.name, r.wins, r.losses, r.pointDiff, badge, null);
+    }).join('');
+    body = `<div class="pl-sect">Overall seeding</div>${colh}${rows}<p class="pl-foot">Seeded by win %, then point diff — this sets the bracket order.</p>`;
+  } else {
+    const pool = activePools.find((p) => (p.label || '') === selected) || activePools[0];
+    const shaped = shapeStandingsByPool(pools, teams, matches).find((s) => s.poolLabel === (pool.label || ''));
+    const standRows = (shaped ? shaped.rows : []).map((r) => poolStandRowHTML(r.rank, r.teamId, r.name, r.wins, r.losses, r.pointDiff, '', null)).join('');
+    const poolMs = matches.filter((m) => m.pool_id === pool.id);
+    const nets = [...new Set(poolMs.map((m) => m.net).filter((n) => n != null))].sort((a, b) => a - b);
+    const netsLabel = nets.length ? ('Net' + (nets.length > 1 ? 's' : '') + ' ' + formatNetList(nets)) : '';
+    const gsections = nets.map((net) => {
+      const games = poolMs.filter((m) => m.net === net).sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
+      const rows = games.map((g, i) => mgPoolGameRowHTML(g, g.queue_order || (i + 1), teams)).join('');
+      return `<div class="pl-net">NET ${escapeHTML(String(net))}</div>${rows}`;
+    }).join('');
+    body = `<div class="pl-sect">Pool ${escapeHTML(pool.label || '')} standings</div>${colh}${standRows}<div class="pl-sect">Games${netsLabel ? ' · ' + escapeHTML(netsLabel) : ''}</div>${gsections}`;
+  }
+  return `${meta}${tabs}${body}`;
+}
+
+// One admin game row: the whole row is tappable (data-mgps-score) → the score sheet. Unscored rows show a
+// SCORE outline button, live rows a green score + LIVE pill, finals the winner-first line + a quiet EDIT tag.
+// NO data-team-peek (that read-only public affordance is replaced by the admin score action).
+function mgPoolGameRowHTML(g, order, teams) {
+  const EN = '–';
+  const idAttr = escapeHTMLText(String(g.id));
+  const aN = escapeHTML(teamNameById(teams, g.team_a_id));
+  const bN = escapeHTML(teamNameById(teams, g.team_b_id));
+  const rd = `<span class="rd">R${escapeHTML(String(order))}</span>`;
+  if (g.status === 'final') {
+    const aWin = g.winner_team_id === g.team_a_id;
+    const w = aWin ? aN : bN, l = aWin ? bN : aN;
+    const ws = aWin ? g.score_a : g.score_b, ls = aWin ? g.score_b : g.score_a;
+    return `<div class="pl-g" data-mgps-score="${idAttr}">${rd}<span class="gt"><b>${w}</b> <span class="def">def.</span> <span class="lose">${l}</span></span><span class="sc">${escapeHTML(String(ws))}${EN}${escapeHTML(String(ls))}</span><span class="ftag">EDIT</span></div>`;
+  }
+  if (g.status === 'live') {
+    const sa = Number(g.score_a) || 0, sb = Number(g.score_b) || 0;
+    return `<div class="pl-g live" data-mgps-score="${idAttr}">${rd}<span class="gt">${aN} <span class="vs">vs</span> ${bN}</span><span class="sc">${sa}${EN}${sb}</span><span class="pill">LIVE</span></div>`;
+  }
+  return `<div class="pl-g" data-mgps-score="${idAttr}">${rd}<span class="gt">${aN} <span class="vs">vs</span> ${bN}</span><button type="button" class="mgps-score" data-mgps-score="${idAttr}">SCORE</button></div>`;
+}
+
+// The Pool controls section — collapsed to one "careful stuff" row (mockup ps-a), expanded to per-pool team
+// lists (tap → the T6 team sheet to move a team), Edit nets per pool, and a type-name Reset pools.
+function mgPoolsControlsHTML(t, teams, pools, matches) {
+  if (!mgpControlsOpen) {
+    return `<div class="pl-sect">Pool controls</div>`
+      + `<button type="button" class="mgps-ctrlrow" data-mgps-controls>`
+        + `<div class="mg-rb"><div class="mg-rn">Move teams · edit nets · reset pools</div>`
+        + `<div class="mg-rs">The careful stuff, one tap deeper</div></div>${MG_CHEV}</button>`;
+  }
+  return `<div class="pl-sect">Pool controls</div>`
+    + `<button type="button" class="mgps-quiet" data-mgps-controls>Close controls</button>`
+    + pools.map((p) => mgPoolTeamsBlockHTML(p, teams, matches, true)).join('')
+    + `<button type="button" class="mgts-danger" data-mgps-reset>Reset pools</button>`
+    + `<div class="mgps-note">Clears every pool result and re-draws — type the tournament name to confirm.</div>`;
+}
+
+// ── The shared body-level score sheet (Task 7 defines it; Task 8's bracket reuses openMgScoreSheet) ──────
+// Match-generic: handles phase 'pool' | 'main'. Content builder is pure (like buildMgTeamSheetHTML); the
+// interactive steppers + writes live in openMgScoreSheet. Writes: pool final → tdbSubmitResult, bracket
+// final → tdbSubmitBracketResult, edit-final → tdbEditMatchScore, live → tdbSetLiveScore.
+function buildMgScoreSheetHTML(match) {
+  if (!match) return '';
+  const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];
+  const aName = teamNameById(teams, match.team_a_id) || 'Team A';
+  const bName = teamNameById(teams, match.team_b_id) || 'Team B';
+  const a = Math.max(0, Number(match.score_a) || 0);
+  const b = Math.max(0, Number(match.score_b) || 0);
+  const isFinal = match.status === 'final';
+  const t = (Array.isArray(state.tournaments) ? state.tournaments : []).find((x) => x.id === match.tournament_id) || manageLeadTournament() || {};
+  const rules = scoringRulesFor(match.phase, t);
+  const ruleText = 'First to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ' (cap ' + rules.cap + ')' : '');
+  const bits = [];
+  if (match.phase === 'main') {
+    bits.push(bracketLabelPart(match));
+  } else {
+    const pool = (Array.isArray(state.tournamentPools) ? state.tournamentPools : []).find((p) => p.id === match.pool_id);
+    if (pool) bits.push('Pool ' + (pool.label || ''));
+    if (match.queue_order) bits.push('Round ' + match.queue_order);
+  }
+  if (match.net) bits.push('Net ' + match.net);
+  bits.push(ruleText);
+  const meta = bits.filter(Boolean).join(' · ');
+
+  const head = `<div class="pd-reg-grip"></div>`
+    + `<div class="mgts-head"><div class="mgts-eyebrow">${isFinal ? 'Edit result' : 'Score'}</div>`
+    + `<button type="button" class="pd-reg-sheetx" data-mgss="close" aria-label="Close">`
+    + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
+  const title = `<div class="mgss-title">${escapeHTML(aName)} <span class="mgss-vs">vs</span> ${escapeHTML(bName)}</div>`;
+  const metaLine = `<div class="mgss-meta">${escapeHTML(meta)}</div>`;
+  const stepper = (side, name, val) => `<div class="mgss-step">`
+    + `<div class="mgss-sname">${escapeHTML(name)}</div>`
+    + `<div class="mgss-srow">`
+      + `<button type="button" class="mgss-sbtn" data-mgss-step="${side}" data-mgss-d="-1" aria-label="${escapeHTMLText(name)} minus one">−</button>`
+      + `<span class="mgss-sval" id="mgss-${side}">${val}</span>`
+      + `<button type="button" class="mgss-sbtn" data-mgss-step="${side}" data-mgss-d="1" aria-label="${escapeHTMLText(name)} plus one">+</button>`
+    + `</div></div>`;
+  const steppers = `<div class="mgss-steps">${stepper('a', aName, a)}${stepper('b', bName, b)}</div>`;
+  const err = `<div class="mgss-err" id="mgss-err" hidden></div>`;
+  const leader = a > b ? aName : (b > a ? bName : null);
+  const finalLabel = leader
+    ? (isFinal ? 'Save — ' : 'Final — ') + escapeHTML(leader) + ' wins ' + Math.max(a, b) + '–' + Math.min(a, b)
+    : (isFinal ? 'Enter a winning score' : 'Final — set the score to pick a winner');
+  const primary = `<button type="button" class="mgt-cta mgss-final" data-mgss="${isFinal ? 'edit' : 'final'}"${leader ? '' : ' disabled'}>${finalLabel}</button>`;
+  const quiet = isFinal
+    ? `<p class="mgss-note">Fixing the score — same winner only. To change who won, clear the result first.</p>`
+    : `<button type="button" class="mgss-quiet" data-mgss="live">Just update the live score</button>`;
+  return head + title + metaLine + steppers + err + primary + quiet;
+}
+
+function closeMgScoreSheet() { const el = document.getElementById('mgss-sheet'); if (el) el.remove(); }
+
+function openMgScoreSheet(matchId) {
+  if (!state.isAdmin) return;
+  const match = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).find((m) => m.id === matchId);
+  if (!match || !match.team_a_id || !match.team_b_id) return;
+  closeMgScoreSheet();
+  const aName = teamNameById(state.tournamentTeams, match.team_a_id) || 'Team A';
+  const bName = teamNameById(state.tournamentTeams, match.team_b_id) || 'Team B';
+  const isFinal = match.status === 'final';
+  let a = Math.max(0, Number(match.score_a) || 0);
+  let b = Math.max(0, Number(match.score_b) || 0);
+  let submitting = false;
+  const scrim = document.createElement('div');
+  scrim.id = 'mgss-sheet';
+  scrim.className = 'pd-reg-scrim';
+  scrim.setAttribute('role', 'dialog');
+  scrim.setAttribute('aria-modal', 'true');
+  scrim.setAttribute('aria-label', isFinal ? 'Edit result' : 'Enter score');
+  scrim.innerHTML = `<div class="pd-reg-sheet">${buildMgScoreSheetHTML(match)}</div>`;
+  document.body.appendChild(scrim);
+  const errEl = () => document.getElementById('mgss-err');
+  const fail = (msg) => { const e = errEl(); if (e) { e.textContent = msg; e.hidden = false; } };
+  const sync = () => {
+    const ea = document.getElementById('mgss-a'), eb = document.getElementById('mgss-b');
+    if (ea) ea.textContent = String(a);
+    if (eb) eb.textContent = String(b);
+    const btn = scrim.querySelector('.mgss-final');
+    if (btn) {
+      const leader = a > b ? aName : (b > a ? bName : null);
+      if (leader) {
+        btn.removeAttribute('disabled');
+        btn.textContent = (isFinal ? 'Save — ' : 'Final — ') + leader + ' wins ' + Math.max(a, b) + '–' + Math.min(a, b);
+      } else {
+        btn.setAttribute('disabled', 'true');
+        btn.textContent = isFinal ? 'Enter a winning score' : 'Final — set the score to pick a winner';
+      }
+    }
+  };
+  const doFinal = async () => {
+    if (submitting) return;
+    if (a === b) { fail('A game can\'t end in a tie.'); return; }
+    submitting = true;
+    try {
+      if (!(await confirmBigMargin(String(a), String(b)))) { submitting = false; return; }
+      if (isFinal) await tdbEditMatchScore(match, String(a), String(b));
+      else if (match.phase === 'main') await tdbSubmitBracketResult(match, a > b ? 'a' : 'b', String(a), String(b));
+      else await tdbSubmitResult(match, String(a), String(b));
+      await tdbRefreshTournaments();
+      closeMgScoreSheet();
+      repaintManage();
+    } catch (e) { fail((e && e.message) || 'Could not save the result.'); submitting = false; }
+  };
+  const doLive = async () => {
+    if (submitting) return;
+    submitting = true;
+    try {
+      await tdbSetLiveScore(match, a, b);
+      await tdbRefreshTournaments();
+      closeMgScoreSheet();
+      repaintManage();
+    } catch (e) { fail((e && e.message) || 'Could not update the live score.'); submitting = false; }
+  };
+  scrim.addEventListener('click', (ev) => {
+    if (ev.target === scrim) { closeMgScoreSheet(); return; }
+    const step = ev.target.closest('[data-mgss-step]');
+    if (step) {
+      const side = step.getAttribute('data-mgss-step');
+      const d = Number(step.getAttribute('data-mgss-d')) || 0;
+      if (side === 'a') a = Math.max(0, a + d); else b = Math.max(0, b + d);
+      const e = errEl(); if (e) e.hidden = true;
+      sync();
+      return;
+    }
+    const act = ev.target.closest('[data-mgss]');
+    if (!act) return;
+    const role = act.getAttribute('data-mgss');
+    if (role === 'close') { closeMgScoreSheet(); return; }
+    if (role === 'final' || role === 'edit') { void doFinal(); return; }
+    if (role === 'live') { void doLive(); return; }
+  });
+}
+
+// ── Task 7 pool-setup handlers (wired from the manage click delegate under mgtView==='pools') ────────────
+async function mgPoolsDraw() {
+  if (!state.isAdmin) return;
+  const t = manageLeadTournament();
+  if (!t) return;
+  const teams = state.tournamentTeams || [];
+  if (teams.length < 2) { appNotice({ title: 'Add teams first', message: 'You need at least 2 teams to draw pools.' }); return; }
+  const pcEl = document.getElementById('mgps-poolcount');
+  const ncEl = document.getElementById('mgps-nets');
+  const pc = Math.max(1, Math.floor(Number(pcEl && pcEl.value) || Number(t.pool_count) || 1));
+  const nc = Math.max(1, Math.floor(Number(ncEl && ncEl.value) || Number(t.net_count) || 1));
+  try {
+    await tdbSetTournamentFields(t.id, { pool_count: pc, net_count: nc });
+    await tdbDrawPoolsAtomic({ ...t, pool_count: pc, net_count: nc });
+    await tdbRefreshTournaments();
+    repaintManage();
+  } catch (err) { appNotice({ title: 'Could not draw pools', message: (err && err.message) || 'Try again.' }); }
+}
+
+async function mgPoolsStart() {
+  if (!state.isAdmin) return;
+  const t = manageLeadTournament();
+  if (!t) return;
+  const unpaid = (state.tournamentTeams || []).filter((tm) => !tm.paid).length;
+  if (unpaid > 0 && !(await appConfirm({ title: 'Unpaid teams', message: `${unpaid} team${unpaid === 1 ? '' : 's'} not marked paid. Start pool play anyway?`, confirmText: 'Start anyway' }))) return;
+  try {
+    await tdbStartPoolPlayAtomic(t);
+    await tdbRefreshTournaments();
+    repaintManage();
+  } catch (err) { appNotice({ title: 'Could not start pool play', message: (err && err.message) || 'Try again.' }); }
+}
+
+async function mgPoolsRedraw() {
+  if (!state.isAdmin) return;
+  const t = manageLeadTournament();
+  if (!t) return;
+  if (!(await appConfirm({ title: 'Draw again', message: 'Shuffle the teams into new pools?', confirmText: 'Draw again' }))) return;
+  try {
+    await tdbDrawPoolsAtomic(t);
+    await tdbRefreshTournaments();
+    repaintManage();
+  } catch (err) { appNotice({ title: 'Could not draw pools', message: (err && err.message) || 'Try again.' }); }
+}
+
+async function mgPoolsEditNets(poolId) {
+  if (!state.isAdmin) return;
+  const pool = (state.tournamentPools || []).find((p) => p.id === poolId);
+  if (!pool) return;
+  const cur = [...new Set((state.tournamentMatches || []).filter((m) => m.pool_id === pool.id && m.net != null).map((m) => m.net))].sort((a, b) => a - b);
+  const input = await appPrompt({ title: 'Pool ' + (pool.label || '') + ' nets', message: 'Which nets does this pool play on? Separate with commas. Re-assigns its unplayed games.', value: cur.join(', '), placeholder: 'e.g. 1, 2', confirmText: 'Save' });
+  if (input == null) return;
+  const nets = String(input).split(/[,\s]+/).map((s) => parseInt(s, 10)).filter((n) => !isNaN(n));
+  try {
+    await tdbSetPoolNets(pool, nets, state.tournamentMatches || []);
+    await tdbRefreshTournaments();
+    repaintManage();
+  } catch (err) { appNotice({ title: 'Could not update nets', message: (err && err.message) || 'Try again.' }); }
+}
+
+async function mgPoolsResetPools() {
+  if (!state.isAdmin) return;
+  const t = manageLeadTournament();
+  if (!t) return;
+  const nm = (t.name || '').trim() || 'this tournament';
+  const typed = await appPrompt({ title: 'Reset pools', message: `This clears every pool result and re-draws. Type the tournament name to confirm.`, placeholder: nm, confirmText: 'Reset pools' });
+  if (String(typed || '').trim() !== nm) return;
+  try {
+    await tdbSetTournamentFields(t.id, { status: 'setup' });
+    if (typeof _autoGenPrompted !== 'undefined' && _autoGenPrompted) delete _autoGenPrompted[t.id];
+    await tdbDrawPoolsAtomic({ ...t, status: 'setup' });
+    await tdbRefreshTournaments();
+    mgpControlsOpen = false;
+    repaintManage();
+  } catch (err) { appNotice({ title: 'Could not reset pools', message: (err && err.message) || 'Try again.' }); }
 }
 
 // Flip to the old admin shell (temporary — the whole path dies in Task 14). Runs the exact old render
@@ -11970,6 +12425,24 @@ function attachHandlers() {
           if (e.target.closest('[data-mgtp-add]')) { void mgTeamAddPrompt(); return; }
           const teamRow = e.target.closest('[data-mgtp-team]');
           if (teamRow) { openMgTeamSheet(teamRow.getAttribute('data-mgtp-team')); return; }
+        }
+        // Pools & schedule (Task 7, pick R9): tab switch + score-sheet open + the two-step draw/start + Pool
+        // controls (move team → the T6 sheet, edit nets, reset). Checked BEFORE the generic hub rows so a tab
+        // or SCORE tap never falls through; the header back button carries data-mgt-back (handled below).
+        if (mgtView === 'pools') {
+          const psTab = e.target.closest('[data-mgps-tab]');
+          if (psTab) { mgpPoolFilter = psTab.getAttribute('data-mgps-tab'); repaintManage(); return; }
+          const psScore = e.target.closest('[data-mgps-score]');
+          if (psScore) { openMgScoreSheet(psScore.getAttribute('data-mgps-score')); return; }
+          if (e.target.closest('[data-mgps-draw]')) { void mgPoolsDraw(); return; }
+          if (e.target.closest('[data-mgps-start]')) { void mgPoolsStart(); return; }
+          if (e.target.closest('[data-mgps-redraw]')) { void mgPoolsRedraw(); return; }
+          if (e.target.closest('[data-mgps-controls]')) { mgpControlsOpen = !mgpControlsOpen; repaintManage(); return; }
+          const psTeam = e.target.closest('[data-mgps-team]');
+          if (psTeam) { openMgTeamSheet(psTeam.getAttribute('data-mgps-team')); return; }
+          const psNets = e.target.closest('[data-mgps-editnets]');
+          if (psNets) { void mgPoolsEditNets(psNets.getAttribute('data-mgps-editnets')); return; }
+          if (e.target.closest('[data-mgps-reset]')) { void mgPoolsResetPools(); return; }
         }
         if (e.target.closest('[data-mgt-back]')) { mgtView = null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
         const mgtRow = e.target.closest('[data-mgt-view]');
