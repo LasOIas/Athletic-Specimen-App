@@ -255,11 +255,12 @@ describe('buildManagePageHTML — the Manage lead (flat, needs-you first)', () =
     expect(html).toContain('>Everything<'); // the rest of the lead still renders
   });
 
-  it('carries the temporary Open-the-old-admin escape hatch', () => {
+  it('no longer carries the old-admin escape hatch (Task 14: old shell deleted)', () => {
     setManageState();
     const html = bridge.buildManage();
-    expect(html).toContain('data-mg-old');
-    expect(html).toContain('Open the old admin');
+    expect(html).not.toContain('data-mg-old');
+    expect(html).not.toContain('Open the old admin');
+    expect(html).not.toContain('mg-oldlink');
   });
 });
 

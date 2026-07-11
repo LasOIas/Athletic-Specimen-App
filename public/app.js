@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.15'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.16'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1603,7 +1603,7 @@ function renderPlayersPanel() {
   if (!state.isAdmin || !panel) { render(); return; }
 
   const snapshot = captureTransientInteractionState();
-  // Reproduce renderAdminShell()'s EXACT #tab-players innerHTML (incl. the template-literal whitespace
+  // Reproduce adminPlayersHTML()'s EXACT #tab-players innerHTML (incl. the template-literal whitespace
   // around the .container wrapper) so a scoped re-render is byte-identical to a full render(), not just
   // pixel-identical.
   panel.innerHTML = `
@@ -2520,97 +2520,6 @@ function getPublicLiveData() {
   return { matchups: live.matchups, results, waitingTeams: live.waitingTeams, liveCount };
 }
 
-// C26 item 3a: court rows shared by Home + Scores. Returns '' when there are no teams.
-function buildPublicLiveCourtsHTML() {
-  const { matchups, results } = getPublicLiveData();
-  if (!matchups.length) return '';
-  return matchups.map((m, idx) => {
-    const winner = Number(results[liveMatchupKey(m.teamA, m.teamB)]) || 0;
-    const status = winner
-      ? `<span class="court-stat is-done">Team ${winner} won</span>`
-      : `<span class="court-stat is-live">Playing</span>`;
-    return `<div class="court-row">
-      <div class="court-row-info"><div class="court-row-name">Net ${idx + 1}</div>
-        <div class="court-row-sub">Team ${m.teamA} vs Team ${m.teamB}</div></div>
-      ${status}
-    </div>`;
-  }).join('');
-}
-
-// NF-7: the live tournament's in-progress games, as public court rows for the Scores board. Tournament
-// matches are scheduled->final atomically (SC-1: no running score), so "live" = the current unplayed game
-// per net (pool) / the playable matchups (bracket). Public-safe: team names only, "Playing", never a score.
-function buildPublicTournamentLiveHTML(opts) {
-  const lull = !!(opts && opts.lull); // §13.4: only the Home board opts into the between-rounds fallback
-  const t = publicLiveTournament();
-  if (!t || (t.status !== 'pools' && t.status !== 'bracket')) return '';
-  const teams = state.tournamentTeams || [];
-  const matches = state.tournamentMatches || [];
-  const row = (label, m) => {
-    // C72: a game being live-scored shows its running score instead of just "Playing".
-    const stat = m.status === 'live'
-      ? ((m.score_a != null ? m.score_a : 0) + '–' + (m.score_b != null ? m.score_b : 0))
-      : 'Playing';
-    // Slice 1 (§13.2): team names are tap-a-team peek targets on the Home live board too.
-    const tap = (id) => `<span class="tapname" data-team-peek="${escapeHTML(id)}">${escapeHTML(teamNameById(teams, id))}</span>`;
-    return `<div class="court-row">
-      <div class="court-row-info"><div class="court-row-name">${escapeHTML(label)}</div>
-        <div class="court-row-sub">${tap(m.team_a_id)} vs ${tap(m.team_b_id)}</div></div>
-      <span class="court-stat is-live">${escapeHTML(String(stat))}</span>
-    </div>`;
-  };
-  let rows = '';
-  if (t.status === 'pools') {
-    // C70 fix (2026-06-27, v.27.5): the "live now" game per net is a DISJOINT set across nets
-    // (pickPoolCurrentGames) so a team is never shown playing on two nets at once — mirrors the pool board.
-    // The previous lowest-queue-per-net-independently pick double-booked a team (the M1 bug) on this strip,
-    // which feeds the admin dashboard AND the public Scores board. Teams belong to one pool, so deduping
-    // globally across all nets == per-pool dedup. Render-only: schedule / queue_order / DB unchanged.
-    const live = matches.filter((m) => m.phase === 'pool' && m.status !== 'final' && m.net && m.team_a_id && m.team_b_id);
-    const nets = [...new Set(live.map((m) => m.net))].sort((a, b) => a - b);
-    const netUnplayed = nets.map((net) => live.filter((m) => m.net === net).sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0)));
-    const currentIds = pickPoolCurrentGames(netUnplayed);
-    rows = nets.map((net, i) => {
-      const id = currentIds[i];
-      if (!id) return '';
-      const up = live.find((m) => m.id === id);
-      return up ? row('Net ' + net, up) : '';
-    }).join('');
-  } else {
-    // bracket: every playable matchup (both teams known, not final). Label by net if assigned, else game number.
-    const live = matches.filter((m) => m.phase === 'main' && m.status !== 'final' && m.team_a_id && m.team_b_id);
-    const gnB = bracketGameNumbers(matches.filter((m) => m.phase === 'main')).byId;
-    rows = live.slice().sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0)).map((m) => {
-      const label = m.net ? ('Net ' + m.net) : ('G' + (gnB[m.id] || '?'));
-      return row(label, m);
-    }).join('');
-  }
-  if (!rows) {
-    // Between-rounds lull (spec §13.4): during an ACTIVE tournament with no live games the Home board card
-    // no longer vanishes — it keeps its header (+ the caller's legend) and shows a quiet line plus the next
-    // scheduled matchups as faint rows (up to 3, from the same match data). The admin dashboard caller does
-    // not pass lull, so its "No courts live yet" empty state is unchanged.
-    if (!lull) return '';
-    const upNext = matches
-      .filter((m) => (t.status === 'pools' ? m.phase === 'pool' : m.phase === 'main')
-        && m.status !== 'final' && m.team_a_id && m.team_b_id)
-      .sort((a, b) => (a.net || 0) - (b.net || 0) || (a.queue_order || 0) - (b.queue_order || 0))
-      .slice(0, 3);
-    const gnB = t.status === 'bracket' ? bracketGameNumbers(matches.filter((m) => m.phase === 'main')).byId : {};
-    const tap = (id) => `<span class="tapname" data-team-peek="${escapeHTML(id)}">${escapeHTML(teamNameById(teams, id))}</span>`;
-    const faintRows = upNext.map((m) => {
-      const label = m.net ? ('Net ' + m.net) : (t.status === 'bracket' ? ('G' + (gnB[m.id] || '?')) : 'Up next');
-      return `<div class="court-row is-next">
-        <div class="court-row-info"><div class="court-row-name">${escapeHTML(label)}</div>
-          <div class="court-row-sub">${tap(m.team_a_id)} vs ${tap(m.team_b_id)}</div></div>
-        <span class="court-stat is-next">Up next</span>
-      </div>`;
-    }).join('');
-    return `<div class="ph-sec">${escapeHTML(t.name || 'Tournament')} &middot; between rounds</div>`
-      + `<p class="ph-lull">Between rounds — the next games appear here.</p>${faintRows}`;
-  }
-  return `<div class="ph-sec">${escapeHTML(t.name || 'Tournament')} &middot; live now</div>${rows}`;
-}
 
 // C32: the public-facing "live" tournament (the one the public Bracket tab follows), or null.
 function publicLiveTournament() {
@@ -4176,10 +4085,9 @@ async function refreshTournamentLive() {
       // Wave 1b (2026-06-25): the Bracket nav button shows/hides when a tournament goes live or ends on
       // another device. Rebuild ONLY #bottom-nav (the click handler is delegated on the nav element, so
       // an innerHTML swap keeps it working) instead of a full render() that resets a spectator's scroll —
-      // exactly at the peak-attention moment a tournament starts. Session-10 R1: admins are on the public
-      // shell now, so this surgical swap covers them too (keyed !oldAdminMode); the old shell full-renders.
+      // exactly at the peak-attention moment a tournament starts. Every session is on the public shell (Task 14).
       const nav = document.getElementById('bottom-nav');
-      if (nav && !oldAdminMode) { nav.innerHTML = buildPublicNavInnerHTML(); activateMainTab(activeMainTab); }
+      if (nav) { nav.innerHTML = buildPublicNavInnerHTML(); activateMainTab(activeMainTab); }
       else render();
     }
   }
@@ -6003,9 +5911,8 @@ function buildTournamentTabHTML() {
     ? list.find((x) => x.id === state.activeTournamentId)
     : null;
 
-  // Admin-only by both call sites: buildPublicTournamentRootHTML() only calls this under `if (state.isAdmin)`,
-  // and renderAdminShell() (the sole other caller) is itself rendered only when state.isAdmin. The legacy
-  // public (!state.isAdmin) read-only branch here was therefore dead code — removed 2026-07-10 (v.26).
+  // Admin-only: buildPublicTournamentRootHTML() (the sole caller) only invokes this under `if (state.isAdmin)`.
+  // The legacy public (!state.isAdmin) read-only branch here was dead code — removed 2026-07-10 (v.26).
 
   const err = state.tournamentTabError
     ? `<div class="card" style="border-left:4px solid var(--danger);color:var(--danger);">${escapeHTML(state.tournamentTabError)}</div>`
@@ -6492,20 +6399,6 @@ function createOperatorActionId() {
   return `op_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function formatOperatorActionTimeLabel(ts) {
-  if (!ts) return '';
-  try {
-    return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-}
-
-function canAccessOperatorSafetyControls() {
-  // Task 13 (2026-07-11): the group-scoping term died with the code login — this is now purely the
-  // owner check (masterAdminAuthenticated is set only for a role==='owner' server session).
-  return !!(state.isAdmin && state.masterAdminAuthenticated);
-}
 
 function recordOperatorAction({
   scope = 'general',
@@ -6538,42 +6431,6 @@ function recordOperatorAction({
   return entry.id;
 }
 
-function markOperatorActionUndoUsed(actionId) {
-  const target = String(actionId || '').trim();
-  if (!target) return;
-  state.operatorActions = (state.operatorActions || []).map((entry) => {
-    if (!entry || entry.id !== target || !entry.undo) return entry;
-    return { ...entry, undo: { ...entry.undo, used: true } };
-  });
-}
-
-function renderOperatorActionsLogHTML() {
-  if (!canAccessOperatorSafetyControls()) return '';
-  const items = Array.isArray(state.operatorActions) ? state.operatorActions.slice(0, 10) : [];
-  if (!items.length) return '<p class="small">No recent admin actions.</p>';
-  return `
-    <ul class="operator-actions-log" style="list-style:none; margin:0; padding:0;">
-      ${items.map((entry) => {
-        const ts = formatOperatorActionTimeLabel(entry.at);
-        const metaParts = [entry.scope, entry.action].filter(Boolean).join(' / ');
-        const canUndo = !!(entry.undo && !entry.undo.used);
-        return `
-          <li class="small" style="padding:0.45rem 0; border-top:1px solid var(--border);">
-            <div>
-              <strong>${escapeHTMLText(entry.title)}</strong>
-              ${ts ? `<span style="opacity:0.75;"> | ${escapeHTMLText(ts)}</span>` : ''}
-            </div>
-            ${entry.detail ? `<div style="opacity:0.9;">${escapeHTMLText(entry.detail)}</div>` : ''}
-            ${metaParts ? `<div style="opacity:0.7;">${escapeHTMLText(metaParts)}</div>` : ''}
-            ${canUndo
-              ? `<div style="margin-top:0.25rem;"><button type="button" class="secondary" data-role="undo-operator-action" data-action-id="${escapeHTMLText(entry.id)}">Undo</button></div>`
-              : ''}
-          </li>
-        `;
-      }).join('')}
-    </ul>
-  `;
-}
 
 function confirmDangerousActionOrAbort({ title, detail, confirmText }) {
   const expected = String(confirmText || '').trim();
@@ -6583,72 +6440,6 @@ function confirmDangerousActionOrAbort({ title, detail, confirmText }) {
   return String(response || '').trim() === expected;
 }
 
-async function syncCheckedInStateToSupabase() {
-  if (!supabaseClient) return true;
-  ensurePlayerIdentityKeys();
-  const checkedSet = new Set(normalizeCheckedInEntries(state.checkedIn || []));
-  let failed = false;
-  for (const player of (state.players || [])) {
-    if (!player || !player.id) continue;
-    const shouldBeCheckedIn = checkedSet.has(playerIdentityKey(player));
-    // C21 single-source contract (reliability fix 2026-06-20): reconcile through the check_in/check_out
-    // RPCs (which also maintain the check_ins history) instead of a direct checked_in UPDATE that
-    // desynced the history table. Rare path (operator undo / authority reconcile), so per-player RPCs
-    // are acceptable.
-    try {
-      const { error } = await supabaseClient.rpc(shouldBeCheckedIn ? 'check_in' : 'check_out', { p_id: player.id });
-      if (error) throw error;
-    } catch (err) {
-      console.error('syncCheckedInStateToSupabase RPC error', err);
-      failed = true;
-    }
-  }
-  if (failed) return false;
-  queueSupabaseRefresh();
-  return true;
-}
-
-async function runOperatorActionUndo(actionId) {
-  if (!canAccessOperatorSafetyControls()) return;
-  const target = String(actionId || '').trim();
-  if (!target) return;
-  const entry = (state.operatorActions || []).find((item) => item && item.id === target);
-  if (!entry || !entry.undo || entry.undo.used) return;
-
-  const undoType = String(entry.undo.kind || '').trim();
-  if (undoType === 'checkins') {
-    state.checkedIn = normalizeCheckedInEntries(entry.undo.checkedIn || []);
-    saveLocal();
-    render();
-    if (supabaseClient) {
-      const synced = await syncCheckedInStateToSupabase();
-      if (!synced) {
-        await reconcileToSupabaseAuthority('operator-undo-reset-checkins');
-        recordOperatorAction({
-          scope: 'players',
-          action: 'undo-failed',
-          entityType: 'checkins',
-          entityId: '',
-          title: 'Undo failed: restored latest shared check-in state.',
-          detail: entry.title,
-          tone: 'error'
-        });
-        return;
-      }
-    }
-    markOperatorActionUndoUsed(target);
-    recordOperatorAction({
-      scope: 'players',
-      action: 'undo',
-      entityType: 'checkins',
-      entityId: '',
-      title: 'Undo applied for check-in reset.',
-      detail: entry.title,
-      tone: 'success'
-    });
-    render();
-  }
-}
 
 function normalizeCollapsedCardsState(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -7974,66 +7765,6 @@ function bindSelectionHandlers() {
 // C26 item 2: per-surface tab persistence — admin and public keep independent active-tab memory.
 function currentTabKey() { return state.isAdmin ? 'as_main_tab_admin' : 'as_main_tab_public'; }
 
-// C26 item 2: Teams card (admin-only tab). Markup moved verbatim from render(); the shell decides
-// when to call it, so the old `state.isAdmin ? … : ''` wrapper is gone.
-function adminTeamsHTML(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
-  // C36 T3 (§38 A — run the night, nets first): title "Courts" → size chips + Generate → Live Nets
-  // board UP TOP (default EXPANDED when nets exist) → fairness → team cards below. The Live Nets
-  // collapse defaults OPEN now: only a user's explicit collapse (state.liveNetsCollapsed === true)
-  // hides it; undefined/false = expanded so the live action is front-and-center.
-  const liveNetsCollapsed = state.liveNetsCollapsed === true;
-  // C48.6 (Option A): when NO teams are generated yet, the board area below the controls is dead space.
-  // Render a vertically-centered empty state in that region (subtle court/net line-icon, no emoji).
-  // The controls (chips + Generate) stay top-aligned; only the empty board region is centered. When
-  // teams exist, teamsHTML is non-empty and this block is omitted (normal top-aligned layout).
-  const hasTeams = Array.isArray(state.generatedTeams) && state.generatedTeams.length > 0;
-  const courtsEmptyHTML = hasTeams ? '' : `<div class="courts-empty">
-    <div class="idle-block">
-      <div class="idle-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="1.5"/><path d="M12 6v12M3 12h18"/></svg></div>
-      <div class="idle-title">No courts live yet</div>
-      <div class="idle-sub">Generate teams to start a round.</div>
-    </div>
-  </div>`;
-  return `<div class="courts-board${hasTeams ? '' : ' is-empty'}">
-  <div class="card card-generate-teams">
-  <div class="card-collapsible-head">
-    <h3>Courts</h3>
-  </div>
-  <div id="card-body-admin-generate-teams">
-  <div class="team-size-label">Team size — tap to build teams of that size</div>
-  <div class="team-size-chips">
-    ${[2, 3, 4, 6].map((sz) => {
-      const n = Math.floor(state.checkedIn.length / sz);
-      const active = state.lastTeamSize === sz ? ' is-active' : '';
-      return `<button type="button" class="team-size-chip${active}" data-team-size="${sz}" aria-pressed="${state.lastTeamSize === sz ? 'true' : 'false'}">
-        <strong>${sz}s</strong>
-        <span>${n === 0 ? `need ${sz}+ in` : `${n} ${n === 1 ? 'team' : 'teams'}`}</span>
-      </button>`;
-    }).join('')}
-  </div>
-  <div class="row generate-teams-controls">
-    <label class="generate-teams-count">
-      Teams:
-      <input type="number" id="group-count" min="2" value="${escapeHTML(String(state.groupCount))}" />
-    </label>
-    <button id="btn-generate-teams">Generate</button>
-  </div>
-  ${liveMatchupsHTML ? `<div class="live-nets-collapsible">
-    <button type="button" class="live-nets-toggle" data-role="toggle-live-nets" aria-expanded="${liveNetsCollapsed ? 'false' : 'true'}">
-      <span>Live Nets</span>
-      <span class="live-nets-caret">${liveNetsCaretHTML(liveNetsCollapsed)}</span>
-    </button>
-    <div class="live-nets-body${liveNetsCollapsed ? ' is-collapsed' : ''}">
-      ${liveMatchupsHTML}
-    </div>
-  </div>` : ''}
-  ${teamsFairnessHTML}
-  ${teamsHTML}
-  </div>
-</div>
-  ${courtsEmptyHTML}
-</div>`;
-}
 
 // C26 item 2: Admin Players panel. Markup moved verbatim from render(); locals recomputed at the top
 // (byte-identical to render()'s former locals), the old `state.isAdmin ? … : ''` wrapper removed.
@@ -9050,11 +8781,8 @@ function buildHistoryPageHTML() {
 // The lead: title flush top -> NEEDS YOU (omitted when nothing is pending) -> EVERYTHING rows
 // (Tournament · Pickup days · Players · Teams · Admins), each a flat tappable row with a one-line status
 // sub + chevron. Flat on stone (NO pd-card), pl-sect section labels, mg-* kit, SVG chevrons, plain English.
-// `manageView` ('lead' | area) is a MODULE var (distinct from state.manageView — the OLD admin
-// tournament-mode sub-view that dies with the old shell in Task 14); it survives partialRender so a
-// background sync repaints the current Manage surface, never a full render(). `oldAdminMode` keeps the old
-// renderAdminShell reachable via the temporary Open-the-old-admin link (dies Task 14).
-let oldAdminMode = false; // admins boot on the public shell; the temporary Open-the-old-admin link flips this
+// `manageView` ('lead' | area) is a MODULE var (distinct from state.manageView — the legacy tournament-mode
+// sub-view); it survives partialRender so a background sync repaints the current Manage surface, never a full render().
 let manageView = 'lead';  // 'lead' = the needs-you lead; 'pickup'/'pickup-form' (Task 2); 'players' (Task 3); else an area id (placeholder)
 let pickupEditId = null;  // Task 2: the pickup_days row id being edited in 'pickup-form' (null = adding a new day)
 // Task 3 (Players directory, pick R4): the live-search value + Select(bulk) state. All survive the container-
@@ -9215,11 +8943,9 @@ function buildManagePageHTML() {
     + mgRowHTML('teams', 'Teams', escapeHTML(teamsSub))
     + mgRowHTML('admins', 'Admins', 'Seats &amp; activity log');
 
-  // The temporary escape hatch back to the old admin shell (dies Task 14).
   return `<div class="mg-h1">Manage</div>
     ${needsHTML}
-    ${everythingHTML}
-    <button type="button" class="mg-oldlink" data-mg-old>Open the old admin</button>`;
+    ${everythingHTML}`;
 }
 
 // Area placeholders (Task 1): the real Pickup/Players/Teams/Tournament/Admins screens land in Tasks 2-11.
@@ -9371,9 +9097,8 @@ async function loadActionLog() {
 // ── Task 11 (session-10 pick R6): Manage → Admins — 4-seat roster + activity log ──────────────────────
 // Mockups r10-manage/m-c (seats) + m-b (log). Top-level Manage area (manageView==='admins', NOT a
 // tournament sub-view). buildMgAdminsHTML dispatches on mgAdminsView: 'seats' | 'log'. Owner-gating keys on
-// state.masterAdminAuthenticated (the owner-role server session — the same flag canAccessOperatorSafetyControls
-// uses): only the owner can assign a waiting seat or remove a filled non-owner seat. Flat on stone, no
-// pd-card, labeled pills never dots, plain English, NO undo this slice (the old operator undo stays old-shell).
+// state.masterAdminAuthenticated (the owner-role server session): only the owner can assign a waiting seat
+// or remove a filled non-owner seat. Flat on stone, no pd-card, labeled pills never dots, plain English.
 function buildMgAdminsHTML() {
   return mgAdminsView === 'log' ? buildMgLogHTML() : buildMgSeatsHTML();
 }
@@ -11411,12 +11136,6 @@ async function mgBracketReset() {
   } catch (err) { appNotice({ title: 'Could not reset the bracket', message: (err && err.message) || 'Try again.' }); }
 }
 
-// Flip to the old admin shell (temporary — the whole path dies in Task 14). Runs the exact old render
-// branch so the old shell's auth/sign-out wiring stays byte-identical; a reload returns to the public shell.
-function renderOldAdminShell() {
-  oldAdminMode = true;
-  render();
-}
 
 function renderPublicShell() {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
@@ -11482,50 +11201,6 @@ function buildDashboardStatHTML() {
   return `<div class="ad-statbig"><span class="ad-statnum">${state.checkedIn.length}</span><span class="ad-statlab">checked in</span></div>${grpLine}`;
 }
 
-function adminDashboardHTML() {
-  // C41 (2026-06-20): Dashboard leads with the 2x2 tiles (Mike's call), then the live status
-  // (checked-in stat + live courts board) below. Tile subtitles are STATEFUL. Co-pilot teaser
-  // removed (it duplicated the Co-pilot nav tab — Mike: remove what's duplicated).
-  const inCount = (state.checkedIn || []).length;
-  const teamCount = Array.isArray(state.generatedTeams) ? state.generatedTeams.length : 0;
-  const tourActive = (state.tournaments || []).some((t) => t.status === 'pools' || t.status === 'bracket');
-  const sessLabel = state.currentSession?.date ? formatSessionDate(state.currentSession.date) : 'Not set yet';
-  // Include live TOURNAMENT games too (mirror the public Scores board) — the admin home was casual-only,
-  // so it showed "No courts live yet" during a live tournament while its own Tournament tile said "in progress".
-  const courtsHTML = buildPublicLiveCourtsHTML() + buildPublicTournamentLiveHTML();
-  const liveSection = courtsHTML
-    ? `<div class="ad-sec">On the courts now</div>${courtsHTML}`
-    : `<div class="ad-sec">On the courts now</div><div class="ad-live-empty">No courts live yet — generate teams to start a round.</div>`;
-  return `
-<div class="container">
-  <div class="ad-screen">
-    <div class="ad-top">
-      <div class="ad-brand"><img class="as-logo" src="/logo-mark.png" alt="Athletic Specimen" /></div>
-    </div>
-    <div class="ad-statcard" id="js-dashboard-stat">${buildDashboardStatHTML()}</div>
-    <div class="ad-sec">Quick actions</div>
-    <div class="ad-qgrid">
-      <button type="button" class="ad-qa" data-qa="checkin">
-        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4M21 12v7H3V5h11"/></svg></div>
-        <div class="ad-qt">Check-in mode</div><div class="ad-qs">${inCount ? inCount + ' checked in' : 'door kiosk / QR'}</div>
-      </button>
-      <button type="button" class="ad-qa" data-qa="generate">
-        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.4"/><path d="M3 20c0-3 2.7-5 6-5s6 2 6 5M15.5 20c0-2 1-3.4 3-3.8"/></svg></div>
-        <div class="ad-qt">Generate teams</div><div class="ad-qs">${teamCount ? teamCount + ' teams ready' : (inCount ? 'balanced' : 'needs check-ins')}</div>
-      </button>
-      <button type="button" class="ad-qa" data-qa="tournament">
-        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/></svg></div>
-        <div class="ad-qt">Tournament</div><div class="ad-qs">${tourActive ? 'in progress' : 'pools + bracket'}</div>
-      </button>
-      <button type="button" class="ad-qa" data-qa="session">
-        <div class="ad-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></div>
-        <div class="ad-qt">Session</div><div class="ad-qs">${escapeHTML(sessLabel)}</div>
-      </button>
-    </div>
-    ${liveSection}
-  </div>
-</div>`;
-}
 
 // C28 Slice 1: the admin AI co-pilot chat (layout A — chat thread; Mike picked it from 3 §38 options).
 // READ-ONLY: it answers from the current state, never acts (acting is Slice 2). The thread renders from
@@ -11533,7 +11208,6 @@ function adminDashboardHTML() {
 // the array AND the DOM directly (no full re-render per message, so the input keeps focus). The context
 // snapshot is built by buildCopilotContext (pure.js) and is skill-redacted before it ever leaves the
 // browser; the copilot edge function holds the API key and is admin-JWT-gated.
-const COPILOT_CHIPS = ["Who's up next?", 'How many here?', 'Tournament standings?'];
 
 // Render a co-pilot answer for a chat bubble: escape (XSS-safe) FIRST, then lightly format the
 // markdown Haiku tends to emit — **bold** and "- "/"* " bullets — since a phone bubble can't show raw
@@ -11563,26 +11237,6 @@ function copilotBubbleHTML(m) {
   return `<div class="${cls}" data-cop-msg="${escapeHTMLText(m.id)}">${inner}</div>`;
 }
 
-function adminCopilotHTML() {
-  const msgs = Array.isArray(state.copilotMessages) ? state.copilotMessages : [];
-  const greeting = `<div class="cop-msg cop-bot cop-greet">Ask me what's going on tonight, or to check players in, build teams, and record scores — tap a suggestion or type a question.</div>`;
-  const thread = msgs.length ? msgs.map(copilotBubbleHTML).join('') : greeting;
-  const chips = COPILOT_CHIPS
-    .map((c) => `<button type="button" class="cop-chip" data-cop-chip="${escapeHTMLText(c)}">${escapeHTMLText(c)}</button>`)
-    .join('');
-  return `
-<div class="container">
-  <div class="ad-cop-screen cop-screen">
-    <div class="ad-cop-head"><svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" width="18" height="18"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9z"/></svg> Co-pilot</div>
-    <div id="copilot-thread" class="cop-thread">${thread}</div>
-    <div class="cop-chips">${chips}</div>
-    <div class="ad-inbar cop-inbar">
-      <input type="text" id="copilot-input" placeholder="Ask the co-pilot&hellip;" aria-label="Ask the co-pilot" autocomplete="off" />
-      <button type="button" class="ad-send cop-send" data-role="copilot-send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-    </div>
-  </div>
-</div>`;
-}
 
 // ===== Task 12 (session-10 §6): Co-pilot floating bubble + chat-on-stone (Mike's design) =====
 // A small admin-only round bubble rides ABOVE the floating bottom nav on every public tab; tapping it
@@ -11590,8 +11244,8 @@ function adminCopilotHTML() {
 // This is NEW markup that REUSES the shipped copilot message flow verbatim by keeping the SAME element
 // ids/roles the bound handlers target: #copilot-thread (copilotRenderBubble), #copilot-input
 // (send/keydown/focus handlers → the copilot-typing nav hide), data-role="copilot-send". The old-shell
-// copilot tab (adminCopilotHTML) stays dormant for Task 14; it is never mounted while the public shell is,
-// so there is no duplicate-id collision. copilotOpen is a module flag so the view survives partialRender
+// copilot tab (adminCopilotHTML) was deleted in Task 14, so there is no duplicate-id collision.
+// copilotOpen is a module flag so the view survives partialRender
 // polls (they never repaint #cop-chat) and is re-applied by activateMainTab after a full render().
 let copilotOpen = false;
 
@@ -11626,7 +11280,7 @@ function buildCopilotChatHTML() {
 
 // Shell fragment: the fab + the (hidden-until-open) chat, admin-only, never on the old shell.
 function copilotShellHTML() {
-  if (!state.isAdmin || oldAdminMode) return '';
+  if (!state.isAdmin) return '';
   return copilotFabHTML() + buildCopilotChatHTML();
 }
 
@@ -12033,122 +11687,7 @@ function copilotAttachUndo(msgId, undos) {
 
 // Admin bottom nav — normal (Home · Players · Courts · Co-pilot) or, in tournament mode (Mike, 2026-06-27),
 // Home · Manage · Live · Co-pilot. Home + Co-pilot are shared; tapping Home exits tournament mode.
-function buildAdminBottomNavHTML() {
-  const nb = (tab, label, svg) => `<button class="nav-btn" data-nav-tab="${tab}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svg}</svg><span>${label}</span></button>`;
-  const home = nb('dashboard', 'Home', '<path d="M3 11l9-8 9 8M5 10v10h14V10"/>');
-  const copilot = nb('copilot', 'Co-pilot', '<path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9z"/>');
-  if (state.tournamentMode) {
-    return home
-      + nb('manage', 'Manage', '<path d="M3 6h18M3 12h18M3 18h12"/>')
-      + nb('live', 'Live', '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5l5 2.5-5 2.5z"/>')
-      + copilot;
-  }
-  return home
-    + nb('players', 'Players', '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>')
-    + nb('teams', 'Courts', '<path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/>')
-    + copilot;
-}
 
-function renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML) {
-  const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
-  return `
-<div id="app-shell">
-  <header id="app-header">
-    <span class="app-header-mode is-admin">ADMIN</span>
-    <div id="js-sync-notice">${sharedSyncNoticeHTML}</div>
-    <span class="app-header-version">v${APP_VERSION}</span>
-    <button type="button" id="btn-logout" class="app-header-logout">Log out</button>
-  </header>
-  <div id="app-content">
-    <div id="tab-dashboard" class="tab-panel">
-      ${adminDashboardHTML()}
-    </div>
-    <div id="tab-session" class="tab-panel">
-      <div class="container">
-        <div class="session-screen">
-          <h2 class="session-title">Session</h2>
-          <!-- C36 T4 (§38 option B — one unified card): form + the "what players will see" preview together. -->
-          <div class="card session-admin-card">
-            <h3 class="session-card-h">Current session</h3>
-            <div class="session-form">
-              <label class="session-label" for="session-date">Date</label>
-              <input type="date" id="session-date" class="session-input"
-                value="${escapeHTML(state.currentSession?.date || '')}" />
-              <label class="session-label" for="session-time">Time</label>
-              <input type="text" id="session-time" class="session-input"
-                placeholder="e.g. 10:00 AM"
-                value="${escapeHTML(state.currentSession?.time || '')}" />
-              <label class="session-label" for="session-location">Location</label>
-              <input type="text" id="session-location" class="session-input"
-                placeholder="e.g. Gym A, 123 Main St"
-                value="${escapeHTML(state.currentSession?.location || '')}" />
-              <div class="session-form-actions">
-                <button id="btn-save-session" class="primary">Save session</button>
-                <button id="btn-share-session" class="secondary" ${state.currentSession ? '' : 'disabled title="Save the session first"'}>Share QR / link</button>
-                ${state.currentSession ? '<button id="btn-clear-session" class="secondary">Clear session</button>' : ''}
-              </div>
-              <div id="session-save-msg" style="display:none; margin-top:8px; font-size:13px; color:var(--live);"></div>
-              ${state.currentSession ? `
-              <div class="session-preview">
-                <p class="session-preview-label">What players will see</p>
-                <div class="session-detail-row">
-                  <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></span>
-                  <span>${escapeHTML(formatSessionDate(state.currentSession.date))}</span>
-                </div>
-                ${state.currentSession.time ? `<div class="session-detail-row">
-                  <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
-                  <span>${escapeHTML(state.currentSession.time)}</span>
-                </div>` : ''}
-                ${state.currentSession.location ? `<div class="session-detail-row">
-                  <span class="session-detail-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg></span>
-                  <span>${escapeHTML(state.currentSession.location)}</span>
-                </div>` : ''}
-              </div>` : ''}
-            </div>
-          </div>
-          <div class="card session-admin-card">
-            <h3 class="session-card-h">Run the night</h3>
-            <p class="small session-newnight-note">Start a new session to begin a fresh attendance night — everyone is checked out and the previous night is kept as history.</p>
-            <button id="btn-reset-checkins" class="danger">Start new session</button>
-            ${canAccessOperatorSafetyControls() ? `
-            <details class="recent-actions-card" ${state.operatorActions && state.operatorActions.length ? 'open' : ''}>
-              <summary class="recent-actions-summary"><h3>Recent actions</h3></summary>
-              ${renderOperatorActionsLogHTML()}
-            </details>` : ''}
-          </div>
-        </div>
-      </div>
-    </div>
-    <div id="tab-players" class="tab-panel">
-      <div class="container">
-        ${adminPlayersHTML()}
-      </div>
-    </div>
-    <div id="tab-teams" class="tab-panel">
-      <div class="container">
-        ${adminTeamsHTML(teamsHTML, teamsFairnessHTML, liveMatchupsHTML)}
-      </div>
-    </div>
-    <div id="tab-tournament" class="tab-panel">
-      <div class="container">
-        ${buildTournamentTabHTML()}
-      </div>
-    </div>
-    ${state.tournamentMode ? `
-    <div id="tab-manage" class="tab-panel">
-      <div class="container">${buildManageTabHTML()}</div>
-    </div>
-    <div id="tab-live" class="tab-panel">
-      <div class="container">${buildLiveTabHTML()}</div>
-    </div>` : ''}
-    <div id="tab-copilot" class="tab-panel">
-      ${adminCopilotHTML()}
-    </div>
-  </div>
-  <nav id="bottom-nav">${buildAdminBottomNavHTML()}</nav>
-</div>
-  `;
-}
 
 function render() {
   dismissTeamPeek(); // §13.2: a full render replaces the tapped anchor — never strand a floating peek
@@ -12158,139 +11697,28 @@ function render() {
   const savedScrollY = existingPanel ? existingPanel.scrollTop : 0;
   const interactionSnapshot = captureTransientInteractionState();
 
-  // Build generated teams HTML
-  let teamsHTML = '';
-  let teamsFairnessHTML = '';
-  let liveMatchupsHTML = '';
-  if (state.generatedTeams.length > 0) {
-    if (state.generatedTeamsSummary) {
-      teamsFairnessHTML = `
-        <p class="small fairness-line">
-          <strong>${state.generatedTeamsSummary.skillSpread <= 0.5 ? 'Well balanced' : state.generatedTeamsSummary.skillSpread <= 1.5 ? 'Fairly balanced' : 'A bit uneven — regenerate to improve'}</strong>
-          &middot; skill spread ${state.generatedTeamsSummary.skillSpread.toFixed(1)} &middot; team sizes within ${state.generatedTeamsSummary.countSpread}
-        </p>
-      `;
-    }
-
-    const normalizedCourtOrder = normalizeLiveCourtOrder(state.liveCourtOrder, state.generatedTeams.length);
-    state.liveCourtOrder = normalizedCourtOrder;
-    const liveMatchups = deriveLiveTeamMatchupsFromOrder(normalizedCourtOrder);
-    const resultsByMatch = normalizeLiveMatchResults(state.liveMatchResults, liveMatchups.matchups);
-    state.liveMatchResults = resultsByMatch;
-    const snapshotsByMatch = normalizeLiveMatchSkillSnapshots(state.liveMatchSkillSnapshots, resultsByMatch);
-    state.liveMatchSkillSnapshots = snapshotsByMatch;
-    const matchupRows = liveMatchups.matchups.map((match, idx) => {
-      const matchKey = liveMatchupKey(match.teamA, match.teamB);
-      const winner = Number(resultsByMatch[matchKey]) || 0;
-      const loser = winner === match.teamA ? match.teamB : (winner === match.teamB ? match.teamA : 0);
-      const teamASize = Array.isArray(state.generatedTeams[match.teamA - 1]) ? state.generatedTeams[match.teamA - 1].length : 0;
-      const teamBSize = Array.isArray(state.generatedTeams[match.teamB - 1]) ? state.generatedTeams[match.teamB - 1].length : 0;
-      return `
-      <article class="live-net-card">
-        <div class="live-net-header">
-          <span class="live-net-label">Net ${idx + 1}</span>
-          <span class="small live-net-match-label">Team ${match.teamA} vs Team ${match.teamB}</span>
-        </div>
-        <div class="live-net-court" role="group" aria-label="Net ${idx + 1} teams">
-          <div class="live-net-team">
-            <strong>Team ${match.teamA}</strong>
-            <span class="small live-net-team-size">Team of ${teamASize}</span>
-          </div>
-          <div class="live-net-divider" aria-hidden="true">NET</div>
-          <div class="live-net-team">
-            <strong>Team ${match.teamB}</strong>
-            <span class="small live-net-team-size">Team of ${teamBSize}</span>
-          </div>
-        </div>
-        <div class="live-matchup-actions">
-          <button
-            type="button"
-            class="live-matchup-result-btn ${winner === match.teamA ? 'is-selected' : ''}"
-            data-role="report-live-match-result"
-            data-match-key="${matchKey}"
-            data-winner-team="${match.teamA}"
-          >Team ${match.teamA} Won</button>
-          <button
-            type="button"
-            class="live-matchup-result-btn ${winner === match.teamB ? 'is-selected' : ''}"
-            data-role="report-live-match-result"
-            data-match-key="${matchKey}"
-            data-winner-team="${match.teamB}"
-          >Team ${match.teamB} Won</button>
-          ${winner ? `
-          <button
-            type="button"
-            class="live-matchup-clear-btn"
-            data-role="clear-live-match-result"
-            data-match-key="${matchKey}"
-          >Clear Result</button>` : ''}
-        </div>
-        ${winner ? `<div class="small live-matchup-result">Recorded: Team ${winner} defeated Team ${loser}</div>` : ''}
-      </article>
-    `;
-    }).join('');
-    const waitingLabel = liveMatchups.waitingTeams.map((teamNo) => `Team ${teamNo}`).join(', ');
-    liveMatchupsHTML = `
-      <div class="live-matchups-board">
-        <h4>Live Nets</h4>
-        <div class="live-nets-grid">
-          ${matchupRows || '<p class="small live-matchups-empty">No pairings available.</p>'}
-        </div>
-        ${waitingLabel ? `<p class="small live-matchups-waiting"><strong>Waiting Off Court:</strong> ${waitingLabel}</p>` : ''}
-      </div>
-    `;
-
-    teamsHTML = '<div class="teams">' + state.generatedTeams.map((team, i) => {
-      const members = team.map((p, memberIndex) => {
-        const playerKey = playerIdentityKey(p) || `temp:${i}:${memberIndex}`;
-        return `
-          <li
-            class="team-player-card"
-            draggable="true"
-            data-team-index="${i}"
-            data-player-key="${escapeHTML(playerKey)}"
-            title="Drag to move to another team"
-          >
-            <span class="name">${escapeHTML(p.name)}</span>
-            <span class="small">${escapeHTML(String(Number(p.skill) || 0))}</span>
-          </li>
-        `;
-      }).join('');
-      const totalSkill = team.reduce((sum, p) => sum + (Number(p.skill) || 0), 0).toFixed(1);
-      return `
-  <div class="team generated-team" data-team-index="${i}">
-    <h4>Team ${i + 1} <span class="small" style="font-weight:normal;">(Total: ${totalSkill})</span></h4>
-    <ul class="team-player-list">${members || '<li class="team-drop-empty small">Drop here</li>'}</ul>
-  </div>
-`;
-    }).join('') + '</div>';
-  }
 
   // C26 item 2: per-surface active-tab memory (set just before activateMainTab below).
-  // Session-10 R1: admins now boot on the PUBLIC shell — only the temporary Open-the-old-admin link
-  // (oldAdminMode) reaches renderAdminShell. So the tab guards below run for admins-on-public-shell too,
-  // keyed on !oldAdminMode (was !state.isAdmin). The old shell still defaults to its 'dashboard' Home.
-  activeMainTab = sessionStorage.getItem(currentTabKey()) || (oldAdminMode ? 'dashboard' : 'home');
-  // On the public shell the old-admin-only tabs (dashboard/session/teams/live) and the removed public
-  // 'scores' tab have no panel — bounce them Home. (A non-admin never stores these; harmless.)
-  if (!oldAdminMode && ['dashboard', 'session', 'teams', 'scores', 'live'].includes(activeMainTab)) activeMainTab = 'home';
+  // Task 14: the old admin shell is gone — every session (admin or not) boots on the PUBLIC shell.
+  activeMainTab = sessionStorage.getItem(currentTabKey()) || 'home';
+  // Old-admin-only tabs (dashboard/session/teams/live) and the removed public 'scores' tab have no panel
+  // on the public shell — bounce them Home. (A non-admin never stores these; harmless.)
+  if (['dashboard', 'session', 'teams', 'scores', 'live'].includes(activeMainTab)) activeMainTab = 'home';
   // Manage is admin-only: a non-admin's stale/forged 'manage' tab bounces Home (admins keep it).
-  if (!oldAdminMode && activeMainTab === 'manage' && !state.isAdmin) activeMainTab = 'home';
+  if (activeMainTab === 'manage' && !state.isAdmin) activeMainTab = 'home';
   // Check In rework (Mike 2026-07-10): a saved 'players' tab bounces to Home when the Check In nav button
-  // is hidden (session deleted / date passed) — mirrors the retired-'scores' bounce (public shell, incl. admins).
-  if (!oldAdminMode && activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
+  // is hidden (session deleted / date passed) — mirrors the retired-'scores' bounce.
+  if (activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
   // Mike K (2026-07-10): the public Standings page folded into the Pools & schedule Seeding tab, so a saved
   // 'standings' tab has no panel — bounce it to the Tournament tab (the Seeding tab lives inside it). Runs
   // BEFORE the tournament→home guard below, so a standings-saved fan with no live tournament cascades to Home.
-  if (!oldAdminMode && activeMainTab === 'standings') activeMainTab = 'tournament';
+  if (activeMainTab === 'standings') activeMainTab = 'tournament';
   // Wave 1e: a fan last on the Bracket tab who returns after the tournament was deleted would land on
   // an empty 'tournament' panel with no nav button to highlight (the Bracket button is gone). Reset to
   // Home unless a tournament is actually live.
-  if (!oldAdminMode && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
+  if (activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 
-  const shellHtml = (state.isAdmin && oldAdminMode)
-    ? renderAdminShell(teamsHTML, teamsFairnessHTML, liveMatchupsHTML)
-    : renderPublicShell();
+  const shellHtml = renderPublicShell();
   root.innerHTML = shellHtml.replace(/\n?\]\s*$/, '');
 
 // ---- dropdown menu CSS (keep ONLY this block) ----
@@ -12568,15 +11996,15 @@ bindTournamentTabV2();
 bindPlayerRowHandlers();
 bindSelectionHandlers();
 updateBulkBarVisibility();
-// Session-10 R1: these mirror the pre-shell guards above; keyed on !oldAdminMode so admins-on-public-shell get them too.
-if (!oldAdminMode && ['dashboard', 'session', 'teams', 'scores', 'live'].includes(activeMainTab)) activeMainTab = 'home';
-if (!oldAdminMode && activeMainTab === 'manage' && !state.isAdmin) activeMainTab = 'home'; // Manage is admin-only
+// Task 14: these mirror the pre-shell guards above (the old admin shell is gone — all sessions are on the public shell).
+if (['dashboard', 'session', 'teams', 'scores', 'live'].includes(activeMainTab)) activeMainTab = 'home';
+if (activeMainTab === 'manage' && !state.isAdmin) activeMainTab = 'home'; // Manage is admin-only
 // Check In rework (Mike 2026-07-10): bounce a stranded 'players' tab to Home when the Check In nav button is hidden.
-if (!oldAdminMode && activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
+if (activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
 // Mike K (2026-07-10): Standings folded into the Pools Seeding tab — a saved 'standings' tab has no panel; bounce it to Tournament (the guard below re-routes to Home if none is live).
-if (!oldAdminMode && activeMainTab === 'standings') activeMainTab = 'tournament';
+if (activeMainTab === 'standings') activeMainTab = 'tournament';
 // Wave 1e: reset a stale 'tournament' tab to Home when no tournament is live (else an empty panel + no nav button).
-if (!oldAdminMode && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
+if (activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 activateMainTab(activeMainTab);
 restoreTransientInteractionState(interactionSnapshot);
 refreshAzStripAvailability();
@@ -12980,17 +12408,14 @@ function bindTournamentTabV2() {
 }
 
 function activateMainTab(tab) {
-  // OLD admin tournament-mode tabs (manage/live) only exist while in the mode — fall back if stale. Gated on
-  // oldAdminMode so the PUBLIC shell's real Manage tab (session-10 R1, admin) is never bounced to dashboard.
-  if ((tab === 'manage' || tab === 'live') && !state.tournamentMode && oldAdminMode) tab = 'dashboard';
   // Check In rework (Mike 2026-07-10): the public Check In tab only exists on the pickup-session day —
   // any stale route to it (saved tab, mid-visit nav rebuild after the session hides) bounces to Home.
-  if (tab === 'players' && !oldAdminMode && !checkinNavVisible()) tab = 'home';
+  if (tab === 'players' && !checkinNavVisible()) tab = 'home';
   activeMainTab = tab;
   sessionStorage.setItem(currentTabKey(), tab);
   // e2e catch 2026-07-11: entering Manage glues the loaded tournament data to the resolved tournament
   // (activeTournamentId only ever followed the old shell's select flow before this).
-  if (tab === 'manage' && state.isAdmin && !oldAdminMode) mgSyncActiveTournament();
+  if (tab === 'manage' && state.isAdmin) mgSyncActiveTournament();
   // Slice 1: lazy-load completed-tournament history the first time History opens (read-only, cached on state).
   if (tab === 'history' && typeof state.tournamentHistory === 'undefined' && !state.tournamentHistoryLoading) {
     loadTournamentHistory().then(() => {
@@ -13001,7 +12426,7 @@ function activateMainTab(tab) {
     });
   }
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
-  document.body.classList.toggle('pd-public-active', !oldAdminMode); // Mike (2026-07-09): the logo backdrop shows on EVERY public page; session-10 R1: admins are on the public shell now, so keyed on !oldAdminMode (the old shell keeps its own styling)
+  document.body.classList.add('pd-public-active'); // Mike (2026-07-09): the logo backdrop shows on EVERY public page (Task 14: every session is on the public shell)
   document.body.classList.toggle('copilot-open', copilotOpen); // Task 12: re-apply the chat-on-stone state after a full render() (a poll never repaints #cop-chat, so the view survives; render()s do)
   // Reliability fix (2026-06-20): expose the current tab to assistive tech, not just a visual .active
   // class (this is the single place nav active state is set — first paint via activateMainTab(activeMainTab)
@@ -13016,9 +12441,7 @@ function activateMainTab(tab) {
   // Public tile-pages (Standings/My Team/History) have no bottom-nav button of their own -> anchor their
   // highlight to the Tournament nav button (they are Tournament content now). (Admin keeps
   // tournament/session -> dashboard; the public 'tournament' Bracket tab has its own nav button again.)
-  const NAV_ANCHOR = oldAdminMode
-    ? { tournament: 'dashboard', session: 'dashboard' }
-    : { standings: 'tournament', history: 'tournament', myteam: 'tournament' };
+  const NAV_ANCHOR = { standings: 'tournament', history: 'tournament', myteam: 'tournament' };
   const navActive = hasOwnButton ? tab : (NAV_ANCHOR[tab] || tab);
   navButtons.forEach((b) => {
     const isActive = b.dataset.navTab === navActive;
@@ -13347,8 +12770,7 @@ function attachHandlers() {
         }
       }
       // Manage tab (session-10 R1): flat-row navigation is a container-swap partial repaint (module var
-      // manageView survives; NO full render()). data-mg-area="lead" returns to the lead; an area id opens its
-      // (placeholder this slice) page. data-mg-old is the TEMPORARY escape hatch into the old admin shell.
+      // manageView survives; NO full render()). data-mg-area="lead" returns to the lead; an area id opens its page.
       const mgArea = e.target.closest('[data-mg-area]');
       if (mgArea) {
         const nextArea = mgArea.getAttribute('data-mg-area') || 'lead';
@@ -13376,7 +12798,6 @@ function attachHandlers() {
         if (nextArea === 'admins') { void loadAdminSeats(); }
         return;
       }
-      if (e.target.closest('[data-mg-old]')) { renderOldAdminShell(); return; }
       const navBtn = e.target.closest('[data-nav-tab]');
       if (navBtn) activateMainTab(navBtn.dataset.navTab);
     });
@@ -13462,7 +12883,6 @@ const logoutBtn = document.getElementById('btn-logout');
   if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
     state.isAdmin = false;
-    oldAdminMode = false; // session-10 R1: leaving admin drops the old-shell escape hatch, so a re-login lands on the public shell
     state.masterAdminAuthenticated = false;
     state.activeGroup = 'All';                   // reset view
     try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
@@ -13746,32 +13166,9 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
   }
   attachPlayerRowHandlers();
 
-  // --- Start new session (was: reset all check-ins) ---
-  // C22 item 4: rolls attendance to a fresh session — checks everyone out AND preserves tonight's
-  // attendance as durable history (the prior session's check_ins rows are kept). Server-side via the
-  // start_new_session RPC (authenticated/admin only); players.checked_in stays the live UI flag.
-  const resetBtn = document.getElementById('btn-reset-checkins');
-  if (resetBtn) {
-    resetBtn.addEventListener('click', async () => {
-      if (!canAccessOperatorSafetyControls()) return; // master-admin only; server gate = authenticated RPC
-      await startNewSessionFlow(); // shared with the new pickup-day form's "Start a fresh sheet" (gate-free there)
-    });
-  }
-
-  if (canAccessOperatorSafetyControls()) {
-    document.querySelectorAll('[data-role="undo-operator-action"]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const actionId = String(btn.getAttribute('data-action-id') || '').trim();
-        if (!actionId) return;
-        btn.disabled = true;
-        try {
-          await runOperatorActionUndo(actionId);
-        } finally {
-          btn.disabled = false;
-        }
-      });
-    });
-  }
+  // Task 14: the old-shell "Start new session" button (btn-reset-checkins) + the operator-action undo log
+  // handler are gone — both were mounted only in the deleted admin shell. The new pickup-day form calls
+  // startNewSessionFlow() directly (gate-free), and recordOperatorAction still logs actions for the DB.
 
   // --- Team generator controls ---
   const groupCountInput = document.getElementById('group-count');
@@ -13837,11 +13234,11 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
     });
   }
 
-  // [Task 4 — R5 cut] the report-live-match-result + clear-live-match-result handlers deleted with the casual
-  // courts board. They recorded a casual net win/loss, nudged skills ±0.1, and advanced the court order — all
-  // cut by Mike ("show the teams, not what court is playing"). Skills change by admin edit only now. The old
-  // admin shell's Live-Nets card markup (render() → adminTeamsHTML) stays DORMANT until the Task 14 sweep; its
-  // buttons are now inert. Team generation + cross-device team persistence are unaffected.
+  // [Task 4 — R5 cut] the report-live-match-result + clear-live-match-result handlers were deleted with the
+  // casual courts board. They recorded a casual net win/loss, nudged skills ±0.1, and advanced the court order
+  // — all cut by Mike ("show the teams, not what court is playing"). Skills change by admin edit only now. The
+  // old-shell Live-Nets card builder (adminTeamsHTML + render()'s casual-teams block) was deleted in Task 14.
+  // Team generation + cross-device team persistence are unaffected.
 
   // --- Session tab handlers ---
   const btnSaveSession = document.getElementById('btn-save-session');

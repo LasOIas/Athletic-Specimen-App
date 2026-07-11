@@ -94,8 +94,7 @@ h1, h2, h3, h4, .statbig .n, .score, .av { font-family: 'Sora', 'Inter', sans-se
 
 /* ===================================================================
    C48.6 (Option A) — centered & balanced empty/idle states.
-   Shared primitives used by the Scores empty state and (via .courts-empty)
-   the Courts empty board. .tab-panel is position:absolute; inset:0 inside
+   Shared primitives for centered empty/idle states. .tab-panel is position:absolute; inset:0 inside
    #app-content, so it has a definite height = the available viewport between
    the header and bottom-nav. min-height:100% on the centering wrapper therefore
    resolves to that height and lets us vertically center the idle block at both
@@ -512,39 +511,6 @@ select:focus {
 .nav-btn.active { color: var(--brand); font-weight: 600; }
 .nav-btn:hover:not(.active) { color: var(--text-3); }
 
-/* ── Admin Toolbar ── */
-.admin-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  margin-bottom: 10px;
-  flex-wrap: wrap;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-sm);
-}
-.admin-toolbar select {
-  flex: 1 1 150px;
-  min-width: 150px;
-  font-weight: 600;
-  color: var(--brand);
-  background: var(--brand-light);
-  border-color: var(--brand-ring);
-}
-.admin-toolbar-actions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.admin-toolbar button {
-  white-space: nowrap;
-  min-height: 44px;
-  padding: 0 12px;
-  font-size: 13px !important;
-  flex-shrink: 0;
-}
 
 /* ── Checkin Stats Card ── */
 .checkin-stats-card {
@@ -617,19 +583,6 @@ select:focus {
   flex-shrink: 0;
 }
 .roster-add:hover { background: var(--brand-dark); }
-.roster-head .admin-toolbar { margin-bottom: 0; padding: 6px 8px; flex: 1 1 auto; }
-
-/* ── Recent Actions (collapsible) ── */
-.recent-actions-card { margin-top: 0; }
-.recent-actions-summary {
-  list-style: none;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.recent-actions-summary::-webkit-details-marker { display: none; }
-.recent-actions-summary h3 { margin: 0; display: flex; align-items: center; gap: 6px; }
-.recent-actions-summary h3::after { content: '▸'; color: var(--faint); font-size: .85em; }
-.recent-actions-card[open] .recent-actions-summary h3::after { content: '▾'; }
 
 /* ── Filter chips ── */
 .chip-row {
@@ -1308,84 +1261,6 @@ select:focus {
 /* ── Admin login ── */
 .card.card-login h2 { margin: 0 0 10px; }
 
-/* ── Session empty state ── */
-.session-empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 3rem 1.5rem;
-  background: var(--surface);
-  border-radius: var(--r-lg);
-  border: 1px solid var(--border);
-  margin-top: 1rem;
-  box-shadow: var(--shadow-sm);
-}
-.session-empty-icon svg { width: 56px; height: 56px; color: #93c5fd; margin-bottom: 1rem; }
-.session-empty-title { font-size: 1.3rem; font-weight: 700; color: var(--text); margin: 0 0 .5rem; }
-.session-empty-desc  { color: var(--text-3); font-size: .95rem; max-width: 300px; line-height: 1.6; margin: 0; }
-
-/* ── Session tab ── */
-.session-admin-card h3,
-.session-info-card h3 { margin: 0 0 12px; }
-
-.session-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.session-label {
-  font-size: .8rem;
-  font-weight: 600;
-  color: var(--text-2);
-  margin-top: 6px;
-}
-.session-input {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  font-size: 16px;
-  box-sizing: border-box;
-}
-.session-form-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-  flex-wrap: wrap;
-}
-.session-form-actions button { flex: 1 1 140px; min-height: 42px; }
-
-.session-info-label {
-  font-size: .75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: .05em;
-  color: var(--text-3);
-  margin: 0 0 10px;
-}
-.session-detail-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 1rem;
-}
-.session-detail-row:last-child { border-bottom: none; }
-
-/* C36 T4 (§38 option B): unified session screen — title + form + inline "what players see" preview */
-.session-title { font-family: 'Sora', 'Inter', sans-serif; font-size: 1.1rem; font-weight: 800; letter-spacing: -.3px; margin: 2px 2px 12px; color: var(--ink); }
-.session-card-h { font-family: 'Sora', 'Inter', sans-serif; font-size: .95rem; font-weight: 700; margin: 0 0 12px; }
-.session-input { border-radius: var(--r-md); }
-.session-preview { margin-top: 14px; background: var(--accent-soft); border-radius: var(--r-md); padding: 12px 14px; }
-.session-preview-label { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
-.session-preview .session-detail-row { border-bottom: none; padding: 5px 0; font-size: .95rem; }
-.session-preview .session-detail-icon svg { color: var(--accent); }
-.session-detail-icon { flex-shrink: 0; width: 20px; display: flex; align-items: center; }
-.session-detail-icon svg { width: 18px; height: 18px; color: var(--faint); display: block; }
 
 /* ── Courts (Teams) tab — C36 T3 direction-A (run-the-night, nets-first) ── */
 .team-size-label { font-size: .8rem; font-weight: 600; color: var(--text-2); margin: 0 0 8px; }
@@ -1512,136 +1387,8 @@ select:focus {
   transition: transform .1s, box-shadow .1s;
 }
 
-/* ── Generate teams controls ── */
-.card-generate-teams h3 { margin-top: 0; }
-.card-generate-teams .generate-teams-controls { align-items: center; }
-.card-generate-teams .generate-teams-count    { display: inline-flex; align-items: center; gap: 6px; }
-.card-generate-teams #group-count { width: 80px; min-width: 80px; flex: 0 0 80px; }
-.card-generate-teams .generate-teams-controls button { min-height: 40px; }
-
-/* ── Live Nets / matchups — .net look (the live action, front-and-center) ── */
-.card-generate-teams .live-matchups-board {
-  margin: 8px 0 0;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  background: var(--surface-2);
-}
-.card-generate-teams .live-matchups-board h4 { margin: 0 0 8px; }
-
-.card-generate-teams .live-nets-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(180px, 1fr));
-  gap: 10px;
-  justify-content: start;
-  align-items: start;
-}
-
-.card-generate-teams .live-net-card {
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  padding: 12px;
-  background: var(--surface);
-  min-height: 240px;
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--shadow-sm);
-}
-.card-generate-teams .live-net-header {
-  display: flex; align-items: flex-start; justify-content: space-between;
-  gap: 6px; margin-bottom: 8px;
-}
-.card-generate-teams .live-net-label {
-  font-family: 'Sora', 'Inter', sans-serif;
-  font-size: .78rem; font-weight: 700; letter-spacing: .05em;
-  text-transform: uppercase; color: var(--accent);
-}
-.card-generate-teams .live-net-match-label { color: var(--text-3); font-size: .8rem; text-align: right; }
-
-.card-generate-teams .live-net-court {
-  display: grid;
-  grid-template-columns: 1fr;
-  grid-template-rows: 1fr auto 1fr;
-  justify-items: center;
-  align-items: center;
-  gap: 6px;
-  border: 1px dashed var(--border-2);
-  border-radius: var(--r-sm);
-  padding: 8px;
-  background: var(--accent-soft);
-  min-height: 140px;
-  flex: 1;
-}
-
-.card-generate-teams .live-net-team {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  width: 100%; min-height: 48px;
-  border: 1px solid var(--border); border-radius: var(--r-sm);
-  background: var(--surface); padding: 6px;
-  line-height: 1.2; gap: 2px; color: var(--text);
-}
-.card-generate-teams .live-net-team strong { font-size: .95rem; }
-.card-generate-teams .live-net-team-size   { color: var(--text-3); font-size: .75rem; }
-
-.card-generate-teams .live-net-divider {
-  font-size: .65rem; font-weight: 700; letter-spacing: .1em;
-  color: var(--accent); display: inline-flex; align-items: center; gap: 4px; text-transform: uppercase;
-}
-.card-generate-teams .live-net-divider::before,
-.card-generate-teams .live-net-divider::after { content: ''; width: 24px; border-top: 2px solid var(--border-2); }
-
-.card-generate-teams .live-matchup-actions {
-  display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; justify-content: center;
-}
-/* .wbtn — big Won buttons */
-.card-generate-teams .live-matchup-result-btn {
-  padding: 10px 14px; min-height: 46px; font-size: 14px !important; font-weight: 600;
-  min-width: 120px; flex: 1 1 120px;
-  border: 1px solid var(--border-2); border-radius: var(--r-sm);
-  background: var(--surface); color: var(--text-2);
-  transition: background .12s, border-color .12s, color .12s;
-}
-.card-generate-teams .live-matchup-result-btn:hover { background: var(--surface-3); border-color: var(--accent); }
-/* recorded winner highlighted with --live-soft / --live */
-.card-generate-teams .live-matchup-result-btn.is-selected {
-  border-color: color-mix(in oklch, var(--live) 45%, transparent);
-  background: var(--live-soft);
-  color: var(--live); font-weight: 700;
-}
-.card-generate-teams .live-matchup-clear-btn {
-  padding: 10px 14px; min-height: 46px; font-size: 14px !important;
-  border: 1px solid color-mix(in oklch, var(--danger) 30%, transparent); border-radius: var(--r-sm);
-  background: var(--danger-light); color: var(--danger-dark);
-}
-.card-generate-teams .live-matchup-clear-btn:hover { background: color-mix(in oklch, var(--danger-light) 80%, var(--danger) 8%); }
-.card-generate-teams .live-matchup-result   { margin-top: 6px; text-align: center; font-size: .8rem; color: var(--text-2); }
-.card-generate-teams .live-matchups-empty   { margin: 0; color: var(--text-3); }
-.card-generate-teams .live-matchups-waiting { margin: 8px 0 0; color: var(--text-3); font-size: .85rem; }
-
-/* Collapsible Live Nets — header card, tap to collapse (defaults EXPANDED, nets-first) */
-.live-nets-collapsible { margin: 4px 0 12px; }
-.live-nets-toggle {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 12px 14px;
-  min-height: 48px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-md);
-  box-shadow: var(--shadow-sm);
-  color: var(--text);
-  font-family: 'Sora', 'Inter', sans-serif;
-  font-weight: 700;
-  font-size: 15px !important;
-}
-.live-nets-toggle:hover { background: var(--surface-3); }
 .live-nets-caret { font-weight: 600; color: var(--accent); font-size: 13px !important; }
 .live-nets-body.is-collapsed { display: none; }
-.live-nets-collapsible .live-matchups-board { margin-top: 8px; }
-.live-nets-collapsible .live-matchups-board h4 { display: none; } /* the toggle is the header now */
 
 /* ── Player filter tabs ── */
 .player-tabs, .skill-subtabs {
@@ -1722,31 +1469,16 @@ select:focus {
   .prow .tg { min-width: 56px; padding: 0 11px; }
   .prow-actions { gap: 6px; }
   .chip { padding: 0 12px; font-size: .82rem; }
-  .roster-head .admin-toolbar { width: 100%; flex: 1 1 100%; }
   .player-card .edit-row { display: block !important; }
   .edit-row input { margin-bottom: 8px; }
   .btn-save-edit  { display: block; width: 100%; }
-  .card-generate-teams .live-nets-grid { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
-  .card-generate-teams .live-net-card  { min-height: 220px; }
-  .card-generate-teams .live-net-court { min-height: 124px; }
-  /* C36 T3: nets-first means Live Nets + team cards flow naturally (single page scroll) — the old
-     max-height/overflow caps created an awkward nested double-scroll on mobile; removed. */
-  .card-generate-teams .teams { padding-right: 4px; }
   .teams { grid-template-columns: repeat(2, 1fr); }
   .btn-checkin, .btn-checkout { min-width: 70px; padding: 5px 8px; }
   #groupManager .gm-table th,
   #groupManager .gm-table td { padding: 8px 6px; }
 }
 
-@media (max-width: 480px) {
-  /* one full-width net per row on phones so the two "Won" buttons sit
-     side-by-side with a comfortable gap instead of 30px tall, 6px apart */
-  .card-generate-teams .live-nets-grid { grid-template-columns: 1fr; }
-  .card-generate-teams .live-net-card  { min-height: 0; }
-}
 
-@media (min-width: 769px)  { .card-generate-teams .live-nets-grid { grid-template-columns: repeat(3, minmax(170px, 1fr)); } }
-@media (min-width: 1120px) { .card-generate-teams .live-nets-grid { grid-template-columns: repeat(4, minmax(180px, 1fr)); } }
 
 /* ===== C26 item 3a: PUBLIC Home + Scores (Direction-A, mobile-first, read-only) ===== */
 .ph-brand {
@@ -1761,72 +1493,11 @@ select:focus {
   justify-content: space-between;
   gap: 10px;
 }
-.ph-sec {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin: 18px 2px 11px;
-}
-
-/* §13.4 between-rounds lull: quiet line + faint next-matchup rows (the board card no longer vanishes). */
-.ph-lull { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin: 2px 4px 12px; }
-.court-row.is-next { opacity: 0.62; }
-.court-stat.is-next { color: var(--muted); background: var(--accent-soft); }
-
-.court-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  padding: 13px 15px;
-  margin-bottom: 9px;
-}
-.court-row-name {
-  font-size: 13.5px;
-  color: var(--ink);
-  font-weight: 500;
-}
-.court-row-sub {
-  font-size: 12.5px; /* S5: was 11.5px — the matchup was the faintest/smallest text in the row */
-  color: var(--faint);
-  margin-top: 2px;
-}
-.court-stat {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
-  white-space: nowrap;
-  padding: 5px 10px;
-  border-radius: 999px;
-}
-.court-stat.is-live {
-  color: var(--live);
-  background: var(--live-soft);
-}
-.court-stat.is-done {
-  color: var(--muted);
-  background: var(--accent-soft);
-}
 
 @media (min-width: 769px) {
   .ph-brand { font-size: 22px; }
 }
 
-/* ===== C26 item 3b: ADMIN Dashboard ("run the night") + static Co-pilot placeholder ===== */
-/* Direction-A tokens only. NO skill, NO emoji, NO neon. Mobile-first (390px), holds at 1920. */
-.ad-screen { padding: 6px 0 8px; }
-
-.ad-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 2px 15px;
-}
 .ad-brand {
   font-family: 'Sora', 'Inter', sans-serif;
   font-size: 18px;
@@ -1836,23 +1507,6 @@ select:focus {
   display: flex;
   align-items: center;
   gap: 9px;
-}
-.ad-badge {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--accent);
-  background: var(--accent-soft);
-  padding: 3px 8px;
-  border-radius: 20px;
-  letter-spacing: 0.4px;
-}
-
-.ad-statcard {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 16px;
-  margin-bottom: 13px;
 }
 .ad-statbig {
   display: flex;
@@ -1886,184 +1540,7 @@ select:focus {
   font-weight: 700;
 }
 
-.ad-sec {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin: 16px 2px 11px;
-}
 
-.ad-qgrid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 11px;
-}
-.ad-qa {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 14px;
-  text-align: left;
-  cursor: pointer;
-  font-family: inherit;
-}
-.ad-ic {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.ad-ic svg { width: 18px; height: 18px; display: block; }
-.ad-qt {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--ink);
-}
-.ad-qs {
-  font-size: 11px;
-  color: var(--faint);
-  margin-top: -5px;
-}
-
-.ad-copilot {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  width: 100%;
-  background: var(--accent-soft);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 14px;
-  margin-top: 13px;
-  text-align: left;
-  cursor: pointer;
-  font-family: inherit;
-}
-.ad-sp {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: var(--accent);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.ad-sp svg { width: 19px; height: 19px; display: block; }
-.ad-ct {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--ink);
-}
-.ad-cs {
-  font-size: 11.5px;
-  color: var(--muted);
-  margin-top: 1px;
-}
-
-/* --- static Co-pilot placeholder --- */
-.ad-cop-screen {
-  display: flex;
-  flex-direction: column;
-  min-height: 60vh;
-  padding: 6px 0 8px;
-}
-.ad-cop-head {
-  font-family: 'Sora', 'Inter', sans-serif;
-  font-size: 17px;
-  font-weight: 800;
-  letter-spacing: -0.4px;
-  color: var(--ink);
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 6px 2px 16px;
-}
-.ad-cop-head svg { width: 18px; height: 18px; display: block; }
-.ad-cop-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  gap: 9px;
-  padding: 24px 12px;
-}
-.ad-cop-emptytitle {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink);
-}
-.ad-cop-emptysub {
-  font-size: 13px;
-  color: var(--muted);
-  line-height: 1.45;
-  max-width: 320px;
-}
-.ad-inbar {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 11px 14px;
-  margin-top: 14px;
-}
-.ad-inbar input {
-  flex: 1;
-  border: none;
-  background: none;
-  outline: none;
-  font-family: 'Inter', sans-serif;
-  font-size: 14px;
-  color: var(--muted);
-}
-.ad-inbar input:disabled { cursor: not-allowed; }
-.ad-send {
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  opacity: 0.55;
-}
-.ad-send svg { width: 16px; height: 16px; display: block; }
-
-/* --- C28 Slice 1: co-pilot chat (layout A — chat thread) --- */
-/* Fill the tab panel (which has a definite height between header + nav, like the idle-center pattern at
-   line ~98) so the thread scrolls and the chips + input pin to the bottom — instead of the whole screen
-   stopping at min-height:60vh with the input floating mid-screen. */
-.tab-panel > .container:has(> .cop-screen) {
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-.cop-screen { flex: 1; min-height: 0; }
-.cop-thread {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow-y: auto;
-  padding: 4px 2px 8px;
-}
 .cop-msg {
   max-width: 85%;
   padding: 10px 13px;
@@ -2100,12 +1577,6 @@ select:focus {
 .cop-dots span:nth-child(2) { animation-delay: 0.2s; }
 .cop-dots span:nth-child(3) { animation-delay: 0.4s; }
 @keyframes cop-blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
-.cop-chips {
-  display: flex;
-  gap: 7px;
-  flex-wrap: wrap;
-  padding: 10px 0 0;
-}
 .cop-chip {
   font-family: 'Inter', sans-serif;
   font-size: 12.5px;
@@ -2511,49 +1982,6 @@ body.copilot-open #cop-chat {
 }
 .app-header-logout:active { background: var(--accent-soft); }
 
-/* C40: Session "Run the night" note */
-.session-newnight-note { margin: 0 0 12px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
-
-/* C48.6 (Option A): Courts tab — when no teams are generated, the board area below the
-   controls is dead space. The #tab-teams container fills the panel height (min-height:100%
-   resolves against the absolutely-positioned .tab-panel, which has a definite height) and
-   becomes a flex column; .courts-board.is-empty grows to fill it, the controls card stays at
-   the top (flex:0) and .courts-empty grows to vertically center its mark + message in the
-   space below. When teams exist (.courts-board, no .is-empty) layout stays normal block flow. */
-#tab-teams > .container:has(.courts-board.is-empty) {
-  min-height: 100%;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-.courts-board.is-empty {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-.courts-board.is-empty > .card-generate-teams { flex: 0 0 auto; }
-.courts-empty {
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-  padding: 24px 12px;
-  min-height: 180px;
-}
-
-/* C41: Dashboard live-courts empty state */
-.ad-live-empty {
-  background: var(--card);
-  border: 1px dashed var(--border);
-  border-radius: 13px;
-  padding: 16px;
-  color: var(--muted);
-  font-size: 13px;
-  text-align: center;
-}
 
 /* C42 rank 1: per-row kebab (⋮) overflow menu — previously had ZERO css (unstyled / off-screen) */
 .menu-wrap { position: relative; }
@@ -2598,9 +2026,7 @@ body.copilot-open #cop-chat {
 .nav-btn { min-height: 48px; }
 .player-select { width: 26px; height: 26px; }
 
-/* C42 rank 13: press / focus feedback on the primary tappable cards + buttons (was none) */
-.ad-qa { transition: transform .08s ease, background .12s ease; }
-.ad-qa:active { transform: scale(.985); background: var(--accent-soft); }
+/* C42 rank 13: press / focus feedback on the primary tappable buttons (was none) */
 /* iPhone fix (2026-06-22, C48.7): iOS holds :active on the LAST-tapped element until you touch
    elsewhere, so .nav-btn:active's pressed-fill PERSISTED on the active tab (a filled box with the
    brand-blue label sitting on it at low contrast). Gate the pressed-fill to hover-capable devices
@@ -2613,7 +2039,7 @@ body.copilot-open #cop-chat {
    not the whole box." Force nav buttons transparent in EVERY state; the active tab is shown by
    color alone (.nav-btn.active { color: var(--brand) }). */
 .nav-btn, .nav-btn:hover, .nav-btn:active, .nav-btn:focus { background: transparent; }
-.ad-qa:focus-visible, .nav-btn:focus-visible,
+.nav-btn:focus-visible,
 .roster-add:focus-visible, .app-header-logout:focus-visible, .chip:focus-visible,
 .btn-actions:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px;
@@ -2666,8 +2092,6 @@ body.copilot-open #cop-chat {
 .prow .tg:active { transform: scale(.96); }
 .chip { transition: background-color .15s ease, color .15s ease, border-color .15s ease, transform .08s ease; }
 .chip:active { transform: scale(.96); }
-.card-generate-teams .live-matchup-result-btn { transition: background-color .15s ease, border-color .15s ease, transform .08s ease; }
-.card-generate-teams .live-matchup-result-btn:active { transform: scale(.96); }
 
 /* The player-edit / add-player / Group Manager cards use the shared .popup system, which
    had NO entry animation (only the QR modal faded). Give the shared system a gentle,
@@ -3240,7 +2664,7 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .pl-sect::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
 /* ── Manage tab (session-10 pick R1) — admin-only lead on the public shell. Flat rows on stone (NO card),
-   pl-sect section labels, mg-* kit per the r10-manage mockup. The .mg-oldlink is TEMPORARY (dies Task 14). ── */
+   pl-sect section labels, mg-* kit per the r10-manage mockup. ── */
 .mg-h1 { font: 700 22px/1.05 var(--font-display); color: var(--ink); }
 .mg-row { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-top: 1px solid var(--border); text-decoration: none; color: inherit; cursor: pointer; }
 .pl-sect + .mg-row { border-top: none; }
@@ -3249,7 +2673,6 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mg-rs { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
 .mg-rs b { color: var(--warn-ink); font-weight: 600; }
 .mg-chev { flex: none; width: 16px; height: 16px; color: var(--faint); }
-.mg-oldlink { display: block; width: 100%; margin-top: 26px; background: none; border: none; color: var(--faint); font-size: 12.5px; text-align: center; cursor: pointer; }
 
 /* ── Pickup days (Task 2, session-10 pick R3 hybrid) — multi-day list + form-first edit. pk-* kit from the
    r10-manage p-h1 (list) + p-h2 (form) mockups. Flat on stone, hairline rows/fields, §51 matte. ── */
