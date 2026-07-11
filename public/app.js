@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.13'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.14'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -5438,7 +5438,7 @@ function buildRegisterPageHTML() {
 
   // A closed/stale route shows an honest closed state, never a dead form (the Home CTA only appears when open).
   if (!regOpen) {
-    return `${header}<section class="pd-card rf-card">
+    return `${header}<section class="rf-page">
         <div class="rf-eyebrow">${escapeHTML(name)}</div>
         <h1 class="rf-h1">Registration closed</h1>
         <p class="rf-sub">Registration isn't open for this tournament right now.</p>
@@ -5451,6 +5451,12 @@ function buildRegisterPageHTML() {
   const payDisplay = buyIn || '$80 a team';
   const moneyMatch = buyIn.match(/\$\s?\d[\d,]*/);
   const money = moneyMatch ? moneyMatch[0].replace(/\s+/g, '') : '$80';
+  // Mockup payline: the dollar figure BIG in Barlow, the unit ("a team") small + muted inside the same span.
+  // When buy_in is free text that doesn't lead with the $ figure, show it whole in the big span (never invent).
+  const payTail = payDisplay.indexOf(money) === 0 ? payDisplay.slice(money.length).trim() : '';
+  const amtHTML = payTail
+    ? `<span class="rf-amt">${escapeHTML(money)} <span class="rf-amt-unit">${escapeHTML(payTail)}</span></span>`
+    : `<span class="rf-amt">${escapeHTML(payDisplay)}</span>`;
 
   // Only render a real, tappable link for an http(s) Venmo URL (same guard as buildPublicRegisterHTML) — an
   // empty/unset link renders a DISABLED button + "coming soon" so Mike pastes it into admin settings and it
@@ -5467,10 +5473,10 @@ function buildRegisterPageHTML() {
       <input class="rf-pinput" id="reg-p${i + 1}" type="text" placeholder="First and last name" autocomplete="off" autocapitalize="words" spellcheck="false" />
     </div>`).join('');
 
-  // Header composition mirrors the Home registration lead (.hm-regwrap): title cluster left, the cross logo
-  // absolute at the TOP RIGHT, its height matched to the h1+sub cluster (not an oversized floating image). The
-  // form fields below stay full-width — the logo accompanies only the header, exactly like Home.
-  return `${header}<section class="pd-card rf-card">
+  // FLAT page (mockup: no card — content sits on the stone background, watermark showing through). Header
+  // composition mirrors the Home registration lead (.hm-regwrap): title cluster left, the cross logo absolute
+  // at the TOP RIGHT with height matched to the h1+sub cluster — it reads like Home's lead, not a tiny mark.
+  return `${header}<section class="rf-page">
       <div class="rf-hero">
         <div class="rf-heroinfo">
           <h1 class="rf-h1">Register your team</h1>
@@ -5483,13 +5489,13 @@ function buildRegisterPageHTML() {
       <div class="rf-fld"><input class="rf-tinput" id="reg-team" type="text" placeholder="Pick a team name" autocomplete="off" autocapitalize="words" spellcheck="false" /></div>
       <p class="rf-warn" id="reg-name-warn" role="status" aria-live="polite"></p>
 
-      <div class="rf-plhead"><span class="rf-sect">Players</span><span class="rf-plhint">first + last name</span></div>
+      <div class="rf-plhead"><span class="rf-sect">Players</span><span class="rf-plhint">first + last name · at least 1 guy + 1 girl</span></div>
       <div class="rf-pllist">${rows}</div>
 
       <div class="rf-divlab"><span>Payment</span></div>
-      <div class="rf-payline"><span class="rf-amt">${escapeHTML(payDisplay)}</span><span class="rf-payd">Teams pay to register — your spot is held once it's sent.</span></div>
+      <div class="rf-payline">${amtHTML}<span class="rf-payd">Teams pay to register — your spot is held once it's sent.</span></div>
       ${venmoBlock}
-      <label class="rf-paid"><input type="checkbox" id="reg-paid" class="rf-paidbox" /><span class="rf-paidt">We sent the ${escapeHTML(money)} on Venmo</span></label>
+      <label class="rf-paid"><input type="checkbox" id="reg-paid" class="rf-paidbox" /><span class="rf-paidt">We sent the <b>${escapeHTML(money)}</b> on Venmo</span></label>
 
       <p class="rf-msg" id="reg-msg" role="status" aria-live="polite"></p>
       <button type="button" class="rf-cta" data-role="reg-page-submit" disabled aria-disabled="true">Register team</button>
