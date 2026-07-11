@@ -50,6 +50,23 @@ begin
   end loop;
 end $$;
 
+-- ── 1b. Authenticated READ restored (applied as a follow-up in the same cut) ───────────────────────────
+-- The dropped blanket ALL policies were ALSO the authenticated READ path; the anon-read policies are
+-- `to anon` only. Without this, a signed-in PLAYER lost every tournament/teams/matches read and the whole
+-- signed-in experience broke (caught by the controller BEFORE the adversarial verify). Same read surface
+-- as anon, explicit:
+do $$
+declare t record;
+begin
+  for t in
+    select distinct tablename from pg_policies
+    where schemaname = 'public' and policyname like '% organizer write%'
+  loop
+    execute format('drop policy if exists %I on public.%I', t.tablename || ' authenticated read', t.tablename);
+    execute format('create policy %I on public.%I for select to authenticated using (true)', t.tablename || ' authenticated read', t.tablename);
+  end loop;
+end $$;
+
 -- ── 2. copilot_actions: admin-only read ────────────────────────────────────────────────────────────────
 -- copilot_actions carries NO community_id column (0020) — gate on the single AS community constant.
 drop policy if exists "c21 admin read copilot_actions" on public.copilot_actions;
