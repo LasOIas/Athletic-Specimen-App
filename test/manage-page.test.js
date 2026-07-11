@@ -120,6 +120,8 @@ function loadApp() {
         mgLogError = opts.logError || '';
         return manageContainerHTML();
       },
+      // Task 12 (Co-pilot, Mike §6): the admin-only floating bubble + chat-on-stone shell fragment.
+      copilotShell: () => copilotShellHTML(),
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -1688,5 +1690,56 @@ describe('buildMgLogHTML — the day-grouped activity log (pick R6, mockup m-b)'
     const html = bridge.buildAdmins({ view: 'log', log: [{ at: iso(0, 9, 5), actor: null, summary: 'did a thing' }] });
     expect(html).toContain('did a thing');
     expect(html).toContain('<b>Someone</b>');
+  });
+});
+
+// ── Task 12 (session-10 §6): Co-pilot floating bubble + chat-on-stone ──────────
+// Mike's design: a small admin-only bubble above the bottom nav → tap opens a full-screen
+// chat on the stone bg + watermark (no card/panel chrome), reusing the shipped copilot flow.
+describe('copilotShellHTML — admin-only co-pilot bubble + chat-on-stone', () => {
+  it('renders the round fab and the full-screen chat for an admin', () => {
+    const st = bridge.getState();
+    st.isAdmin = true; st.copilotMessages = [];
+    const html = bridge.copilotShell();
+    expect(html).toContain('class="cop-fab"');   // the round floating bubble
+    expect(html).toContain('data-cop-open');       // tap opens the chat
+    expect(html).toContain('id="cop-chat"');       // the on-stone chat view
+    expect(html).toContain('data-cop-close');      // back chevron closes it
+    expect(html).toContain('>Co-pilot<');          // quiet header title, nothing else
+  });
+
+  it('reuses the shipped copilot flow ids so the bound handlers work unchanged', () => {
+    const st = bridge.getState(); st.isAdmin = true; st.copilotMessages = [];
+    const html = bridge.copilotShell();
+    expect(html).toContain('id="copilot-thread"');
+    expect(html).toContain('id="copilot-input"');
+    expect(html).toContain('data-role="copilot-send"');
+  });
+
+  it('renders nothing for a non-admin (no bubble leaks onto the public shell)', () => {
+    const st = bridge.getState(); st.isAdmin = false;
+    expect(bridge.copilotShell()).toBe('');
+  });
+
+  it('shows the greeting when the thread is empty and never says "tonight"', () => {
+    const st = bridge.getState(); st.isAdmin = true; st.copilotMessages = [];
+    const html = bridge.copilotShell();
+    expect(html).toContain('cop-greet');
+    expect(html.toLowerCase()).not.toContain('tonight');
+  });
+
+  it('rebuilds prior messages from state (poll/rebuild-safe) instead of the greeting', () => {
+    const st = bridge.getState(); st.isAdmin = true;
+    st.copilotMessages = [{ id: 'cm1', role: 'user', text: 'how many here?' }];
+    const html = bridge.copilotShell();
+    expect(html).toContain('how many here?');
+    expect(html).not.toContain('cop-greet');
+  });
+
+  it('draws a 4-point sparkle path (no emoji) and stays card-free on stone', () => {
+    const st = bridge.getState(); st.isAdmin = true; st.copilotMessages = [];
+    const html = bridge.copilotShell();
+    expect(html).toContain('M12 3l1.8 4.2');   // the sparkle SVG path, not an emoji glyph
+    expect(html).not.toContain('pd-card');
   });
 });

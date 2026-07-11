@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.11'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.12'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -11602,6 +11602,7 @@ function renderPublicShell() {
       </div>
     </div>` : ''}
   </div>
+  ${copilotShellHTML()}
   <nav id="bottom-nav">${buildPublicNavInnerHTML()}</nav>
 </div>
   `;
@@ -11724,6 +11725,52 @@ function adminCopilotHTML() {
 </div>`;
 }
 
+// ===== Task 12 (session-10 §6): Co-pilot floating bubble + chat-on-stone (Mike's design) =====
+// A small admin-only round bubble rides ABOVE the floating bottom nav on every public tab; tapping it
+// opens a full-screen chat on the bare stone bg + the shell's own pd-watermark (NO card/panel chrome).
+// This is NEW markup that REUSES the shipped copilot message flow verbatim by keeping the SAME element
+// ids/roles the bound handlers target: #copilot-thread (copilotRenderBubble), #copilot-input
+// (send/keydown/focus handlers → the copilot-typing nav hide), data-role="copilot-send". The old-shell
+// copilot tab (adminCopilotHTML) stays dormant for Task 14; it is never mounted while the public shell is,
+// so there is no duplicate-id collision. copilotOpen is a module flag so the view survives partialRender
+// polls (they never repaint #cop-chat) and is re-applied by activateMainTab after a full render().
+let copilotOpen = false;
+
+function copilotFabHTML() {
+  // §51 matte: soft shadow, no glow. White 4-point sparkle (same path as the co-pilot head — SVG, no emoji).
+  return `<button type="button" class="cop-fab" data-cop-open aria-label="Open the co-pilot">
+  <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22" aria-hidden="true"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9z"/></svg>
+</button>`;
+}
+
+function buildCopilotChatHTML() {
+  const msgs = Array.isArray(state.copilotMessages) ? state.copilotMessages : [];
+  // Plain English, never "night/tonight" (spec §3). Empty thread → this greeting; otherwise rebuild from state.
+  const greeting = `<div class="cop-msg cop-bot cop-greet">Ask what's happening, or to check players in, build teams, and record scores.</div>`;
+  const thread = msgs.length ? msgs.map(copilotBubbleHTML).join('') : greeting;
+  return `<div id="cop-chat" class="cop2" aria-hidden="true">
+  <div class="cop2-head">
+    <button type="button" class="cop2-back" data-cop-close aria-label="Back">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <span class="cop2-title">Co-pilot</span>
+  </div>
+  <div id="copilot-thread" class="cop2-thread">${thread}</div>
+  <div class="cop2-inbar">
+    <input type="text" id="copilot-input" class="cop2-input" placeholder="Ask the co-pilot&hellip;" aria-label="Ask the co-pilot" autocomplete="off" />
+    <button type="button" class="cop2-send" data-role="copilot-send" aria-label="Send">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </button>
+  </div>
+</div>`;
+}
+
+// Shell fragment: the fab + the (hidden-until-open) chat, admin-only, never on the old shell.
+function copilotShellHTML() {
+  if (!state.isAdmin || oldAdminMode) return '';
+  return copilotFabHTML() + buildCopilotChatHTML();
+}
+
 // Assemble the active-tournament slice of the co-pilot snapshot (null when none is live).
 function copilotTournamentInput() {
   const id = state.activeTournamentId;
@@ -11800,6 +11847,25 @@ async function handleCopilotSend(question) {
   window.__copilotBound = true;
   document.addEventListener('click', function onCopilotClick(e) {
     if (!(e.target instanceof Element)) return;
+    // Task 12: open the chat from the floating bubble, close it from the back chevron. copilotOpen is the
+    // module flag CSS keys the on-stone view off of; it persists across partialRender polls and full renders.
+    if (e.target.closest('[data-cop-open]')) {
+      e.preventDefault();
+      copilotOpen = true;
+      document.body.classList.add('copilot-open');
+      const thread = document.getElementById('copilot-thread');
+      if (thread) thread.scrollTop = thread.scrollHeight; // land on the newest message
+      const input = document.getElementById('copilot-input');
+      if (input && input.focus) input.focus();
+      return;
+    }
+    if (e.target.closest('[data-cop-close]')) {
+      e.preventDefault();
+      copilotOpen = false;
+      document.body.classList.remove('copilot-open');
+      document.body.classList.remove('copilot-typing'); // drop the keyboard-up nav hide on the way out
+      return;
+    }
     const chip = e.target.closest('[data-cop-chip]');
     if (chip) {
       e.preventDefault();
@@ -13074,6 +13140,7 @@ function activateMainTab(tab) {
   }
   document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + tab));
   document.body.classList.toggle('pd-public-active', !oldAdminMode); // Mike (2026-07-09): the logo backdrop shows on EVERY public page; session-10 R1: admins are on the public shell now, so keyed on !oldAdminMode (the old shell keeps its own styling)
+  document.body.classList.toggle('copilot-open', copilotOpen); // Task 12: re-apply the chat-on-stone state after a full render() (a poll never repaints #cop-chat, so the view survives; render()s do)
   // Reliability fix (2026-06-20): expose the current tab to assistive tech, not just a visual .active
   // class (this is the single place nav active state is set — first paint via activateMainTab(activeMainTab)
   // and on click — so aria-current stays correct everywhere).
@@ -13144,6 +13211,7 @@ function attachHandlers() {
       const btn = e.target.closest('[data-nav-tab]');
       if (!btn) return;
       const tab = btn.dataset.navTab;
+      if (copilotOpen) { copilotOpen = false; document.body.classList.remove('copilot-open'); } // Task 12: leaving via the nav closes the co-pilot chat (activateMainTab re-toggles the class off)
       if (state.tournamentMode && tab === 'dashboard') { exitTournamentMode(); return; } // Home exits tournament mode
       activateMainTab(tab);
     });

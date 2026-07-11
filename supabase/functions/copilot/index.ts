@@ -1,6 +1,7 @@
-// C28 — copilot Edge Function (read-only AI assistant for admins). Holds ANTHROPIC_API_KEY
-// (Supabase secret); the client bundle never sees it. Admin-only: requires the admin session JWT
-// minted by admin_login (app_metadata.admin === true) — players, who have no admin JWT, get 401.
+// C28 — copilot Edge Function (AI assistant for admins). Holds ANTHROPIC_API_KEY (Supabase secret); the
+// client bundle never sees it. Admin-only: requires a caller JWT whose community role is owner/organizer
+// (Task 12 §6 re-home), with the legacy code-login app_metadata.admin flag as an OR-fallback until Task 13.
+// Players (no admin role, no admin flag) get 401.
 // Read-only: this function only ANSWERS; it never writes. Mirrors admin_login's CORS + generic-error
 // hardening. The snapshot it receives is already skill-redacted by buildCopilotContext on the client.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
@@ -45,19 +46,40 @@ Deno.serve(async (req) => {
   }
   if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
 
-  // admin gate: require a valid admin session JWT (app_metadata.admin === true)
+  // auth gate (Task 12 §6 re-home): verify the caller JWT, then authorize by community ROLE — an active
+  // owner/organizer membership in the Athletic Specimen community — via a service-role memberships lookup
+  // (the same gate the email+password admins use client-side, deriveRole/caller_role). The legacy
+  // app_metadata.admin flag (minted by the retiring nlvb2025/asvb2025 code login) is kept as an OR-fallback
+  // so code-login admins still reach the co-pilot until Task 13 retires the codes. TASK 13 REMOVES THIS
+  // FALLBACK (delete the app_metadata branch when the codes die).
+  const COMMUNITY_ID = "2c3bcfa9-305e-448b-924b-da90c029f575";
   const authz = req.headers.get("Authorization") || "";
   const jwt = authz.startsWith("Bearer ") ? authz.slice(7) : "";
   if (!jwt) return json({ error: "unauthorized" }, 401);
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE, { auth: { autoRefreshToken: false, persistSession: false } });
-  let isAdmin = false;
+  let authorized = false;
   try {
     const { data, error } = await admin.auth.getUser(jwt);
-    isAdmin = !error && !!data?.user && (data.user.app_metadata as Record<string, unknown>)?.admin === true;
+    const user = data?.user;
+    if (!error && user) {
+      if ((user.app_metadata as Record<string, unknown>)?.admin === true) {
+        authorized = true; // legacy code-login admin — REMOVED in Task 13
+      } else {
+        const { data: mem } = await admin
+          .from("memberships")
+          .select("role")
+          .eq("profile_id", user.id)
+          .eq("community_id", COMMUNITY_ID)
+          .eq("status", "active")
+          .maybeSingle();
+        const role = (mem as { role?: string } | null)?.role;
+        authorized = role === "owner" || role === "organizer";
+      }
+    }
   } catch (_e) {
-    isAdmin = false;
+    authorized = false;
   }
-  if (!isAdmin) return json({ error: "unauthorized" }, 401);
+  if (!authorized) return json({ error: "unauthorized" }, 401);
 
   // parse body once
   let body: Record<string, unknown> = {};
