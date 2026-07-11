@@ -105,6 +105,21 @@ function loadApp() {
       },
       closeoutContainer: () => { manageView = 'tournament'; mgtView = 'closeout'; return manageContainerHTML(); },
       buildChampPicker: (teams, sel) => buildMgChampionPickerHTML(teams, sel),
+      // Task 11 (Admins, pick R6): drive buildMgAdminsHTML via manageContainerHTML with injected module
+      // state (seat/log data normally loads lazily via the 0051 RPCs — the tests inject it directly).
+      buildAdmins: (opts) => {
+        opts = opts || {};
+        manageView = 'admins';
+        mgAdminsView = opts.view || 'seats';
+        mgSeats = ('seats' in opts) ? opts.seats : null;
+        mgSeatsLoading = !!opts.seatsLoading;
+        mgSeatsError = opts.seatsError || '';
+        mgAssignOpen = !!opts.assign;
+        mgLog = ('log' in opts) ? opts.log : null;
+        mgLogLoading = !!opts.logLoading;
+        mgLogError = opts.logError || '';
+        return manageContainerHTML();
+      },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -1514,5 +1529,164 @@ describe('buildMgChampionPickerHTML — the CHANGE picker sheet (body-level)', (
     const html = bridge.buildChampPicker([{ id: 'x', name: '<b>x</b>', paid: false }], null);
     expect(html).not.toContain('<b>x</b>');
     expect(html).toContain('&lt;b&gt;');
+  });
+});
+
+// ── Task 11: Admins — seats + activity log (session-10 pick R6, mockups m-c + m-b) ────────────────────
+// buildMgAdminsHTML() dispatches on the module var mgAdminsView: 'seats' (four seat rows from
+// list_admin_seats — OWNER filled pill / ADMIN outline / OFF waiting) + an Activity log row → 'log'
+// (day-grouped rows from read_action_log, time · "<b>actor</b> summary"). Owner-gating keys on
+// state.masterAdminAuthenticated (the owner-role server session): only the owner can assign a waiting
+// seat or remove a filled non-owner seat. Flat on stone, no pd-card, labeled pills never dots, NO undo.
+function setAdminsState(extra = {}) {
+  const st = bridge.getState();
+  Object.assign(st, { isAdmin: true, masterAdminAuthenticated: true, currentSession: null, ...extra });
+}
+const OWNER_SEAT = { display_name: 'Mikey Olas', email: 'olasmikey@gmail.com', role: 'owner' };
+const ORG_SEAT = { display_name: 'Kc Vaughn', email: 'kc@example.com', role: 'organizer' };
+
+describe('buildMgAdminsHTML — the 4-seat roster (pick R6, mockup m-c)', () => {
+  it('dispatches through manageContainerHTML (real view, own back button, no placeholder)', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ seats: [OWNER_SEAT] });
+    expect(html).not.toContain('Coming in the next slices.');
+    expect(html).toContain('class="pd-htitle">Admins<');
+    expect(html).toContain('data-mg-area="lead"'); // back to the Manage lead
+    expect(html).not.toContain('pd-card');
+  });
+
+  it('renders the owner with a filled OWNER pill + name and email, never editable', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ seats: [OWNER_SEAT] });
+    expect(html).toContain('Mikey Olas');
+    expect(html).toContain('olasmikey@gmail.com');
+    expect(html).toContain('class="mgad-pill ow">OWNER<');
+    // the owner row is never a remove target
+    expect(html).not.toContain('data-mgad-remove="olasmikey@gmail.com"');
+  });
+
+  it('fills exactly four seats: owner + organizer + two waiting (OFF) seats', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ seats: [OWNER_SEAT, ORG_SEAT] });
+    expect(count(html, 'class="mgad-pill ow"')).toBe(1);   // one owner
+    expect(count(html, 'class="mgad-pill ad"')).toBe(1);   // one organizer → ADMIN outline pill
+    expect(count(html, 'class="mgad-pill off"')).toBe(2);  // two empty seats → OFF pill
+    expect(html).toContain('Kc Vaughn');
+    expect(html).toContain('>Seat 3<');
+    expect(html).toContain('>Seat 4<');
+    // the FIRST empty seat carries the explainer; the rest just say "Waiting"
+    expect(html).toContain('Waiting — they create an account, you flip it on');
+    expect(html).not.toMatch(/•/); // labeled pills, never bare dots
+  });
+
+  it('OWNER can assign a waiting seat (data-mgad-seat) and remove a filled non-owner (data-mgad-remove)', () => {
+    setAdminsState({ masterAdminAuthenticated: true });
+    const html = bridge.buildAdmins({ seats: [OWNER_SEAT, ORG_SEAT] });
+    expect(html).toContain('data-mgad-seat');                       // waiting seats are tappable
+    expect(html).toContain('data-mgad-remove="kc@example.com"');    // the organizer seat is removable
+  });
+
+  it('a NON-owner admin (organizer) sees the roster read-only — no assign, no remove', () => {
+    setAdminsState({ masterAdminAuthenticated: false });
+    const html = bridge.buildAdmins({ seats: [OWNER_SEAT, ORG_SEAT] });
+    expect(html).not.toContain('data-mgad-seat');
+    expect(html).not.toContain('data-mgad-remove');
+    expect(html).toContain('Only the owner can add or remove admins.');
+    // still shows the pills / roster
+    expect(html).toContain('class="mgad-pill ow"');
+    expect(html).toContain('class="mgad-pill ad"');
+  });
+
+  it('the Activity log row is present and carries NO undo this slice', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ seats: [OWNER_SEAT] });
+    expect(html).toContain('data-mgad-log');
+    expect(html).toContain('>Activity log<');
+    expect(html.toLowerCase()).not.toContain('undo');
+  });
+
+  it('opening a waiting seat reveals the rf-grammar email field + Make them an admin (owner)', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ seats: [OWNER_SEAT], assign: true });
+    expect(html).toContain('id="mgad-email"');
+    expect(html).toContain('data-mgad-make');
+    expect(html).toContain('Make them an admin');
+  });
+
+  it('shows an honest loading line before the seats RPC returns, no fake seats', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ seats: null, seatsLoading: true });
+    expect(html).toContain('Loading the admin seats');
+    expect(html).not.toContain('class="mgad-pill');
+  });
+
+  it('surfaces a friendly load error (incl. the pre-0051 "still updating" notice)', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ seats: null, seatsError: 'Admins tools aren’t available yet — the server is still updating. Try again in a minute.' });
+    expect(html).toContain('the server is still updating');
+    expect(html).not.toContain('class="mgad-pill');
+  });
+
+  it('escapes a hostile display name / email in a seat row', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ seats: [OWNER_SEAT, { display_name: '<img src=x onerror=alert(1)>', email: 'x@y.z', role: 'organizer' }] });
+    expect(html).not.toContain('<img src=x onerror=alert(1)>');
+    expect(html).toContain('&lt;img');
+  });
+});
+
+describe('buildMgLogHTML — the day-grouped activity log (pick R6, mockup m-b)', () => {
+  // Build timestamps relative to "now" so the day labels are deterministic (Today / Yesterday).
+  const iso = (dayOffset, h, m) => {
+    const d = new Date(); d.setDate(d.getDate() - dayOffset); d.setHours(h, m, 0, 0);
+    return d.toISOString();
+  };
+
+  it('renders day headers with time + "<b>actor</b> summary" rows, newest group first', () => {
+    setAdminsState();
+    const log = [
+      { at: iso(0, 21, 12), actor: 'Mikey', summary: 'closed registration' },
+      { at: iso(0, 20, 44), actor: 'Mikey', summary: 'marked Dig It paid' },
+      { at: iso(1, 19, 2), actor: 'Kc', summary: 'generated teams · 4s' },
+    ];
+    const html = bridge.buildAdmins({ view: 'log', log });
+    expect(html).toContain('class="pd-htitle">Activity log<');
+    expect(html).toContain('data-mgad-seats'); // back to the seats view
+    expect(html).toContain('class="mgad-day">Today<');
+    expect(html).toContain('class="mgad-day">Yesterday<');
+    expect(html).toContain('<b>Mikey</b> closed registration');
+    expect(html).toContain('<b>Kc</b> generated teams · 4s');
+    expect(html).toContain('class="mgad-lt"'); // the faint Barlow time column
+    // Today's group renders before Yesterday's
+    expect(html.indexOf('>Today<')).toBeLessThan(html.indexOf('>Yesterday<'));
+  });
+
+  it('shows the honest empty state when nothing is logged', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ view: 'log', log: [] });
+    expect(html).toContain('Nothing logged yet.');
+    expect(html).not.toContain('class="mgad-lg"');
+  });
+
+  it('shows a loading line before the log RPC returns', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ view: 'log', log: null, logLoading: true });
+    expect(html).toContain('Loading the activity log');
+  });
+
+  it('escapes actor + summary content (never injects markup)', () => {
+    setAdminsState();
+    const log = [{ at: iso(0, 12, 0), actor: '<b>x</b>', summary: '<script>alert(1)</script>' }];
+    const html = bridge.buildAdmins({ view: 'log', log });
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;');
+    expect(html).not.toContain('<b>x</b>');
+  });
+
+  it('coalesces a missing actor to a plain fallback rather than empty bold', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ view: 'log', log: [{ at: iso(0, 9, 5), actor: null, summary: 'did a thing' }] });
+    expect(html).toContain('did a thing');
+    expect(html).toContain('<b>Someone</b>');
   });
 });

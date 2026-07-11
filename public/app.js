@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.10'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.11'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1514,6 +1514,16 @@ function partialRender() {
       const mp = document.getElementById('tab-manage');
       const active = mp ? document.activeElement : null;
       if (active && mp.contains(active) && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+        if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+        return;
+      }
+    }
+    // Task 11 EXCEPTION: the Admins seats view carries a live assign-by-email input (owner only). Never
+    // clobber a half-typed email on a background sync — bail (refresh the sync notice only) when it is
+    // focused / holds a value. The remove-admin sheet is body-level → already immune to the container swap.
+    if (manageView === 'admins') {
+      const emailEl = document.getElementById('mgad-email');
+      if (emailEl && (document.activeElement === emailEl || (String(emailEl.value || '').trim() !== ''))) {
         if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
         return;
       }
@@ -3647,6 +3657,33 @@ async function tdbReopenTournament(tournamentId) {
   if (!supabaseClient || !tournamentId) throw new Error('No tournament.');
   const { error } = await supabaseClient.rpc('reopen_tournament', { p_tournament_id: tournamentId });
   if (error) { if (isFnMissingError(error)) throw new Error(CLOSEOUT_RPC_NOT_READY); throw error; }
+}
+
+// Task 11 (pick R6) — admin seats + activity-log RPCs (migration 0051). All three are SECURITY DEFINER +
+// role-guarded server-side (OWNER for set_member_role, organizer for the two reads); the client just calls
+// them. PRE-APPLY GUARD: until the controller applies 0051 the functions don't exist — surface the friendly
+// "still updating" notice (isFnMissingError) and NEVER fall back to a direct memberships/table write
+// (memberships has no client INSERT policy; the log tables are RLS-locked — a fallback would only fail less
+// honestly and would bypass the owner guard these functions enforce).
+const ADMIN_RPC_NOT_READY = 'Admins tools aren\'t available yet — the server is still updating. Try again in a minute.';
+// OWNER-ONLY. role = 'organizer' (promote to co-admin) | 'player' (remove admin). The server enforces the
+// owner guard, the "account must exist" check, and the no-mint-owner / no-touch-owner rails.
+async function tdbSetMemberRole(email, role) {
+  if (!supabaseClient) throw new Error('No connection.');
+  const { error } = await supabaseClient.rpc('set_member_role', { p_email: email, p_role: role });
+  if (error) { if (isFnMissingError(error)) throw new Error(ADMIN_RPC_NOT_READY); throw error; }
+}
+async function tdbListAdminSeats() {
+  if (!supabaseClient) throw new Error('No connection.');
+  const { data, error } = await supabaseClient.rpc('list_admin_seats');
+  if (error) { if (isFnMissingError(error)) throw new Error(ADMIN_RPC_NOT_READY); throw error; }
+  return Array.isArray(data) ? data : [];
+}
+async function tdbReadActionLog(limit) {
+  if (!supabaseClient) throw new Error('No connection.');
+  const { data, error } = await supabaseClient.rpc('read_action_log', { p_limit: limit || 50 });
+  if (error) { if (isFnMissingError(error)) throw new Error(ADMIN_RPC_NOT_READY); throw error; }
+  return Array.isArray(data) ? data : [];
 }
 
 // C25 item 3: before submitting, sanity-check a lopsided score that still passes validation
@@ -9217,6 +9254,19 @@ let mgpControlsOpen = false;
 // "no champion recorded". Survives the container-swap repaint (a background sync must not reset the pick); the
 // picker sheet is body-level (poll-clobber-immune). Reset to undefined after a successful close.
 let mgCloseoutChampId = undefined;
+// Task 11 (Admins, pick R6): the seats + activity-log surface under manageView==='admins'. Seat/log data
+// load LAZILY on open via the 0051 read RPCs (list_admin_seats / read_action_log) — NOT part of the boot
+// sync — into these module vars, then repaintManage(). All survive the container swap (a background poll
+// must never wipe a half-typed email or a loaded list). mgAdminsView: 'seats' | 'log'. mgSeats/mgLog:
+// null = not loaded yet (→ loading line), [] = loaded-empty (→ honest empty state), else the rows.
+let mgAdminsView = 'seats';
+let mgSeats = null;
+let mgSeatsLoading = false;
+let mgSeatsError = '';
+let mgAssignOpen = false;   // the inline assign-by-email field (owner taps a waiting seat)
+let mgLog = null;
+let mgLogLoading = false;
+let mgLogError = '';
 
 const MG_CHEV ='<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
 
@@ -9420,6 +9470,7 @@ function manageContainerHTML() {
   if (manageView === 'players') return buildManagePlayersHTML();
   if (manageView === 'teams') return buildManageTeamsHTML();
   if (manageView === 'tournament') return buildManageTournamentContainerHTML();
+  if (manageView === 'admins') return buildMgAdminsHTML();
   return manageAreaPlaceholderHTML(manageView);
 }
 
@@ -9427,6 +9478,207 @@ function manageContainerHTML() {
 function repaintManage() {
   const c = document.querySelector('#tab-manage .container');
   if (c) c.innerHTML = manageContainerHTML();
+}
+
+// Task 11 (pick R6): lazily load the admin SEATS when the Admins area opens (mockup m-c). Not part of the
+// boot sync — seats change rarely, so loading them on open keeps boot lean. Honest states: loading line →
+// list → friendly error (isFnMissingError → "still updating"). Only repaints while the Admins area is open.
+async function loadAdminSeats() {
+  mgSeatsLoading = true; mgSeatsError = '';
+  if (manageView === 'admins') repaintManage();
+  try {
+    mgSeats = await tdbListAdminSeats();
+  } catch (err) {
+    mgSeatsError = (err && err.message) ? err.message : 'Could not load the admin seats.';
+  } finally {
+    mgSeatsLoading = false;
+    if (manageView === 'admins') repaintManage();
+  }
+}
+// Lazily load the ACTIVITY LOG when the log sub-view opens (mockup m-b, day-grouped rows).
+async function loadActionLog() {
+  mgLogLoading = true; mgLogError = '';
+  if (manageView === 'admins') repaintManage();
+  try {
+    mgLog = await tdbReadActionLog(50);
+  } catch (err) {
+    mgLogError = (err && err.message) ? err.message : 'Could not load the activity log.';
+  } finally {
+    mgLogLoading = false;
+    if (manageView === 'admins') repaintManage();
+  }
+}
+
+// ── Task 11 (session-10 pick R6): Manage → Admins — 4-seat roster + activity log ──────────────────────
+// Mockups r10-manage/m-c (seats) + m-b (log). Top-level Manage area (manageView==='admins', NOT a
+// tournament sub-view). buildMgAdminsHTML dispatches on mgAdminsView: 'seats' | 'log'. Owner-gating keys on
+// state.masterAdminAuthenticated (the owner-role server session — the same flag canAccessOperatorSafetyControls
+// uses): only the owner can assign a waiting seat or remove a filled non-owner seat. Flat on stone, no
+// pd-card, labeled pills never dots, plain English, NO undo this slice (the old operator undo stays old-shell).
+function buildMgAdminsHTML() {
+  return mgAdminsView === 'log' ? buildMgLogHTML() : buildMgSeatsHTML();
+}
+
+// Role pill (mockup m-c): OWNER filled accent · ADMIN outline · OFF faint outline. A labeled tag, never a dot.
+function mgSeatPill(kind) {
+  if (kind === 'owner') return '<span class="mgad-pill ow">OWNER</span>';
+  if (kind === 'admin') return '<span class="mgad-pill ad">ADMIN</span>';
+  return '<span class="mgad-pill off">OFF</span>';
+}
+
+const MGAD_TOTAL_SEATS = 4; // the 4-admin model (spec §1): 1 owner + up to 3 organizers.
+
+function buildMgSeatsHTML() {
+  const isOwner = !!state.masterAdminAuthenticated;
+  const header = `<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>
+      <div class="pd-htitle">Admins</div>
+    </div>`;
+  // Not loaded yet — honest loading line, no fake seats (mgSeats===null only before the first RPC returns).
+  if (mgSeats === null) {
+    const line = mgSeatsError ? escapeHTML(mgSeatsError) : 'Loading the admin seats…';
+    return header + `<div class="pd-empty">${line}</div>`;
+  }
+  // Owner first, then organizers (the RPC already orders this way; re-assert defensively for a clean UI).
+  const seats = (Array.isArray(mgSeats) ? mgSeats.slice() : [])
+    .sort((a, b) => (b && b.role === 'owner' ? 1 : 0) - (a && a.role === 'owner' ? 1 : 0));
+  let firstEmptyDone = false;
+  const rows = [];
+  for (let i = 0; i < MGAD_TOTAL_SEATS; i++) {
+    const s = seats[i];
+    if (s) {
+      const owner = s.role === 'owner';
+      const name = escapeHTML(s.display_name || s.email || 'Admin');
+      const email = escapeHTML(s.email || '');
+      // The owner row is NEVER editable. A filled non-owner seat is a remove target — for the owner only.
+      const rm = (!owner && isOwner) ? ` data-mgad-remove="${escapeHTMLText(String(s.email || ''))}"` : '';
+      rows.push(`<a class="mgad-row"${rm}><div class="mgad-rb"><div class="mgad-rn">${name}</div>`
+        + `<div class="mgad-rs">${email}</div></div>${mgSeatPill(owner ? 'owner' : 'admin')}</a>`);
+    } else {
+      // A WAITING (empty) seat. The FIRST empty seat carries the explainer; the rest just say "Waiting".
+      // Owner taps it → the inline assign-by-email field.
+      const seatTap = isOwner ? ' data-mgad-seat' : '';
+      const sub = firstEmptyDone ? 'Waiting' : 'Waiting — they create an account, you flip it on';
+      firstEmptyDone = true;
+      rows.push(`<a class="mgad-row"${seatTap}><div class="mgad-rb"><div class="mgad-rn">Seat ${i + 1}</div>`
+        + `<div class="mgad-rs">${sub}</div></div>${mgSeatPill('off')}</a>`);
+    }
+  }
+  // The inline assign-by-email form (owner only), toggled by tapping a waiting seat. rf-* field grammar.
+  const assign = (isOwner && mgAssignOpen)
+    ? `<div class="mgad-assign">`
+      + `<label class="pk-fl" for="mgad-email">Their account email</label>`
+      + `<input class="pk-fv" id="mgad-email" type="email" inputmode="email" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="name@email.com" />`
+      + `<button type="button" class="mgr-cta" data-mgad-make>Make them an admin</button>`
+      + `<p class="mgad-msg" id="mgad-msg" role="status" aria-live="polite"></p>`
+      + `<div class="mgr-fnote">They must have created an account first — this flips their access on.</div>`
+      + `</div>`
+    : '';
+  // The Activity log row → the log sub-view (NO undo this slice).
+  const logRow = `<a class="mgad-row mgad-logrow" data-mgad-log><div class="mgad-rb">`
+    + `<div class="mgad-rn">Activity log</div><div class="mgad-rs">Every admin action · who and when</div></div>${MG_CHEV}</a>`;
+  // Organizers see the roster read-only.
+  const note = isOwner ? '' : `<div class="mgr-fnote">Only the owner can add or remove admins.</div>`;
+  return header + rows.join('') + assign + logRow + note;
+}
+
+// Day label for the log group headers (mockup m-b): Today / Yesterday / weekday / "Month D". Groups by the
+// LOCAL calendar day of the row's timestamp.
+function mgLogDayLabel(d) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const that = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = Math.round((today.getTime() - that.getTime()) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  if (diff > 1 && diff < 7) return that.toLocaleDateString('en-US', { weekday: 'long' });
+  return that.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+}
+function mgLogTime(d) { return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); }
+
+function buildMgLogHTML() {
+  const header = `<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-mgad-seats aria-label="Back to Admins">${PK_BACK_SVG}</button>
+      <div class="pd-htitle">Activity log</div>
+    </div>`;
+  if (mgLog === null) {
+    const line = mgLogError ? escapeHTML(mgLogError) : 'Loading the activity log…';
+    return header + `<div class="pd-empty">${line}</div>`;
+  }
+  const rows = Array.isArray(mgLog) ? mgLog : [];
+  if (!rows.length) return header + `<div class="pd-empty">Nothing logged yet.</div>`;
+  let out = ''; let lastDay = null;
+  rows.forEach((r) => {
+    const actor = escapeHTML((r && r.actor) || 'Someone');
+    const summary = escapeHTML((r && r.summary) || '');
+    const dt = r && r.at ? new Date(r.at) : null;
+    const valid = dt && !isNaN(dt.getTime());
+    if (valid) {
+      const day = mgLogDayLabel(dt);
+      if (day !== lastDay) { out += `<div class="mgad-day">${escapeHTML(day)}</div>`; lastDay = day; }
+    }
+    const time = valid ? escapeHTML(mgLogTime(dt)) : '';
+    out += `<div class="mgad-lg"><span class="mgad-lt">${time}</span>`
+      + `<span class="mgad-lx"><b>${actor}</b> ${summary}</span></div>`;
+  });
+  return header + out;
+}
+
+// Make-them-an-admin (owner only): set_member_role(email,'organizer'), then refresh the seats.
+async function mgAdminMakeOrganizer() {
+  if (!state.masterAdminAuthenticated) return; // owner-only
+  const el = document.getElementById('mgad-email');
+  const msg = document.getElementById('mgad-msg');
+  const email = el ? String(el.value || '').trim() : '';
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    if (msg) msg.textContent = 'Enter their account email first.'; return;
+  }
+  if (msg) msg.textContent = 'Adding…';
+  try {
+    await tdbSetMemberRole(email, 'organizer');
+    mgAssignOpen = false;
+    await loadAdminSeats(); // repaints the seats with the new admin
+  } catch (err) {
+    if (msg) msg.textContent = (err && err.message) ? err.message : 'Could not add them — check the email and try again.';
+  }
+}
+
+// The quiet body-level Remove-admin sheet (owner only). Body-level = outside #tab-manage → poll-clobber-immune.
+function closeMgAdminSheet() { const el = document.getElementById('mgad-sheet'); if (el) el.remove(); }
+function openMgRemoveAdminSheet(email) {
+  if (!state.masterAdminAuthenticated || !email) return;
+  closeMgAdminSheet();
+  const seat = (Array.isArray(mgSeats) ? mgSeats : []).find((s) => s && String(s.email) === String(email));
+  const name = seat ? (seat.display_name || seat.email || 'this admin') : 'this admin';
+  const scrim = document.createElement('div');
+  scrim.id = 'mgad-sheet';
+  scrim.className = 'pd-reg-scrim';
+  scrim.setAttribute('role', 'dialog');
+  scrim.setAttribute('aria-modal', 'true');
+  scrim.setAttribute('aria-label', 'Remove admin');
+  scrim.innerHTML = `<div class="pd-reg-sheet">`
+    + `<div class="mgts-head"><div class="mgts-eyebrow">Admin</div>`
+    + `<button type="button" class="mgts-done" data-mgad="close">Done</button></div>`
+    + `<div class="mgad-shn">${escapeHTML(name)}</div>`
+    + `<div class="mgad-she">${escapeHTML(seat ? (seat.email || '') : '')}</div>`
+    + `<button type="button" class="pk-danger" data-mgad="remove">Remove admin</button>`
+    + `<div class="mgr-fnote">They keep their account — this just turns off their admin access.</div>`
+    + `</div>`;
+  document.body.appendChild(scrim);
+  scrim.addEventListener('click', (ev) => {
+    if (ev.target === scrim) { closeMgAdminSheet(); return; } // backdrop tap dismisses
+    const r = ev.target.closest('[data-mgad]');
+    if (!r) return;
+    const role = r.getAttribute('data-mgad');
+    if (role === 'close') { closeMgAdminSheet(); return; }
+    if (role === 'remove') { void mgAdminRemove(email); return; }
+  });
+}
+async function mgAdminRemove(email) {
+  if (!state.masterAdminAuthenticated || !email) return;
+  try { await tdbSetMemberRole(email, 'player'); }
+  catch (err) { console.warn('mgAdminRemove', err); }
+  closeMgAdminSheet();
+  await loadAdminSeats();
 }
 
 // Persist the pickup-day form (insert a new row or update the edited one), then return to the list.
@@ -13136,6 +13388,34 @@ function attachHandlers() {
         const copyBtn = e.target.closest('[data-mgr-copy]');
         if (copyBtn) { void mgrCopyAnnouncement(copyBtn); return; }
       }
+      // Task 11 (R6) Admins-area actions. Checked BEFORE the generic data-mg-area so a seat/log/button tap
+      // never falls through to nav; the seats page's own back button carries data-mg-area="lead" (handled
+      // below), and the log's back carries data-mgad-seats (handled here). Owner-only actions are also
+      // guarded server-side (set_member_role owner check) — this is the UI gate, not the security boundary.
+      if (manageView === 'admins') {
+        // Owner taps a WAITING seat → toggle the inline assign-by-email field (then focus it).
+        if (e.target.closest('[data-mgad-seat]')) {
+          mgAssignOpen = !mgAssignOpen; repaintManage();
+          if (mgAssignOpen) { const f = document.getElementById('mgad-email'); if (f) { try { f.focus(); } catch (_) {} } }
+          return;
+        }
+        if (e.target.closest('[data-mgad-make]')) { void mgAdminMakeOrganizer(); return; }
+        const rm = e.target.closest('[data-mgad-remove]');
+        if (rm) { openMgRemoveAdminSheet(rm.getAttribute('data-mgad-remove') || ''); return; }
+        // Activity log row → the log sub-view (lazy-load on first open).
+        if (e.target.closest('[data-mgad-log]')) {
+          mgAdminsView = 'log';
+          if (mgLog === null && !mgLogLoading) { void loadActionLog(); } else { repaintManage(); }
+          const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0;
+          return;
+        }
+        // Back from the log → the seats view.
+        if (e.target.closest('[data-mgad-seats]')) {
+          mgAdminsView = 'seats'; repaintManage();
+          const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0;
+          return;
+        }
+      }
       // Manage tab (session-10 R1): flat-row navigation is a container-swap partial repaint (module var
       // manageView survives; NO full render()). data-mg-area="lead" returns to the lead; an area id opens its
       // (placeholder this slice) page. data-mg-old is the TEMPORARY escape hatch into the old admin shell.
@@ -13150,11 +13430,19 @@ function attachHandlers() {
         if (nextArea === 'teams' && manageView !== 'teams') { mgtSize = 4; mgtSwapKey = null; mgtSwapFrom = null; }
         // Entering the Tournament area fresh: land on the sub-hub (not a stale sub-view).
         if (nextArea === 'tournament' && manageView !== 'tournament') { mgtView = null; }
+        // Entering the Admins area fresh (Task 11): land on the seats view, clear stale seat/log data +
+        // any half-open assign field so the first paint shows the honest loading line.
+        if (nextArea === 'admins' && manageView !== 'admins') {
+          mgAdminsView = 'seats'; mgAssignOpen = false;
+          mgSeats = null; mgSeatsError = ''; mgLog = null; mgLogError = '';
+        }
         manageView = nextArea;
         const c = document.querySelector('#tab-manage .container');
         if (c) c.innerHTML = manageContainerHTML();
         const mgPanel = document.getElementById('tab-manage');
         if (mgPanel) mgPanel.scrollTop = 0;
+        // Kick off the lazy seats load AFTER the loading line is painted (Task 11).
+        if (nextArea === 'admins') { void loadAdminSeats(); }
         return;
       }
       if (e.target.closest('[data-mg-old]')) { renderOldAdminShell(); return; }

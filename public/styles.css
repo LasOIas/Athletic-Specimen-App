@@ -3335,6 +3335,36 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgtp-tag { flex: none; background: none; border: none; padding: 4px 4px; font: 700 11px var(--font-display); letter-spacing: .06em; cursor: pointer; }
 .mgtp-tag.paid { color: var(--live-ink); }
 .mgtp-tag.unpaid { color: var(--warn-ink); }
+
+/* ── Task 11 (session-10 pick R6): Manage → Admins — 4-seat roster + activity log. Mockups r10-manage m-c
+   (seats) + m-b (log). Reuses the pd-pagehdr/pd-empty chrome + the pk-fld field grammar + the body-level
+   .pd-reg-scrim/.pd-reg-sheet sheet; the mgad-* kit adds the seat rows, the role pills (OWNER filled ·
+   ADMIN outline · OFF faint outline — labeled tags, never dots), the assign field, and the day-grouped log
+   rows. §41: the ≥1024 #tab-manage clamp caps the column at 720px (shared, no per-kit desktop rules). */
+.mgad-row { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-top: 1px solid var(--border); text-decoration: none; color: inherit; cursor: pointer; }
+.pd-pagehdr + .mgad-row { border-top: none; }
+.mgad-rb { flex: 1; min-width: 0; }
+.mgad-rn { font-size: 15px; font-weight: 600; color: var(--ink); }
+.mgad-rs { font-size: 12.5px; color: var(--muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgad-logrow { margin-top: 14px; }
+.mgad-pill { flex: none; font: 700 10.5px var(--font-display); letter-spacing: .06em; padding: 2px 8px; border-radius: 999px; }
+.mgad-pill.ow { color: #fff; background: var(--accent); border: 1px solid var(--accent); }
+.mgad-pill.ad { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-bd); }
+.mgad-pill.off { color: var(--faint); background: transparent; border: 1px solid var(--border-2); }
+/* the inline assign-by-email field (owner taps a waiting seat) */
+.mgad-assign { margin-top: 14px; }
+.mgad-msg { font-size: 12.5px; color: var(--live-ink); margin-top: 6px; min-height: 1em; }
+/* the body-level remove-admin sheet inner kit (chrome = .pd-reg-scrim/.pd-reg-sheet) */
+.mgad-shn { font: 700 18px var(--font-display); color: var(--ink); margin-top: 2px; }
+.mgad-she { font-size: 13px; color: var(--muted); margin: 2px 0 14px; }
+/* the day-grouped activity log (mockup m-b) */
+.mgad-day { font: 700 11.5px var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin: 16px 0 4px; display: flex; align-items: center; gap: 10px; }
+.mgad-day::after { content: ""; flex: 1; height: 1px; background: var(--accent-bd); }
+.mgad-lg { display: flex; gap: 10px; padding: 9px 2px; border-top: 1px solid var(--border); align-items: baseline; }
+.mgad-day + .mgad-lg { border-top: none; }
+.mgad-lt { flex: none; font: 700 11px var(--font-display); color: var(--faint); width: 62px; }
+.mgad-lx { flex: 1; font-size: 13px; color: var(--ink); }
+.mgad-lx b { font-weight: 600; }
 /* the body-level team-edit sheet inner kit (chrome = .pd-reg-scrim/.pd-reg-sheet) */
 .mgts-head { display: flex; align-items: center; justify-content: space-between; margin: 2px 0 10px; }
 .mgts-eyebrow { font: 700 12px var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
