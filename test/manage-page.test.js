@@ -95,6 +95,8 @@ function loadApp() {
       buildMgPools: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'pools'; mgpPoolFilter = (opts.filter === undefined ? null : opts.filter); mgpControlsOpen = !!opts.controls; return buildMgPoolsHTML(); },
       buildScoreSheet: (m) => buildMgScoreSheetHTML(m),
       buildBracket: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'bracket'; state.seedOverride = (opts.seedOverride === undefined ? null : opts.seedOverride); return buildMgBracketHTML(); },
+      buildSettings: () => { manageView = 'tournament'; mgtView = 'settings'; return buildMgSettingsHTML(); },
+      buildRules: () => { manageView = 'tournament'; mgtView = 'rules'; return buildMgRulesHTML(); },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -1251,5 +1253,120 @@ describe('buildMgBracketHTML — pre-bracket seeding (pick R10-C, mockup bk-c)',
     const html = bridge.buildBracket();
     expect(html).toContain('Draw pools and play them out first');
     expect(html).not.toContain('data-mgbk-generate');
+  });
+});
+
+// ── Task 9: Event settings (pick R11, mockup es-b) + Rules sheet (pick R11b, mockup ru-d) ─────────────
+// A tournament carrying every scoring knob (real tournaments.* columns per the recon map §4).
+const fullKnobT = {
+  id: 'T', name: 'July 2026 tournament', status: 'setup', registration_open: true,
+  team_size: 4, net_count: 3, pool_target: 15, pool_cap: 20, bracket_target: 21, bracket_cap: 25,
+  match_cap: 21, win_by_2: true, grand_final_reset: true, buy_in: '$80 a team',
+};
+
+describe('buildMgSettingsHTML — all-knobs-flat event settings (pick R11, mockup es-b)', () => {
+  it('renders the Event settings header with a back-to-hub button', () => {
+    setTournamentState(fullKnobT);
+    const html = bridge.buildSettings();
+    expect(html).toContain('class="pd-htitle">Event settings<');
+    expect(html).toContain('data-mgt-back'); // back returns to the sub-hub, not the Manage lead
+    expect(html).not.toContain('pd-card');
+  });
+
+  it('renders every knob flat + editable, prefilled from the real columns', () => {
+    setTournamentState(fullKnobT);
+    const html = bridge.buildSettings();
+    // full-width text fields
+    expect(html).toContain('id="mges-name"');
+    expect(html).toContain('value="July 2026 tournament"');
+    expect(html).toContain('id="mges-buyin"');
+    expect(html).toContain('value="$80 a team"');
+    // two-across numeric pairs — real column values
+    expect(html).toContain('id="mges-teamsize"');
+    expect(html).toContain('id="mges-nets"');
+    expect(html).toContain('id="mges-pooltarget"');
+    expect(html).toContain('id="mges-poolcap"');
+    expect(html).toContain('id="mges-brackettarget"');
+    expect(html).toContain('id="mges-bracketcap"');
+    expect(html).toContain('value="15"'); // pool target
+    expect(html).toContain('value="20"'); // pool cap
+    expect(html).toContain('value="21"'); // bracket target
+    expect(html).toContain('value="25"'); // bracket cap
+    // the short fields sit two-across
+    expect(count(html, 'class="mges-half"')).toBeGreaterThanOrEqual(3);
+  });
+
+  it('gives every numeric input the iOS numeric keyboard + 16px guard', () => {
+    setTournamentState(fullKnobT);
+    const html = bridge.buildSettings();
+    // one inputmode="numeric" per numeric field (6: team size, nets, pool to/cap, bracket to/cap)
+    expect(count(html, 'inputmode="numeric"')).toBe(6);
+    // the pk-fv field grammar carries the 16px font (styles.css) — assert we reuse it, not a bespoke input
+    expect(html).toContain('class="pk-fv"');
+  });
+
+  it('renders win-by-2 and grand-final-reset as mg-sw switches (not text), reflecting the booleans', () => {
+    setTournamentState(fullKnobT);
+    const html = bridge.buildSettings();
+    expect(html).toContain('data-mges-toggle="win_by_2"');
+    expect(html).toContain('data-mges-toggle="grand_final_reset"');
+    // both true → both switches on
+    expect(count(html, 'class="mg-sw on"')).toBe(2);
+    expect(count(html, 'aria-checked="true"')).toBe(2);
+    // both off → neither switch on
+    const off = (setTournamentState({ ...fullKnobT, win_by_2: false, grand_final_reset: false }), bridge.buildSettings());
+    expect(off).not.toContain('class="mg-sw on"');
+    expect(count(off, 'aria-checked="false"')).toBe(2);
+  });
+
+  it('dispatches through manageContainerHTML (real view, no placeholder)', () => {
+    setTournamentState(fullKnobT);
+    const view = bridge.mgtContainer('settings');
+    expect(view).not.toContain('Coming in the next slices.');
+    expect(view).toContain('data-mgt-back');
+    expect(view).toContain('id="mges-name"');
+  });
+});
+
+describe('buildMgRulesHTML — one-sheet rules editor (pick R11b, mockup ru-d)', () => {
+  it('prefills the textarea from tournaments.rules and shows the players-see-it CTA + hint', () => {
+    setTournamentState({ ...fullKnobT, rules: '## Format\n- 4s co-ed — 1 guy + 1 girl' });
+    const html = bridge.buildRules();
+    expect(html).toContain('class="pd-htitle">Rules sheet<');
+    expect(html).toContain('id="mgru-ta"');
+    expect(html).toContain('## Format');
+    expect(html).toContain('- 4s co-ed — 1 guy + 1 girl');
+    expect(html).toContain('data-mgru-save');
+    expect(html).toContain('Save — players see it right away');
+    // the hint line teaches the markdown-lite grammar
+    expect(html).toContain('Same text players read on the Rules page');
+    expect(html).toContain('## makes a heading');
+    expect(html).toContain('- makes a bullet');
+    expect(html).toContain('data-mgt-back');
+    expect(html).not.toContain('pd-card');
+  });
+
+  it('renders an empty (never "undefined") textarea when rules is unset', () => {
+    setTournamentState({ ...fullKnobT, rules: null });
+    const html = bridge.buildRules();
+    expect(html).toContain('id="mgru-ta"');
+    expect(html).not.toContain('undefined');
+    // the empty editor is still savable
+    expect(html).toContain('data-mgru-save');
+  });
+
+  it('escapes rules content (never injects markup) in the textarea + dirty-guard attribute', () => {
+    setTournamentState({ ...fullKnobT, rules: '## Heads up <script>alert(1)</script> & be cool' });
+    const html = bridge.buildRules();
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
+  it('dispatches through manageContainerHTML (real view, no placeholder)', () => {
+    setTournamentState({ ...fullKnobT, rules: '## Format' });
+    const view = bridge.mgtContainer('rules');
+    expect(view).not.toContain('Coming in the next slices.');
+    expect(view).toContain('id="mgru-ta"');
+    expect(view).toContain('data-mgt-back');
   });
 });

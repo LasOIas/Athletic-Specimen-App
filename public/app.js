@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.9'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1493,6 +1493,17 @@ function partialRender() {
     // team-size fields. Never clobber a half-typed announcement or field on a background sync — bail (refresh
     // the sync notice only) when an input/textarea in #tab-manage is focused, or the announcement is dirty.
     if (manageView === 'tournament' && mgtView === 'registration' && manageRegDirty()) {
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      return;
+    }
+    // Task 9 EXCEPTION: the Event settings view carries live text/number fields; the Rules editor carries a
+    // live textarea. Bail the background repaint (refresh the sync notice only) while a field is focused / the
+    // rules text is dirty so a half-typed edit survives.
+    if (manageView === 'tournament' && mgtView === 'settings' && manageSettingsDirty()) {
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      return;
+    }
+    if (manageView === 'tournament' && mgtView === 'rules' && manageRulesDirty()) {
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
       return;
     }
@@ -9966,6 +9977,8 @@ function buildManageTournamentContainerHTML() {
   if (mgtView === 'teams') return buildMgTeamsHTML();
   if (mgtView === 'pools') return buildMgPoolsHTML();
   if (mgtView === 'bracket') return buildMgBracketHTML();
+  if (mgtView === 'settings') return buildMgSettingsHTML();
+  if (mgtView === 'rules') return buildMgRulesHTML();
   if (mgtView) return mgtSubPlaceholderHTML(mgtView);
   return buildManageTournamentHTML();
 }
@@ -10067,6 +10080,191 @@ async function mgrSaveField(id) {
     await tdbSetTournamentFields(t.id, fields);
     await tdbRefreshTournaments();
   } catch (err) { console.warn('mgrSaveField', err); }
+}
+
+// ── Task 9: Event settings (session-10 pick R11) + Rules sheet (pick R11b) ───────────────────────────
+// Mockups r10-manage/es-b (all-knobs-flat, two-across pairs) + ru-d (one-sheet rules editor). EVERY knob is
+// flat and editable with NO locking (Mike declined guard rails — R11); the destructive redraw/reset live in
+// the Pools/Bracket views, not here. Text/number fields save on BLUR through tdbSetTournamentFields (the
+// focusout delegate → mgSaveSettingsField); the two booleans (win_by_2 / grand_final_reset) render as mg-sw
+// switches and save on TOGGLE (mgToggleSettingsField). Numeric parses are defensive: a blank/NaN entry
+// reverts the field + a quiet note, and leaves the column unchanged (no crash). Column names are the REAL
+// tournaments.* columns (recon map §4): name, team_size, net_count, pool_target, pool_cap, bracket_target
+// (+ match_cap kept in lockstep for NF-1 back-compat), bracket_cap, win_by_2, grand_final_reset, buy_in
+// (TEXT). net_count is the ONE field that still routes through the ATOMIC re-net (migration 0031 /
+// apply_net_count_change) when a tournament is mid pools/bracket — a plain write there would drift
+// matches.net from net_count (the closed F7/F8 bug class); this keeps that invariant with no added lock.
+function mgSettingsTournament() { return manageLeadTournament(); }
+
+function buildMgSettingsHTML() {
+  const t = mgSettingsTournament();
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">Event settings</div></div>`;
+  if (!t) return header + `<div class="pd-empty">No tournament to edit settings for yet.</div>`;
+  const numFld = (id, label, val) =>
+    `<div class="pk-fld"><label class="pk-fl" for="${id}">${label}</label>`
+    + `<input class="pk-fv" id="${id}" type="number" min="1" inputmode="numeric" value="${escapeHTMLText(val == null ? '' : String(val))}" /></div>`;
+  const swFld = (field, label, on) =>
+    `<div class="pk-fld mges-swfield"><span class="pk-fl">${escapeHTML(label)}</span>`
+    + `<button type="button" class="mg-sw${on ? ' on' : ''}" data-mges-toggle="${field}" role="switch" aria-checked="${on ? 'true' : 'false'}" aria-label="${escapeHTML(label)}"></button></div>`;
+  const bracketTo = (t.bracket_target != null ? t.bracket_target : t.match_cap);
+  const winBy2 = (t.win_by_2 == null || !!t.win_by_2); // default on (matches the create/modal contract)
+  return header
+    + `<div class="pk-fld"><label class="pk-fl" for="mges-name">Tournament name</label>`
+      + `<input class="pk-fv" id="mges-name" type="text" autocomplete="off" autocapitalize="words" value="${escapeHTMLText(t.name == null ? '' : String(t.name))}" /></div>`
+    + `<div class="mges-half">${numFld('mges-teamsize', 'Team size', t.team_size)}${numFld('mges-nets', 'Nets', t.net_count)}</div>`
+    + `<div class="mges-half">${numFld('mges-pooltarget', 'Pool to', t.pool_target)}${numFld('mges-poolcap', 'Pool cap', t.pool_cap)}</div>`
+    + `<div class="mges-half">${numFld('mges-brackettarget', 'Bracket to', bracketTo)}${numFld('mges-bracketcap', 'Bracket cap', t.bracket_cap)}</div>`
+    + `<div class="mges-half">${swFld('win_by_2', 'Win by 2', winBy2)}${swFld('grand_final_reset', 'Grand final reset', !!t.grand_final_reset)}</div>`
+    + `<div class="pk-fld"><label class="pk-fl" for="mges-buyin">Buy-in</label>`
+      + `<input class="pk-fv" id="mges-buyin" type="text" autocomplete="off" placeholder="$80 a team" value="${escapeHTMLText(t.buy_in == null ? '' : String(t.buy_in))}" /></div>`
+    + `<p class="mgr-status" id="mges-status" role="status" aria-live="polite"></p>`;
+}
+
+// The Rules sheet editor (mockup ru-d): ONE textarea prefilled from tournaments.rules (the exact markdown-
+// lite text the public Rules page renders through rulesToHTML) + a Save CTA that writes it back so players
+// see it immediately + a quiet Saved status + the grammar hint. Escape-first: the raw text is HTML-escaped
+// into the textarea so it can never inject markup (mirrors mgr-ann). Saved on the explicit CTA (data-mgru-
+// save → mgSaveRules), not on blur — the copy promises the change is live "right away" on that tap.
+function buildMgRulesHTML() {
+  const t = mgSettingsTournament();
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">Rules sheet</div></div>`;
+  if (!t) return header + `<div class="pd-empty">No tournament to edit rules for yet.</div>`;
+  const rules = (typeof t.rules === 'string') ? t.rules : '';
+  return header
+    + `<textarea class="mgru-ta" id="mgru-ta" data-mgru-initial="${escapeHTMLText(rules)}" placeholder="## Format&#10;- 4s co-ed — 1 guy + 1 girl on the court&#10;- Pool play to 15, cap 20" aria-label="Rules sheet">${escapeHTML(rules)}</textarea>`
+    + `<button type="button" class="mgr-cta" data-mgru-save>Save — players see it right away</button>`
+    + `<p class="mgr-status" id="mgru-status" role="status" aria-live="polite"></p>`
+    + `<p class="mgru-note">Same text players read on the Rules page · ## makes a heading · - makes a bullet</p>`;
+}
+
+// True when the Event settings view has an in-progress edit (a focused input in #tab-manage) the background
+// poll must not clobber. Extends the Task 5 registration dirty-guard.
+function manageSettingsDirty() {
+  const panel = document.getElementById('tab-manage');
+  if (!panel) return false;
+  const ae = document.activeElement;
+  return !!(ae && panel.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA'));
+}
+// True when the Rules editor is focused OR has unsaved changes (value differs from data-mgru-initial).
+function manageRulesDirty() {
+  const panel = document.getElementById('tab-manage');
+  if (!panel) return false;
+  const ae = document.activeElement;
+  if (ae && panel.contains(ae) && ae.tagName === 'TEXTAREA') return true;
+  const ta = document.getElementById('mgru-ta');
+  if (ta && typeof ta.value === 'string' && ta.value !== (ta.getAttribute('data-mgru-initial') || '')) return true;
+  return false;
+}
+
+// Save one Event-settings field on blur. Numeric fields parse defensively (blank/NaN → revert the input +
+// quiet note, no write); name must be non-empty; pool_cap/bracket_cap accept blank → null; buy_in is free
+// text (as-typed or null); bracket_target keeps match_cap in lockstep. net_count routes through the atomic
+// re-net during pools/bracket. Never repaints (blur already left the field).
+async function mgSaveSettingsField(id) {
+  const t = mgSettingsTournament();
+  if (!t || !state.isAdmin) return;
+  const el = document.getElementById(id);
+  if (!el) return;
+  const status = document.getElementById('mges-status');
+  const note = (msg) => { if (status) status.textContent = msg; };
+  const raw = String(el.value == null ? '' : el.value).trim();
+  // Parse a positive-integer field. Returns null (= revert + note done) on a bad entry; { fields } to write,
+  // or false when unchanged. `nullable` lets a blank clear the column.
+  const intWrite = (col, curNum, nullable) => {
+    if (raw === '') {
+      if (nullable) return (curNum == null) ? false : { [col]: null };
+      el.value = (curNum == null ? '' : String(curNum)); note('That needs to be a number — left it unchanged.'); return null;
+    }
+    const n = parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < 1) { el.value = (curNum == null ? '' : String(curNum)); note('That needs to be a number — left it unchanged.'); return null; }
+    return (n === curNum) ? false : { [col]: n };
+  };
+  try {
+    let fields = null;
+    if (id === 'mges-name') {
+      if (!raw) { el.value = String(t.name == null ? '' : t.name); note('Name is required — left it unchanged.'); return; }
+      if (raw === String(t.name == null ? '' : t.name)) return;
+      fields = { name: raw };
+    } else if (id === 'mges-buyin') {
+      const cur = t.buy_in == null ? '' : String(t.buy_in);
+      if (raw === cur) return;
+      fields = { buy_in: raw || null };
+    } else if (id === 'mges-teamsize') {
+      const w = intWrite('team_size', (t.team_size == null ? null : Number(t.team_size)), false); if (!w) return; fields = w;
+    } else if (id === 'mges-nets') {
+      const cur = Number(t.net_count);
+      const n = parseInt(raw, 10);
+      if (raw === '' || !Number.isFinite(n) || n < 1) { el.value = (Number.isFinite(cur) ? String(cur) : ''); note('Nets needs to be a number — left it unchanged.'); return; }
+      if (n === cur) return;
+      // ATOMIC re-net mid-play so matches.net can never drift from net_count (migration 0031 / F7-F8).
+      if (t.status === 'pools' || t.status === 'bracket') {
+        const freshM = await tdbListMatches(t.id);
+        await tdbApplyNetCountChange(t.id, n, computeNetAssignments(t.status, state.tournamentPools, freshM, n));
+      } else {
+        await tdbSetTournamentFields(t.id, { net_count: n });
+      }
+      await tdbRefreshTournaments(); note('Saved'); return;
+    } else if (id === 'mges-pooltarget') {
+      const w = intWrite('pool_target', (t.pool_target == null ? null : Number(t.pool_target)), false); if (!w) return; fields = w;
+    } else if (id === 'mges-poolcap') {
+      const w = intWrite('pool_cap', (t.pool_cap == null ? null : Number(t.pool_cap)), true); if (!w) return; fields = w;
+    } else if (id === 'mges-brackettarget') {
+      const cur = (t.bracket_target != null ? Number(t.bracket_target) : (t.match_cap != null ? Number(t.match_cap) : null));
+      const n = parseInt(raw, 10);
+      if (raw === '' || !Number.isFinite(n) || n < 1) { el.value = (cur == null ? '' : String(cur)); note('That needs to be a number — left it unchanged.'); return; }
+      if (n === cur) return;
+      fields = { bracket_target: n, match_cap: n }; // NF-1 back-compat: legacy readers use match_cap
+    } else if (id === 'mges-bracketcap') {
+      const w = intWrite('bracket_cap', (t.bracket_cap == null ? null : Number(t.bracket_cap)), true); if (!w) return; fields = w;
+    } else {
+      return;
+    }
+    if (!fields) return;
+    await tdbSetTournamentFields(t.id, fields);
+    await tdbRefreshTournaments();
+    note('Saved');
+  } catch (err) {
+    console.warn('mgSaveSettingsField', err);
+    note('Could not save — check the connection and try again.');
+  }
+}
+
+// Toggle a boolean setting (win_by_2 / grand_final_reset). The switch is a button (no text field focused) so
+// a repaint is safe and reflects the new state.
+async function mgToggleSettingsField(field) {
+  const t = mgSettingsTournament();
+  if (!t || !state.isAdmin || (field !== 'win_by_2' && field !== 'grand_final_reset')) return;
+  const cur = (field === 'win_by_2') ? (t.win_by_2 == null || !!t.win_by_2) : !!t.grand_final_reset;
+  try {
+    await tdbSetTournamentFields(t.id, { [field]: !cur });
+    await tdbRefreshTournaments();
+    repaintManage();
+  } catch (err) { console.warn('mgToggleSettingsField', err); }
+}
+
+// Save the Rules sheet on the explicit CTA — writes tournaments.rules so the public Rules page updates
+// immediately, resets the dirty-guard baseline, and shows the quiet Saved status. No repaint (the textarea
+// keeps focus/scroll; a repaint would rebuild it).
+async function mgSaveRules() {
+  const t = mgSettingsTournament();
+  if (!t || !state.isAdmin) return;
+  const ta = document.getElementById('mgru-ta');
+  if (!ta) return;
+  const val = String(ta.value == null ? '' : ta.value);
+  const status = document.getElementById('mgru-status');
+  try {
+    await tdbSetTournamentFields(t.id, { rules: val });
+    ta.setAttribute('data-mgru-initial', val);
+    await tdbRefreshTournaments();
+    if (status) status.textContent = 'Saved — players see it now';
+  } catch (err) {
+    console.warn('mgSaveRules', err);
+    if (status) status.textContent = 'Could not save — check the connection and try again.';
+  }
 }
 
 // ── Task 6: Teams & payment (session-10 pick R8) — the list + the body-level full-edit team sheet ─────
@@ -12524,6 +12722,8 @@ function attachHandlers() {
       if (!t || !t.id) return;
       if (t.id === 'mgr-ann') { void mgrSaveAnnouncement(t); return; }
       if (t.id === 'mgr-venmo' || t.id === 'mgr-buyin' || t.id === 'mgr-teamsize') { void mgrSaveField(t.id); return; }
+      // Task 9: every Event-settings field (mges-*) saves on blur through tdbSetTournamentFields.
+      if (t.id.indexOf('mges-') === 0) { void mgSaveSettingsField(t.id); return; }
     });
     appContent.addEventListener('click', (e) => {
       // Slice 3b: "claim your team" — signed-in → the claim page; signed-out → sign in first
@@ -12700,6 +12900,18 @@ function attachHandlers() {
             if (tp) tp.scrollTop = 0;
             return;
           }
+        }
+        // Event settings (Task 9, pick R11): the two boolean switches save on toggle; every text/number field
+        // saves on blur (the focusout delegate). Checked before the generic hub rows so a toggle never falls
+        // through; the header back button carries data-mgt-back (handled below).
+        if (mgtView === 'settings') {
+          const mgesToggle = e.target.closest('[data-mges-toggle]');
+          if (mgesToggle) { void mgToggleSettingsField(mgesToggle.getAttribute('data-mges-toggle')); return; }
+        }
+        // Rules sheet (Task 9, pick R11b): the explicit Save CTA writes tournaments.rules (players see it
+        // right away). Checked before the generic hub rows so the Save tap never falls through.
+        if (mgtView === 'rules') {
+          if (e.target.closest('[data-mgru-save]')) { void mgSaveRules(); return; }
         }
         if (e.target.closest('[data-mgt-back]')) { mgtView = null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
         const mgtRow = e.target.closest('[data-mgt-view]');

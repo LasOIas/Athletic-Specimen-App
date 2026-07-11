@@ -3294,6 +3294,18 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mg-sw.on::after { left: 21px; }
 .mgr-fnote { font-size: 12px; color: var(--muted); margin: 6px 0 2px; }
 
+/* ── Task 9 (session-10 picks R11 + R11b): Event settings all-knobs-flat + Rules one-sheet editor. Reuses
+   the pk-fld/pk-fl/pk-fv field grammar + the mg-sw switch; only the two-across wrapper, the switch-field
+   row, and the rules textarea are new. §41: the short fields stay two-across at every width (the #tab-manage
+   ≥1024 clamp caps the column at 720px). */
+.mges-half { display: flex; gap: 16px; }
+.mges-half > .pk-fld { flex: 1; min-width: 0; }
+.mges-swfield { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 2px 4px; }
+.mges-swfield .pk-fl { flex: 1; }
+.mgru-ta { display: block; width: 100%; margin-top: 6px; border: 1.5px solid var(--accent-bd); border-radius: 12px; background: var(--card); padding: 13px; font: 400 15px/1.6 'Inter', sans-serif; color: var(--ink); resize: vertical; min-height: 300px; }
+.mgru-ta:focus { outline: none; border-color: var(--accent); }
+.mgru-note { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; }
+
 /* ── Task 6 (session-10 pick R8): Teams & payment list + full-edit team sheet. Flat on stone, mg-row
    grammar; the sheet reuses the body-level .pd-reg-scrim/.pd-reg-sheet chrome (poll-clobber-immune, §41). */
 .mgtp-row { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-top: 1px solid var(--border); cursor: pointer; }
