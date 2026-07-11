@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1488,6 +1488,13 @@ function partialRender() {
         if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
         return;
       }
+    }
+    // Task 5 EXCEPTION: the Tournament → Registration view has a live announcement textarea + venmo/buy-in/
+    // team-size fields. Never clobber a half-typed announcement or field on a background sync — bail (refresh
+    // the sync notice only) when an input/textarea in #tab-manage is focused, or the announcement is dirty.
+    if (manageView === 'tournament' && mgtView === 'registration' && manageRegDirty()) {
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      return;
     }
     const panel = document.getElementById('tab-manage');
     const c = panel ? panel.querySelector('.container') : null;
@@ -9077,6 +9084,11 @@ let mgRenameGroup = null;       // the group name being inline-renamed in the gr
 let mgtSize = 4;                // the active size chip (2/3/4/6); 4s default per the mockup
 let mgtSwapKey = null;          // the playerIdentityKey being swapped (null = swap sheet closed)
 let mgtSwapFrom = null;         // the team index the swapped player currently sits on
+// Task 5 (Tournament sub-hub, pick R2 + Registration, pick R7): the open tournament sub-view under
+// manageView==='tournament'. null = the sub-hub (the 7 rows); 'registration' = the Registration view (built
+// now); 'teams'|'pools'|'bracket'|'settings'|'rules'|'closeout' render honest placeholders until Tasks 6-10
+// fill them. Survives the container-swap repaint (a background sync never resets which sub-view is open).
+let mgtView = null;
 
 const MG_CHEV = '<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
 
@@ -9266,6 +9278,7 @@ function manageContainerHTML() {
   if (manageView === 'pickup-form') return buildPickupDayFormHTML();
   if (manageView === 'players') return buildManagePlayersHTML();
   if (manageView === 'teams') return buildManageTeamsHTML();
+  if (manageView === 'tournament') return buildManageTournamentContainerHTML();
   return manageAreaPlaceholderHTML(manageView);
 }
 
@@ -9731,6 +9744,234 @@ function mgtApplySwap(toTeamIndex) {
   mgtSwapKey = null; mgtSwapFrom = null;
   if (result && result.changed) saveLocal();
   repaintManage();
+}
+
+// ── Task 5: Tournament sub-hub (session-10 pick R2) + Registration (pick R7) ─────────────────────────
+// Mockups r10-manage/t-b (sub-hub) + r-b (registration). The sub-hub reuses the mg-row grammar (extend,
+// don't duplicate) with a data-mgt-view delegate; the header + stage sub-line are the mgt-* additions. The
+// Registration view leads with an EDITABLE announcement textarea, a Copy-for-GroupMe CTA, the Registration-
+// open switch (mg-sw pill → the existing tv2-toggle-registration write path), and venmo/buy-in/team-size
+// fields (pk-fld underline grammar, save-on-blur via tdbSetTournamentFields). The lead tournament is the T1
+// resolver (manageLeadTournament); the announcement TOLERATES tournaments.announcement not existing yet.
+
+// The default GroupMe announcement composed from the tournament's real fields (buy_in optional). Used when
+// tournaments.announcement is null/undefined — INCLUDING before migration 0047 lands (the column simply
+// reads as undefined), so the Registration view always renders a sensible editable draft.
+function mgDefaultAnnouncement(t) {
+  const name = (t && t.name && String(t.name).trim()) ? String(t.name).trim() : 'The tournament';
+  const size = Number(t && t.team_size) || 4;
+  const buyIn = (t && t.buy_in != null && String(t.buy_in).trim()) ? String(t.buy_in).trim() : '';
+  const mid = buyIn ? `${buyIn}, ${size}s co-ed` : `${size}s co-ed`;
+  return `${name} — registration is open! ${mid}. Register at athletic-specimen.com`;
+}
+// The announcement to prefill: the persisted value when set (post-0047), else the composed default. Tolerant
+// of the column not existing yet (t.announcement === undefined → default; never renders the string "undefined").
+function mgAnnouncementValue(t) {
+  const a = t && t.announcement;
+  return (typeof a === 'string' && a.trim()) ? a : mgDefaultAnnouncement(t);
+}
+
+// The muted stage sub-line under the sub-hub title, by tournament status.
+const MGT_STAGE_SUBLINE = { setup: 'Setup · registration phase', pools: 'Pool play', bracket: 'Bracket', completed: 'Completed' };
+const MGT_SUB_TITLES = { registration: 'Registration', teams: 'Teams & payment', pools: 'Pools & schedule', bracket: 'Bracket & scores', settings: 'Event settings', rules: 'Rules sheet', closeout: 'Close out' };
+
+// One sub-hub row. Mirrors mgRowHTML but carries data-mgt-view (opens a tournament sub-view) instead of
+// data-mg-area. subHTML is emitted RAW — callers pre-escape any user-derived content.
+function mgtRowHTML(view, name, subHTML) {
+  return `<a class="mg-row" data-mgt-view="${view}">
+      <div class="mg-rb"><div class="mg-rn">${name}</div><div class="mg-rs">${subHTML}</div></div>
+      ${MG_CHEV}
+    </a>`;
+}
+
+// The plain sub-hub (mockup t-b): header (back-to-Manage + the active tournament name, Barlow 22 via
+// pd-htitle) + a muted stage sub-line + SEVEN status-inline rows. No cards, no inline controls at this level.
+function buildManageTournamentHTML() {
+  const t = manageLeadTournament();
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">${escapeHTML(t ? (t.name || 'Tournament') : 'Tournament')}</div></div>`;
+  if (!t) {
+    return header + `<div class="pd-empty">No tournament yet — create one from <b>Open the old admin</b> on the Manage screen. A create-tournament screen lands in a later slice.</div>`;
+  }
+  const teams = state.tournamentTeams || [];
+  const nTeams = teams.length;
+  const unpaid = teams.filter((x) => !x.paid).length;
+  const stage = MGT_STAGE_SUBLINE[t.status] || MGT_STAGE_SUBLINE.setup;
+  const regSub = t.registration_open
+    ? `<span class="mgt-on">Open</span> · ${nTeams} team${nTeams === 1 ? '' : 's'} · close it when full`
+    : 'Closed';
+  const teamsSub = `${nTeams} registered · ${unpaid ? unpaid + ' unpaid' : 'all paid'}`;
+  const poolsSub = t.status === 'setup' ? 'Not drawn yet' : (t.status === 'pools' ? 'Pool play underway' : 'Pools complete');
+  const bracketSub = t.status === 'bracket' ? 'Bracket underway' : (t.status === 'completed' ? 'Complete' : 'After pool play');
+  const size = Number(t.team_size) || 4;
+  const buyIn = (t.buy_in != null && String(t.buy_in).trim()) ? String(t.buy_in).trim() : '';
+  const settingsSub = `${size}s co-ed${buyIn ? ' · ' + escapeHTML(buyIn) : ''} · scoring targets &amp; caps`;
+  const rows = mgtRowHTML('registration', 'Registration', regSub)
+    + mgtRowHTML('teams', 'Teams &amp; payment', teamsSub)
+    + mgtRowHTML('pools', 'Pools &amp; schedule', poolsSub)
+    + mgtRowHTML('bracket', 'Bracket &amp; scores', bracketSub)
+    + mgtRowHTML('settings', 'Event settings', settingsSub)
+    + mgtRowHTML('rules', 'Rules sheet', 'Edit what players read on the Rules page')
+    + mgtRowHTML('closeout', 'Close out', 'End the tournament · crown the champion');
+  return header + `<div class="mgt-stage">${escapeHTML(stage)}</div>` + rows;
+}
+
+// The Registration view (mockup r-b): THE ANNOUNCEMENT (editable textarea prefilled from the persisted value
+// or the composed default) + Copy for GroupMe + CONTROLS (the Registration-open switch + venmo/buy-in/team-
+// size fields). The switch/copy act via the click delegate; the fields save on blur (focusout delegate).
+function buildMgRegistrationHTML() {
+  const t = manageLeadTournament();
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">Registration</div></div>`;
+  if (!t) {
+    return header + `<div class="pd-empty">No tournament to manage registration for yet.</div>`;
+  }
+  const teams = state.tournamentTeams || [];
+  const nTeams = teams.length;
+  const paid = teams.filter((x) => x.paid).length;
+  const ann = mgAnnouncementValue(t);
+  const open = !!t.registration_open;
+  const venmo = t.venmo_link == null ? '' : String(t.venmo_link);
+  const buyin = t.buy_in == null ? '' : String(t.buy_in);
+  const size = Number(t.team_size) || 4;
+  const venmoNote = /^https?:\/\//i.test(venmo)
+    ? 'Players pay on Venmo when they register'
+    : 'Venmo missing — the pay button says "coming soon"';
+  return header
+    + `<div class="pl-sect">The announcement</div>`
+    + `<textarea class="mgr-ann" id="mgr-ann" rows="4" data-mgr-initial="${escapeHTMLText(ann)}" aria-label="Registration announcement">${escapeHTML(ann)}</textarea>`
+    + `<button type="button" class="mgr-cta" data-mgr-copy>Copy for GroupMe</button>`
+    + `<p class="mgr-status" id="mgr-ann-status" role="status" aria-live="polite"></p>`
+    + `<div class="pl-sect">Controls</div>`
+    + `<div class="mgr-tog"><div class="mg-rb"><div class="mg-rn">Registration open</div>`
+      + `<div class="mg-rs">${nTeams} team${nTeams === 1 ? '' : 's'} in · ${paid} paid</div></div>`
+      + `<button type="button" class="mg-sw${open ? ' on' : ''}" data-mgr-regtoggle role="switch" aria-checked="${open ? 'true' : 'false'}" aria-label="Registration open"></button></div>`
+    + `<div class="pk-fld"><label class="pk-fl" for="mgr-venmo">Venmo link</label>`
+      + `<input class="pk-fv" id="mgr-venmo" type="text" inputmode="url" autocomplete="off" placeholder="https://venmo.com/u/yourname" value="${escapeHTMLText(venmo)}" /></div>`
+    + `<div class="mgr-fnote">${escapeHTML(venmoNote)}</div>`
+    + `<div class="pk-fld"><label class="pk-fl" for="mgr-buyin">Buy-in</label>`
+      + `<input class="pk-fv" id="mgr-buyin" type="text" autocomplete="off" placeholder="$80 per team" value="${escapeHTMLText(buyin)}" /></div>`
+    + `<div class="pk-fld"><label class="pk-fl" for="mgr-teamsize">Team size</label>`
+      + `<input class="pk-fv" id="mgr-teamsize" type="number" min="1" inputmode="numeric" value="${escapeHTMLText(String(size))}" /></div>`;
+}
+
+// A tournament sub-view placeholder (Tasks 6-10 fill these). Its back button returns to the SUB-HUB
+// (data-mgt-back), never straight to the Manage lead.
+function mgtSubPlaceholderHTML(view) {
+  const title = MGT_SUB_TITLES[view] || 'Tournament';
+  return `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">${escapeHTML(title)}</div></div>`
+    + `<div class="pd-empty">Coming in the next slices.</div>`;
+}
+
+// manageView==='tournament' dispatch: null mgtView → the sub-hub; 'registration' → the built view; any other
+// sub-view id → an honest placeholder.
+function buildManageTournamentContainerHTML() {
+  if (mgtView === 'registration') return buildMgRegistrationHTML();
+  if (mgtView) return mgtSubPlaceholderHTML(mgtView);
+  return buildManageTournamentHTML();
+}
+
+// The tournament the Registration view reads/writes (same resolver as the sub-hub header).
+function mgRegTournament() { return manageLeadTournament(); }
+
+// True when the Registration view has an in-progress edit the background poll must not clobber: a focused
+// input/textarea inside #tab-manage, or an announcement textarea whose value differs from what was last
+// rendered/saved (its data-mgr-initial). Extends the Task 2/3 dirty-guard pattern for manageView==='tournament'
+// + mgtView==='registration'.
+function manageRegDirty() {
+  const panel = document.getElementById('tab-manage');
+  if (!panel) return false;
+  const ae = document.activeElement;
+  if (ae && panel.contains(ae) && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT')) return true;
+  const ta = document.getElementById('mgr-ann');
+  if (ta && typeof ta.value === 'string' && ta.value !== (ta.getAttribute('data-mgr-initial') || '')) return true;
+  return false;
+}
+
+// Copy the CURRENT announcement textarea value to the clipboard (mutating the CTA label as the confirm
+// affordance — the house copy pattern, cf. tv2-share-registration + showCheckinToast's timed restore).
+async function mgrCopyAnnouncement(btn) {
+  const ta = document.getElementById('mgr-ann');
+  const text = ta ? String(ta.value == null ? '' : ta.value) : '';
+  try {
+    await navigator.clipboard.writeText(text);
+    if (btn) btn.textContent = 'Copied for GroupMe!';
+  } catch (_) {
+    if (btn) btn.textContent = 'Long-press the text to copy';
+  }
+  clearTimeout(mgrCopyAnnouncement._t);
+  mgrCopyAnnouncement._t = setTimeout(() => {
+    const b = document.querySelector('[data-mgr-copy]');
+    if (b) b.textContent = 'Copy for GroupMe';
+  }, 2200);
+}
+
+// Toggle registration open/closed — reuses the exact tv2-toggle-registration write (tdbSetTournamentFields +
+// tdbRefreshTournaments), then a container-swap repaint (the switch is a button; no text input is focused).
+async function mgrToggleRegistration() {
+  const t = mgRegTournament();
+  if (!t || !state.isAdmin) return;
+  try {
+    await tdbSetTournamentFields(t.id, { registration_open: !t.registration_open });
+    await tdbRefreshTournaments();
+    repaintManage();
+  } catch (err) { console.warn('mgrToggleRegistration', err); }
+}
+
+// Save the announcement on blur — writes tournaments.announcement (0047) only when it actually changed from
+// what we rendered. Tolerant of the column being absent pre-migration (the write throws → friendly status,
+// no crash). Does NOT repaint (blur already left the field; a repaint would rebuild the textarea).
+async function mgrSaveAnnouncement(ta) {
+  const t = mgRegTournament();
+  if (!t || !ta) return;
+  const val = String(ta.value == null ? '' : ta.value);
+  const status = document.getElementById('mgr-ann-status');
+  if (val === (ta.getAttribute('data-mgr-initial') || '')) return; // unchanged → no write
+  try {
+    await tdbSetTournamentFields(t.id, { announcement: val });
+    ta.setAttribute('data-mgr-initial', val);
+    await tdbRefreshTournaments();
+    if (status) status.textContent = 'Saved';
+  } catch (err) {
+    console.warn('mgrSaveAnnouncement', err);
+    if (status) status.textContent = 'Could not save — check the connection and try again.';
+  }
+}
+
+// Save a venmo/buy-in/team-size field on blur. venmo keeps the EXISTING behavior (store as-typed or null; the
+// public pay button already guards to http(s)-only at render — rf-venmo — so no stricter validation is added,
+// matching tv2-save-registration). team-size must be a positive integer or the field reverts (no write). No
+// repaint (blur already left the field; the counts/switch don't depend on these values).
+async function mgrSaveField(id) {
+  const t = mgRegTournament();
+  if (!t) return;
+  const el = document.getElementById(id);
+  if (!el) return;
+  const raw = String(el.value == null ? '' : el.value).trim();
+  let fields = null;
+  if (id === 'mgr-venmo') {
+    const cur = t.venmo_link == null ? '' : String(t.venmo_link);
+    if (raw === cur) return;
+    fields = { venmo_link: raw || null };
+  } else if (id === 'mgr-buyin') {
+    const cur = t.buy_in == null ? '' : String(t.buy_in);
+    if (raw === cur) return;
+    fields = { buy_in: raw || null };
+  } else if (id === 'mgr-teamsize') {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1) { el.value = String(Number(t.team_size) || 4); return; } // invalid → revert
+    if (n === (Number(t.team_size) || 4)) return;
+    fields = { team_size: n };
+  }
+  if (!fields) return;
+  try {
+    await tdbSetTournamentFields(t.id, fields);
+    await tdbRefreshTournaments();
+  } catch (err) { console.warn('mgrSaveField', err); }
 }
 
 // Flip to the old admin shell (temporary — the whole path dies in Task 14). Runs the exact old render
@@ -11355,6 +11596,15 @@ function attachHandlers() {
       const listEl = document.getElementById('mgp-list');
       if (listEl) listEl.innerHTML = buildMgpListHTML();
     });
+    // Task 5: the Registration view saves on blur. Delegated focusout on the stable #app-content ancestor so
+    // it survives the container-swap repaints (the fields are re-created on each swap). Each helper writes only
+    // when the value actually changed (no needless writes on a focus-through).
+    appContent.addEventListener('focusout', (e) => {
+      const t = e.target;
+      if (!t || !t.id) return;
+      if (t.id === 'mgr-ann') { void mgrSaveAnnouncement(t); return; }
+      if (t.id === 'mgr-venmo' || t.id === 'mgr-buyin' || t.id === 'mgr-teamsize') { void mgrSaveField(t.id); return; }
+    });
     appContent.addEventListener('click', (e) => {
       // Slice 3b: "claim your team" — signed-in → the claim page; signed-out → sign in first
       // (claimIntent re-opens the claim page automatically once SIGNED_IN lands).
@@ -11470,6 +11720,18 @@ function attachHandlers() {
         const swapName = e.target.closest('[data-mgt-swap]');
         if (swapName) { mgtSwapKey = swapName.getAttribute('data-mgt-swap') || null; mgtSwapFrom = Number(swapName.getAttribute('data-mgt-from')); repaintManage(); return; }
       }
+      // Tournament sub-hub (Task 5, pick R2) + Registration view (pick R7). data-mgt-view opens a sub-view
+      // from the hub; data-mgt-back returns to the hub; the reg switch (data-mgr-regtoggle) + Copy CTA
+      // (data-mgr-copy) act inline. All container-swap repaints (mgtView survives). Checked BEFORE the generic
+      // data-mg-area so these never fall through to nav; the hub's own back carries data-mg-area="lead".
+      if (manageView === 'tournament') {
+        if (e.target.closest('[data-mgt-back]')) { mgtView = null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
+        const mgtRow = e.target.closest('[data-mgt-view]');
+        if (mgtRow) { mgtView = mgtRow.getAttribute('data-mgt-view') || null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
+        if (e.target.closest('[data-mgr-regtoggle]')) { void mgrToggleRegistration(); return; }
+        const copyBtn = e.target.closest('[data-mgr-copy]');
+        if (copyBtn) { void mgrCopyAnnouncement(copyBtn); return; }
+      }
       // Manage tab (session-10 R1): flat-row navigation is a container-swap partial repaint (module var
       // manageView survives; NO full render()). data-mg-area="lead" returns to the lead; an area id opens its
       // (placeholder this slice) page. data-mg-old is the TEMPORARY escape hatch into the old admin shell.
@@ -11482,6 +11744,8 @@ function attachHandlers() {
         }
         // Entering the Teams page fresh: 4s default + no open swap sheet.
         if (nextArea === 'teams' && manageView !== 'teams') { mgtSize = 4; mgtSwapKey = null; mgtSwapFrom = null; }
+        // Entering the Tournament area fresh: land on the sub-hub (not a stale sub-view).
+        if (nextArea === 'tournament' && manageView !== 'tournament') { mgtView = null; }
         manageView = nextArea;
         const c = document.querySelector('#tab-manage .container');
         if (c) c.innerHTML = manageContainerHTML();

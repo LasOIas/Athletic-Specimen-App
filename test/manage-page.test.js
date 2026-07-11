@@ -84,6 +84,11 @@ function loadApp() {
         mgtSwapFrom = (opts.swapFrom == null ? null : opts.swapFrom);
         return buildManageTeamsHTML();
       },
+      buildTournament: () => { manageView = 'tournament'; mgtView = null; return buildManageTournamentHTML(); },
+      buildReg: () => { manageView = 'tournament'; mgtView = 'registration'; return buildMgRegistrationHTML(); },
+      mgtContainer: (view) => { manageView = 'tournament'; mgtView = (view === undefined ? null : view); return manageContainerHTML(); },
+      defaultAnnouncement: (t) => mgDefaultAnnouncement(t),
+      annValue: (t) => mgAnnouncementValue(t),
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -598,5 +603,141 @@ describe('buildManageTeamsHTML — the Teams page (mockup k-h1, R5 trimmed)', ()
     expect(html).not.toContain('data-mgt-to="0"');        // never the team the player is already on
     expect(html).toContain('Mikey Olas');                 // names the player being moved
     expect(html).toContain('data-mgt-cancel');            // a way out
+  });
+});
+
+// ── Task 5: Tournament sub-hub (pick R2) + Registration (pick R7) ─────────────
+// Mockups r10-manage/t-b (sub-hub) + r-b (registration). The sub-hub reuses the mg-row grammar with a
+// data-mgt-view delegate; the Registration view leads with an EDITABLE announcement textarea (prefilled
+// from tournaments.announcement OR a composed default that TOLERATES the column not existing yet), a Copy
+// for GroupMe CTA, the Registration-open switch, and venmo/buy-in/team-size fields. The lead tournament is
+// resolved by the reused T1 resolver (manageLeadTournament = publicLiveTournament || setup+reg-open).
+function setTournamentState(t, extra = {}) {
+  const st = bridge.getState();
+  Object.assign(st, {
+    tournaments: [t],
+    activeTournamentId: t ? t.id : null,
+    tournamentTeams: [
+      { id: 't1', name: 'Sets & Reps', paid: false },
+      { id: 't2', name: 'Dig It', paid: false },
+      { id: 't3', name: 'Paid Squad', paid: true },
+    ],
+    players: [], checkedIn: [], currentSession: null, pickupDays: undefined,
+    isAdmin: true,
+    ...extra,
+  });
+}
+const setupOpen = { id: 'T', name: 'July 2026', status: 'setup', registration_open: true, venmo_link: '', buy_in: '$80', team_size: 4 };
+
+describe('buildManageTournamentHTML — the tournament sub-hub (pick R2, mockup t-b)', () => {
+  it('renders the tournament name header, the stage sub-line, and all seven rows', () => {
+    setTournamentState(setupOpen);
+    const html = bridge.buildTournament();
+    expect(html).toContain('class="pd-htitle">July 2026<');
+    expect(html).toContain('class="mgt-stage">Setup · registration phase<');
+    ['registration', 'teams', 'pools', 'bracket', 'settings', 'rules', 'closeout'].forEach((v) =>
+      expect(count(html, `data-mgt-view="${v}"`)).toBe(1));
+    expect(html).toContain('data-mg-area="lead"');   // back to the Manage lead
+    expect(html).not.toContain('pd-card');
+  });
+
+  it('shows the green Open word + team count on the Registration row when open', () => {
+    setTournamentState(setupOpen);
+    const html = bridge.buildTournament();
+    expect(html).toContain('class="mgt-on">Open<');
+    expect(html).toContain('3 teams · close it when full');
+  });
+
+  it('shows Closed (no green word) on the Registration row when registration is closed', () => {
+    // a pools-stage tournament with registration closed → resolved by publicLiveTournament
+    setTournamentState({ id: 'T', name: 'July 2026', status: 'pools', registration_open: false });
+    const html = bridge.buildTournament();
+    expect(html).not.toContain('class="mgt-on"');
+    expect(html).toContain('>Closed<');
+    expect(html).toContain('class="mgt-stage">Pool play<'); // stage sub-line follows status
+  });
+
+  it('teams-and-payment + stage-honest subs read from state', () => {
+    setTournamentState(setupOpen);
+    const html = bridge.buildTournament();
+    expect(html).toContain('3 registered · 2 unpaid');
+    expect(html).toContain('Not drawn yet');   // pools sub in setup
+    expect(html).toContain('After pool play'); // bracket sub before pools
+    expect(html).toContain('4s co-ed · $80');  // settings one-liner from real fields
+    expect(html).toContain('Edit what players read on the Rules page');
+    expect(html).toContain('End the tournament · crown the champion');
+  });
+
+  it('honest empty state when there is no tournament to manage', () => {
+    setTournamentState(null, { tournaments: [], activeTournamentId: null });
+    const html = bridge.buildTournament();
+    expect(html).toContain('No tournament yet');
+  });
+
+  it('the container dispatch shows the hub for null mgtView and a placeholder for the unbuilt sub-views', () => {
+    setTournamentState(setupOpen);
+    expect(bridge.mgtContainer()).toContain('data-mgt-view="registration"'); // hub
+    const teamsView = bridge.mgtContainer('teams');
+    expect(teamsView).toContain('Coming in the next slices.');
+    expect(teamsView).toContain('data-mgt-back'); // placeholder returns to the hub, not the lead
+  });
+});
+
+describe('buildMgRegistrationHTML — the Registration view (pick R7, mockup r-b)', () => {
+  it('prefills the announcement textarea with the composed default when announcement is null', () => {
+    setTournamentState(setupOpen); // announcement absent
+    const html = bridge.buildReg();
+    expect(html).toContain('id="mgr-ann"');
+    expect(html).toContain('July 2026 — registration is open! $80, 4s co-ed. Register at athletic-specimen.com');
+    expect(html).toContain('data-mgt-back');   // back returns to the sub-hub
+    expect(html).not.toContain('pd-card');
+  });
+
+  it('prefers a persisted announcement over the default and tolerates the column being absent', () => {
+    expect(bridge.annValue({ name: 'X', team_size: 4, announcement: 'Come play!' })).toBe('Come play!');
+    // pre-migration: announcement === undefined → composed default (never a crash / never "undefined")
+    const pre = bridge.annValue({ name: 'X', team_size: 4 });
+    expect(pre).toContain('registration is open!');
+    expect(pre).not.toContain('undefined');
+  });
+
+  it('composes the default gracefully when buy_in is missing', () => {
+    expect(bridge.defaultAnnouncement({ name: 'July 2026', team_size: 4 }))
+      .toBe('July 2026 — registration is open! 4s co-ed. Register at athletic-specimen.com');
+    // with buy-in present it is folded in
+    expect(bridge.defaultAnnouncement({ name: 'July 2026', team_size: 3, buy_in: '$60' }))
+      .toBe('July 2026 — registration is open! $60, 3s co-ed. Register at athletic-specimen.com');
+  });
+
+  it('renders the Copy for GroupMe CTA', () => {
+    setTournamentState(setupOpen);
+    expect(bridge.buildReg()).toContain('data-mgr-copy');
+    expect(bridge.buildReg()).toContain('Copy for GroupMe');
+  });
+
+  it('the switch reflects registration_open (on) / closed (off) and toggles the reg write path', () => {
+    setTournamentState(setupOpen);
+    const on = bridge.buildReg();
+    expect(on).toContain('class="mg-sw on"');
+    expect(on).toContain('data-mgr-regtoggle');
+    setTournamentState({ id: 'T', name: 'July 2026', status: 'pools', registration_open: false });
+    const off = bridge.buildReg();
+    expect(off).toContain('data-mgr-regtoggle');
+    expect(off).not.toContain('mg-sw on');
+  });
+
+  it('renders the venmo/buy-in/team-size fields with the values prefilled', () => {
+    setTournamentState({ id: 'T', name: 'July 2026', status: 'setup', registration_open: true, venmo_link: 'https://venmo.com/u/mike', buy_in: '$80', team_size: 4 });
+    const html = bridge.buildReg();
+    expect(html).toContain('id="mgr-venmo"');
+    expect(html).toContain('value="https://venmo.com/u/mike"');
+    expect(html).toContain('id="mgr-buyin"');
+    expect(html).toContain('value="$80"');
+    expect(html).toContain('id="mgr-teamsize"');
+  });
+
+  it('honestly flags a missing Venmo link (pay button says coming soon)', () => {
+    setTournamentState(setupOpen); // venmo_link ''
+    expect(bridge.buildReg()).toContain('coming soon');
   });
 });

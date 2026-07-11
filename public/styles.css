@@ -3274,6 +3274,25 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgt-to-r { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mgt-cancel { display: block; width: 100%; margin-top: 8px; padding: 10px; border: none; background: none; color: var(--muted); font: 600 13px 'Inter', sans-serif; cursor: pointer; }
 
+/* ── Manage → Tournament (Task 5, pick R2 sub-hub + pick R7 Registration) — r10-manage t-b + r-b mockups.
+   The sub-hub REUSES the mg-row grammar; the mgt-stage line + mgt-on green word are the additions. The
+   Registration view adds the mgr-* announcement box, the mg-sw 44×26 switch, and reuses pk-fld/pk-fl/pk-fv
+   underline fields for venmo/buy-in/team size. Flat on stone, §51 matte (soft shadow, no glow). ── */
+.mgt-stage { font-size: 12.5px; color: var(--muted); margin: -2px 0 6px 41px; }
+.mgt-stage + .mg-row { border-top: none; }
+.mgt-on { color: var(--live-ink); font-weight: 600; }
+.mgr-ann { display: block; width: 100%; margin-top: 6px; border: 1.5px solid var(--accent-bd); border-radius: 12px; background: var(--card); padding: 13px; font: 400 16px/1.5 'Inter', sans-serif; color: var(--ink); resize: vertical; min-height: 96px; }
+.mgr-ann:focus { outline: none; border-color: var(--accent); }
+.mgr-cta { display: block; width: 100%; margin-top: 10px; padding: 14px; border: none; border-radius: 11px; background: var(--accent); color: #fff; font: 700 15px 'Inter', sans-serif; text-align: center; cursor: pointer; }
+.mgr-status { font-size: 12.5px; color: var(--live-ink); text-align: center; margin-top: 6px; min-height: 1em; }
+.mgr-tog { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-top: 1px solid var(--border); }
+.pl-sect + .mgr-tog { border-top: none; }
+.mg-sw { flex: none; width: 44px; height: 26px; border-radius: 999px; background: var(--border-2); position: relative; border: none; padding: 0; cursor: pointer; transition: background .15s ease; }
+.mg-sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px oklch(0.18 0.005 75 / .22); transition: left .15s ease; }
+.mg-sw.on { background: var(--live); }
+.mg-sw.on::after { left: 21px; }
+.mgr-fnote { font-size: 12px; color: var(--muted); margin: 6px 0 2px; }
+
 .pl-colh { display: flex; align-items: center; gap: 10px; padding: 0 2px 5px; font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--faint); }
 .pl-srow { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-top: 1px solid var(--border); }
 .pl-colh + .pl-srow { border-top: none; }
