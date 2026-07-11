@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.18'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.19'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -5217,7 +5217,7 @@ let rulesReturnView = 'hub'; // 'hub' | 'register'
 // SURVIVES a background partialRenderTournament — the success page has no inputs, so tournamentTabIsDirty()
 // is false and a 15s sync would otherwise rebuild an empty form over it. Reset to null on any hub/sub-page nav.
 let regSubmittedTeam = null;
-let pdPoolFilter = 'all'; // Pools & schedule page client-side filter: 'all' | a pool label — survives partialRender
+let pdPoolFilter = 'all'; // Pools & schedule tab: 'seeding' | a pool label | 'all'/stale -> resolves to first pool — survives partialRender
 
 // Atom-up redesign (spec 2026-07-10 §1): the signed-out gate. The Tournament page is PERSONAL, so a
 // signed-out user gets ONLY this — a centered logo, "This page is yours", the personal-page line, a
@@ -5847,6 +5847,10 @@ function pdOrdinal(n) {
 }
 
 function buildPoolsSchedulePageHTML() {
+  // Rebuilt to Mike's session-9 "H" pick (atom-up 2026-07-10): POOL + SEEDING tabs -> standings-lite
+  // (# / Team / W-L / Diff) -> per-net hairline games. §51 matte, Barlow display, single --accent, flat on
+  // stone (NO frosted pd-card). pdPoolFilter is 'A'|'B'|...|'seeding' (a stale/'all' value -> first pool).
+  const EN = '–'; // en dash — record / score / net-range separator
   const list = state.tournaments || [];
   const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
   const show = active || list[0] || null;
@@ -5857,57 +5861,63 @@ function buildPoolsSchedulePageHTML() {
       <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
       <div class="ph-titles"><span class="pd-eyebrow">${escapeHTML(show ? (show.name || 'Tournament') : 'Tournament')}</span><div class="pd-htitle">Pools &amp; schedule</div></div>
     </div>`;
-  if (!show || !pools.length || !matches.length) {
-    return `${header}<div class="pd-empty">The schedule appears here once pool play is drawn.</div>`;
-  }
 
-  // Only pools that actually have games show a chip / section (a drawn-but-unscheduled pool is skipped).
+  // Only pools that actually have scheduled games become a tab (a drawn-but-unscheduled pool is skipped).
   const activePools = pools.filter((p) => matches.some((m) => m.pool_id === p.id));
-  const selected = (pdPoolFilter !== 'all' && activePools.some((p) => (p.label || '') === pdPoolFilter)) ? pdPoolFilter : 'all';
-  const chip = (label, val) => `<button type="button" class="pd-pool-chip${selected === val ? ' pd-on' : ''}" data-pd-pool="${escapeHTML(val)}"${selected === val ? ' aria-current="true"' : ''}>${escapeHTML(label)}</button>`;
-  const chips = activePools.length > 1
-    ? `<div class="pd-pool-chips" role="group" aria-label="Filter by pool">${chip('All', 'all')}${activePools.map((p) => chip('Pool ' + (p.label || ''), p.label || '')).join('')}</div>`
-    : '';
-
-  const shownPools = activePools.filter((p) => selected === 'all' || (p.label || '') === selected);
-
-  // "Now playing" cluster — one card per genuinely live game (status 'live'), across the shown pools, in net
-  // order. Hidden entirely when nothing is live (the between-rounds treatment for this page is the net cards).
-  const shownPoolIds = new Set(shownPools.map((p) => p.id));
-  const liveGames = matches
-    .filter((m) => m.status === 'live' && m.net && m.team_a_id && m.team_b_id && shownPoolIds.has(m.pool_id))
-    .sort((a, b) => (a.net || 0) - (b.net || 0));
-  let nowPlaying = '';
-  if (liveGames.length) {
-    const liveNets = [...new Set(liveGames.map((m) => m.net))].sort((a, b) => a - b);
-    const cards = liveGames.map((m) => {
-      const a = teamNameById(teams, m.team_a_id), b = teamNameById(teams, m.team_b_id);
-      const sa = Number(m.score_a) || 0, sb = Number(m.score_b) || 0;
-      const aLead = sa > sb ? ' pd-pool-lead' : '', bLead = sb > sa ? ' pd-pool-lead' : '';
-      return `<div class="pd-pool-live">
-        <div><div class="pd-pool-lcnet">Net ${escapeHTML(String(m.net))}</div>
-          <div class="pd-pool-lcm"><span class="tapname${aLead}" data-team-peek="${escapeHTML(m.team_a_id)}">${escapeHTML(a)}</span> <span class="pd-pool-vs">vs</span> <span class="tapname${bLead}" data-team-peek="${escapeHTML(m.team_b_id)}">${escapeHTML(b)}</span></div></div>
-        <div class="pd-pool-lcr"><div class="pd-pool-lcsc">${sa}&ndash;${sb}</div><div class="pd-pool-lctag">LIVE</div></div>
-      </div>`;
-    }).join('');
-    nowPlaying = `<section class="pd-card">
-      <div class="pd-pool-sechd"><span class="pd-pool-dot"></span><span class="pd-pool-sect">Now playing</span><span class="pd-pool-secsub">Net${liveNets.length > 1 ? 's' : ''} ${escapeHTML(formatNetList(liveNets))}</span></div>
-      ${cards}
-    </section>`;
+  if (!show || !activePools.length || !matches.length) {
+    return `${header}<div class="pl-empty">The schedule appears here once pool play is drawn.</div>`;
   }
 
-  // Per-net cards grouped under slim pool section labels ("POOL A · NETS 1–3").
-  const sections = shownPools.map((pool) => {
+  // Tab selection: 'seeding', else a real pool label, else the first pool (default). Survives partialRender.
+  const poolLabels = activePools.map((p) => p.label || '');
+  const selected = pdPoolFilter === 'seeding'
+    ? 'seeding'
+    : (poolLabels.includes(pdPoolFilter) ? pdPoolFilter : poolLabels[0]);
+
+  const tab = (label, val) => `<button type="button" class="pl-tab${selected === val ? ' pl-on' : ''}" data-pl-tab="${escapeHTML(val)}"${selected === val ? ' aria-current="true"' : ''}>${escapeHTML(label)}</button>`;
+  const tabs = `<div class="pl-tabs" role="group" aria-label="Pools and seeding">${activePools.map((p) => tab('Pool ' + (p.label || ''), p.label || '')).join('')}${tab('Seeding', 'seeding')}</div>`;
+
+  // Round meta: total rounds = max queue_order across pool games; current round = highest round with any
+  // final + 1 (capped at total). "done of total" counts pool-phase games that have both teams (byes excluded).
+  const poolGames = matches.filter((m) => m.pool_id && m.team_a_id && m.team_b_id && (m.phase ? m.phase === 'pool' : true));
+  const total = poolGames.length;
+  const done = poolGames.filter((m) => m.status === 'final').length;
+  const maxRound = Math.max(1, ...poolGames.map((m) => m.queue_order || 0));
+  const finalOrders = poolGames.filter((m) => m.status === 'final').map((m) => m.queue_order || 0);
+  const curRound = Math.min(maxRound, (finalOrders.length ? Math.max(...finalOrders) : 0) + 1);
+  const meta = `<p class="pl-meta">Round ${curRound} of ${maxRound} · ${done} of ${total} game${total === 1 ? '' : 's'} final</p>`;
+
+  const myTeam = myTeamInfo();
+  const myTeamId = myTeam ? myTeam.teamId : null;
+  const youTag = '<span class="pl-youtag">You</span>';
+  const colh = `<div class="pl-colh"><span class="c1">#</span><span class="c2">Team</span><span class="c3">W${EN}L</span><span class="c4">Diff</span></div>`;
+  // One standings-lite row (# / Team / W-L / Diff). `badge` prefixes the team cell (pool chip on Seeding).
+  const srow = (rank, teamId, name, wins, losses, diff, badge) => {
+    const mine = myTeamId && teamId === myTeamId;
+    const diffCls = diff > 0 ? 'c4' : 'c4 n';
+    const diffTxt = (diff > 0 ? '+' : '') + diff;
+    return `<div class="pl-srow${mine ? ' pl-you' : ''}"><span class="c1">${escapeHTML(String(rank))}</span><span class="c2">${badge || ''}${escapeHTML(name)}${mine ? youTag : ''}</span><span class="c3">${escapeHTML(String(wins))}${EN}${escapeHTML(String(losses))}</span><span class="${diffCls}">${escapeHTML(diffTxt)}</span></div>`;
+  };
+
+  let body;
+  if (selected === 'seeding') {
+    const poolByTeam = {};
+    teams.forEach((t) => { const p = pools.find((pp) => pp.id === t.pool_id); if (p) poolByTeam[t.id] = p.label || ''; });
+    const seeds = computeSeeding(teams, matches);
+    const rows = seeds.map((r) => {
+      const badge = poolByTeam[r.teamId] ? `<span class="pl-pl">${escapeHTML(poolByTeam[r.teamId])}</span> ` : '';
+      return srow(r.seed, r.teamId, r.name, r.wins, r.losses, r.pointDiff, badge);
+    }).join('');
+    body = `<div class="pl-sect">Overall seeding</div>${colh}${rows}<p class="pl-foot">Seeded by win %, then point diff — this sets the bracket order.</p>`;
+  } else {
+    const pool = activePools.find((p) => (p.label || '') === selected) || activePools[0];
+    const shaped = shapeStandingsByPool(pools, teams, matches).find((s) => s.poolLabel === (pool.label || ''));
+    const standRows = (shaped ? shaped.rows : []).map((r) => srow(r.rank, r.teamId, r.name, r.wins, r.losses, r.pointDiff, '')).join('');
     const poolMatches = matches.filter((m) => m.pool_id === pool.id);
     const nets = [...new Set(poolMatches.map((m) => m.net).filter((n) => n != null))].sort((a, b) => a - b);
     const netsLabel = nets.length ? ('Net' + (nets.length > 1 ? 's' : '') + ' ' + formatNetList(nets)) : '';
-    const label = `<div class="pd-pool-label">Pool ${escapeHTML(pool.label || '')}${netsLabel ? ' · ' + escapeHTML(netsLabel) : ''}</div>`;
-    const cards = nets.map((net) => {
+    const gsections = nets.map((net) => {
       const games = poolMatches.filter((m) => m.net === net).sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
-      const finalCount = games.filter((g) => g.status === 'final').length;
-      const liveCount = games.filter((g) => g.status === 'live').length;
-      const metaBits = [liveCount ? (liveCount + ' live') : '', finalCount ? (finalCount + ' final') : ''].filter(Boolean).join(' · ')
-        || (games.length + (games.length === 1 ? ' game' : ' games'));
       const rows = games.map((g, i) => {
         const order = g.queue_order || (i + 1);
         const aId = g.team_a_id, bId = g.team_b_id;
@@ -5915,45 +5925,25 @@ function buildPoolsSchedulePageHTML() {
         const bN = escapeHTML(teamNameById(teams, bId));
         const aTap = aId ? `<span class="tapname" data-team-peek="${escapeHTML(aId)}">${aN}</span>` : aN;
         const bTap = bId ? `<span class="tapname" data-team-peek="${escapeHTML(bId)}">${bN}</span>` : bN;
-        const kick = `<div class="pd-pool-gnet">Round ${order}</div>`;
         if (g.status === 'final') {
           const aWin = g.winner_team_id === aId;
           const w = aWin ? aTap : bTap, l = aWin ? bTap : aTap;
-          // Score pair follows the displayed winner-first name order (§27 TRUE), not the stored a–b order.
+          // Score pair follows the displayed winner-first name order (§27 TRUE), not the stored a-b order.
           const ws = aWin ? g.score_a : g.score_b, ls = aWin ? g.score_b : g.score_a;
-          return `<div class="pd-pool-game${i === 0 ? ' pd-pool-first' : ''}">
-            <div class="pd-pool-gi">${kick}<div class="pd-pool-gt"><b>${w}</b> def. <span class="pd-pool-glose">${l}</span></div></div>
-            <div class="pd-pool-gr"><span class="pd-pool-gsc">${escapeHTML(String(ws))}&ndash;${escapeHTML(String(ls))}</span><span class="pd-pool-finaltag">FINAL</span></div>
-          </div>`;
+          return `<div class="pl-g"><span class="rd">R${escapeHTML(String(order))}</span><span class="gt"><b>${w}</b> <span class="def">def.</span> <span class="lose">${l}</span></span><span class="sc">${escapeHTML(String(ws))}${EN}${escapeHTML(String(ls))}</span><span class="ftag">FINAL</span></div>`;
         }
         if (g.status === 'live') {
           const sa = Number(g.score_a) || 0, sb = Number(g.score_b) || 0;
-          return `<div class="pd-pool-game pd-pool-islive${i === 0 ? ' pd-pool-first' : ''}">
-            <div class="pd-pool-gi">${kick}<div class="pd-pool-gt">${aTap} <span class="pd-pool-vs">vs</span> ${bTap}</div></div>
-            <div class="pd-pool-gr"><span class="pd-pool-gsc pd-pool-sclive">${sa}&ndash;${sb}</span><span class="pd-pool-livetag">LIVE</span></div>
-          </div>`;
+          return `<div class="pl-g live"><span class="rd">R${escapeHTML(String(order))}</span><span class="gt">${aTap} <span class="vs">vs</span> ${bTap}</span><span class="sc">${sa}${EN}${sb}</span><span class="pill">LIVE</span></div>`;
         }
-        return `<div class="pd-pool-game${i === 0 ? ' pd-pool-first' : ''}">
-          <div class="pd-pool-gi">${kick}<div class="pd-pool-gt">${aTap} <span class="pd-pool-vs">vs</span> ${bTap}</div></div>
-        </div>`;
+        return `<div class="pl-g"><span class="rd">R${escapeHTML(String(order))}</span><span class="gt up">${aTap} <span class="vs">vs</span> ${bTap}</span><span class="ftag">UP NEXT</span></div>`;
       }).join('');
-      return `<section class="pd-card">
-        <div class="pd-pool-nethd"><span class="pd-pool-court">${escapeHTML(String(net))}</span><span class="pd-pool-netnm">Net ${escapeHTML(String(net))}</span><span class="pd-pool-netmeta${liveCount ? ' has-live' : ''}">${escapeHTML(metaBits)}</span></div>
-        ${rows || '<p class="small" style="color:var(--muted);margin:0;">No games scheduled.</p>'}
-      </section>`;
+      return `<div class="pl-net">NET ${escapeHTML(String(net))}</div>${rows}`;
     }).join('');
-    // Slice 5 (§13.8) structural hook: each pool's [label + stacked net cards] wraps in a .pd-pool-col so the
-    // desktop grid can put Pool A | B | C side-by-side. MOBILE-INERT: .pd-pool-col is display:contents below
-    // 1024px (styles.css), so this div generates no box and the label+cards render exactly as before.
-    return `<div class="pd-pool-col">${label}${cards}</div>`;
-  }).join('');
+    body = `<div class="pl-sect">Pool ${escapeHTML(pool.label || '')} standings</div>${colh}${standRows}<div class="pl-sect">Games${netsLabel ? ' · ' + escapeHTML(netsLabel) : ''}</div>${gsections}`;
+  }
 
-  const rules = show ? scoringRulesFor('pool', show) : null;
-  const ruleText = rules ? ('games to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ', cap ' + rules.cap : '')) : '';
-  const foot = `<div class="pd-foot">Read-only view · scores refresh live${ruleText ? ' · ' + escapeHTML(ruleText) : ''}</div>`;
-  // Slice 5 (§13.8): .pd-pool-cols is the desktop grid parent (Pool A | B | C side-by-side); mobile-inert
-  // (display:contents < 1024px) so the pool columns render as a single flat stack exactly as before.
-  return `${header}${chips}${nowPlaying}<div class="pd-pool-cols">${sections}</div>${foot}`;
+  return `${header}${meta}${tabs}${body}`;
 }
 
 // Slice 1 (spec §13.2): the tap-a-team peek — a read-only, account-free popover anchored below the tapped
@@ -10883,11 +10873,12 @@ function attachHandlers() {
       // falls through to navigation. (The peek's own X is bound in openTeamPeek — it lives on document.body.)
       const peekBtn = e.target.closest('[data-team-peek]');
       if (peekBtn) { openTeamPeek(peekBtn.getAttribute('data-team-peek'), peekBtn); return; }
-      // Slice 1 (spec §13.1): Pools & schedule pool filter chips — client-side, module var survives partialRender.
-      const poolChip = e.target.closest('[data-pd-pool]');
-      if (poolChip && !state.isAdmin) {
+      // Pools & schedule tab strip (Mike H): POOL + SEEDING tabs — client-side, pdPoolFilter survives
+      // partialRender. Container-swap partial repaint only (never a full render() from a tab tap).
+      const plTab = e.target.closest('[data-pl-tab]');
+      if (plTab && !state.isAdmin) {
         dismissTeamPeek();
-        pdPoolFilter = poolChip.getAttribute('data-pd-pool') || 'all';
+        pdPoolFilter = plTab.getAttribute('data-pl-tab') || '';
         const c = document.querySelector('#tab-tournament .container');
         if (c) c.innerHTML = buildPublicTournamentRootHTML();
         return;

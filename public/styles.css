@@ -2946,7 +2946,7 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .pd-pagehdr { display: flex; align-items: center; gap: 11px; margin-bottom: 10px; }
 .pd-back { width: 30px; height: 30px; min-height: 0; padding: 0; border-radius: 9px; background: var(--card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--muted); flex: none; }
 .pd-back svg { width: 16px; height: 16px; flex-shrink: 0; }
-.pd-htitle { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 16px; color: var(--ink); }
+.pd-htitle { font: 700 22px/1.05 var(--font-display); color: var(--ink); }
 .pd-empty { padding: 40px 16px; text-align: center; color: var(--muted); font-size: 13px; }
 
 /* -- tile grid (Home) -- */
@@ -3169,54 +3169,55 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
    a1-final mockup onto the app kit; reuses the existing :root tokens + frosted .pd-card (§51 matte only). ── */
 .ph-titles { display: flex; flex-direction: column; gap: 3px; }
 
-/* pool filter chips */
-.pd-pool-chips { display: flex; gap: 7px; margin-bottom: 15px; }
-.pd-pool-chip { flex: 1; padding: 8px 4px; text-align: center; font-size: 12.5px; font-weight: 700; border-radius: 999px; background: oklch(0.98 0.004 75 / 0.55); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); border: 1.5px solid var(--border-2); color: var(--muted); cursor: pointer; font-family: inherit; }
-.pd-pool-chip.pd-on { background: var(--accent); border-color: var(--accent); color: #fff; }
+/* ── Pools & schedule tabs (Mike H, 2026-07-10 atom-up): POOL + SEEDING tabs -> standings-lite ──
+   (# / Team / W-L / Diff) -> per-net hairline games. §51 matte, Barlow display, single --accent,
+   flat on stone (NO frosted pd-card). Supersedes the pd-pool-* kit. */
+.pl-meta { font-size: 12px; color: var(--muted); margin: 0 0 13px; }
 
-/* Now playing section head */
-.pd-pool-sechd { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
-.pd-pool-sect { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 14px; letter-spacing: .02em; color: var(--ink); }
-.pd-pool-secsub { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--muted); }
-.pd-pool-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 3px var(--live-soft); flex: none; }
+.pl-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.pl-tab { flex: 1; padding: 9px 6px; text-align: center; font: 700 12.5px var(--font-display); letter-spacing: .04em; text-transform: uppercase; border-radius: 11px; border: 1.5px solid var(--accent-bd); color: var(--accent); background: oklch(0.985 0.003 75 / 0.6); cursor: pointer; }
+.pl-tab.pl-on { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-/* Now playing live score cards */
-.pd-pool-live { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; background: var(--live-soft); border: 1px solid oklch(0.85 0.05 150); border-radius: var(--r-md); padding: 10px 11px; margin-top: 8px; }
-.pd-pool-live:first-of-type { margin-top: 0; }
-.pd-pool-lcnet { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--live-ink); margin-bottom: 4px; }
-.pd-pool-lcnet::before { content: ""; width: 5px; height: 5px; border-radius: 2px; background: var(--live); display: inline-block; }
-.pd-pool-lcm { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px; font-size: 14px; font-weight: 700; color: var(--ink); line-height: 1.25; }
-.pd-pool-vs { font-size: 11px; font-weight: 600; color: var(--faint); }
-.pd-pool-lead { color: var(--live-ink); }
-.pd-pool-lcr { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
-.pd-pool-lcsc { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 21px; letter-spacing: -.5px; color: var(--live-ink); line-height: 1; }
-.pd-pool-lctag { font-size: 8.5px; font-weight: 800; letter-spacing: .5px; color: #fff; background: var(--live); border-radius: 999px; padding: 2px 7px; }
+.pl-sect { display: flex; align-items: center; gap: 10px; margin: 20px 0 10px; font: 700 13px var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
+.pl-sect::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
-/* slim pool section label */
-.pd-pool-label { display: flex; align-items: center; gap: 9px; margin: 2px 2px 10px; font-family: 'Sora','Inter',sans-serif; font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-.pd-pool-label::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.pl-colh { display: flex; align-items: center; gap: 10px; padding: 0 2px 5px; font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--faint); }
+.pl-srow { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-top: 1px solid var(--border); }
+.pl-colh + .pl-srow { border-top: none; }
+.pl-colh .c1, .pl-srow .c1 { width: 26px; flex: none; text-align: center; }
+.pl-colh .c2, .pl-srow .c2 { flex: 1; min-width: 0; }
+.pl-colh .c3, .pl-srow .c3 { width: 38px; flex: none; text-align: right; }
+.pl-colh .c4, .pl-srow .c4 { width: 40px; flex: none; text-align: right; }
+.pl-srow .c1 { font: 800 12.5px var(--font-display); color: var(--muted); }
+.pl-srow .c2 { font-size: 14px; font-weight: 600; color: var(--ink); }
+.pl-srow .c3 { font: 700 12.5px var(--font-display); color: var(--muted); }
+.pl-srow .c4 { font: 700 12.5px var(--font-display); color: var(--live-ink); }
+.pl-srow .c4.n { color: var(--muted); }
+.pl-srow.pl-you { background: var(--accent-soft); border-top-color: transparent; border-radius: 9px; margin: 2px 0; padding: 9px 8px; }
+.pl-srow.pl-you .c1 { color: var(--accent); }
+.pl-srow.pl-you .c2 { color: var(--accent); font-weight: 700; }
+.pl-youtag { font-size: 9px; font-weight: 700; color: #fff; background: var(--accent); border-radius: 999px; padding: 2px 7px; margin-left: 5px; }
+.pl-pl { display: inline-block; font: 700 10px var(--font-display); color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-bd); border-radius: 6px; padding: 1px 5px; margin-right: 6px; }
 
-/* per-net cards */
-.pd-pool-nethd { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
-.pd-pool-netnm { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 14px; color: var(--ink); letter-spacing: -.2px; }
-.pd-pool-court { width: 22px; height: 22px; border-radius: 7px; background: var(--accent-soft); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 11px; flex: none; }
-.pd-pool-netmeta { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--muted); }
-.pd-pool-netmeta.has-live { color: var(--live-ink); }
+.pl-net { display: flex; align-items: center; gap: 8px; margin: 14px 0 5px; font: 700 11.5px var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+.pl-net::after { content: ""; flex: 1; height: 1px; background: var(--accent-bd); }
 
-/* game rows */
-.pd-pool-game { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid var(--border); }
-.pd-pool-game.pd-pool-first { border-top: none; }
-.pd-pool-game.pd-pool-islive { background: var(--live-soft); border-radius: 10px; border-top-color: transparent; margin: 3px -6px; padding: 9px 6px; }
-.pd-pool-gi { min-width: 0; }
-.pd-pool-gnet { font-size: 11px; color: var(--muted); font-weight: 600; }
-.pd-pool-gt { font-size: 13.5px; font-weight: 600; color: var(--ink); margin-top: 1px; }
-.pd-pool-gt b { font-weight: 700; }
-.pd-pool-glose { color: var(--muted); font-weight: 500; }
-.pd-pool-gr { display: flex; align-items: center; gap: 9px; flex: none; }
-.pd-pool-gsc { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 16px; color: var(--ink); letter-spacing: -.3px; }
-.pd-pool-gsc.pd-pool-sclive { color: var(--live-ink); }
-.pd-pool-livetag { font-size: 9.5px; font-weight: 800; letter-spacing: .4px; color: var(--live); background: var(--live-soft); border-radius: 5px; padding: 2px 6px; }
-.pd-pool-finaltag { font-size: 9.5px; font-weight: 800; letter-spacing: .4px; color: var(--muted); background: var(--surface-3); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; }
+.pl-g { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-top: 1px solid var(--border); }
+.pl-net + .pl-g { border-top: none; }
+.pl-g.live { background: var(--live-soft); border-top-color: transparent; border-radius: 10px; margin: 3px -6px; padding: 9px 6px; }
+.pl-g .rd { width: 26px; flex: none; font: 700 11px var(--font-display); color: var(--muted); }
+.pl-g .gt { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.pl-g .gt b { font-weight: 700; }
+.pl-g .gt .def, .pl-g .gt .lose { color: var(--muted); font-weight: 500; }
+.pl-g .gt .vs { font-size: 12px; font-weight: 600; color: var(--faint); }
+.pl-g .gt.up { color: var(--muted); }
+.pl-g .sc { flex: none; font: 700 15px var(--font-display); letter-spacing: -.3px; color: var(--ink); }
+.pl-g.live .sc { color: var(--live-ink); }
+.pl-g .ftag { flex: none; font-size: 9.5px; font-weight: 800; letter-spacing: .4px; color: var(--muted); background: var(--surface-3); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; }
+.pl-g .pill { flex: none; font-size: 9.5px; font-weight: 800; letter-spacing: .4px; color: #fff; background: var(--live); border-radius: 999px; padding: 2px 7px; }
+
+.pl-foot { font-size: 10.5px; color: var(--faint); text-align: center; margin-top: 12px; line-height: 1.4; }
+.pl-empty { padding: 40px 16px; text-align: center; color: var(--muted); font-size: 13px; }
 
 /* tap-a-team target (pools page + Home live board) */
 .tapname { border-bottom: 1.5px dotted var(--accent-bd); cursor: pointer; }
@@ -3546,16 +3547,17 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 
    SCOPING CONTRACT (so 390px + the admin surface are byte-identical):
    every rule below is BOTH scoped to body.pd-public-active AND inside
-   @media (min-width:1024px) — with ONE exception: the two mobile-INERT
-   structural hooks directly below. They use display:contents so the JS
-   wrapper divs (.pd-pool-cols/.pd-pool-col in the Pools page,
-   .pd-cardgrid in Standings) generate NO box below 1024px — the wrapped
-   content renders exactly as the pre-Slice-5 flat stack. The @media
-   block re-materialises them as grids. This is the only base-layer add.
+   @media (min-width:1024px) — with ONE exception: the mobile-INERT
+   structural hook directly below. It uses display:contents so the JS
+   wrapper div (.pd-cardgrid in Standings) generates NO box below 1024px —
+   the wrapped content renders exactly as the pre-Slice-5 flat stack. The
+   @media block re-materialises it as a grid. This is the only base-layer
+   add. (The Pools page dropped its .pd-pool-cols/col reflow when it went
+   tabbed — Mike H, 2026-07-10 — so only .pd-cardgrid remains here.)
    =================================================================== */
 
 /* — mobile-inert structural hooks (see contract above) — */
-.pd-pool-cols, .pd-pool-col, .pd-cardgrid { display: contents; }
+.pd-cardgrid { display: contents; }
 
 @media (min-width: 1024px) {
   /* ---- chrome: bottom nav becomes a slim top tab strip under the header ---- */
@@ -3588,7 +3590,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 
   /* ---- typography: Sora titles up a notch on the surfaces that go wide (A direction) ---- */
   body.pd-public-active .pd-thero .pd-h { font-size: 22px; }
-  body.pd-public-active .pd-htitle { font-size: 19px; }
+  body.pd-public-active .pd-htitle { font-size: 24px; }
   body.pd-public-active .mt-team { font-size: 1.5rem; }
   body.pd-public-active .mt-rn { font-size: 52px; }
 
@@ -3601,24 +3603,22 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   body.pd-public-active .tn-gate { max-width: 560px; margin-left: auto; margin-right: auto; }
   body.pd-public-active .tn-title { font-size: 30px; }
 
-  /* ---- Pools & schedule: now-playing cluster = a full-width ROW of live cards (was a vertical stack) ---- */
-  body.pd-public-active section.pd-card:has(> .pd-pool-live) {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 12px;
-    align-items: start;
+  /* ---- Pools & schedule (Mike H): the tabbed page is a comfortable CENTERED reading column on desktop
+     (tabs stretch, standings-lite + net games breathe). The tab structure replaces the old multi-column
+     pool reflow, so the whole pools body clamps to 640px. `:has(+ .pl-meta)` scopes the centering to the
+     pools sub-page header only (the bracket / register headers stay untouched this slice). ---- */
+  body.pd-public-active #tab-tournament .pd-pagehdr:has(+ .pl-meta),
+  body.pd-public-active #tab-tournament .pl-meta,
+  body.pd-public-active #tab-tournament .pl-tabs,
+  body.pd-public-active #tab-tournament .pl-sect,
+  body.pd-public-active #tab-tournament .pl-colh,
+  body.pd-public-active #tab-tournament .pl-srow,
+  body.pd-public-active #tab-tournament .pl-net,
+  body.pd-public-active #tab-tournament .pl-g,
+  body.pd-public-active #tab-tournament .pl-foot,
+  body.pd-public-active #tab-tournament .pl-empty {
+    max-width: 640px; margin-left: auto; margin-right: auto;
   }
-  body.pd-public-active section.pd-card:has(> .pd-pool-live) > .pd-pool-sechd { grid-column: 1 / -1; }
-  body.pd-public-active section.pd-card:has(> .pd-pool-live) > .pd-pool-live { margin-top: 0; }
-
-  /* ---- Pools & schedule: the pools become side-by-side columns ---- */
-  body.pd-public-active .pd-pool-cols {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 18px;
-    align-items: start;
-  }
-  body.pd-public-active .pd-pool-col { display: block; } /* each pool = one column; its net cards stack within */
 
   /* ---- Standings: by-pool mini-tables 2–3 across; Overall as a centred wider table ---- */
   body.pd-public-active .pd-cardgrid {
