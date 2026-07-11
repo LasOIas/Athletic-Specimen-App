@@ -2927,7 +2927,7 @@ body.pd-public-active .pd-card { background: oklch(0.98 0.004 75 / 0.30); -webki
 body.pd-public-active .pd-watermark{ display: block; }
 .pd-wordmark { display: flex; flex-direction: column; gap: 2px; }
 .pd-wm-1 { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15px; letter-spacing: .13em; color: var(--ink); line-height: 1; }
-.pd-wm-2 { font-weight: 600; font-size: 9px; letter-spacing: .30em; color: var(--faint); line-height: 1; }
+.pd-wm-2 { font-weight: 600; font-size: 9px; letter-spacing: .30em; color: var(--accent); line-height: 1; } /* Mike 2026-07-10: COLORADO in the app blue */
 /* Public display face (atom-up 2026-07-10, spec §1): Barlow Semi Condensed on the public surface only.
    Admin keeps Sora via the base rule above. */
 body.pd-public-active h1, body.pd-public-active h2, body.pd-public-active h3,
@@ -2935,9 +2935,13 @@ body.pd-public-active .pd-wordmark, body.pd-public-active .score,
 body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .pd-hgrp { display: flex; align-items: center; gap: 9px; }
 /* public dashboard header layout — id-qualified so it beats the base #app-header + its @media centering */
-#app-header.pd-header { justify-content: space-between; flex-wrap: wrap; row-gap: 3px; }
+/* Mike 2026-07-10 (header tighten): sync notice sits INLINE with the wordmark row (was its own
+   wrapped 100%-basis line) and the strip slims — padding 3px vs the base 6px. Order: wordmark ·
+   (auto gap) · Updated · avatar. Wrap kept as a safety for very narrow screens. */
+#app-header.pd-header { justify-content: space-between; flex-wrap: wrap; row-gap: 3px; padding-top: calc(3px + env(safe-area-inset-top, 0px)); padding-bottom: 3px; }
 #app-header.pd-header .app-header-mode { display: none; }  /* redundant on the public dashboard; sync notice stays */
-#app-header.pd-header #js-sync-notice { flex-basis: 100%; }
+#app-header.pd-header #js-sync-notice { flex-basis: auto; margin-left: auto; order: 1; }
+#app-header.pd-header .pd-hgrp { order: 2; }
 /* page header for tile sub-pages (Standings / History) */
 .pd-pagehdr { display: flex; align-items: center; gap: 11px; margin-bottom: 10px; }
 .pd-back { width: 30px; height: 30px; min-height: 0; padding: 0; border-radius: 9px; background: var(--card); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--muted); flex: none; }

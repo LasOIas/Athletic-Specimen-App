@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.17'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.18'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
