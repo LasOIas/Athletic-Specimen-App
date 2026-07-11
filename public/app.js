@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.16'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.17'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -5396,12 +5396,15 @@ function buildPublicTournamentRootHTML() {
   // renders for EVERYONE, so the registration form's "Read the rules" link works signed-out (reg is
   // anon). Checked BEFORE the sign-in gate on purpose; every other view stays behind it.
   if (pdTournamentView === 'rules') return buildTournamentRulesHTML();
+  // Registration is ANONYMOUS by design (the launch flow): the register view must never sit behind the
+  // sign-in gate — signed-out captains land here straight from the Home CTA. (Launch-night fix: v.15's
+  // gate accidentally blocked it.)
+  if (pdTournamentView === 'register') return buildRegisterPageHTML();
   // Atom-up redesign (spec 2026-07-10 §1): the Tournament page is PERSONAL — signed-out users get ONLY the
   // gate (no hub, no data). Branch on the real signed-in flag (state.authSession) before any view/data.
   if (!state.authSession) return buildTournamentGateHTML();
   if (pdTournamentView === 'pools') return buildPoolsSchedulePageHTML();
   if (pdTournamentView === 'bracket') return buildBracketPageHTML();
-  if (pdTournamentView === 'register') return buildRegisterPageHTML();
   return buildTournamentHubHTML();
 }
 
