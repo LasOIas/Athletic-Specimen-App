@@ -1372,25 +1372,33 @@ function sessionIsUpcoming(dateStr, todayStr) {
   return d >= today; // zero-padded ISO date parts compare correctly as strings
 }
 
-// Check In rework (Mike 2026-07-10): true ONLY when the session date IS today — the day-of gate for
-// the public Check In nav tab and the Home session_live state ("it should not show unless an admin
-// creates a pickup day"; a FUTURE pickup day stays quiet until its day). Same date parsing as
-// sessionIsUpcoming: 'YYYY-MM-DD' (leading ISO date part accepted), compared as calendar days in
-// LOCAL time; missing/unparseable dates → false. todayStr defaults to the local today. PURE.
-function sessionIsToday(dateStr, todayStr) {
+// Check In rework (Mike 2026-07-10) + multi-day pickup schedule (Task 2, Mike 2026-07-11): true when
+// ANY pickup day in the set IS today — the day-of gate for the public Check In nav tab and the Home
+// session_live state ("it should not show unless an admin creates a pickup day"; a FUTURE pickup day
+// stays quiet until its day). `days` is a SET of pickup-day rows ([{ day }] — the new pickup_days
+// shape; a legacy sessions row's `date` is read too). A compatibility branch keeps a SINGLE legacy row
+// (an object) or a bare date string working, so pre-migration callers + the shipped tests still hold.
+// Same date parsing as sessionIsUpcoming: 'YYYY-MM-DD' (leading ISO date part accepted), compared as
+// calendar days in LOCAL time; missing/unparseable → skipped. todayStr defaults to the local today. PURE.
+function sessionIsToday(days, todayStr) {
   const isoDate = (s) => {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s == null ? '' : s).trim());
     return m ? (m[1] + '-' + m[2] + '-' + m[3]) : null;
   };
-  const d = isoDate(dateStr);
-  if (!d) return false;
   let today = isoDate(todayStr);
   if (!today) {
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
     today = now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
   }
-  return d === today;
+  // Accept: an array of pickup-day rows | a single legacy row object | a bare date string.
+  const rows = Array.isArray(days) ? days
+    : (days && typeof days === 'object') ? [days]
+      : [days];
+  return rows.some((r) => {
+    const raw = (r && typeof r === 'object') ? (r.day != null ? r.day : r.date) : r;
+    return isoDate(raw) === today;
+  });
 }
 
 // Manage lead — the "needs you" attention model (session-10 pick R1, admin Manage tab). PURE: no state,
@@ -1456,8 +1464,10 @@ function manageNeedsYouModel(t, teams, pickupDays) {
 function publicHomeState(o) {
   o = o || {};
   if (o.liveTournament) return 'tournament_live';
-  var sessionToday = !!(o.session && o.session.date && sessionIsToday(o.session.date, o.todayStr));
-  if (sessionToday) return 'session_live';
+  // Day-of gate against the SET of pickup days (Task 2). Back-compat: a single legacy `session` row is
+  // accepted and shaped as a one-element set, so the pre-migration caller + the shipped tests still hold.
+  var days = Array.isArray(o.pickupDays) ? o.pickupDays : (o.session ? [o.session] : []);
+  if (sessionIsToday(days, o.todayStr)) return 'session_live';
   if (o.regTournament) return 'registration';
   return 'quiet';
 }

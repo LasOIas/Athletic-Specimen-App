@@ -173,3 +173,29 @@ describe('sessionIsToday', () => {
     expect(sessionIsToday('2000-01-01')).toBe(false);
   });
 });
+
+// Task 2 (Mike 2026-07-11): sessionIsToday now gates against the SET of pickup days ([{ day }] rows),
+// with a compatibility branch keeping a single legacy row (object) + the bare-string form working.
+describe('sessionIsToday — pickup-day SET (Task 2 multi-day)', () => {
+  it('is true when ANY row in the set is today', () => {
+    expect(sessionIsToday([{ day: '2026-07-10' }], '2026-07-10')).toBe(true);
+    expect(sessionIsToday([{ day: '2026-07-09' }, { day: '2026-07-10' }], '2026-07-10')).toBe(true);
+  });
+
+  it('is false for an empty set', () => {
+    expect(sessionIsToday([], '2026-07-10')).toBe(false);
+  });
+
+  it('is false when no row matches today (all past/future)', () => {
+    expect(sessionIsToday([{ day: '2026-07-09' }, { day: '2026-07-20' }], '2026-07-10')).toBe(false);
+  });
+
+  it('reads a legacy row\'s .date too (backfill/fallback shape)', () => {
+    expect(sessionIsToday([{ date: '2026-07-10' }], '2026-07-10')).toBe(true);
+  });
+
+  it('compat: accepts a single legacy row object (not wrapped in an array)', () => {
+    expect(sessionIsToday({ date: '2026-07-10' }, '2026-07-10')).toBe(true);
+    expect(sessionIsToday({ day: '2026-07-09' }, '2026-07-10')).toBe(false);
+  });
+});

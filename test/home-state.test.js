@@ -48,6 +48,15 @@ describe('publicHomeState — exclusive with precedence (spec §2)', () => {
     expect(publicHomeState({ ...base, session: { date: '' } })).toBe('quiet');
     expect(publicHomeState({ ...base, session: {} })).toBe('quiet');
   });
+
+  // Task 2 (Mike 2026-07-11): the day-of gate reads the SET of pickup days. A day IN the set today →
+  // session_live; only future/empty → quiet. The legacy single `session` input still works (above).
+  it('gates on the pickup-day SET — session_live only when a day in the set is today', () => {
+    expect(publicHomeState({ ...base, pickupDays: [{ day: '2026-07-10' }] })).toBe('session_live');
+    expect(publicHomeState({ ...base, pickupDays: [{ day: '2026-07-05' }, { day: '2026-07-10' }] })).toBe('session_live');
+    expect(publicHomeState({ ...base, pickupDays: [{ day: '2026-07-20' }] })).toBe('quiet');
+    expect(publicHomeState({ ...base, pickupDays: [] })).toBe('quiet');
+  });
 });
 
 describe('homeNetBlocksModel', () => {

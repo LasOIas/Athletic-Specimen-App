@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1443,8 +1443,15 @@ function partialRender() {
 
   // Session-10 R1: the admin Manage tab repaints IN PLACE on a background sync — the needs-you rows +
   // status subs recompute from live state via a single container swap that preserves manageView + scrollTop.
-  // No form lives on the lead and the area placeholders are static, so rebuilding either is safe (no clobber).
+  // The lead + area placeholders + the pickup LIST are static/derived, so rebuilding them is safe. Task 2
+  // EXCEPTION: the pickup FORM ('pickup-form') has live text inputs — never clobber a half-typed day; just
+  // refresh the sync notice and bail (still return so we don't fall through to a full render() that would
+  // ALSO wipe the form).
   if (!playersEl && activeMainTab === 'manage') {
+    if (manageView === 'pickup-form') {
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      return;
+    }
     const panel = document.getElementById('tab-manage');
     const c = panel ? panel.querySelector('.container') : null;
     if (c) {
@@ -2836,7 +2843,7 @@ function publicHomeHTML() {
   const st = publicHomeState({
     liveTournament: t,
     regTournament: reg,
-    session: state.currentSession,
+    pickupDays: pickupDaySet(), // Task 2: the day-of gate reads the SET (folds in the pre-0046 legacy-session fallback)
     todayStr: null, // sessionIsToday (day-of gate) defaults to local today when todayStr is null
     hasLiveCourts: getPublicLiveData().liveCount > 0,
   });
@@ -3319,7 +3326,9 @@ const state = {
     ? SHARED_SYNC_PENDING
     : SHARED_SYNC_LOCAL_ONLY,
   sharedSyncError: '',
-  currentSession: null, // { date, time, location } or null
+  currentSession: null, // { date, time, location } or null — legacy single sessions row (day-of fallback pre-0046)
+  pickupDays: [],       // Task 2: the pickup_days rows [{ id, day, time_label, location }] — the day-of gate reads the SET
+  pickupDaysLoaded: false, // true once loadPickupDays succeeds (table exists); false → pickupDaySet falls back to currentSession
   lastSharedSyncAt: 0,
   operatorActions: [],
   copilotMessages: [], // C28 Slice 1 — admin co-pilot chat thread (persists across render() rebuilds)
@@ -4175,7 +4184,8 @@ function tournamentNavVisible() {
 // state, so the nav tab and the Home Check-in CTA always agree. Admin surface is unaffected
 // (its nav is built separately).
 function checkinNavVisible() {
-  return !!(state.currentSession && state.currentSession.date && sessionIsToday(state.currentSession.date));
+  // Task 2: gate against the SET of pickup days (pickupDaySet folds in the pre-0046 legacy-session fallback).
+  return sessionIsToday(pickupDaySet());
 }
 
 async function refreshTournamentLive() {
@@ -7506,6 +7516,94 @@ async function clearSession() {
   }
 }
 
+// Task 2 (pickup days): a stable signature of the loaded set, used to skip needless repaints on the poll.
+function pickupDaysSignature() {
+  return (Array.isArray(state.pickupDays) ? state.pickupDays : [])
+    .map((d) => [d && d.id, d && d.day, d && d.time_label, d && d.location].join('|')).join(';');
+}
+
+// Load the pickup_days SET (multi-day schedule, replaces the single sessions row for the app's read
+// path). Runs alongside loadSession at boot AND on the 15s poll. GRACEFUL: if the table doesn't exist
+// yet (0046 not applied), leave pickupDaysLoaded=false so pickupDaySet falls back to the legacy session
+// row for day-of gating, and keep the managed list quietly empty. A transient error AFTER a good load
+// keeps the last-good set (never blanks the gate on a blip). Returns true when the set changed.
+async function loadPickupDays() {
+  if (!supabaseClient) return false;
+  const prevSig = pickupDaysSignature();
+  try {
+    const { data, error } = await supabaseClient
+      .from('pickup_days')
+      .select('id, day, time_label, location')
+      .order('day', { ascending: true });
+    if (error) throw error;
+    state.pickupDays = Array.isArray(data) ? data : [];
+    state.pickupDaysLoaded = true;
+  } catch (err) {
+    // Pre-migration (0046 not applied) the table is absent → fall back to the legacy session for gating.
+    if (!state.pickupDaysLoaded) state.pickupDays = [];
+    console.warn('loadPickupDays skipped (pickup_days table missing?):', err && err.message ? err.message : err);
+  }
+  return pickupDaysSignature() !== prevSig;
+}
+
+// Roll check-ins into history + start a clean sheet. Extracted from the old-shell "Start new session"
+// button so the NEW pickup-day form's "Start a fresh sheet" row can reuse the exact flow WITHOUT the
+// master-admin gate (spec §1: all 4 admins are full-power). The old-shell caller keeps its own gate; this
+// function is gate-free by design. Server truth = the authenticated-only start_new_session RPC.
+async function startNewSessionFlow() {
+  const previouslyCheckedIn = normalizeCheckedInEntries(state.checkedIn || []);
+  const n = previouslyCheckedIn.length;
+  // Wave 1e: the most destructive admin action (checks everyone out) used native window.confirm,
+  // unreliable in standalone-PWA/iOS where the rest of the app already moved to appConfirm.
+  const confirmed = await appConfirm({
+    title: 'Start a new session?',
+    message: `${n} player${n === 1 ? ' is' : 's are'} checked in — they'll be checked out and tonight's attendance is saved as history.`,
+    confirmText: 'Start new session',
+    danger: true
+  });
+  if (!confirmed) return;
+
+  state.checkedIn = [];
+  recordOperatorAction({
+    scope: 'players',
+    action: 'start-new-session',
+    entityType: 'checkins',
+    entityId: '',
+    title: 'Started a new session.',
+    detail: `${n} player${n === 1 ? ' was' : 's were'} checked out; tonight's attendance was saved.`,
+    tone: 'warning',
+    undo: {
+      kind: 'checkins',
+      checkedIn: previouslyCheckedIn
+    }
+  });
+  saveLocal();
+  // Full render() AFTER recording so the "Started a new session." entry + Undo appear in the
+  // operator-actions log. partialRender (background sync) and tab-switches don't regenerate that
+  // card, so a render() before recordOperatorAction (the old Reset's order) showed nothing.
+  render();
+
+  if (supabaseClient) {
+    try {
+      const { error } = await supabaseClient.rpc('start_new_session', { p_label: null });
+      if (error) throw error;
+      queueSupabaseRefresh();
+    } catch (err) {
+      console.error('Supabase start-new-session error', err);
+      await reconcileToSupabaseAuthority('start-new-session');
+      recordOperatorAction({
+        scope: 'players',
+        action: 'start-new-session-failed',
+        entityType: 'checkins',
+        entityId: '',
+        title: 'Start new session failed to sync.',
+        detail: 'Supabase write failed. Latest shared state was restored.',
+        tone: 'error'
+      });
+    }
+  }
+}
+
 async function reconcileToSupabaseAuthority(contextLabel = '') {
   if (!supabaseClient || !SUPABASE_AUTHORITATIVE) return false;
   const synced = await syncFromSupabase();
@@ -9141,7 +9239,8 @@ function buildHistoryPageHTML() {
 // background sync repaints the current Manage surface, never a full render(). `oldAdminMode` keeps the old
 // renderAdminShell reachable via the temporary Open-the-old-admin link (dies Task 14).
 let oldAdminMode = false; // admins boot on the public shell; the temporary Open-the-old-admin link flips this
-let manageView = 'lead';  // 'lead' = the needs-you lead; else an area id (honest placeholder this slice)
+let manageView = 'lead';  // 'lead' = the needs-you lead; 'pickup'/'pickup-form' (Task 2); else an area id (placeholder)
+let pickupEditId = null;  // Task 2: the pickup_days row id being edited in 'pickup-form' (null = adding a new day)
 
 const MG_CHEV = '<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
 
@@ -9151,12 +9250,23 @@ function manageLeadTournament() {
     || (state.tournaments || []).find((x) => x.registration_open && x.status === 'setup') || null;
 }
 
-// Shape the pickup-day set for the pure model. state.pickupDays lands in Task 2; until then a single
-// upcoming currentSession stands in (empty when none is upcoming), so `noday` fires honestly today.
+// The effective pickup-day SET, read by every day-of gate (checkinNavVisible, publicHomeState) and the
+// Manage lead. Post-0046 the loaded pickup_days rows are authoritative (even when empty = genuinely no
+// days). PRE-0046 (table absent → pickupDaysLoaded stays false) it falls back to the single legacy
+// sessions row shaped as a one-element array, so day-of gating keeps working until the migration + its
+// backfill land. Rows carry `.day` (pickup_days) — the legacy fallback maps `.date` onto `.day`.
+function pickupDaySet() {
+  if (state.pickupDaysLoaded) return Array.isArray(state.pickupDays) ? state.pickupDays : [];
+  if (state.currentSession && state.currentSession.date) {
+    return [{ day: state.currentSession.date, time_label: state.currentSession.time || null, location: state.currentSession.location || null }];
+  }
+  return [];
+}
+
+// The UPCOMING pickup days (>= today), pre-filtered for the pure needs-you model (its `noday` item just
+// checks length). Empty → `noday` fires honestly.
 function manageUpcomingPickupDays() {
-  return state.pickupDays
-    || (state.currentSession && state.currentSession.date && sessionIsUpcoming(state.currentSession.date)
-      ? [state.currentSession] : []);
+  return pickupDaySet().filter((d) => d && sessionIsUpcoming(d.day));
 }
 
 // Thin caller over the pure attention model (pure.js).
@@ -9193,7 +9303,7 @@ function buildManagePageHTML() {
     : 'No tournament yet';
   const days = manageUpcomingPickupDays();
   const pickupSub = days.length
-    ? (days.length === 1 ? 'Next up ' + formatSessionDate(days[0].date) : days.length + ' scheduled')
+    ? (days.length === 1 ? 'Next up ' + formatSessionDate(days[0].day || days[0].date) : days.length + ' scheduled')
     : 'None scheduled';
   const roster = (state.players || []).length;
   const inNow = (state.checkedIn || []).length;
@@ -9226,10 +9336,155 @@ function manageAreaPlaceholderHTML(area) {
     <div class="pd-empty">Coming in the next slices.</div>`;
 }
 
-// The Manage panel content dispatches on manageView (lead vs an area page). Used by renderPublicShell,
-// the partialRender 'manage' branch, and the data-mg-area container-swap — one source, no full render().
+// ── Task 2: Pickup days (session-10 pick R3 hybrid) — multi-day list + form-first edit ──────────────
+// Mockups r10-manage/p-h1 (list) + p-h2 (form). Reuses the manage-area chrome (pd-pagehdr/pd-back/
+// pd-htitle) + the pl-sect section label + MG_CHEV; the pk-* kit carries the rows/fields/CTAs.
+const PK_BACK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
+const PK_PLUS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
+
+// 'YYYY-MM-DD' → a LOCAL Date (avoids the UTC-parse off-by-one that new Date('YYYY-MM-DD') causes).
+function pkLocalDate(dayStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dayStr == null ? '' : dayStr));
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+}
+function pkWeekdayTag(dayStr) { // "THU"
+  const dt = pkLocalDate(dayStr);
+  return dt ? dt.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase() : '';
+}
+function pkDateLabel(dayStr) { // "July 16"
+  const dt = pkLocalDate(dayStr);
+  return dt ? dt.toLocaleDateString('en-US', { month: 'long', day: 'numeric' }) : '';
+}
+function pkFormTitle(dayStr) { // "Thursday, July 16"
+  const dt = pkLocalDate(dayStr);
+  return dt ? dt.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) : 'Pickup day';
+}
+
+// The Pickup days LIST (mockup p-h1). Renders the loaded pickup_days rows (NOT the legacy fallback —
+// that only drives gating; pre-0046 this list is honestly empty). Upcoming (>= today) only, soonest-first,
+// NEXT UP live-ink tag on the soonest, dashed Add. Each row deep-links into its form via data-pk-day.
+function buildPickupDaysHTML() {
+  const rows = (Array.isArray(state.pickupDays) ? state.pickupDays.slice() : [])
+    .filter((d) => d && sessionIsUpcoming(d.day))
+    .sort((a, b) => String(a.day).localeCompare(String(b.day)));
+  const header = `<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>
+      <div class="pd-htitle">Pickup days</div>
+    </div>`;
+  const body = rows.length
+    ? `<div class="pl-sect">Scheduled</div>`
+      + rows.map((d, i) => {
+        const timeTail = d.time_label ? ' · ' + escapeHTML(String(d.time_label)) : '';
+        const loc = d.location ? escapeHTML(String(d.location)) : 'Location TBD';
+        const nextUp = i === 0 ? `<span class="pk-next">NEXT UP</span>` : '';
+        return `<a class="pk-row" data-pk-day="${escapeHTML(String(d.id || ''))}">
+          <span class="pk-wk">${pkWeekdayTag(d.day)}</span>
+          <div class="pk-dn"><div class="pk-dt">${escapeHTML(pkDateLabel(d.day))}${timeTail}</div><div class="pk-ds">${loc}</div></div>
+          ${nextUp}
+        </a>`;
+      }).join('')
+    : `<div class="pd-empty">No pickup days scheduled — add one to open Check In.</div>`;
+  const add = `<button type="button" class="pk-add" data-pk-add>${PK_PLUS_SVG}Add a pickup day</button>
+    <div class="pk-note">Each day opens its own Check In when it arrives</div>`;
+  return header + body + add;
+}
+
+// The Pickup day FORM (mockup p-h2). DATE/TIME/LOCATION hairline-underline fields + Save + the note.
+// For an EXISTING day it also shows the ON THE DAY rows (Share the check-in QR · Start a fresh sheet)
+// and the red Remove; a NEW (unsaved) day shows just the fields (those day-of actions are meaningless yet).
+function buildPickupDayFormHTML() {
+  const editing = pickupEditId
+    ? (state.pickupDays || []).find((d) => d && String(d.id) === String(pickupEditId))
+    : null;
+  const day = editing || {};
+  const titleText = editing && editing.day ? pkFormTitle(editing.day) : 'New pickup day';
+  const header = `<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-mg-area="pickup" aria-label="Back to pickup days">${PK_BACK_SVG}</button>
+      <div class="pd-htitle">${escapeHTML(titleText)}</div>
+    </div>`;
+  const fields = `
+    <div class="pk-fld"><label class="pk-fl" for="pk-date">Date</label>
+      <input class="pk-fv" id="pk-date" type="date" value="${escapeHTML(String(day.day || ''))}" /></div>
+    <div class="pk-fld"><label class="pk-fl" for="pk-time">Time</label>
+      <input class="pk-fv" id="pk-time" type="text" placeholder="7:00 PM" autocomplete="off" value="${escapeHTML(String(day.time_label || ''))}" /></div>
+    <div class="pk-fld"><label class="pk-fl" for="pk-location">Location</label>
+      <input class="pk-fv" id="pk-location" type="text" placeholder="Cherry Creek courts" autocomplete="off" value="${escapeHTML(String(day.location || ''))}" /></div>
+    <button type="button" class="pk-cta" data-pk-save>Save</button>
+    <div class="pk-savenote">The Check In tab appears for everyone that day</div>
+    <p class="pk-msg" id="pk-msg" role="status" aria-live="polite"></p>`;
+  const onDay = editing ? `<div class="pl-sect">On the day</div>
+    <a class="pk-orow" data-pk-qr><div class="pk-ob"><div class="pk-on">Share the check-in QR</div><div class="pk-os">For the door — players scan and tap their name</div></div>${MG_CHEV}</a>
+    <a class="pk-orow" data-pk-fresh><div class="pk-ob"><div class="pk-on">Start a fresh sheet</div><div class="pk-os">Rolls check-ins into history and starts clean</div></div>${MG_CHEV}</a>` : '';
+  const remove = editing
+    ? `<button type="button" class="pk-danger" data-pk-remove="${escapeHTML(String(editing.id))}">Remove this pickup day</button>`
+    : '';
+  return header + fields + onDay + remove;
+}
+
+// The Manage panel content dispatches on manageView (lead / pickup list / pickup form / an area page).
+// Used by renderPublicShell, the partialRender 'manage' branch, and the data-mg-area container-swap —
+// one source, no full render().
 function manageContainerHTML() {
-  return manageView === 'lead' ? buildManagePageHTML() : manageAreaPlaceholderHTML(manageView);
+  if (manageView === 'lead') return buildManagePageHTML();
+  if (manageView === 'pickup') return buildPickupDaysHTML();
+  if (manageView === 'pickup-form') return buildPickupDayFormHTML();
+  return manageAreaPlaceholderHTML(manageView);
+}
+
+// Swap just the Manage container (partial repaint; module vars survive — NO full render()).
+function repaintManage() {
+  const c = document.querySelector('#tab-manage .container');
+  if (c) c.innerHTML = manageContainerHTML();
+}
+
+// Persist the pickup-day form (insert a new row or update the edited one), then return to the list.
+async function savePickupDay() {
+  const dateEl = document.getElementById('pk-date');
+  const timeEl = document.getElementById('pk-time');
+  const locEl = document.getElementById('pk-location');
+  const msgEl = document.getElementById('pk-msg');
+  const day = dateEl ? String(dateEl.value || '').trim() : '';
+  const time_label = timeEl ? String(timeEl.value || '').trim() : '';
+  const location = locEl ? String(locEl.value || '').trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) { if (msgEl) msgEl.textContent = 'Pick a date first.'; return; }
+  if (!supabaseClient) { if (msgEl) msgEl.textContent = 'No connection — try again in a moment.'; return; }
+  const payload = { day, time_label: time_label || null, location: location || null };
+  try {
+    const q = pickupEditId
+      ? supabaseClient.from('pickup_days').update(payload).eq('id', pickupEditId)
+      : supabaseClient.from('pickup_days').insert(payload);
+    const { error } = await q;
+    if (error) throw error;
+    await loadPickupDays();
+    pickupEditId = null;
+    manageView = 'pickup';
+    repaintManage();
+  } catch (err) {
+    console.warn('savePickupDay error', err);
+    if (msgEl) msgEl.textContent = 'Could not save — check the connection and try again.';
+  }
+}
+
+// Remove a pickup day (its date stops opening Check In). Confirm first (destructive).
+async function removePickupDay(id) {
+  if (!id) return;
+  const ok = await appConfirm({
+    title: 'Remove this pickup day?',
+    message: 'Its date will no longer open the Check In tab.',
+    confirmText: 'Remove',
+    danger: true
+  });
+  if (!ok) return;
+  if (supabaseClient) {
+    try {
+      const { error } = await supabaseClient.from('pickup_days').delete().eq('id', id);
+      if (error) throw error;
+    } catch (err) { console.warn('removePickupDay error', err); }
+  }
+  await loadPickupDays();
+  pickupEditId = null;
+  manageView = 'pickup';
+  repaintManage();
 }
 
 // Flip to the old admin shell (temporary — the whole path dies in Task 14). Runs the exact old render
@@ -10905,6 +11160,17 @@ function attachHandlers() {
         if (panel) panel.scrollTop = 0; // a sub-page open/back is an explicit user action — top is correct
         return;
       }
+      // Pickup days (Task 2): list ⇄ form navigation + writes, all container-swap partial repaints. Checked
+      // BEFORE data-mg-area so a row/Add tap opens the form instead of falling through. The form's back button
+      // carries data-mg-area="pickup" (handled below) → returns to the list.
+      const pkDayRow = e.target.closest('[data-pk-day]');
+      if (pkDayRow) { pickupEditId = pkDayRow.getAttribute('data-pk-day') || null; manageView = 'pickup-form'; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
+      if (e.target.closest('[data-pk-add]')) { pickupEditId = null; manageView = 'pickup-form'; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
+      if (e.target.closest('[data-pk-save]')) { void savePickupDay(); return; }
+      const pkRemove = e.target.closest('[data-pk-remove]');
+      if (pkRemove) { void removePickupDay(pkRemove.getAttribute('data-pk-remove')); return; }
+      if (e.target.closest('[data-pk-qr]')) { openQrModal(); return; }              // reuse the shared QR modal
+      if (e.target.closest('[data-pk-fresh]')) { void startNewSessionFlow(); return; } // reuse start_new_session (no gate — all 4 admins)
       // Manage tab (session-10 R1): flat-row navigation is a container-swap partial repaint (module var
       // manageView survives; NO full render()). data-mg-area="lead" returns to the lead; an area id opens its
       // (placeholder this slice) page. data-mg-old is the TEMPORARY escape hatch into the old admin shell.
@@ -11315,57 +11581,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
   if (resetBtn) {
     resetBtn.addEventListener('click', async () => {
       if (!canAccessOperatorSafetyControls()) return; // master-admin only; server gate = authenticated RPC
-      const previouslyCheckedIn = normalizeCheckedInEntries(state.checkedIn || []);
-      const n = previouslyCheckedIn.length;
-      // Wave 1e: the most destructive admin action (checks everyone out) used native window.confirm,
-      // unreliable in standalone-PWA/iOS where the rest of the app already moved to appConfirm.
-      const confirmed = await appConfirm({
-        title: 'Start a new session?',
-        message: `${n} player${n === 1 ? ' is' : 's are'} checked in — they'll be checked out and tonight's attendance is saved as history.`,
-        confirmText: 'Start new session',
-        danger: true
-      });
-      if (!confirmed) return;
-
-      state.checkedIn = [];
-      recordOperatorAction({
-        scope: 'players',
-        action: 'start-new-session',
-        entityType: 'checkins',
-        entityId: '',
-        title: 'Started a new session.',
-        detail: `${n} player${n === 1 ? ' was' : 's were'} checked out; tonight's attendance was saved.`,
-        tone: 'warning',
-        undo: {
-          kind: 'checkins',
-          checkedIn: previouslyCheckedIn
-        }
-      });
-      saveLocal();
-      // Full render() AFTER recording so the "Started a new session." entry + Undo appear in the
-      // operator-actions log. partialRender (background sync) and tab-switches don't regenerate that
-      // card, so a render() before recordOperatorAction (the old Reset's order) showed nothing.
-      render();
-
-      if (supabaseClient) {
-        try {
-          const { error } = await supabaseClient.rpc('start_new_session', { p_label: null });
-          if (error) throw error;
-          queueSupabaseRefresh();
-        } catch (err) {
-          console.error('Supabase start-new-session error', err);
-          await reconcileToSupabaseAuthority('start-new-session');
-          recordOperatorAction({
-            scope: 'players',
-            action: 'start-new-session-failed',
-            entityType: 'checkins',
-            entityId: '',
-            title: 'Start new session failed to sync.',
-            detail: 'Supabase write failed. Latest shared state was restored.',
-            tone: 'error'
-          });
-        }
-      }
+      await startNewSessionFlow(); // shared with the new pickup-day form's "Start a fresh sheet" (gate-free there)
     });
   }
 
@@ -12466,7 +12682,7 @@ function init() {
       // (conditional) and tdbRefreshTournaments (unconditional) each fired their own render() within ~1s
       // of boot, on top of this immediate paint — up to 3 full renders. Keep the immediate paint for
       // first contentful render; render once more after both settle.
-      Promise.allSettled([loadSession(), tdbRefreshTournaments()]).then(() => render());
+      Promise.allSettled([loadSession(), loadPickupDays(), tdbRefreshTournaments()]).then(() => render());
 
       if (!SyncManager.poll.interval) {
         // Keep multiple devices converged without requiring a full page refresh.
@@ -12475,6 +12691,9 @@ function init() {
           void flushOutbox(); // C22 item 3: keep retrying queued offline writes
           queueSupabaseRefresh(800);
           queueTournamentRefresh(800);
+          // Task 2: keep the pickup-day set fresh (day-of gate flips as a new day arrives / is added on
+          // another device). Only repaint when the set actually changed, to avoid clobbering a half-typed form.
+          void loadPickupDays().then((changed) => { if (changed && !tournamentTabIsDirty()) partialRender(); });
         }, 15000);
       }
     })();

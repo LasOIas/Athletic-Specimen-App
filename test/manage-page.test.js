@@ -65,6 +65,9 @@ function loadApp() {
       buildManage: () => buildManagePageHTML(),
       buildNav: () => buildPublicNavInnerHTML(),
       getState: () => state,
+      buildPickup: () => buildPickupDaysHTML(),
+      buildPickupForm: (id) => { pickupEditId = (id == null ? null : id); manageView = 'pickup-form'; return buildPickupDayFormHTML(); },
+      checkinNav: () => checkinNavVisible(),
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -223,5 +226,121 @@ describe('buildPublicNavInnerHTML — the Manage nav item is admin-only', () => 
     const nav = bridge.buildNav();
     expect(nav).toContain('data-nav-tab="manage"');
     expect(nav).toContain('>Manage<');
+  });
+});
+
+// ── Task 2: Pickup days list + form ──────────────────────────────────────────
+const todayStr = (() => {
+  const n = new Date(); const p = (x) => String(x).padStart(2, '0');
+  return n.getFullYear() + '-' + p(n.getMonth() + 1) + '-' + p(n.getDate());
+})();
+function setPickup(rows, loaded = true) {
+  const st = bridge.getState();
+  Object.assign(st, { pickupDays: rows, pickupDaysLoaded: loaded, currentSession: null });
+}
+
+describe('buildPickupDaysHTML — the multi-day list (mockup p-h1)', () => {
+  it('renders upcoming days soonest-first with a weekday tag, date·time, place', () => {
+    // deliberately out of order → the builder sorts ascending
+    setPickup([
+      { id: 'b', day: '2999-07-23', time_label: '7:00 PM', location: 'Cherry Creek courts' },
+      { id: 'a', day: '2999-07-16', time_label: '7:00 PM', location: 'Cherry Creek courts' },
+    ]);
+    const html = bridge.buildPickup();
+    expect(html).toContain('>Pickup days<');
+    expect(html).toContain('>Scheduled<');
+    expect(html).toContain('class="pk-wk"');            // weekday tag
+    expect(html).toContain('July 16 · 7:00 PM');        // sorted first row: date · time
+    expect(html).toContain('Cherry Creek courts');
+    // soonest-first: July 16 appears before July 23
+    expect(html.indexOf('July 16')).toBeLessThan(html.indexOf('July 23'));
+    expect(html).not.toContain('pd-card');
+  });
+
+  it('puts the NEXT UP live-ink tag on the soonest day ONLY', () => {
+    setPickup([
+      { id: 'a', day: '2999-07-16', time_label: '7:00 PM', location: 'X' },
+      { id: 'b', day: '2999-07-23', time_label: '7:00 PM', location: 'Y' },
+    ]);
+    const html = bridge.buildPickup();
+    expect(count(html, 'NEXT UP')).toBe(1);
+    expect(html).toContain('class="pk-next">NEXT UP<');
+  });
+
+  it('always offers the dashed Add a pickup day', () => {
+    setPickup([{ id: 'a', day: '2999-07-16', time_label: '', location: '' }]);
+    const html = bridge.buildPickup();
+    expect(html).toContain('data-pk-add');
+    expect(html).toContain('Add a pickup day');
+  });
+
+  it('shows the honest empty state (and still the Add) when no upcoming days', () => {
+    setPickup([]);
+    const html = bridge.buildPickup();
+    expect(html).toContain('No pickup days scheduled — add one to open Check In.');
+    expect(html).toContain('data-pk-add');
+    expect(count(html, 'NEXT UP')).toBe(0);
+  });
+
+  it('drops past days from the upcoming list', () => {
+    setPickup([{ id: 'old', day: '2000-01-01', time_label: '', location: '' }]);
+    const html = bridge.buildPickup();
+    expect(html).toContain('No pickup days scheduled');
+  });
+});
+
+describe('buildPickupDayFormHTML — the form-first edit (mockup p-h2)', () => {
+  it('renders DATE/TIME/LOCATION fields + Save + the check-in note for an existing day', () => {
+    setPickup([{ id: 'd1', day: '2999-07-16', time_label: '7:00 PM', location: 'Cherry Creek courts' }]);
+    const html = bridge.buildPickupForm('d1');
+    expect(html).toContain('id="pk-date"');
+    expect(html).toContain('value="2999-07-16"');
+    expect(html).toContain('id="pk-time"');
+    expect(html).toContain('value="7:00 PM"');
+    expect(html).toContain('id="pk-location"');
+    expect(html).toContain('value="Cherry Creek courts"');
+    expect(html).toContain('data-pk-save');
+    expect(html).toContain('The Check In tab appears for everyone that day');
+    expect(html).toContain('July 16');                  // form title from the day
+  });
+
+  it('shows the ON THE DAY rows + red Remove for an existing day', () => {
+    setPickup([{ id: 'd1', day: '2999-07-16', time_label: '7:00 PM', location: 'X' }]);
+    const html = bridge.buildPickupForm('d1');
+    expect(html).toContain('>On the day<');
+    expect(html).toContain('Share the check-in QR');
+    expect(html).toContain('data-pk-qr');
+    expect(html).toContain('Start a fresh sheet');
+    expect(html).toContain('data-pk-fresh');
+    expect(html).toContain('Remove this pickup day');
+    expect(html).toContain('data-pk-remove="d1"');
+  });
+
+  it('a NEW (unsaved) day shows just the fields — no day-of actions, no Remove', () => {
+    setPickup([]);
+    const html = bridge.buildPickupForm(null);
+    expect(html).toContain('New pickup day');
+    expect(html).toContain('id="pk-date"');
+    expect(html).toContain('data-pk-save');
+    expect(html).not.toContain('Remove this pickup day');
+    expect(html).not.toContain('data-pk-fresh');
+  });
+});
+
+describe('checkinNavVisible — day-of gate reads the pickup SET', () => {
+  it('is visible when a pickup day in the set is TODAY', () => {
+    setPickup([{ id: 't', day: todayStr, time_label: '7:00 PM', location: 'X' }]);
+    expect(bridge.checkinNav()).toBe(true);
+  });
+  it('is hidden when the only days are future/past', () => {
+    setPickup([{ id: 'f', day: '2999-01-01', time_label: '', location: '' }]);
+    expect(bridge.checkinNav()).toBe(false);
+    setPickup([]);
+    expect(bridge.checkinNav()).toBe(false);
+  });
+  it('pre-migration falls back to the legacy session row for the gate', () => {
+    const st = bridge.getState();
+    Object.assign(st, { pickupDays: [], pickupDaysLoaded: false, currentSession: { date: todayStr } });
+    expect(bridge.checkinNav()).toBe(true);
   });
 });
