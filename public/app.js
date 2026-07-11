@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.25'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.26'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5158,48 +5158,9 @@ function wireBracketGestures(pan, canvas) {
   pan.addEventListener('click', (e) => { if (moved) { e.stopPropagation(); e.preventDefault(); moved = false; } }, true);
 }
 
-// Builds the Tournament tab body (admin create/manage, or public read-only).
-// Public team self-registration screen (§38 layout A — one card; replaces the Google Form). AS-custom:
-// team name + fixed 4 player names + co-ed reminder + Venmo link/"we paid" + Register. Registered teams
-// shown for social proof (names only, no skill). Submits via the anon register_team RPC.
-function buildPublicRegisterHTML(t, teams, opts = {}) {
-  const count = (teams || []).length;
-  const venmoRaw = t.venmo_link ? String(t.venmo_link).trim() : '';
-  const venmo = /^https?:\/\//i.test(venmoRaw) ? venmoRaw : ''; // only render an http(s) link (block javascript: etc.)
-  const buyIn = t.buy_in ? String(t.buy_in).trim() : '';
-  const payRow = venmo
-    ? `<div class="reg-pay">
-        <a class="reg-venmo" href="${escapeHTMLText(venmo)}" target="_blank" rel="noopener noreferrer">Pay${buyIn ? ' ' + escapeHTMLText(buyIn) : ''} on Venmo</a>
-        <label class="reg-check"><input type="checkbox" id="reg-paid" /> We paid</label>
-      </div>`
-    : `<label class="reg-check" style="margin-top:6px;"><input type="checkbox" id="reg-paid" /> We paid${buyIn ? ' (' + escapeHTMLText(buyIn) + ')' : ''}</label>`;
-  const registered = count
-    ? `<div class="card" style="margin-top:12px;"><div class="reg-label">Registered (${count})</div>${
-        (teams || []).map((tm) => `<div class="reg-regrow" data-role="tv2-team-card" data-id="${escapeHTMLText(tm.id)}" role="button" tabindex="0"><span>${escapeHTMLText(tm.name || '')}</span>${tm.paid ? '<span class="reg-paidtag">paid</span>' : ''}<svg class="reg-regchev" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>`).join('')
-      }</div>`
-    : '';
-  // When embedded under the Tournament hub's pd page-header (Slice 2), the header supplies the title/eyebrow,
-  // so the screen's own h1/sub are suppressed to avoid a doubled title.
-  const titleBlock = opts.embedded ? '' : `<h2 class="reg-h1">Register your team</h2>
-    <p class="reg-sub">${escapeHTMLText(t.name || '')}${buyIn ? ' · ' + escapeHTMLText(buyIn) : ''}</p>`;
-  return `<div class="reg-screen">
-    ${titleBlock}
-    <div class="card reg-card">
-      <label class="reg-label" for="reg-team">Team name</label>
-      <input type="text" id="reg-team" class="reg-input" placeholder="e.g. Bumpin Uglies" autocomplete="off" autocapitalize="words" />
-      <div class="reg-label">Players (${Number(t.team_size) || 4})</div>
-      ${Array.from({ length: Number(t.team_size) || 4 }, (_, i) => `<input type="text" id="reg-p${i + 1}" class="reg-input" placeholder="Player ${i + 1}" autocomplete="off" autocapitalize="words" />`).join('')}
-      <div class="reg-remind">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4"/></svg>
-        <span>Each team needs at least one guy and one girl.</span>
-      </div>
-      ${payRow}
-    </div>
-    <button type="button" class="primary reg-primary" data-role="tv2-register-team">Register team</button>
-    <p class="reg-teamspill" id="reg-msg">${count} ${count === 1 ? 'team' : 'teams'} registered so far</p>
-    ${registered}
-  </div>`;
-}
+// (Legacy public team self-registration screen `buildPublicRegisterHTML` deleted 2026-07-10, v.26 —
+// it was only reached from the dead `!state.isAdmin` branch in buildTournamentTabHTML. The LIVE anon
+// register flow is buildRegisterPageHTML (rf-* grammar), reached via pdTournamentView === 'register'.)
 
 // Round 2 (2026-07-09, spec §12.4 — Mike's locked §38 pick A "tile hub"): the public Tournament tab
 // is a hub (header card + tiles). The pre-existing public register/pool/bracket surface becomes the
@@ -5572,7 +5533,7 @@ function buildRegisterPageHTML() {
     ? `<span class="rf-amt">${escapeHTML(money)} <span class="rf-amt-unit">${escapeHTML(payTail)}</span></span>`
     : `<span class="rf-amt">${escapeHTML(payDisplay)}</span>`;
 
-  // Only render a real, tappable link for an http(s) Venmo URL (same guard as buildPublicRegisterHTML) — an
+  // Only render a real, tappable link for an http(s) Venmo URL (same guard the legacy register screen used) — an
   // empty/unset link renders a DISABLED button + "coming soon" so Mike pastes it into admin settings and it
   // lights up (no dead javascript: link ever reaches the DOM).
   const venmoRaw = show.venmo_link ? String(show.venmo_link).trim() : '';
@@ -6059,46 +6020,9 @@ function buildTournamentTabHTML() {
     ? list.find((x) => x.id === state.activeTournamentId)
     : null;
 
-  // Public (non-admin) read-only view.
-  if (!state.isAdmin) {
-    const show = active || list[0];
-    if (!show) {
-      return `<div class="card" style="text-align:center;padding:2rem;">
-        <p style="color:var(--muted);margin:0;">No tournament yet. Check back soon.</p>
-      </div>`;
-    }
-    const teams = (active ? state.tournamentTeams : []) || [];
-    // Registration open (pre-pools) → the public self-registration screen (replaces the Google Form).
-    if (active && show.registration_open && show.status === 'setup') {
-      return buildPublicRegisterHTML(show, teams);
-    }
-    if (active && !show.registration_open && show.status === 'setup') {
-      // R2: registration explicitly closed (pre-pools) — say so instead of a cold generic "Setup" view.
-      return `<div class="card" style="text-align:center;padding:1.5rem;">
-        <h3 style="margin:0 0 6px;">${escapeHTML(show.name || '')}</h3>
-        <p style="color:var(--muted);margin:0;">Registration is closed &middot; teams are set. Check back when pool play starts.</p>
-      </div>` + buildTeamListHTML(teams, false);
-    }
-    if (active && show.status === 'pools') {
-      return `<div class="card">
-        <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
-        <p class="small" style="color:var(--muted);margin:0;">Pool play — submit your game results below.</p>
-      </div>` + buildPoolPlayHTML(active, state.tournamentPools || [], teams, state.tournamentMatches || [], false, state.tournamentPickedTeamId)
-        + buildSeedingTableHTML(teams, state.tournamentMatches || []);
-    }
-    if (active && (show.status === 'bracket' || show.status === 'completed')) {
-      return `<div class="card">
-        <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
-        <p class="small" style="color:var(--muted);margin:0;">Bracket</p>
-      </div>` + buildBracketHTML(active, state.tournamentMatches || [], teams)
-        + buildSeedingTableHTML(teams, state.tournamentMatches || []);
-    }
-    return `<div class="card">
-      <h3 style="margin:0 0 4px;">${escapeHTML(show.name || '')}</h3>
-      <p class="small" style="color:var(--muted);margin:0 0 12px;">${escapeHTML(tournamentStatusLabel(show.status))}</p>
-      ${active ? buildTeamListHTML(teams, false) : '<p class="small" style="color:var(--muted);margin:0;">Tap a tournament when the admin opens it.</p>'}
-    </div>`;
-  }
+  // Admin-only by both call sites: buildPublicTournamentRootHTML() only calls this under `if (state.isAdmin)`,
+  // and renderAdminShell() (the sole other caller) is itself rendered only when state.isAdmin. The legacy
+  // public (!state.isAdmin) read-only branch here was therefore dead code — removed 2026-07-10 (v.26).
 
   const err = state.tournamentTabError
     ? `<div class="card" style="border-left:4px solid var(--danger);color:var(--danger);">${escapeHTML(state.tournamentTabError)}</div>`

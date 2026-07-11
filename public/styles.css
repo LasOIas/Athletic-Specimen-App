@@ -2668,22 +2668,15 @@ body.copilot-typing #bottom-nav { display: none; }
 .bt-node.tappable { cursor: pointer; }
 .bt-node.tappable:active { background: var(--accent-soft); }
 
-/* Tournament team self-registration (build 1) — §38 layout A (one card). Direction-A tokens, no neon. */
-.reg-screen { padding: 4px 0 10px; }
-.reg-h1 { font: 800 22px 'Sora','Inter',sans-serif; margin: 4px 0 2px; }
-.reg-sub { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
-.reg-card { padding: 16px; }
+/* Shared form primitives (still LIVE): reg-label/reg-input/reg-check/reg-teamspill/reg-paidtag/reg-unpaidtag
+   are used by the admin settings + roster forms and the venmo/buy-in fields. The legacy public register SCREEN
+   that first introduced them (reg-screen/reg-h1/reg-sub/reg-card/reg-remind/reg-pay/reg-venmo/reg-primary/
+   reg-regrow/reg-regchev) was deleted 2026-07-10 (v.26) with buildPublicRegisterHTML — those orphaned rules removed. */
 .reg-label { font: 600 12px 'Inter',sans-serif; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 2px 0 6px; display: block; }
 .reg-input { width: 100%; box-sizing: border-box; min-height: 46px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 16px; background: var(--bg); margin-bottom: 10px; }
-.reg-remind { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--muted); background: var(--accent-soft); border-radius: 10px; padding: 10px 12px; margin: 2px 0 12px; }
-.reg-remind svg { flex: none; margin-top: 1px; color: var(--accent); }
-.reg-pay { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.reg-venmo { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; color: #fff; background: #3D95CE; border: none; border-radius: 10px; padding: 11px 14px; text-decoration: none; }
 .reg-check { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600; }
 .reg-check input { width: 22px; height: 22px; }
-.reg-primary { width: 100%; min-height: 52px; margin-top: 2px; }
 .reg-teamspill { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
-.reg-regrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
 /* 2026-06-27: match the roster-popup .tc-paid (filled) so the "paid" pill looks identical on the register
    list and the team card — same label, same look, one tap apart. */
 .reg-paidtag { font-size: 11px; font-weight: 800; color: var(--live); background: var(--live-soft); border-radius: 999px; padding: 3px 10px; }
@@ -2763,9 +2756,6 @@ body.copilot-typing #bottom-nav { display: none; }
 .ppl-more-body { padding-top: 6px; }
 
 /* C69 — tap a registered team -> roster popup card (§38 Option A: avatar list). */
-.reg-regrow { cursor: pointer; }
-.reg-regrow > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.reg-regchev { flex: 0 0 auto; color: var(--faint); font-weight: 800; font-size: 16px; }
 .tc-card { width: min(360px, 94vw); padding: 20px; text-align: left; }
 .tc-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .tc-name { font-family: 'Sora','Inter',sans-serif; font-size: 21px; font-weight: 800; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
