@@ -2977,10 +2977,9 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .pd-livetag { font-size: 9.5px; font-weight: 800; letter-spacing: .4px; color: var(--live); background: var(--live-soft); border-radius: 5px; padding: 2px 6px; }
 .pd-finaltag { font-size: 9.5px; font-weight: 800; letter-spacing: .4px; color: var(--muted); background: var(--surface-3); border: 1px solid var(--border); border-radius: 5px; padding: 2px 6px; }
 
-/* -- segmented toggle (Standings / History) -- */
-.pd-seg { display: flex; background: var(--surface-3); border: 1px solid var(--border); border-radius: 11px; padding: 3px; margin-bottom: 12px; }
-.pd-seg-s { flex: 1; text-align: center; padding: 8px 4px; font-size: 12.5px; font-weight: 700; border-radius: 8px; color: var(--muted); background: none; border: none; }
-.pd-seg-s.pd-on { background: var(--card); color: var(--ink); box-shadow: var(--shadow-sm); }
+/* -- segmented toggle (Standings / History) retired: Standings folded into the Pools Seeding tab (Mike K)
+   and History became the "Past tournaments" one-list (Mike Z, session 9). Its .pd-seg/.pd-seg-s/.pd-on
+   rules were grep-gated to 0 in app.js and deleted; the one-list uses the ht-* kit below. -- */
 
 /* -- standings mini-tables retired: the public Standings page folded into the Pools & schedule Seeding
    tab (Mike K, 2026-07-10). Its .pd-st/.pd-colh/.pd-rk/.pd-tm/.pd-rec/.pd-df/.pd-ph/.pd-pl/.pd-youtag
@@ -3000,27 +2999,24 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .pd-yourrec .pd-ic svg { width: 20px; height: 20px; }
 .pd-yourrec .pd-l1 { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 14px; color: var(--ink); }
 .pd-yourrec .pd-l2 { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
-.pd-pt { display: flex; align-items: center; gap: 11px; padding: 10px 0; border-top: 1px solid var(--border); }
-.pd-pt.pd-first { border-top: none; }
-.pd-pt .pd-nm { font-weight: 600; font-size: 13.5px; color: var(--ink); }
-.pd-pt .pd-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .pd-plc { margin-left: auto; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; border-radius: 999px; padding: 3px 9px; flex: none; }
 .pd-plc.pd-champ { background: var(--gold-soft); color: oklch(0.42 0.08 72); border: 1px solid var(--gold-bd); }
 .pd-plc.pd-fin { background: var(--surface-3); color: var(--muted); border: 1px solid var(--border); }
 .pd-plc.pd-mid { background: var(--surface-3); color: var(--faint); border: 1px solid var(--border); }
-.pd-rec2 { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--border); }
-.pd-rec2.pd-first { border-top: none; }
-.pd-rec2 .pd-ic { width: 32px; height: 32px; border-radius: 9px; background: var(--gold-soft); color: var(--gold); display: flex; align-items: center; justify-content: center; flex: none; }
-.pd-rec2 .pd-ic svg { width: 17px; height: 17px; }
-.pd-rec2 .pd-l { font-size: 9.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; font-weight: 700; }
-.pd-rec2 .pd-v { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 14px; color: var(--ink); margin-top: 1px; }
-.pd-rec2 .pd-n { margin-left: auto; font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 18px; color: var(--ink); }
-.pd-cw { display: flex; align-items: center; gap: 11px; padding: 9px 0; border-top: 1px solid var(--border); }
-.pd-cw.pd-first { border-top: none; }
-.pd-cw .pd-dt { font-size: 11px; color: var(--muted); width: 70px; flex: none; }
-.pd-cw .pd-tr { color: var(--gold); display: flex; flex: none; }
-.pd-cw .pd-tr svg { width: 16px; height: 16px; }
-.pd-cw .pd-tm { font-weight: 600; font-size: 13.5px; color: var(--ink); }
+/* -- ht-* : "Past tournaments" one-list (Mike pick Z, session 9 — tabs retired). Flat on stone: a hairline
+   year label (pl-sect grammar) over rows of accent-soft trophy tile + name + "N teams · champion|none" +
+   chevron. The old tabbed row kits (.pd-pt tournaments, .pd-rec2 leaderboard, .pd-cw champions) were
+   grep-gated to 0 in app.js and deleted here. -- */
+.ht-year { display: flex; align-items: center; gap: 10px; margin: 20px 0 10px; font: 700 13px var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
+.ht-year::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.ht-row { display: flex; align-items: center; gap: 13px; padding: 12px 2px; border-top: 1px solid var(--border); }
+.ht-year + .ht-row { border-top: none; }
+.ht-ic { width: 38px; height: 38px; flex: none; border-radius: 11px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; }
+.ht-ic svg { width: 20px; height: 20px; }
+.ht-body { flex: 1; min-width: 0; }
+.ht-nm { font-weight: 600; font-size: 15px; color: var(--ink); }
+.ht-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.ht-chev { width: 18px; height: 18px; flex: none; color: var(--faint); }
 
 /* -- claim card / gateway (Home) -- */
 .pd-claimrow { display: flex; align-items: center; gap: 11px; background: var(--card); border: 1px solid var(--border); border-radius: var(--r-md); padding: 11px 13px; margin-bottom: 11px; width: 100%; text-align: left; }

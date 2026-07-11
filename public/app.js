@@ -27,10 +27,9 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.23'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.24'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
-let pdHistoryTab = 'tournaments'; // public History page: 'tournaments' | 'leaderboard' | 'champions'
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
 const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
@@ -9100,10 +9099,12 @@ function buildMyTeamPageHTML() {
     ${rosterRows}`;
 }
 
-// Public History (dashboard remake, Slice 1) — locked mockup Option C: tabbed Tournaments / Leaderboard /
-// Champions. Champions + titles are REAL (per-tournament champion via computeChampion); "most wins / streak"
-// and the personal "your record" card need per-match + claimed-player history from later slices, shown as
-// honest placeholders. Data = loadTournamentHistory() (lazy, read-only anon, cached on state).
+// Public History (Mike's LOCKED pick Z, session 9 — "Past tournaments" ONE year-grouped list; the tabbed
+// Tournaments/Leaderboard/Champions layout is retired). Each row = accent-soft trophy tile + tournament
+// name + "N teams · <champion|No champion recorded>" + chevron, grouped under a hairline year label
+// (descending), rows newest-first within a year. Champion facts enrich the row inline — no separate view.
+// Data = loadTournamentHistory() (lazy, read-only anon, cached on state.tournamentHistory; rows already
+// sorted newest-first by date). computeAllTimeLeaderboard stays exported+tested for a later "records" view.
 function pdFormatMonthYear(iso) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -9139,35 +9140,44 @@ async function loadTournamentHistory() {
 }
 
 function buildHistoryPageHTML() {
-  const header = pdPageHeaderHTML('History & records');
-  const tab = ['tournaments', 'leaderboard', 'champions'].includes(pdHistoryTab) ? pdHistoryTab : 'tournaments';
-  const seg = `<div class="pd-seg">
-    <button type="button" class="pd-seg-s ${tab === 'tournaments' ? 'pd-on' : ''}" data-pd-history-tab="tournaments">Tournaments</button>
-    <button type="button" class="pd-seg-s ${tab === 'leaderboard' ? 'pd-on' : ''}" data-pd-history-tab="leaderboard">Leaderboard</button>
-    <button type="button" class="pd-seg-s ${tab === 'champions' ? 'pd-on' : ''}" data-pd-history-tab="champions">Champions</button>
-  </div>`;
+  const header = pdPageHeaderHTML('Past tournaments');
   const hist = state.tournamentHistory;
-  if (typeof hist === 'undefined') return `${header}${seg}<div class="pd-empty">Loading&hellip;</div>`;
-  if (!hist.length) return `${header}${seg}<div class="pd-empty">Past tournaments show up here after your first completed tournament.</div>`;
+  if (typeof hist === 'undefined') return `${header}<div class="pd-empty">Loading&hellip;</div>`;
+  if (!hist.length) return `${header}<div class="pd-empty">No tournaments finished yet — the first one lands here.</div>`;
 
   const TROPHY = '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 4h12v5a6 6 0 0 1-12 0z"/>';
-  let body = '';
-  if (tab === 'tournaments') {
-    body = `<div class="pd-card">${hist.map((h, i) => `<div class="pd-pt ${i === 0 ? 'pd-first' : ''}"><div><div class="pd-nm">${escapeHTML(h.name)}</div><div class="pd-meta">${h.champion ? ('Champion · ' + escapeHTML(h.champion.name || '')) : 'No champion recorded'}${h.teamCount ? (' · ' + h.teamCount + ' teams') : ''}</div></div></div>`).join('')}</div>`;
-  } else if (tab === 'leaderboard') {
-    const lb = computeAllTimeLeaderboard(hist);
-    const titleRow = lb.mostTitles
-      ? `<div class="pd-rec2 pd-first"><div class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${TROPHY}</svg></div><div><div class="pd-l">Most titles</div><div class="pd-v">${escapeHTML(lb.mostTitles.name)}</div></div><span class="pd-n">${lb.mostTitles.count}</span></div>`
-      : '';
-    const soon = (label, first) => `<div class="pd-rec2 ${first ? 'pd-first' : ''}"><div class="pd-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg></div><div><div class="pd-l">${escapeHTML(label)}</div><div class="pd-v" style="color:var(--muted);font-weight:600;">Coming soon</div></div><span class="pd-n">&mdash;</span></div>`;
-    body = `<div class="pd-card"><span class="pd-eyebrow">All-time records</span>${titleRow}${soon('Most wins', !titleRow)}${soon('Longest streak', false)}</div>`;
-  } else {
-    const champs = hist.filter((h) => h.champion);
-    body = champs.length
-      ? `<div class="pd-card"><span class="pd-eyebrow">Champions</span>${champs.map((h, i) => `<div class="pd-cw ${i === 0 ? 'pd-first' : ''}"><span class="pd-dt">${escapeHTML(pdFormatMonthYear(h.date))}</span><span class="pd-tr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${TROPHY}</svg></span><span class="pd-tm">${escapeHTML(h.champion.name || '')}</span></div>`).join('')}</div>`
-      : `<div class="pd-empty">No champions recorded yet.</div>`;
-  }
-  return `${header}${seg}${body}`;
+  const CHEV = '<svg class="ht-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
+
+  // Group by the calendar year of each tournament's date (created_at||updated_at, shaped by the loader).
+  // hist is already sorted newest-first, so rows stay newest-first within a year; the group KEYS are
+  // sorted descending explicitly (unknown-date rows sink to the bottom under a "—" heading).
+  const byYear = new Map();
+  hist.forEach((h) => {
+    const d = h.date ? new Date(h.date) : null;
+    const key = d && !isNaN(d.getTime()) ? String(d.getFullYear()) : '—';
+    if (!byYear.has(key)) byYear.set(key, []);
+    byYear.get(key).push(h);
+  });
+  const years = [...byYear.keys()].sort((a, b) => {
+    if (a === b) return 0;
+    if (a === '—') return 1;
+    if (b === '—') return -1;
+    return Number(b) - Number(a);
+  });
+
+  const body = years.map((yr) => {
+    const rows = byYear.get(yr).map((h) => {
+      const teams = h.teamCount || 0;
+      const champ = h.champion && h.champion.name
+        ? 'Champions — ' + escapeHTML(h.champion.name)
+        : 'No champion recorded';
+      const sub = `${teams} team${teams === 1 ? '' : 's'} · ${champ}`;
+      return `<div class="ht-row"><span class="ht-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${TROPHY}</svg></span><div class="ht-body"><div class="ht-nm">${escapeHTML(h.name)}</div><div class="ht-sub">${sub}</div></div>${CHEV}</div>`;
+    }).join('');
+    return `<div class="ht-year">${escapeHTML(yr)}</div>${rows}`;
+  }).join('');
+
+  return `${header}${body}`;
 }
 
 function renderPublicShell() {
@@ -10776,14 +10786,6 @@ function attachHandlers() {
       // Tournament atom-up (spec 2026-07-10 §1): the signed-out gate's "Sign in" CTA + "Create an account"
       // link both open the existing auth page (its create toggle handles the new-account path).
       if (e.target.closest('[data-role="tn-signin"]')) { openAuthPage(); return; }
-      // Slice 1: History tab switcher — same pattern.
-      const segHist = e.target.closest('[data-pd-history-tab]');
-      if (segHist) {
-        pdHistoryTab = segHist.dataset.pdHistoryTab;
-        const c = document.querySelector('#tab-history .container');
-        if (c) c.innerHTML = buildHistoryPageHTML();
-        return;
-      }
       // C26 item 3b: Dashboard quick-actions wire to existing affordances (Tournament + Session
       // left the nav but their panels remain, reachable here).
       const qa = e.target.closest('[data-qa]');
