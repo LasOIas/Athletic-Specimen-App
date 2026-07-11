@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.14'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.15'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -5215,62 +5215,164 @@ let pdTournamentView = 'hub'; // 'hub' | 'pools' | 'bracket' | 'register' — mo
 let regSubmittedTeam = null;
 let pdPoolFilter = 'all'; // Pools & schedule page client-side filter: 'all' | a pool label — survives partialRender
 
+// Atom-up redesign (spec 2026-07-10 §1): the signed-out gate. The Tournament page is PERSONAL, so a
+// signed-out user gets ONLY this — a centered logo, "This page is yours", the personal-page line, a
+// full-width Sign in CTA, and a "Create an account" link. Both auth affordances carry data-role="tn-signin"
+// → the #app-content handler opens the existing openAuthPage() (its create toggle covers the new account).
+// FLAT on the stone (no card — the tamed watermark shows through, spec §1). Transcribed from tn5-gate.html.
+function buildTournamentGateHTML() {
+  return `<div class="tn-gate">
+      <img class="tn-glogo" src="/logo-mark.png" alt="" aria-hidden="true" />
+      <h1 class="tn-gate-h">This page is yours</h1>
+      <p class="tn-gate-p">The tournament page is personal — your team, your games, your bracket run. Sign in to see it.</p>
+      <button type="button" class="tn-gate-cta" data-role="tn-signin">Sign in</button>
+      <div class="tn-gate-alt" data-role="tn-signin">New here? Create an account</div>
+    </div>`;
+}
+
+// Atom-up redesign (spec 2026-07-10 §2 build note): Rules copy is PENDING from Mike — the row renders but
+// routes to this honest "coming soon" stub (never invent rules content). Reuses the pd chrome (back →
+// data-tn-view="hub", eyebrow + title) like the other sub-pages.
+function buildTournamentRulesHTML() {
+  const list = state.tournaments || [];
+  const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
+  const show = active || list[0] || null;
+  const backSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
+  return `<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament">${backSvg}</button>
+      <div class="ph-titles"><span class="pd-eyebrow">${escapeHTML(show ? (show.name || 'Tournament') : 'Tournament')}</span><div class="pd-htitle">Rules</div></div>
+    </div>
+    <div class="tn-rules-stub">
+      <div class="tn-rules-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>
+      <div class="tn-rules-h">Rules are on the way</div>
+      <div class="tn-rules-s">The house rules for how we play will live here. Check back soon.</div>
+    </div>`;
+}
+
+// Atom-up redesign (spec 2026-07-10 §2): the signed-in hub, transcribed from tn5-assembled.html. FLAT on the
+// stone (no card): title → stage progress bar (one stage at a time, tournamentStageModel) → meta line →
+// hairline icon/data rows. The ACTIVE stage's row lights green "Happening now" (is-now); the not-yet stage
+// fades (is-locked). Rows route to the EXISTING subpages/tabs; the claim entry folds into the My-team row.
 function buildTournamentHubHTML() {
   const list = state.tournaments || [];
   const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
   const show = active || list[0] || null;
   const teams = (active ? state.tournamentTeams : []) || [];
   const matches = (active ? state.tournamentMatches : []) || [];
-  const isLive = !!(show && (show.status === 'pools' || show.status === 'bracket'));
-  const liveNets = new Set(matches.filter((m) => m.status === 'live' && m.net).map((m) => m.net)).size;
-  const regOpen = !!(show && show.registration_open && show.status === 'setup');
-  const bits = show ? [
+  const pools = (active ? state.tournamentPools : []) || [];
+
+  if (!show) {
+    return `<div class="tn-hub">
+        <h1 class="tn-title">No tournament scheduled</h1>
+        <div class="tn-meta">${state.loaded ? 'Check back soon.' : 'Loading…'}</div>
+      </div>`;
+  }
+
+  const stage = tournamentStageModel(show, matches);
+  const netCount = Number(show.net_count) || 0;
+  const metaBits = [
     teams.length ? teams.length + (teams.length === 1 ? ' team' : ' teams') : '',
-    show.status === 'setup' ? (regOpen ? 'Registration open' : 'Registration closed')
-      : show.status === 'pools' ? 'Pools underway'
-      : show.status === 'bracket' ? 'Bracket underway' : 'Completed',
-  ].filter(Boolean).join(' · ') : '';
-  const header = show
-    ? `<div class="pd-card pd-thero"><div class="tn-head"><div>
-         <span class="pd-eyebrow">Tournament</span>
-         <div class="pd-h">${escapeHTML(show.name || 'Tournament')}</div>
-         <div class="pd-sub">${escapeHTML(bits)}</div>
-       </div>${isLive ? '<span class="tn-live"><span class="tn-dot"></span>Live</span>' : ''}</div>
-       ${regOpen ? `<button type="button" class="pd-claimbtn" data-tn-view="register">
-         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 14l2 2 4-4"/></svg>
-         Register your team
-       </button>` : ''}</div>`
-    : `<div class="pd-card pd-thero"><span class="pd-eyebrow">Tournament</span>
-       <div class="pd-h">No tournament scheduled</div>
-       <div class="pd-sub">${state.loaded ? 'Check back soon.' : 'Loading…'}</div></div>`;
-  const standings = show ? computeStandings(teams, matches) : [];
-  const anyFinal = matches.some((m) => m.phase === 'pool' && m.status === 'final');
+    netCount ? netCount + (netCount === 1 ? ' net' : ' nets') : '',
+  ].filter(Boolean).join(' · ');
+
+  // Stage progress bar — one stage at a time (spec §2/§3). Omitted entirely pre-play (setup) — the rows carry
+  // their own honest "not started" subs. countLabel: "24 of 36" (pools) / "Round 2 of 4" (bracket) / "Complete".
+  const countLabel = stage.phase === 'pools' ? (stage.count + ' of ' + stage.total)
+    : stage.phase === 'bracket' ? ('Round ' + stage.count + ' of ' + stage.total)
+    : stage.phase === 'completed' ? 'Complete' : '';
+  const progHTML = stage.stageLabel ? `<div class="tn-prog">
+        <div class="tn-prog-head"><span>${escapeHTML(stage.stageLabel)}</span><span class="tn-prog-n">${escapeHTML(countLabel)}</span></div>
+        <div class="tn-prog-bar"><i style="width:${stage.pct}%"></i></div>
+      </div>` : '';
+
+  // Row icons (transcribed literally from the mockup — SVG only, no emoji, §51). A right chevron marks a row
+  // with no honest numeric value yet.
+  const ICON = {
+    team: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    cal: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
+    chart: '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',
+    trophy: '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
+    book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+    clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+  };
+  const CHEV = '›';
+  // sub + stat are pre-escaped HTML by the callers (every dynamic piece runs through escapeHTML); title is
+  // escaped here. Rows are clickable DIVs (the codebase norm for flat rows, cf. .pd-game) — the delegated
+  // #app-content handler routes on the data-* attribute; a <button> would inherit the global blue chrome.
+  const row = (attrs, cls, icon, title, sub, stat) => `<div class="tn-row${cls ? ' ' + cls : ''}" ${attrs}>
+      <span class="tn-lft"><svg viewBox="0 0 24 24">${icon}</svg><span class="tn-tl">${escapeHTML(title)}<span class="tn-sub">${sub}</span></span></span>
+      <span class="tn-stat">${stat}</span></div>`;
+
+  const rows = [];
+
+  // My team — claimed shows team + record + next; unclaimed folds in the claim entry (spec §3, item 3).
   const mine = myTeamInfo();
-  const myRec = mine ? computeTeamRecord(mine.teamId, matches, teams) : null;
-  // Claim entry relocated from the old Home hero (atom-up spec 2026-07-10 §2 — Home is the everyone
-  // surface, no personalization; the claim/personal layer lives on the Tournament tab). An unclaimed
-  // user (no My Team) with a live tournament to claim into gets the claim tile here, in the My Team
-  // slot (mutually exclusive with My Team). publicLiveTournament() is the same condition the old Home
-  // hero gated on AND the first branch of the claim page's own precondition (claimableTournament(),
-  // app.js ~8254) — so the entry is never dead. Same #pd-claim id → the delegated #app-content click
-  // handler (app.js ~10400) binds it unchanged; the hub renders inside #app-content.
-  const canClaim = !mine && !!publicLiveTournament();
-  const tile = (attrs, svg, title, sub) => `<button type="button" class="pd-tile" ${attrs}>
-      <span class="pd-ti"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svg}</svg></span>
-      <span class="pd-tt">${escapeHTML(title)}</span><span class="pd-ts">${escapeHTML(sub)}</span></button>`;
-  const tiles = [
-    show ? tile('data-tn-view="pools"', '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', 'Pools & schedule',
-      show.status === 'setup' ? 'Before pool play' : liveNets ? (liveNets + (liveNets === 1 ? ' net live' : ' nets live')) : 'Every game by net') : '',
-    show ? tile('data-nav-tab="standings"', '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M21 20H3"/>', 'Standings',
-      (anyFinal && standings[0]) ? ('Leader: ' + (standings[0].name || '—')) : 'By pool') : '',
-    show ? tile('data-tn-view="bracket"', '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/>', 'Bracket',
-      show.status === 'bracket' ? 'In progress' : show.status === 'completed' ? 'Final' : 'After pools') : '',
-    mine ? tile('data-nav-tab="myteam"', '<circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>', 'My Team',
-      (myRec ? myRec.wins + '–' + myRec.losses + ' · ' : '') + 'Your games')
-      : (canClaim ? tile('id="pd-claim"', '<path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="8" r="4"/><path d="m16.5 11 2 2 4-4"/>', 'Claim your team', 'Playing? Find your name') : ''),
-    tile('data-nav-tab="history"', '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/>', 'Past tournaments', 'Champions & records'),
-  ].filter(Boolean).join('');
-  return `${header}<div class="pd-tiles">${tiles}</div>`;
+  if (mine) {
+    const peek = teamPeekModel(mine.teamId, { teams, matches, pools });
+    const nm = (peek && peek.teamName) || mine.teamName || 'Your team';
+    const poolPart = (peek && peek.poolLabel) ? ' · Pool ' + escapeHTML(peek.poolLabel) : '';
+    let stat = CHEV;
+    if (peek) {
+      const rec = peek.wins + '-' + peek.losses;
+      const nextNet = peek.next && peek.next.net;
+      stat = peek.live ? (rec + ' · Playing now') : (nextNet ? (rec + ' · Net ' + nextNet + ' next') : rec);
+    }
+    rows.push(row('data-nav-tab="myteam"', '', ICON.team, 'My team', escapeHTML(nm) + poolPart, escapeHTML(stat)));
+  } else if (publicLiveTournament()) {
+    // Unclaimed + a live tournament to claim into: the claim entry (relocated from the old Home hero) lives
+    // here in the My-team slot. Same #pd-claim id → the existing delegated handler opens the claim flow.
+    rows.push(row('id="pd-claim"', '', ICON.team, 'Claim your team', 'Playing? Find your name', CHEV));
+  } else {
+    rows.push(row('data-nav-tab="myteam"', '', ICON.team, 'My team', 'Claim your team once play begins', CHEV));
+  }
+
+  // Pools & schedule — the ACTIVE stage during pools (green "Happening now"); a final summary afterward.
+  const poolGames = matches.filter((m) => m.phase === 'pool' && m.team_a_id && m.team_b_id);
+  const poolDone = poolGames.filter((m) => m.status === 'final').length;
+  const poolTotal = poolGames.length;
+  const livePool = matches.filter((m) => m.phase === 'pool' && m.status === 'live').length;
+  if (stage.activeView === 'pools') {
+    const sub = livePool ? ('Happening now · ' + livePool + (livePool === 1 ? ' game playing' : ' games playing')) : 'Pool play underway';
+    rows.push(row('data-tn-view="pools"', 'is-now', ICON.cal, 'Pools & schedule', sub, escapeHTML(poolDone + '/' + poolTotal)));
+  } else if (show.status === 'setup') {
+    rows.push(row('data-tn-view="pools"', '', ICON.cal, 'Pools & schedule', 'Starts when play begins', CHEV));
+  } else {
+    rows.push(row('data-tn-view="pools"', '', ICON.cal, 'Pools & schedule', 'Pool play complete', poolTotal ? escapeHTML(poolTotal + '/' + poolTotal) : CHEV));
+  }
+
+  // Standings — leader once any pool game is final (§27 TRUE: no leader before a result exists).
+  const anyFinal = matches.some((m) => m.phase === 'pool' && m.status === 'final');
+  const standings = computeStandings(teams, matches);
+  const leader = (anyFinal && standings[0]) ? (standings[0].name || '') : '';
+  rows.push(row('data-nav-tab="standings"', '', ICON.chart, 'Standings',
+    leader ? 'Leader' : 'Starts when games do', leader ? escapeHTML(leader) : CHEV));
+
+  // Bracket — locked/faded during pools (spec §2); the active stage during bracket; the champion after.
+  const mainMatches = matches.filter((m) => m.phase === 'main');
+  if (stage.activeView === 'bracket') {
+    const bl = mainMatches.filter((m) => m.status !== 'final').length;
+    const line = bracketStatusLine(mainMatches);
+    rows.push(row('data-tn-view="bracket"', 'is-now', ICON.trophy, 'Bracket',
+      'Happening now' + (line ? ' · ' + escapeHTML(line) : ''), bl ? escapeHTML(bl + ' left') : CHEV));
+  } else if (show.status === 'completed') {
+    const oc = bracketOutcome(mainMatches, teams);
+    rows.push(row('data-tn-view="bracket"', '', ICON.trophy, 'Bracket',
+      oc ? 'Champion crowned' : 'Final', oc ? escapeHTML(oc.championName || '') : CHEV));
+  } else {
+    const sub = show.status === 'pools' ? 'Unlocks when pools finish' : 'After pool play';
+    rows.push(row('data-tn-view="bracket"', 'is-locked', ICON.trophy, 'Bracket', sub, CHEV));
+  }
+
+  // Rules — copy pending from Mike → the "coming soon" stub (spec §2 build note); Past tournaments → History.
+  rows.push(row('data-tn-view="rules"', '', ICON.book, 'Rules', 'How we play', CHEV));
+  rows.push(row('data-nav-tab="history"', '', ICON.clock, 'Past tournaments', 'Champions &amp; records', CHEV));
+
+  return `<div class="tn-hub">
+      <h1 class="tn-title">${escapeHTML(show.name || 'Tournament')}</h1>
+      ${progHTML}
+      <div class="tn-meta">${escapeHTML(metaBits)}</div>
+      <div class="tn-rows">${rows.join('')}</div>
+    </div>`;
 }
 
 // The public Tournament tab root: the hub, or one of its dedicated sub-pages (each its own destination).
@@ -5279,6 +5381,10 @@ function buildTournamentHubHTML() {
 // live in the hub itself. Admin keeps buildTournamentTabHTML() directly (its own branch inside that function).
 function buildPublicTournamentRootHTML() {
   if (state.isAdmin) return buildTournamentTabHTML();
+  // Atom-up redesign (spec 2026-07-10 §1): the Tournament page is PERSONAL — signed-out users get ONLY the
+  // gate (no hub, no data). Branch on the real signed-in flag (state.authSession) before any view/data.
+  if (!state.authSession) return buildTournamentGateHTML();
+  if (pdTournamentView === 'rules') return buildTournamentRulesHTML();
   if (pdTournamentView === 'pools') return buildPoolsSchedulePageHTML();
   if (pdTournamentView === 'bracket') return buildBracketPageHTML();
   if (pdTournamentView === 'register') return buildRegisterPageHTML();
@@ -10716,6 +10822,9 @@ function attachHandlers() {
         else { claimIntent = true; openAuthPage(); }
         return;
       }
+      // Tournament atom-up (spec 2026-07-10 §1): the signed-out gate's "Sign in" CTA + "Create an account"
+      // link both open the existing auth page (its create toggle handles the new-account path).
+      if (e.target.closest('[data-role="tn-signin"]')) { openAuthPage(); return; }
       // Slice 1: Standings Pools/Overall toggle — state in a module var (survives partialRender), re-render in place.
       const segStand = e.target.closest('[data-pd-standings-view]');
       if (segStand) {
@@ -10772,7 +10881,7 @@ function attachHandlers() {
         dismissTeamPeek();
         const v = tnBtn.getAttribute('data-tn-view');
         regSubmittedTeam = null; // any explicit nav (open Register fresh / Back to hub) clears the payoff
-        pdTournamentView = (v === 'pools' || v === 'bracket' || v === 'register') ? v : 'hub';
+        pdTournamentView = (v === 'pools' || v === 'bracket' || v === 'register' || v === 'rules') ? v : 'hub';
         // §13.4: a data-tn-view chip can live OUTSIDE the Tournament tab (e.g. the Home hero's "Watch the
         // bracket" terminal chip) — switch to the Tournament tab first so the sub-page is actually visible.
         if (activeMainTab !== 'tournament') activateMainTab('tournament');

@@ -3471,6 +3471,52 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 @keyframes pd-reg-sheetup { from { transform: translateY(100%); } to { transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .pd-reg-scrim, .pd-reg-sheet { animation: none; } .pd-reg-dot { animation: none; } }
 
+/* ── Tournament page — atom-up redesign (spec 2026-07-10, v2026.07.10.15), transcribed LITERALLY from the
+   approved mockups (scratchpad ladder/tn5-assembled.html + tn5-gate.html). FLAT on the stone (no card — the
+   tamed watermark shows through), Barlow via var(--font-display), single --accent, §51 matte / no gold /
+   SVG icons. oklch literals below are the mockup's own values where no token matches exactly (the prog track
+   + the stage-label ink), mirroring how the .rf-* register page keeps mockup literals. ── */
+/* Signed-in hub */
+.tn-title { font-family: var(--font-display); font-size: 26px; font-weight: 700; line-height: 1.05; color: var(--ink); margin: 0; padding: 2px 0 0; }
+.tn-prog { margin-top: 10px; }
+.tn-prog-head { display: flex; justify-content: space-between; align-items: baseline; }
+.tn-prog-head > span { font: 700 13px var(--font-display); letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); }
+/* .tn-prog-head .tn-prog-n (0,2,0) beats .tn-prog-head > span (0,1,1) so the count renders as the intended
+   Inter/muted/normal-case value — NOT the label's Barlow caps (the "a child selector silently overrides my
+   single class" trap from the last build; raise specificity rather than leave the override / !important). */
+.tn-prog-head .tn-prog-n { font-size: 12px; letter-spacing: 0; color: var(--muted); font-family: 'Inter', sans-serif; font-weight: 600; text-transform: none; }
+.tn-prog-bar { height: 4px; border-radius: 99px; background: oklch(0.92 0.004 75); margin-top: 6px; overflow: hidden; }
+.tn-prog-bar i { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
+.tn-meta { font-size: 13px; color: var(--muted); margin-top: 6px; }
+.tn-rows { margin-top: 14px; }
+/* Rows are clickable DIVs (not buttons — the global blue button chrome would fight the flat hairline look). */
+.tn-row { display: flex; align-items: center; justify-content: space-between; padding: 13px 2px; border-bottom: 1px solid var(--border); font: 600 15px 'Inter', sans-serif; color: var(--ink); cursor: pointer; }
+.tn-row:last-of-type { border-bottom: none; }
+.tn-row:active { background: var(--surface-3); }
+.tn-lft { display: flex; align-items: center; min-width: 0; flex: 1; }
+.tn-tl { min-width: 0; }
+.tn-row svg { width: 20px; height: 20px; stroke: var(--accent); fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; margin-right: 14px; }
+.tn-sub { display: block; font: 400 12.5px 'Inter', sans-serif; color: var(--muted); margin-top: 2px; }
+.tn-stat { font: 700 15px var(--font-display); color: var(--text-2); margin-left: 10px; white-space: nowrap; }
+/* Active stage = green "Happening now" + a left --accent edge; the not-yet stage fades. */
+.tn-row.is-now { border-left: 3px solid var(--accent); padding-left: 10px; margin-left: -13px; }
+.tn-row.is-now .tn-sub { color: var(--live-ink); font-weight: 600; }
+.tn-row.is-locked { opacity: .45; }
+/* Signed-out gate */
+.tn-gate { text-align: center; padding-top: 78px; }
+.tn-glogo { height: 110px; width: auto; margin: 0 auto 18px; display: block; }
+.tn-gate-h { font-family: var(--font-display); font-size: 26px; font-weight: 700; color: var(--ink); margin: 0; }
+.tn-gate-p { font-size: 14px; color: var(--muted); margin-top: 8px; line-height: 1.5; padding: 0 18px; }
+.tn-gate-cta { width: 100%; margin-top: 22px; padding: 14px 0; min-height: 0; background: var(--accent); color: #fff; border: none; border-radius: 11px; font: 600 16px 'Inter', sans-serif; }
+.tn-gate-cta:hover { background: var(--brand-dark); }
+.tn-gate-alt { margin-top: 14px; font: 600 13.5px 'Inter', sans-serif; color: var(--brand-dark); cursor: pointer; }
+/* Rules stub (copy pending from Mike) */
+.tn-rules-stub { text-align: center; padding: 48px 20px; }
+.tn-rules-ic { width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; }
+.tn-rules-ic svg { width: 26px; height: 26px; }
+.tn-rules-h { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--ink); }
+.tn-rules-s { font-size: 13.5px; color: var(--muted); margin: 8px auto 0; line-height: 1.5; max-width: 300px; }
+
 /* ===================================================================
    SLICE 5 — DESKTOP FULL-WIDTH TREATMENT (spec §13.8, 2026-07-09)
    Mike (locked): "A is the best, but on desktop you can fit a lot more
@@ -3527,6 +3573,12 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 
   /* ---- Tournament hub: header card full width, tiles 4-across ---- */
   body.pd-public-active .pd-tiles { grid-template-columns: repeat(4, 1fr); }
+
+  /* ---- Tournament page atom-up (spec §4): the hub + gate stay a comfortable CENTERED column on desktop
+     (the .container widens to 1140px; the flat rows don't want to stretch that wide). ---- */
+  body.pd-public-active .tn-hub,
+  body.pd-public-active .tn-gate { max-width: 560px; margin-left: auto; margin-right: auto; }
+  body.pd-public-active .tn-title { font-size: 30px; }
 
   /* ---- Pools & schedule: now-playing cluster = a full-width ROW of live cards (was a vertical stack) ---- */
   body.pd-public-active section.pd-card:has(> .pd-pool-live) {

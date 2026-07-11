@@ -1475,6 +1475,57 @@ function homeTopStandingsModel(standings, n) {
   });
 }
 
+// Tournament page atom-up redesign (spec 2026-07-10 §2/§3): the CURRENT stage that drives the hub's stage
+// progress bar (one stage at a time — POOL PLAY, then BRACKET, then Final) AND which hub row carries the
+// active-stage emphasis (activeView -> the Pools or Bracket row lights "Happening now"; the not-yet stage's
+// row fades/locks). PURE — keyed on the tournament's own `status`, the phase authority used everywhere else
+// (buildTournamentHubHTML / bracket page). Returns { phase, stageLabel, count, total, pct, activeView }:
+//   setup / no tournament -> no live stage bar (stageLabel null, activeView null).
+//   pools    -> count = pool games final, total = pool games with BOTH teams set (byes/main excluded), like
+//               the bracket page's pre-progress line; pct = round(count/total*100); activeView 'pools'.
+//   bracket  -> total = distinct play-round levels among main matches (winners+losers of the same round run
+//               concurrently, so they share a level; grand final sorts last — mirrors bracketGameNumbers);
+//               count = the ordinal of the CURRENT round (the live game's level, else the soonest still-to-play
+//               game by queue_order); activeView 'bracket'.
+//   completed-> stageLabel 'Final', full bar, activeView null (nothing "happening now"; all rows navigable).
+function tournamentStageModel(tournament, matches) {
+  const t = tournament || {};
+  const list = Array.isArray(matches) ? matches : [];
+  const status = t.status || 'setup';
+
+  if (status === 'pools') {
+    const games = list.filter((m) => m && m.phase === 'pool' && m.team_a_id && m.team_b_id);
+    const total = games.length;
+    const count = games.filter((m) => m.status === 'final').length;
+    const pct = total ? Math.round((count / total) * 100) : 0;
+    return { phase: 'pools', stageLabel: 'Pool play', count, total, pct, activeView: 'pools' };
+  }
+
+  if (status === 'bracket' || status === 'completed') {
+    const main = list.filter((m) => m && m.phase === 'main');
+    const maxRound = main.reduce((mx, m) => Math.max(mx, m.side !== 'grand_final' ? (Number(m.round) || 0) : 0), 0);
+    const playRound = (m) => (m.side === 'grand_final' ? maxRound + (Number(m.round) || 0) : (Number(m.round) || 0));
+    const levels = [...new Set(main.map(playRound))].sort((a, b) => a - b);
+    const total = levels.length;
+    if (status === 'completed') {
+      return { phase: 'completed', stageLabel: 'Final', count: total, total, pct: 100, activeView: null };
+    }
+    // live bracket — current round = the ordinal of the focus game's play-round level.
+    const playable = main.filter((m) => m.team_a_id && m.team_b_id && m.status !== 'final');
+    const live = playable.find((m) => m.status === 'live');
+    const focus = live
+      || playable.slice().sort((a, b) => (Number(a.queue_order) || 0) - (Number(b.queue_order) || 0))[0]
+      || null;
+    const idx = focus ? levels.indexOf(playRound(focus)) : (total - 1);
+    const count = total ? Math.max(1, idx + 1) : 0;
+    const pct = total ? Math.round((count / total) * 100) : 0;
+    return { phase: 'bracket', stageLabel: 'Bracket', count, total, pct, activeView: 'bracket' };
+  }
+
+  // setup / registration / unknown -> no live stage bar (spec §3).
+  return { phase: 'setup', stageLabel: null, count: 0, total: 0, pct: 0, activeView: null };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -1497,6 +1548,7 @@ if (typeof module !== "undefined" && module.exports) {
     bracketOutcome, bracketRoundLabel, bracketStatusLine,
     registerEventModel, joinSheetValidate, registerFormValidate, teamNameTaken,
     computeTeamRunEnded, sessionIsUpcoming, sessionIsToday,
-    publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel
+    publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel,
+    tournamentStageModel
   };
 }
