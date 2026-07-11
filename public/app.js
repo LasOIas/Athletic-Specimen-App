@@ -27,10 +27,9 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.19'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.20'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
-let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
 let pdHistoryTab = 'tournaments'; // public History page: 'tournaments' | 'leaderboard' | 'champions'
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
@@ -1443,20 +1442,18 @@ function partialRender() {
     }
   }
 
-  // Slice 1 (2026-07-08): public Standings + History sub-tabs update IN PLACE on a background sync,
-  // mirroring the Scores short-circuit — rebuild only the panel container (recomputes live standings /
-  // history; the segmented-toggle state lives in a module var so it survives) and preserve the
-  // spectator's scrollTop (iOS resets it on innerHTML replace). Slice 3c: My Team joins the same
-  // pattern (its Games/Roster toggle state lives in pdMyTeamTab).
-  if (!playersEl && (activeMainTab === 'standings' || activeMainTab === 'history' || activeMainTab === 'myteam')) {
+  // Slice 1 (2026-07-08): public History + My Team sub-pages update IN PLACE on a background sync,
+  // mirroring the Scores short-circuit — rebuild only the panel container (recomputes live records /
+  // history; the module-var toggle state survives) and preserve the spectator's scrollTop (iOS resets
+  // it on innerHTML replace). (Standings folded into the Pools Seeding tab — Mike K, 2026-07-10 — so the
+  // pools sub-page repaints via partialRenderTournament below, not here.)
+  if (!playersEl && (activeMainTab === 'history' || activeMainTab === 'myteam')) {
     const panel = document.getElementById('tab-' + activeMainTab);
     const c = panel ? panel.querySelector('.container') : null;
     if (c) {
       const saved = panel.scrollTop;
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
-      c.innerHTML = activeMainTab === 'standings' ? buildStandingsPageHTML()
-        : activeMainTab === 'myteam' ? buildMyTeamPageHTML()
-        : buildHistoryPageHTML();
+      c.innerHTML = activeMainTab === 'myteam' ? buildMyTeamPageHTML() : buildHistoryPageHTML();
       if (saved > 0 && panel.scrollTop !== saved) panel.scrollTop = saved;
       return;
     }
@@ -4189,8 +4186,8 @@ async function refreshTournamentLive() {
     if (tournamentTabIsDirty()) return;
     await tdbRefreshTournaments();
     if (onTournamentSurface()) partialRenderTournament();
-  } else if ((activeMainTab === 'home' || activeMainTab === 'myteam' || activeMainTab === 'standings') && publicLiveTournament()) {
-    // Slice 3c: Home / My Team / Standings all render from tournament state, which previously went
+  } else if ((activeMainTab === 'home' || activeMainTab === 'myteam') && publicLiveTournament()) {
+    // Slice 3c: Home / My Team both render from tournament state, which previously went
     // STALE here — this else-branch only refreshed the tournaments list, so those panels repainted
     // every 15s from frozen data (review wf_4480d8a3-9be: a claimed player's record/up-next froze
     // while they sat on My Team). Refresh the data + repaint via partialRender() (its in-place
@@ -5351,11 +5348,12 @@ function buildTournamentHubHTML() {
     rows.push(row('data-tn-view="pools"', '', ICON.cal, 'Pools & schedule', 'Pool play complete', poolTotal ? escapeHTML(poolTotal + '/' + poolTotal) : CHEV));
   }
 
-  // Standings — leader once any pool game is final (§27 TRUE: no leader before a result exists).
+  // Seeding — leader once any pool game is final (§27 TRUE: no leader before a result exists). Folds into
+  // the Pools & schedule Seeding tab (Mike K, 2026-07-10): data-pools-tab tells the delegate to open there.
   const anyFinal = matches.some((m) => m.phase === 'pool' && m.status === 'final');
   const standings = computeStandings(teams, matches);
   const leader = (anyFinal && standings[0]) ? (standings[0].name || '') : '';
-  rows.push(row('data-nav-tab="standings"', '', ICON.chart, 'Standings',
+  rows.push(row('data-tn-view="pools" data-pools-tab="seeding"', '', ICON.chart, 'Seeding',
     leader ? 'Leader' : 'Starts when games do', leader ? escapeHTML(leader) : CHEV));
 
   // Bracket — locked/faded during pools (spec §2); the active stage during bracket; the champion after.
@@ -5458,17 +5456,18 @@ function buildBracketPageHTML() {
         <div class="pd-bk-bar"><div class="pd-bk-bar-fill" style="width:${pct}%;"></div></div>
       </div>` : '';
     // §13.6: key the heading + body on status. Registration (setup) → honest "comes after pool play" copy
-    // (never "battling through pools"); pools → the existing in-play copy + the seeding→Standings chip
-    // (seeding only exists once pool games are played, so the chip is omitted during registration).
+    // (never "battling through pools"); pools → the existing in-play copy + the seeding chip (deep-links to
+    // the Pools Seeding tab — Mike K; seeding only exists once pool games are played, so it's omitted during
+    // registration).
     const preH = isReg ? 'The bracket comes after pool play' : 'The bracket generates when pool play finishes';
     const preS = isReg
       ? (regOpen
         ? 'Registration is open — the bracket comes after pool play. Once teams are in and pools wrap, it appears right here.'
         : 'The bracket comes after pool play. Once pools wrap, it appears right here.')
       : 'Teams are still battling through pools. The moment the last pool game goes final, seeds lock in and the bracket appears right here.';
-    const seedChip = isReg ? '' : `<button type="button" class="pd-bk-chip" data-nav-tab="standings">Current seeding
+    const seedChip = isReg ? '' : `<button type="button" class="pd-bk-chip" data-tn-view="pools" data-pools-tab="seeding">Current seeding
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
-          <span class="pd-bk-chip-2">Standings</span></button>`;
+          <span class="pd-bk-chip-2">Seeding</span></button>`;
     return `${header}<div class="pd-card pd-bk-precard">
         <div class="pd-bk-preic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v4a2 2 0 0 0 2 2h4"/><path d="M6 21v-4a2 2 0 0 1 2-2h4"/><path d="M12 12h6"/><path d="M18 8v8"/></svg></div>
         <div class="pd-bk-preh">${escapeHTML(preH)}</div>
@@ -9044,11 +9043,7 @@ function pdPageHeaderHTML(title) {
   </div>`;
 }
 
-// Public Standings (dashboard remake, Slice 1) — locked mockup Option A: by-pool ranked mini-tables with a
-// Pools / Overall-seeding toggle. Reuses computeStandings (per pool, via shapeStandingsByPool) + computeSeeding
-// (overall). NO skill. Slice 3c: a signed-in CLAIMED player's team row gets the .pd-you highlight + "You"
-// chip (keyed on r.teamId — computeStandings/computeSeeding row shapes differ). Data = the active tournament.
-// Slice 3c: the My Team page (Mike's LOCKED Option B big-record scoreboard) — centered eyebrow
+// The My Team page (Mike's LOCKED Option B big-record scoreboard, Slice 3c) — centered eyebrow
 // (tournament · Pool · Seed) → team name → 44px Sora W–L + per-game pips → up-next strip →
 // Games ↔ Roster segmented toggle. Renders entirely from state (partialRender-safe rebuild).
 let pdMyTeamTab = 'games'; // 'games' | 'roster' (module var survives partialRender)
@@ -9112,50 +9107,6 @@ function buildMyTeamPageHTML() {
     ${toggle}
     ${body}
   </div>`;
-}
-
-function buildStandingsPageHTML() {
-  const pools = state.tournamentPools || [];
-  const teams = state.tournamentTeams || [];
-  const matches = state.tournamentMatches || [];
-  const header = pdPageHeaderHTML('Standings');
-  const anyFinal = matches.some((m) => m.phase === 'pool' && m.status === 'final');
-  if (!pools.length || !anyFinal) {
-    return `${header}<div class="pd-empty">Standings appear once pool games are scored.</div>`;
-  }
-  const view = pdStandingsView === 'overall' ? 'overall' : 'pools';
-  const toggle = `<div class="pd-seg">
-    <button type="button" class="pd-seg-s ${view === 'pools' ? 'pd-on' : ''}" data-pd-standings-view="pools">Pools</button>
-    <button type="button" class="pd-seg-s ${view === 'overall' ? 'pd-on' : ''}" data-pd-standings-view="overall">Overall seeding</button>
-  </div>`;
-  const myTeamId = (myTeamInfo() || {}).teamId || null;
-  const rowHTML = (r, rankLabel, i) => {
-    const diff = r.pointDiff || 0;
-    const diffStr = (diff > 0 ? '+' : '') + diff;
-    const isMe = myTeamId && r.teamId === myTeamId;
-    return `<div class="pd-st ${i === 0 ? 'pd-first' : ''}${isMe ? ' pd-you' : ''}"><span class="pd-rk">${escapeHTML(String(rankLabel))}</span><span class="pd-tm">${escapeHTML(r.name || '')}${isMe ? '<span class="pd-youtag">You</span>' : ''}</span><span class="pd-rec">${r.wins}–${r.losses}</span><span class="pd-df ${diff >= 0 ? 'pd-p' : 'pd-n'}">${diffStr}</span></div>`;
-  };
-  let body = '';
-  if (view === 'pools') {
-    // Slice 5 (§13.8): the per-pool mini-tables wrap in .pd-cardgrid so desktop lays them 2–3 across;
-    // mobile-inert (display:contents < 1024px) so they stack exactly as before.
-    body = '<div class="pd-cardgrid">' + shapeStandingsByPool(pools, teams, matches).map((p) => {
-      const netsLabel = p.nets.length ? ('Net' + (p.nets.length > 1 ? 's' : '') + ' ' + formatNetList(p.nets)) : '';
-      return `<div class="pd-card">
-        <div class="pd-ph">Pool ${escapeHTML(p.poolLabel)}${netsLabel ? `<span class="pd-pl">${escapeHTML(netsLabel)}</span>` : ''}</div>
-        <div class="pd-colh"><span class="pd-rk">#</span><span>Team</span><span class="pd-rec">W–L</span><span class="pd-df">Diff</span></div>
-        ${p.rows.map((r, i) => rowHTML(r, r.rank, i)).join('')}
-      </div>`;
-    }).join('') + '</div>';
-  } else {
-    const seeds = computeSeeding(teams, matches);
-    body = `<div class="pd-card">
-      <div class="pd-colh"><span class="pd-rk">Seed</span><span>Team</span><span class="pd-rec">W–L</span><span class="pd-df">Diff</span></div>
-      ${seeds.map((r, i) => rowHTML(r, r.seed, i)).join('')}
-    </div>
-    <div class="pd-foot">Seeded by win %, then point differential — this sets the bracket order.</div>`;
-  }
-  return `${header}${toggle}${body}`;
 }
 
 // Public History (dashboard remake, Slice 1) — locked mockup Option C: tabbed Tournaments / Leaderboard /
@@ -9253,11 +9204,6 @@ function renderPublicShell() {
     <div id="tab-tournament" class="tab-panel">
       <div class="container">
         ${buildPublicTournamentRootHTML()}
-      </div>
-    </div>
-    <div id="tab-standings" class="tab-panel">
-      <div class="container">
-        ${buildStandingsPageHTML()}
       </div>
     </div>
     <div id="tab-myteam" class="tab-panel">
@@ -10020,6 +9966,10 @@ function render() {
   // Check In rework (Mike 2026-07-10): a saved 'players' tab from a session day bounces to Home when the
   // Check In nav button is hidden (session deleted / date passed) — mirrors the retired-'scores' bounce.
   if (!state.isAdmin && activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
+  // Mike K (2026-07-10): the public Standings page folded into the Pools & schedule Seeding tab, so a saved
+  // 'standings' tab has no panel — bounce it to the Tournament tab (the Seeding tab lives inside it). Runs
+  // BEFORE the tournament→home guard below, so a standings-saved fan with no live tournament cascades to Home.
+  if (!state.isAdmin && activeMainTab === 'standings') activeMainTab = 'tournament';
   // Wave 1e: a fan last on the Bracket tab who returns after the tournament was deleted would land on
   // an empty 'tournament' panel with no nav button to highlight (the Bracket button is gone). Reset to
   // Home unless a tournament is actually live.
@@ -10308,6 +10258,8 @@ updateBulkBarVisibility();
 if (!state.isAdmin && ['teams', 'session', 'scores'].includes(activeMainTab)) activeMainTab = 'home';
 // Check In rework (Mike 2026-07-10): bounce a stranded public 'players' tab to Home when the Check In nav button is hidden.
 if (!state.isAdmin && activeMainTab === 'players' && !checkinNavVisible()) activeMainTab = 'home';
+// Mike K (2026-07-10): Standings folded into the Pools Seeding tab — a saved 'standings' tab has no panel; bounce it to Tournament (the guard below re-routes to Home if none is live).
+if (!state.isAdmin && activeMainTab === 'standings') activeMainTab = 'tournament';
 // Wave 1e: reset a stale public 'tournament' tab to Home when no tournament is live (else an empty panel + no nav button).
 if (!state.isAdmin && activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 activateMainTab(activeMainTab);
@@ -10833,14 +10785,6 @@ function attachHandlers() {
       // Tournament atom-up (spec 2026-07-10 §1): the signed-out gate's "Sign in" CTA + "Create an account"
       // link both open the existing auth page (its create toggle handles the new-account path).
       if (e.target.closest('[data-role="tn-signin"]')) { openAuthPage(); return; }
-      // Slice 1: Standings Pools/Overall toggle — state in a module var (survives partialRender), re-render in place.
-      const segStand = e.target.closest('[data-pd-standings-view]');
-      if (segStand) {
-        pdStandingsView = segStand.dataset.pdStandingsView;
-        const c = document.querySelector('#tab-standings .container');
-        if (c) c.innerHTML = buildStandingsPageHTML();
-        return;
-      }
       // Slice 1: History tab switcher — same pattern.
       const segHist = e.target.closest('[data-pd-history-tab]');
       if (segHist) {
@@ -10893,6 +10837,9 @@ function attachHandlers() {
         // Rules back-stack: remember where Rules was opened from so its back button returns there.
         if (v === 'rules') rulesReturnView = tnBtn.getAttribute('data-rules-from') === 'register' ? 'register' : 'hub';
         pdTournamentView = (v === 'pools' || v === 'bracket' || v === 'register' || v === 'rules') ? v : 'hub';
+        // Mike K (2026-07-10): the hub "Seeding" row + the bracket seeding chip deep-link to the Pools &
+        // schedule page's Seeding tab — honor data-pools-tab so the pools sub-page opens on Seeding, not a pool.
+        if (tnBtn.getAttribute('data-pools-tab') === 'seeding') pdPoolFilter = 'seeding';
         // §13.4: a data-tn-view chip can live OUTSIDE the Tournament tab (e.g. the Home hero's "Watch the
         // bracket" terminal chip) — switch to the Tournament tab first so the sub-page is actually visible.
         if (activeMainTab !== 'tournament') activateMainTab('tournament');

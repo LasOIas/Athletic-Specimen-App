@@ -2982,25 +2982,9 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .pd-seg-s { flex: 1; text-align: center; padding: 8px 4px; font-size: 12.5px; font-weight: 700; border-radius: 8px; color: var(--muted); background: none; border: none; }
 .pd-seg-s.pd-on { background: var(--card); color: var(--ink); box-shadow: var(--shadow-sm); }
 
-/* -- standings tables -- */
-.pd-ph { display: flex; align-items: center; gap: 7px; font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 13px; color: var(--ink); margin: 0 0 5px; }
-.pd-ph .pd-pl { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--muted); }
-.pd-colh { display: flex; align-items: center; gap: 11px; padding: 0 0 3px; font-size: 9px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--faint); }
-.pd-colh .pd-rk { width: 18px; text-align: center; }
-.pd-colh .pd-rec { margin-left: auto; }
-.pd-colh .pd-df { width: 40px; text-align: right; }
-.pd-st { display: flex; align-items: center; gap: 11px; padding: 8px 0; border-top: 1px solid var(--border); }
-.pd-st.pd-first { border-top: none; }
-.pd-st.pd-you { background: var(--accent-soft); margin: 2px -14px; padding: 9px 14px; border-radius: 9px; border: 1px solid var(--accent-bd); }
-.pd-st .pd-rk { width: 18px; text-align: center; font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 12.5px; color: var(--muted); }
-.pd-st.pd-you .pd-rk { color: var(--accent); }
-.pd-st .pd-tm { font-weight: 600; font-size: 13.5px; color: var(--ink); }
-.pd-st.pd-you .pd-tm { color: var(--accent); font-weight: 700; }
-.pd-youtag { font-size: 9px; font-weight: 700; color: #fff; background: var(--accent); border-radius: 999px; padding: 2px 7px; margin-left: 5px; }
-.pd-st .pd-rec { margin-left: auto; font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 12.5px; color: var(--muted); }
-.pd-st .pd-df { width: 40px; text-align: right; font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 12px; }
-.pd-df.pd-p { color: var(--live-ink); }
-.pd-df.pd-n { color: var(--faint); }
+/* -- standings mini-tables retired: the public Standings page folded into the Pools & schedule Seeding
+   tab (Mike K, 2026-07-10). Its .pd-st/.pd-colh/.pd-rk/.pd-tm/.pd-rec/.pd-df/.pd-ph/.pd-pl/.pd-youtag
+   rules were grep-gated to 0 and deleted here; the Seeding tab uses the pl-* kit (Task 1). -- */
 .pd-medal { width: 19px; height: 19px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 10px; color: #fff; flex: none; }
 .pd-m1 { background: oklch(0.74 0.10 85); }
 .pd-m2 { background: oklch(0.70 0.015 255); }
@@ -3009,7 +2993,6 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .pd-youcard .pd-big { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 28px; color: var(--accent); letter-spacing: -1px; line-height: 1; }
 .pd-youcard .pd-l1 { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 15px; color: var(--ink); }
 .pd-youcard .pd-l2 { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
-.pd-foot { font-size: 10.5px; color: var(--faint); text-align: center; margin-top: 9px; line-height: 1.4; }
 
 /* -- history -- */
 .pd-yourrec { display: flex; align-items: center; gap: 13px; background: var(--accent-soft); border: 1px solid var(--accent-bd); border-radius: var(--r-lg); padding: 13px 15px; margin-bottom: 11px; }
@@ -3547,17 +3530,11 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 
    SCOPING CONTRACT (so 390px + the admin surface are byte-identical):
    every rule below is BOTH scoped to body.pd-public-active AND inside
-   @media (min-width:1024px) — with ONE exception: the mobile-INERT
-   structural hook directly below. It uses display:contents so the JS
-   wrapper div (.pd-cardgrid in Standings) generates NO box below 1024px —
-   the wrapped content renders exactly as the pre-Slice-5 flat stack. The
-   @media block re-materialises it as a grid. This is the only base-layer
-   add. (The Pools page dropped its .pd-pool-cols/col reflow when it went
-   tabbed — Mike H, 2026-07-10 — so only .pd-cardgrid remains here.)
+   @media (min-width:1024px), so nothing changes on mobile or admin. The
+   Pools page is tabbed with no multi-column reflow, and Standings folded
+   into its Seeding tab (Mike H/K, 2026-07-10) — so the former .pd-cardgrid
+   mobile-inert base hook + grid are gone; no base-layer adds remain here.
    =================================================================== */
-
-/* — mobile-inert structural hooks (see contract above) — */
-.pd-cardgrid { display: contents; }
 
 @media (min-width: 1024px) {
   /* ---- chrome: bottom nav becomes a slim top tab strip under the header ---- */
@@ -3619,19 +3596,6 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   body.pd-public-active #tab-tournament .pl-empty {
     max-width: 640px; margin-left: auto; margin-right: auto;
   }
-
-  /* ---- Standings: by-pool mini-tables 2–3 across; Overall as a centred wider table ---- */
-  body.pd-public-active .pd-cardgrid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 14px;
-    align-items: start;
-  }
-  body.pd-public-active .pd-cardgrid > .pd-card { margin-bottom: 0; }
-  /* Overall view = a single bare .pd-card (+ foot) that is a DIRECT child of the container (pool cards live
-     inside .pd-cardgrid, so they are untouched) — centre it. */
-  body.pd-public-active #tab-standings > .container > .pd-card,
-  body.pd-public-active #tab-standings > .container > .pd-foot { max-width: 620px; margin-left: auto; margin-right: auto; }
 
   /* ---- My Team: a comfortable centred column (scoreboard reads best focused, not stretched) ---- */
   body.pd-public-active #tab-myteam > .container > * { max-width: 720px; margin-left: auto; margin-right: auto; }
