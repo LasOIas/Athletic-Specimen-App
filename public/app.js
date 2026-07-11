@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.12'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.13'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -9313,6 +9313,23 @@ function manageNeedsYou() {
   return manageNeedsYouModel(manageLeadTournament(), state.tournamentTeams || [], manageUpcomingPickupDays());
 }
 
+// Manage data-sync (e2e catch, 2026-07-11): the Manage surface renders manageLeadTournament(), but the
+// tournament data collections (teams/pools/matches) load for state.activeTournamentId — which only the old
+// shell's tv2-select-tournament ever set. If they diverge (e.g. a newer setup tournament exists), Manage
+// shows one tournament's NAME over another tournament's DATA. Follow the resolver: when they differ, adopt
+// the resolved id + refresh the collections, then repaint. Re-entrancy-guarded so poll/tap storms can't
+// stack refreshes.
+let mgSyncingTournament = false;
+function mgSyncActiveTournament() {
+  const t = manageLeadTournament();
+  if (!t || state.activeTournamentId === t.id || mgSyncingTournament) return;
+  mgSyncingTournament = true;
+  state.activeTournamentId = t.id;
+  Promise.resolve(tdbRefreshTournaments())
+    .then(() => { mgSyncingTournament = false; repaintManage(); })
+    .catch(() => { mgSyncingTournament = false; });
+}
+
 // One flat Manage row. name + subHTML are emitted RAW — callers pre-escape any user-derived content
 // (apostrophes in the fixed/model copy are valid in text content and must survive verbatim for §27).
 function mgRowHTML(area, name, subHTML) {
@@ -13129,6 +13146,9 @@ function activateMainTab(tab) {
   if (tab === 'players' && !oldAdminMode && !checkinNavVisible()) tab = 'home';
   activeMainTab = tab;
   sessionStorage.setItem(currentTabKey(), tab);
+  // e2e catch 2026-07-11: entering Manage glues the loaded tournament data to the resolved tournament
+  // (activeTournamentId only ever followed the old shell's select flow before this).
+  if (tab === 'manage' && state.isAdmin && !oldAdminMode) mgSyncActiveTournament();
   // Slice 1: lazy-load completed-tournament history the first time History opens (read-only, cached on state).
   if (tab === 'history' && typeof state.tournamentHistory === 'undefined' && !state.tournamentHistoryLoading) {
     loadTournamentHistory().then(() => {
@@ -13490,6 +13510,7 @@ function attachHandlers() {
       const mgArea = e.target.closest('[data-mg-area]');
       if (mgArea) {
         const nextArea = mgArea.getAttribute('data-mg-area') || 'lead';
+        mgSyncActiveTournament(); // keep the loaded tournament data glued to the resolved tournament
         // Entering the Players directory fresh: reset the search + Select state so a re-open starts clean.
         if (nextArea === 'players' && manageView !== 'players') {
           mgPlayerQuery = ''; mgSelectMode = false; mgSelected = new Set(); mgGroupsOpen = false; mgMoveOpen = false; mgRenameGroup = null;
