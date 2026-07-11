@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.24'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.25'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -8543,17 +8543,22 @@ function renderAuthPageInner() {
   const el = document.getElementById('auth-page');
   if (!el) return;
   const signup = authMode === 'signup';
-  // Check In rework (Mike 2026-07-10): .auth-inner is a wrapper DIV now (was the form itself) so the
-  // quiet "Admin sign-in" link + the adminLoginHTML() code form can sit UNDER the sign-in form without
+  // Check In rework (Mike 2026-07-10): .auth-inner is a wrapper DIV (not the form) so the quiet
+  // "Admin sign-in" link + the adminLoginHTML() code form can sit UNDER the sign-in form without
   // nesting <form> inside <form> (invalid HTML — the browser drops the inner form and its submit).
+  // Mike AD+AC hybrid (task-#11, 2026-07-10): the brand block (big logo + Barlow wordmark) moves OUT
+  // of the form to the TOP; the form (hairline-underline fields + full-width blue CTA) sits below.
+  // Every element id is unchanged — handlers bind by id, so the mechanics are untouched.
   el.innerHTML = `
     <button type="button" class="auth-back" id="auth-back" aria-label="Close sign in">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>
     </button>
     <div class="auth-inner">
-      <form id="auth-form" novalidate autocomplete="on">
+      <div class="auth-brand">
         <img class="auth-logo" src="logo-mark.png" alt="Athletic Specimen" />
         <div class="auth-wm"><div class="auth-wm-1">ATHLETIC SPECIMEN</div><div class="auth-wm-2">COLORADO</div></div>
+      </div>
+      <form id="auth-form" novalidate autocomplete="on">
         <h2 class="auth-title">${signup ? 'Create account' : 'Welcome'}</h2>
         <p class="auth-sub">Sign in to claim your team and follow your games.</p>
         <label class="auth-label" for="auth-email">Email</label>

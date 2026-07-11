@@ -3048,18 +3048,25 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 }
 .auth-back svg { width: 18px; height: 18px; flex-shrink: 0; }
 .auth-back:hover { background: var(--surface-3); }
-.auth-inner { width: 100%; max-width: 330px; display: flex; flex-direction: column; }
-.auth-logo { width: 64px; height: auto; display: block; margin: 0 auto 12px; }
-.auth-wm { text-align: center; margin-bottom: 20px; }
-.auth-wm-1 { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15px; letter-spacing: .13em; color: var(--ink); line-height: 1; }
-.auth-wm-2 { font-weight: 600; font-size: 9px; letter-spacing: .30em; color: var(--faint); line-height: 1; margin-top: 3px; }
-.auth-title { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 22px; text-align: center; color: var(--ink); margin: 0 0 5px; }
+.auth-inner { width: 100%; max-width: 340px; display: flex; flex-direction: column; }
+/* Mike AD+AC hybrid (task-#11, 2026-07-10): big centered brand block on TOP (logo ~110px + Barlow
+   wordmark) with breathing room so the form settles into the lower half; matte muted blue (§51). */
+.auth-brand { text-align: center; margin-bottom: 30px; }
+.auth-logo { width: 110px; height: auto; display: block; margin: 0 auto 14px; }
+.auth-wm { text-align: center; }
+.auth-wm-1 { font-family: var(--font-display); font-weight: 700; font-size: 18px; letter-spacing: .14em; color: var(--ink); line-height: 1; }
+.auth-wm-2 { font-family: var(--font-display); font-weight: 600; font-size: 10px; letter-spacing: .30em; color: var(--accent); line-height: 1; margin-top: 4px; }
+.auth-title { font-family: var(--font-display); font-weight: 700; font-size: 24px; text-align: center; color: var(--ink); margin: 0 0 5px; }
 .auth-sub { font-size: 13px; color: var(--muted); text-align: center; line-height: 1.4; margin: 0 0 6px; }
-.auth-label { display: block; font-size: 12.5px; font-weight: 600; color: var(--text-2); margin: 14px 0 5px; }
-.auth-input { width: 100%; height: 46px; padding: 11px 13px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); font-size: 16px; }
-.auth-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--brand-ring); }
+.auth-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 18px 0 2px; }
+/* input.auth-* (0,1,1) ties the app-global input box rule (line ~260) and wins by cascade order — same
+   trick as .rf-tinput. Hairline underline only, transparent field; focus turns the line accent. iOS
+   ≥16px guard kept via the 16px !important font-size. */
+input.auth-input { width: 100%; box-sizing: border-box; border: none; border-bottom: 1.5px solid oklch(0.86 0.03 240); border-radius: 0; background: transparent; box-shadow: none; color: var(--ink); font-family: inherit; font-size: 16px !important; font-weight: 500; padding: 9px 2px; height: auto; min-height: 0; }
+input.auth-input:focus { outline: none; border-bottom-color: var(--accent); box-shadow: none; }
+input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .auth-err { background: var(--danger-soft); border: 1px solid var(--danger-light); color: var(--danger-dark); font-size: 12.5px; line-height: 1.35; padding: 9px 11px; border-radius: var(--r-sm); margin-top: 12px; }
-.auth-submit { width: 100%; height: 48px; margin-top: 20px; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--accent); color: #fff; font-size: 16px; font-weight: 700; cursor: pointer; }
+.auth-submit { width: 100%; height: 48px; margin-top: 22px; border: none; border-radius: 11px; background: var(--accent); color: #fff; font-family: inherit; font-size: 16px; font-weight: 700; cursor: pointer; }
 .auth-submit:hover { background: var(--brand-dark); }
 .auth-submit:disabled { opacity: .65; cursor: default; }
 .auth-alt { display: block; width: 100%; margin-top: 14px; padding: 8px; background: transparent; border: 0; color: var(--accent); font-size: 13.5px; font-weight: 600; cursor: pointer; }
