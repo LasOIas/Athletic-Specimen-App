@@ -2989,7 +2989,6 @@ body.pd-public-active .pd-card { background: oklch(0.98 0.004 75 / 0.30); -webki
 /* official A.S logo — the single brand mark everywhere (public header, admin header, check-in) */
 .as-logo { height: 50px; width: auto; display: block; }
 .ad-brand { display: inline-flex; align-items: center; }
-.ad-brand-grp { margin-left: 8px; font-weight: 600; font-size: 13px; color: var(--muted); }
 /* Mike's pick (2026-07-08): full-bleed logo behind a soft gradient scrim + text wordmark header */
 /* Tamed watermark (atom-up 2026-07-10, spec §1): grayscale, ~7%, centered, z-index below all
    content, pointer-events:none — can never collide with text again. Scrim retired on public pages. */
@@ -3145,11 +3144,6 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .auth-submit:hover { background: var(--brand-dark); }
 .auth-submit:disabled { opacity: .65; cursor: default; }
 .auth-alt { display: block; width: 100%; margin-top: 14px; padding: 8px; background: transparent; border: 0; color: var(--accent); font-size: 13.5px; font-weight: 600; cursor: pointer; }
-/* Check In rework (Mike 2026-07-10): quiet admin entry at the bottom of the sign-in page —
-   small muted text link under the create-account toggle; reveals the code-login card. Matte (§51). */
-.auth-admin { display: block; width: 100%; margin-top: 18px; padding: 6px; background: transparent; border: 0; color: var(--faint); font-size: 13px; font-weight: 500; text-align: center; cursor: pointer; }
-.auth-admin:hover { color: var(--muted); }
-.auth-adminpanel { width: 100%; margin-top: 10px; }
 /* signed-in header chip: the account initial in the accent tint */
 .pd-avic.is-signedin { background: var(--accent-soft); border-color: var(--accent-bd); color: var(--accent); font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15px; }
 /* account menu (reuses .kc-card chrome) */

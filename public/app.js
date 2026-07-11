@@ -18,22 +18,19 @@
 // using browser storage. See https://supabase.io for more information.
 // SUPABASE_URL + SUPABASE_KEY come from public/supabase-config.js (loaded before app.js) — C25 item 7.
 // Identity (2026-07-08, Mike's call): persistSession=true so REAL email+password sign-ins survive a
-// reload (Mike: "save them logged in"). The legacy `nlvb2025` code-login (synthetic `*.local` accounts)
-// stays EPHEMERAL exactly as under the old C21 in-memory design — a restored `.local` session is signed
-// out on load in onAuthStateChange (INITIAL_SESSION), so a left-behind admin session still can't grant
-// the next visitor admin on a shared/kiosk device, and admin gating is unchanged this slice.
+// reload (Mike: "save them logged in"). Task 13 (2026-07-11): the legacy code login is RETIRED —
+// email+password (deriveRole -> caller_role) is the only sign-in and the only admin source.
 // detectSessionInUrl is a harmless no-op for password auth (kept for a future Google redirect option).
 // autoRefreshToken keeps a real session alive.
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.14'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.15'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
 const LS_GROUPS_KEY = 'athletic_specimen_groups';
 const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
-const LS_MASTER_ADMIN_AUTH_KEY = 'athletic_specimen_master_admin_auth';
 const UNGROUPED_FILTER_VALUE = '__ungrouped__';
 const UNGROUPED_FILTER_LABEL = 'Ungrouped (No Groups)';
 const GROUP_CATALOG_NAME_PREFIX = '__as_group__:';
@@ -47,14 +44,6 @@ const SHARED_SYNC_LOCAL_ONLY = 'local-only';
 const SHARED_SYNC_CONFLICT_RESOLVED = 'conflict-resolved';
 
 const selectedSet = () => new Set(state.selectedIds || []);
-
-// Master admin (full access across all groups)
-// C21: admin codes are NO LONGER in the client bundle. They live ONLY in the admin_login
-// Edge Function (server-side). The client sends a typed code and receives a real Supabase
-// session whose JWT carries role/group; isAdmin/limitedGroup derive from that session.
-
-// Session key for tenant scope (still used to keep the active-group filter coherent in-tab)
-const LS_LIMITED_GROUP_KEY = 'athletic_specimen_limited_group';
 
 function computeCheckedInByGroup() {
   const byGroup = new Map();
@@ -1389,11 +1378,7 @@ function buildCheckinStatsHTML() {
   // Round 2 §12.3: the PUBLIC check-in surface shows only a quiet "N checked in" line (the admin
   // dashboard keeps the full stat hero + per-group breakdown below).
   if (!state.isAdmin) return `<div class="cik-count">${state.checkedIn.length} checked in</div>`;
-  const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
-  const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE
-    ? UNGROUPED_FILTER_LABEL
-    : (normalizedActiveGroup || 'All');
-  const groups = state.isAdmin && !state.limitedGroup ? computeCheckedInByGroup() : [];
+  const groups = state.isAdmin ? computeCheckedInByGroup() : [];
   return `
 <div class="checkin-stats-card">
   <div class="checkin-stat-hero">
@@ -1407,7 +1392,7 @@ function buildCheckinStatsHTML() {
       <span class="checkin-group-name">${escapeHTMLText(row.groupLabel)}</span>
       <span class="checkin-group-fraction">${row.in}<span class="checkin-group-sep">/</span>${row.total}</span>
     </div>`).join('')}
-  </div>` : state.isAdmin && state.limitedGroup ? `<p class="checkin-stats-group-label">${escapeHTMLText(activeGroupLabel)}</p>` : ''}
+  </div>` : ''}
 </div>`;
 }
 
@@ -1942,19 +1927,14 @@ function enforceCanonicalGroupState(options = {}) {
         ...existingGroups,
         ...groupsFromPlayers
       ]);
-  const withLimited = state.limitedGroup
-    ? normalizeGroupList([state.limitedGroup, ...canonicalGroups])
-    : canonicalGroups;
-  state.groups = ['All', ...withLimited];
+  state.groups = ['All', ...canonicalGroups];
 
   const currentActive = normalizeActiveGroupSelection(state.activeGroup || 'All');
-  if (state.limitedGroup) {
-    state.activeGroup = normalizeGroupName(state.limitedGroup);
-  } else if (currentActive === 'All' || currentActive === UNGROUPED_FILTER_VALUE) {
+  if (currentActive === 'All' || currentActive === UNGROUPED_FILTER_VALUE) {
     state.activeGroup = currentActive;
   } else {
     const activeKey = normalizeGroupKey(currentActive);
-    const match = withLimited.find((groupName) => normalizeGroupKey(groupName) === activeKey);
+    const match = canonicalGroups.find((groupName) => normalizeGroupKey(groupName) === activeKey);
     state.activeGroup = match || 'All';
   }
 }
@@ -2025,16 +2005,12 @@ function parseAdminGroupsInput(rawValue) {
 }
 
 function getTopFormContextGroup() {
-  if (state.limitedGroup) return normalizeGroupName(state.limitedGroup);
   const active = normalizeActiveGroupSelection(state.activeGroup || 'All');
   if (!active || active === 'All' || active === UNGROUPED_FILTER_VALUE) return '';
   return normalizeGroupName(active);
 }
 
 function getTopFormGroupsHelpText() {
-  if (state.limitedGroup) {
-    return `Group lock active: ${state.limitedGroup} is always primary.`;
-  }
   const contextGroup = getTopFormContextGroup();
   if (contextGroup) {
     return `Roster context: ${contextGroup}. Leave Groups blank to use it for new players.`;
@@ -3176,12 +3152,11 @@ const state = {
   groups: ['All', 'Athletic Specimen'],
   activeGroup: 'All',
   selectedIds: [], // player.id[] currently selected (admin bulk)
-  limitedGroup: null, // when set, admin is locked to this group
   masterAdminAuthenticated: false, // true only for an owner-role server session
   // Identity/Accounts (2026-07-08) — real email+password sign-in on top of the additive DB foundation.
-  // authSession = live Supabase session for a REAL account (null when signed out OR a `.local` code
-  // session — those stay ephemeral); account = { id, email }; role = community role from caller_role
-  // (owner|organizer|player|null). role is NOT yet wired to admin gating (that is the next slice).
+  // authSession = live Supabase session (null when signed out); account = { id, email };
+  // role = community role from caller_role (owner|organizer|player|null); owner/organizer sets isAdmin
+  // in onAuthStateChange — the ONLY admin source since Task 13 retired the code login (2026-07-11).
   authSession: null,
   account: null,
   role: null,
@@ -6527,7 +6502,9 @@ function formatOperatorActionTimeLabel(ts) {
 }
 
 function canAccessOperatorSafetyControls() {
-  return !!(state.isAdmin && state.masterAdminAuthenticated && !state.limitedGroup);
+  // Task 13 (2026-07-11): the group-scoping term died with the code login — this is now purely the
+  // owner check (masterAdminAuthenticated is set only for a role==='owner' server session).
+  return !!(state.isAdmin && state.masterAdminAuthenticated);
 }
 
 function recordOperatorAction({
@@ -6699,7 +6676,6 @@ const messages = {
 // Local storage keys. We use separate keys to avoid collisions.
 const LS_PLAYERS_KEY = 'athletic_specimen_players';
 const LS_CHECKIN_KEY = 'athletic_specimen_checked_in';
-const LS_ADMIN_KEY = 'athletic_specimen_is_admin';
 const LS_GENERATED_TEAMS_KEY = 'athletic_specimen_generated_team_keys';
 const LS_GENERATED_SUMMARY_KEY = 'athletic_specimen_generated_teams_summary';
 const LS_LIVE_COURT_ORDER_KEY = 'athletic_specimen_live_court_order';
@@ -7119,9 +7095,9 @@ function loadLocal() {
     if (normalizedActiveGroup !== ag) shouldPersistMigration = true;
   }
 
-  // C21: no code load + no admin-scope restore from storage. Admin state (isAdmin /
-  // masterAdminAuthenticated / limitedGroup) comes only from a live server session, set on
-  // login and cleared by logout / onAuthStateChange. Start logged-out (defaults already false/null).
+  // C21: no admin-scope restore from storage. Admin state (isAdmin / masterAdminAuthenticated)
+  // comes only from a live server session (deriveRole in onAuthStateChange), cleared on sign-out.
+  // Start logged-out (defaults already false).
 
   const beforeCanonicalGroups = JSON.stringify(state.groups || []);
   const beforeCanonicalActive = normalizeActiveGroupSelection(state.activeGroup || 'All');
@@ -7192,8 +7168,7 @@ function mergePlayersAfterSync(remotePlayers) {
     );
     const prevCheckedAuth = new Set(state.checkedIn || []);
     const pendingLocal = (Array.isArray(state.players) ? state.players : []).filter((p) =>
-      p && !p.id && p.pending && normalize(p.name) && !remoteNamesAuth.has(normalize(p.name)) &&
-      (!state.limitedGroup || getPlayerPrimaryGroup(p) === state.limitedGroup)
+      p && !p.id && p.pending && normalize(p.name) && !remoteNamesAuth.has(normalize(p.name))
     );
     const pendingChecked = pendingLocal
       .map((p) => playerIdentityKey(p))
@@ -7255,9 +7230,6 @@ function mergePlayersAfterSync(remotePlayers) {
     if (!p || typeof p !== 'object') return;
     if (p.id) return; // remote rows with ids are authoritative
 
-    // Keep tenant scoping behavior when a limited group is active.
-    if (state.limitedGroup && getPlayerPrimaryGroup(p) !== state.limitedGroup) return;
-
     const localKey = playerIdentityKey(p);
     const localWasChecked = !!localKey && prevChecked.has(localKey);
     const matchedRemote = remoteByName.get(normalize(p.name));
@@ -7302,7 +7274,6 @@ async function syncFromSupabase() {
       await detectPlayersSchema();
     }
 
-    // when tenant-limited, only fetch that group to reduce data exposure and payload size
     // Explicit columns (not select('*')) to trim payload + avoid pulling unused/future cols.
     // Schema-aware: only request group/tag when the probe confirmed they exist.
     // C21: skill is ADMIN-ONLY. Only request it when a real admin session exists; anon must
@@ -7311,15 +7282,7 @@ async function syncFromSupabase() {
     if (state.isAdmin) playerCols.push('skill');
     if (HAS_GROUP) playerCols.push('group');
     if (HAS_TAG) playerCols.push('tag');
-    let query = supabaseClient.from('players').select(playerCols.join(','));
-
-    if (state.limitedGroup) {
-      if (HAS_GROUP) {
-        query = query.eq('group', state.limitedGroup);
-      } else if (HAS_TAG) {
-        query = query.eq('tag', state.limitedGroup);
-      }
-    }
+    const query = supabaseClient.from('players').select(playerCols.join(','));
 
     const { data: fetchedData, error } = await query;
     if (error) {
@@ -7342,31 +7305,7 @@ async function syncFromSupabase() {
       return false;
     }
 
-    let data = fetchedData;
-    if (state.limitedGroup) {
-      const limitedCatalogRowName = toGroupCatalogRowName(state.limitedGroup);
-      if (limitedCatalogRowName) {
-        const { data: catalogRows, error: catalogError } = await supabaseClient
-          .from('players')
-          .select('*')
-          .eq('name', limitedCatalogRowName)
-          .limit(1);
-
-        if (catalogError) {
-          console.error('Supabase limited catalog fetch error', catalogError);
-        } else if (Array.isArray(catalogRows) && catalogRows.length) {
-          const byIdentity = new Set(
-            data.map((row) => String((row && row.id) || (row && row.name) || '')).filter(Boolean)
-          );
-          catalogRows.forEach((row) => {
-            const key = String((row && row.id) || (row && row.name) || '');
-            if (!key || byIdentity.has(key)) return;
-            byIdentity.add(key);
-            data.push(row);
-          });
-        }
-      }
-    }
+    const data = fetchedData;
 
     const remoteGroupCatalog = [];
     const remotePlayers = [];
@@ -8162,14 +8101,6 @@ function adminPlayersHTML() {
     </select>
 
     <!-- Group filter + group management (revealed by the Groups chip, or when a group is active) -->
-   ${state.limitedGroup
-  ? `
-    <div class="filter-sub" style="margin-top: 0.5rem;">
-      <label>Group:</label>
-      <span class="badge" id="tenant-group-pill" style="font-weight:600;">${state.limitedGroup}</span>
-    </div>
-  `
-  : `
   <div class="filter-sub ${groupsChipOn ? 'is-open' : ''}" id="group-filter-sub" style="margin-top: 0.5rem; align-items:center;">
     <label for="group-filter-select">Group:</label>
     <select id="group-filter-select">
@@ -8180,8 +8111,6 @@ function adminPlayersHTML() {
 
     <button id="btn-open-group-manager" class="secondary">Manage Groups</button>
   </div>
-`
-}
     <!-- Skill range sub-filter (only when Filter = Skill) -->
     ${state.playerTab === 'skill' ? `
       <div class="filter-sub is-open" style="margin-top: 0.5rem;">
@@ -8223,7 +8152,7 @@ function adminPlayersHTML() {
       <button id="btn-bulk-checkout" class="secondary">Check Out</button>
 
       <label for="bulk-dest-group" class="bulkbar-grouplabel">Group:</label>
-      <select id="bulk-dest-group" ${state.limitedGroup ? 'disabled' : ''}>
+      <select id="bulk-dest-group">
         <option value="">— choose —</option>
         ${getAvailableGroups().map(g => `<option value="${g}">${g}</option>`).join('')}
       </select>
@@ -8309,29 +8238,14 @@ function adminPlayersHTML() {
   `;
 }
 
-// C26 item 2: Admin Login card (public surface only). Static markup moved verbatim; old
-// `!state.isAdmin ? … : ''` wrapper removed — the public shell decides when to render it.
-function adminLoginHTML() {
-  return `
-    <div class="card">
-      <h2>Admin Login</h2>
-      <form id="admin-login-form" class="row" autocomplete="on">
-        <input type="password" id="admin-code" name="admin-code" placeholder="Enter admin code" autocomplete="current-password" aria-label="Admin code" />
-        <button type="submit" id="btn-admin-login">Login</button>
-      </form>
-    </div>
-  `;
-}
-
 // C36 T1: PUBLIC Check In → kiosk "type your name → tap it → checked in" (design LOCKED §38 B).
 // NO skill anywhere (rulebook §AS-1 — public surface): same-name players are disambiguated by
 // GROUP + full name, never skill. NO emoji / NO neon — direction-A tokens + SVG icons only.
 // All behavior (check in / check out toggle / register) routes through the SAME existing paths/RPCs
 // wired in attachHandlers (check_in / check_out / register_player) — no new DB. The big name buttons
 // render into #checkin-results via a targeted DOM update (renderCheckinResults), never full-render
-// on keystroke. Check In rework (Mike 2026-07-10): the "Admin" corner link moved off this page — the
-// adminLoginHTML() form now lives behind the sign-in page's quiet "Admin sign-in" link (renderAuthPageInner);
-// the standalone checkin.html kiosk keeps its own copy.
+// on keystroke. Check In rework (Mike 2026-07-10): the "Admin" corner link moved off this page.
+// Task 13 (2026-07-11): the code login is retired — email+password IS the admin sign-in.
 // Mike pick X (task-#10, 2026-07-10): big bordered tap ROW — matched prefix accent-bold, right-side
 // tag (TAP TO CHECK IN / grayed ALREADY IN). NO initials/avatar bubble (Mike's explicit delta — they
 // read as furniture). Same-name rows keep the group differentiator only (never skill). The tap attr
@@ -8562,9 +8476,9 @@ function renderAuthPageInner() {
   const el = document.getElementById('auth-page');
   if (!el) return;
   const signup = authMode === 'signup';
-  // Check In rework (Mike 2026-07-10): .auth-inner is a wrapper DIV (not the form) so the quiet
-  // "Admin sign-in" link + the adminLoginHTML() code form can sit UNDER the sign-in form without
-  // nesting <form> inside <form> (invalid HTML — the browser drops the inner form and its submit).
+  // Task 13 (2026-07-11): the quiet "Admin sign-in" link + code panel are GONE — email+password IS
+  // the admin sign-in (owner/organizer role sets isAdmin in onAuthStateChange). .auth-inner stays a
+  // wrapper DIV so the brand block can sit outside the form.
   // Mike AD+AC hybrid (task-#11, 2026-07-10): the brand block (big logo + Barlow wordmark) moves OUT
   // of the form to the TOP; the form (hairline-underline fields + full-width blue CTA) sits below.
   // Every element id is unchanged — handlers bind by id, so the mechanics are untouched.
@@ -8588,8 +8502,6 @@ function renderAuthPageInner() {
         <button type="submit" class="auth-submit" id="auth-submit">${signup ? 'Create account' : 'Sign in'}</button>
         <button type="button" class="auth-alt" id="auth-alt">${signup ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>
       </form>
-      <button type="button" class="auth-admin" id="auth-admin">Admin sign-in</button>
-      <div class="auth-adminpanel" id="auth-adminpanel" hidden>${adminLoginHTML()}</div>
     </div>`;
   el.querySelector('#auth-back').addEventListener('click', () => {
     claimIntent = false; // dismissing sign-in abandons a pending claim intent (review: it leaked into a later sign-in)
@@ -8600,19 +8512,6 @@ function renderAuthPageInner() {
     renderAuthPageInner();
   });
   el.querySelector('#auth-form').addEventListener('submit', onAuthSubmit);
-  // Check In rework (Mike 2026-07-10): the quiet link reveals the SAME adminLoginHTML() code form the
-  // old Check In "Admin" corner link toggled, bound to the SAME submit flow (onAdminLoginSubmit →
-  // adminLoginWithCode). Toggle + focus mirrors the old handler.
-  el.querySelector('#auth-admin').addEventListener('click', () => {
-    const panel = el.querySelector('#auth-adminpanel');
-    if (!panel) return;
-    panel.hidden = !panel.hidden;
-    if (!panel.hidden) {
-      const codeInput = el.querySelector('#admin-code');
-      if (codeInput) codeInput.focus();
-    }
-  });
-  el.querySelector('#admin-login-form').addEventListener('submit', onAdminLoginSubmit);
   setTimeout(() => { const f = document.getElementById('auth-email'); if (f) f.focus(); }, 50);
 }
 
@@ -8857,76 +8756,8 @@ async function onAuthSubmit(e) {
   }
 }
 
-// ── Admin sign-in (code login) — reached from the sign-in page's quiet "Admin sign-in" link
-// (Check In rework, Mike 2026-07-10: "we can put the admin sign in in the profile bubble").
-// Both functions moved VERBATIM out of attachHandlers (the form left the app shell, so the
-// old render-time binding found nothing); renderAuthPageInner binds the form to onAdminLoginSubmit. ──
-
-// C21 — server-verified admin login (the ONLY login path). POSTs only the code to the admin_login
-// Edge Function, which checks it against a server-only map (NOT in this bundle) and returns a real
-// Supabase session whose JWT carries role/group in app_metadata (for RLS). On success the session
-// is set on supabaseClient (in-memory; persistSession=false) so every later admin request carries
-// the JWT. Returns {role, group}, or null on a wrong code / unreachable function.
-async function adminLoginWithCode(code) {
-  if (!supabaseClient || !code) return null;
-  try {
-    const { data, error } = await supabaseClient.functions.invoke('admin_login', { body: { code } });
-    if (error || !data || !data.access_token || !data.refresh_token) return null;
-    const setRes = await supabaseClient.auth.setSession({
-      access_token: data.access_token,
-      refresh_token: data.refresh_token,
-    });
-    if (setRes.error) return null;
-    return { role: data.role, group: data.group || null };
-  } catch {
-    return null;
-  }
-}
-
-async function onAdminLoginSubmit(e) {
-  e.preventDefault(); // C25 item 10: native form submit — stop the page reload, run the login flow
-  const codeInput = document.getElementById('admin-code');
-  const code = codeInput ? codeInput.value.trim() : '';
-  if (!code) return;
-
-  // C21: the ONLY login path — server-verified. adminLoginWithCode returns {role, group} and
-  // has set a real Supabase session, or null on a wrong code / unreachable function. There is
-  // no client-side code compare and no fallback: the JWT is the source of truth for admin state.
-  const session = await adminLoginWithCode(code);
-  if (!session) { alert('Incorrect admin code'); return; }
-  if (codeInput) codeInput.value = '';
-
-  state.isAdmin = true;
-  state.masterAdminAuthenticated = (session.role === 'owner');
-  state.limitedGroup = (session.role === 'group_admin') ? session.group : null;
-  state.activeGroup = state.limitedGroup || 'All';
-  if (state.limitedGroup && !state.groups.includes(state.limitedGroup)) {
-    state.groups = Array.from(new Set([...state.groups, state.limitedGroup]));
-  }
-  // sessionStorage flags are in-tab UI continuity only (NOT trusted on load — see loadFromLocal).
-  sessionStorage.setItem(LS_ADMIN_KEY, 'true');
-  if (state.masterAdminAuthenticated) sessionStorage.setItem(LS_MASTER_ADMIN_AUTH_KEY, 'true');
-  else sessionStorage.removeItem(LS_MASTER_ADMIN_AUTH_KEY);
-  if (state.limitedGroup) sessionStorage.setItem(LS_LIMITED_GROUP_KEY, state.limitedGroup);
-  else sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
-  try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, state.activeGroup); } catch {}
-
-  const synced = await syncFromSupabase();   // re-fetch as the authenticated admin (incl. skill)
-  if (synced) saveLocal();
-  // C22 item 1: re-hydrate the night now that players carry skill — an anon init hydrate built the
-  // teams from skill-less player objects, so fairness totals would read 0 until this re-maps them.
-  liveStateHydratedOnce = false;
-  if (synced) { await loadLiveStateFromSupabase(); saveLocal(); }
-  if (synced && canRunAdminSharedBackfill()) {
-    (async () => {
-      const catalogSynced = await backfillGroupCatalogToSupabase();
-      const membershipsSynced = await backfillPlayerMembershipsToSupabase();
-      if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
-    })();
-  }
-  closeAuthPage(); // the form lives on the sign-in overlay now — dismiss it before the admin shell paints
-  render();
-}
+// Task 13 (2026-07-11): the legacy admin code login is DELETED.
+// Email+password is the only sign-in; owner/organizer role sets isAdmin in onAuthStateChange.
 
 // Signed-in: a small centered card with the account email + role + Sign out.
 function openAccountMenu() {
@@ -11644,7 +11475,7 @@ function renderPublicShell() {
 // Reliability fix (2026-06-20): the dashboard checked-in stat is refreshed by partialRender (like the
 // Players-tab #js-checkin-stats) so it stays TRUE after a check-in instead of going stale at its login value.
 function buildDashboardStatHTML() {
-  const group = (state.isAdmin && !state.limitedGroup) ? computeCheckedInByGroup() : [];
+  const group = state.isAdmin ? computeCheckedInByGroup() : [];
   const grpLine = group.length
     ? `<div class="ad-grpline">${group.map((r) => `<span><b>${r.in}</b> ${escapeHTML(r.groupLabel)}</span>`).join('')}</div>`
     : '';
@@ -11669,7 +11500,7 @@ function adminDashboardHTML() {
 <div class="container">
   <div class="ad-screen">
     <div class="ad-top">
-      <div class="ad-brand"><img class="as-logo" src="/logo-mark.png" alt="Athletic Specimen" />${state.limitedGroup ? `<span class="ad-brand-grp">${escapeHTML(state.limitedGroup)}</span>` : ''}</div>
+      <div class="ad-brand"><img class="as-logo" src="/logo-mark.png" alt="Athletic Specimen" /></div>
     </div>
     <div class="ad-statcard" id="js-dashboard-stat">${buildDashboardStatHTML()}</div>
     <div class="ad-sec">Quick actions</div>
@@ -13624,23 +13455,16 @@ function closeQrModal() {
   }
 }());
 
-  // --- Admin login/logout ---
-// Admin login: Check In rework (Mike 2026-07-10) — the code-login form no longer lives in the app
-// shell (it moved behind the sign-in page's "Admin sign-in" link), so adminLoginWithCode + the
-// submit flow (onAdminLoginSubmit) are TOP-LEVEL now, next to the auth-page code that binds them.
-
-// Admin logout
+  // --- Admin logout ---
+// Task 13 (2026-07-11): the code login is retired — email+password is the only sign-in,
+// so logout just drops the real session + admin state.
 const logoutBtn = document.getElementById('btn-logout');
   if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
     state.isAdmin = false;
     oldAdminMode = false; // session-10 R1: leaving admin drops the old-shell escape hatch, so a re-login lands on the public shell
     state.masterAdminAuthenticated = false;
-    state.limitedGroup = null;                   // clear tenant lock
     state.activeGroup = 'All';                   // reset view
-    sessionStorage.removeItem(LS_ADMIN_KEY);
-    sessionStorage.removeItem(LS_MASTER_ADMIN_AUTH_KEY);
-    sessionStorage.removeItem(LS_LIMITED_GROUP_KEY);
     try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
     // C21: drop the real Supabase session too (local scope), so the JWT does not linger anywhere.
     if (supabaseClient) { try { await supabaseClient.auth.signOut({ scope: 'local' }); } catch {} }
@@ -13651,28 +13475,18 @@ const logoutBtn = document.getElementById('btn-logout');
 }
 
 // C21 + Identity (2026-07-08): follow the real session.
-//  - A `.local` code-login session (synthetic nlvb2025 accounts) stays EPHEMERAL: one restored from
-//    storage on page load (INITIAL_SESSION) is signed out immediately, so it can't grant the next
-//    visitor admin on a shared device — exactly the old in-memory C21 behavior. A fresh in-tab
-//    code-login (SIGNED_IN via setSession) is left for adminLoginWithCode to handle.
-//  - A REAL email+password account is recorded in state + its community role derived (best-effort),
-//    and persists across reloads. role is NOT wired to admin gating this slice.
+//  - An email+password account is recorded in state + its community role derived (best-effort),
+//    and persists across reloads. Owner/organizer role sets isAdmin below — the ONLY admin source
+//    since Task 13 (2026-07-11) retired the `.local` code login.
 //  - Session loss drops admin state (an explicit signOut / failed refresh) and purges skill.
 if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthStateChange === 'function') {
   supabaseClient.auth.onAuthStateChange(async (event, session) => {
     const email = (session && session.user && session.user.email) || '';
-    const isLocalCode = /\.local$/i.test(email); // synthetic code-login account
 
     // NOTE: supabase-js holds an internal lock during this callback — calling other supabase methods
     // (auth/rpc/from) INLINE here races/deadlocks (role came back null even though caller_role is fine).
     // So any supabase call below is deferred with setTimeout(0) per Supabase's own guidance.
-    if (session && isLocalCode) {
-      // Keep the legacy code-login ephemeral: sign out a restored `.local` session on load.
-      if (event === 'INITIAL_SESSION') { setTimeout(() => { try { supabaseClient.auth.signOut({ scope: 'local' }); } catch (_) {} }, 0); }
-      return; // never treat a code session as a real account
-    }
-
-    if (session && !isLocalCode) {
+    if (session) {
       // STORM GUARD (2026-07-09, found live on prod v09.1): this branch fires on EVERY auth event —
       // and the heavy work below (rpc + tournament reads) makes supabase-js re-validate/refresh the
       // token, which EMITS MORE auth events → a self-sustaining ~14/sec request storm
@@ -13701,9 +13515,9 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
             if (state.role || !state.authSession) break;
             await new Promise((r) => setTimeout(r, 400));
           }
-          // Auth Task 4 (2026-07-09): a signed-in owner/organizer gets the admin surface from their SERVER role
-          // (caller_role), additively — the nlvb2025 code-login path (adminLoginWithCode ~9856) is untouched and
-          // still works for others. A plain 'player' or null role never sets isAdmin here. Cleared on sign-out
+          // Auth Task 4 (2026-07-09) + Task 13 (2026-07-11): a signed-in owner/organizer gets the admin
+          // surface from their SERVER role (caller_role) — the ONLY admin source now that the code login
+          // is retired. A plain 'player' or null role never sets isAdmin here. Cleared on sign-out
           // (the SIGNED_OUT branch already resets isAdmin/masterAdminAuthenticated).
           if (state.role === 'owner' || state.role === 'organizer') {
             state.isAdmin = true;
@@ -13735,7 +13549,6 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       if (state.isAdmin) {
         state.isAdmin = false;
         state.masterAdminAuthenticated = false;
-        state.limitedGroup = null;
         state.activeGroup = 'All';
         // Reliability fix (2026-06-20): a SILENT session loss (JWT expiry / failed refresh) must purge
         // skill from memory + the localStorage cache the same way explicit logout does — re-fetch as anon
@@ -13877,9 +13690,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
         // Wave 1d: a public-kiosk registration with no group selected defaults to CLUB_GROUP (the same
         // canonical group checkin.html uses) so the two doors don't create duplicate, mutually-invisible
         // people. An admin who has a real group selected still registers into THAT group.
-        const group = state.limitedGroup
-          ? state.limitedGroup
-          : (activeGroupForRegister && activeGroupForRegister !== 'All' && activeGroupForRegister !== UNGROUPED_FILTER_VALUE ? activeGroupForRegister : CLUB_GROUP);
+        const group = (activeGroupForRegister && activeGroupForRegister !== 'All' && activeGroupForRegister !== UNGROUPED_FILTER_VALUE) ? activeGroupForRegister : CLUB_GROUP;
         const groups = group ? [group] : [];
         const skill = 0.0;
         // pending:true keeps this in-flight row alive through a racing sync (mergePlayersAfterSync).
@@ -13924,8 +13735,8 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       });
     }
 
-    // Check In rework (Mike 2026-07-10): the "Admin" corner link + its panel toggle moved to the
-    // sign-in page (renderAuthPageInner binds the same adminLoginHTML() form to onAdminLoginSubmit).
+    // Task 13 (2026-07-11): no admin affordance on this page — the code login is retired and
+    // email+password (the sign-in page) is the admin sign-in.
   }
 
   // --- Player cards: inline actions ---
@@ -14120,12 +13931,6 @@ function bindPlayersPanelHandlers() {
 const groupSelect = document.getElementById('group-filter-select');
 if (groupSelect) {
   groupSelect.addEventListener('change', () => {
-    if (state.limitedGroup) {
-      // enforce lock
-      state.activeGroup = state.limitedGroup;
-      groupSelect.value = state.limitedGroup;
-      return;
-    }
     state.activeGroup = normalizeActiveGroupSelection(groupSelect.value || 'All');
     saveLocal();
     renderPlayersPanel();
@@ -14414,10 +14219,6 @@ if (gmOpen && gmRoot) {
         const fallback = normalizeGroupName(fallbackPrimary);
         let next = normalizeGroupList(groups);
         if (!next.length && fallback) next = [fallback];
-        if (state.limitedGroup) {
-          const locked = normalizeGroupName(state.limitedGroup);
-          if (locked) next = normalizeGroupList([locked, ...next.filter((groupName) => groupName !== locked)]);
-        }
         return next;
       };
       if (Number.isNaN(skill)) skill = 0; // treat empty input as 0
@@ -14499,9 +14300,7 @@ if (gmOpen && gmRoot) {
       } else {
         // insert new
         const activeGroupForInsert = normalizeActiveGroupSelection(state.activeGroup || 'All');
-        const defaultPrimary = state.limitedGroup
-          ? state.limitedGroup
-          : (activeGroupForInsert && activeGroupForInsert !== 'All' && activeGroupForInsert !== UNGROUPED_FILTER_VALUE ? activeGroupForInsert : '');
+        const defaultPrimary = (activeGroupForInsert && activeGroupForInsert !== 'All' && activeGroupForInsert !== UNGROUPED_FILTER_VALUE) ? activeGroupForInsert : '';
         const groups = applyTopFormGroupRules(requestedGroups, defaultPrimary);
         const group = groups[0] || '';
         const newPlayer = { name, skill, group, groups };
@@ -14782,8 +14581,7 @@ if (assignBtn) {
 
     const selEl = document.getElementById('bulk-dest-group');
     const chosen = normalizeGroupName(selEl ? selEl.value : '');
-    let dest = chosen;
-    if (state.limitedGroup) dest = state.limitedGroup;
+    const dest = chosen;
 
     if (!dest || dest === 'All') return;
 
@@ -14846,8 +14644,7 @@ if (removeBtn) {
 
     const selEl = document.getElementById('bulk-dest-group');
     const chosen = normalizeGroupName(selEl ? selEl.value : '');
-    let targetGroup = chosen;
-    if (state.limitedGroup) targetGroup = state.limitedGroup;
+    const targetGroup = chosen;
     if (!targetGroup || targetGroup === 'All' || targetGroup === UNGROUPED_FILTER_VALUE) return;
 
     const ids = Array.from(sel);
