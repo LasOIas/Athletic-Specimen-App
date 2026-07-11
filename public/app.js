@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -9965,6 +9965,7 @@ function buildManageTournamentContainerHTML() {
   if (mgtView === 'registration') return buildMgRegistrationHTML();
   if (mgtView === 'teams') return buildMgTeamsHTML();
   if (mgtView === 'pools') return buildMgPoolsHTML();
+  if (mgtView === 'bracket') return buildMgBracketHTML();
   if (mgtView) return mgtSubPlaceholderHTML(mgtView);
   return buildManageTournamentHTML();
 }
@@ -10662,6 +10663,235 @@ async function mgPoolsResetPools() {
     mgpControlsOpen = false;
     repaintManage();
   } catch (err) { appNotice({ title: 'Could not reset pools', message: (err && err.message) || 'Try again.' }); }
+}
+
+// ── Task 8 (pick R10-C): Bracket admin — by-round tap-to-score rows + editor sheet + persisted seed ─────
+// mgtView==='bracket'. Three states off tournament.status:
+//   pre-bracket (setup / pools) → the seeding list (rank + team name + ▲/▼ reorder) + Generate the bracket
+//     (mockup bk-c). Generate persists the FINAL order into tournaments.seed_override (0049) then runs the
+//     existing tdbGenerateBracket → generate_bracket_atomic. Pre-0049 tolerant (see mgBracketGenerate).
+//   live (bracket) → compact rows grouped BY ROUND (Winners / Losers / Grand Final, mockup bk2-c). Every
+//     resolved row (live, up-next, final) opens the SHARED body-level openMgScoreSheet(matchId) from T7 —
+//     match-generic on phase 'main', so there is NO second editor. Unresolved (TBD) rows render muted +
+//     non-tappable. Rows repaint live via the poll (the manage container swap; the score sheet is body-level
+//     → immune), so no partialRender exception is needed here.
+//   completed → the final rows + a quiet "close-out lives in its own page" line.
+// §51 matte, Barlow display, single --accent, flat on stone (mgbk-* kit per bk2-c/bk-c values).
+const MGBK_UP_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>';
+const MGBK_DN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+
+// The tournament the Bracket view manages. Unlike the other sub-views, this one has a COMPLETED state
+// (bk2-c) — and manageLeadTournament() deliberately excludes 'completed'. Resolve the ACTIVE tournament
+// first (the one being managed, whose teams/matches are already loaded into state for activeTournamentId),
+// falling back to the lead resolver when there is no active id.
+function mgBracketTournament() {
+  const byActive = state.activeTournamentId ? (state.tournaments || []).find((x) => x.id === state.activeTournamentId) : null;
+  return byActive || manageLeadTournament();
+}
+
+function buildMgBracketHTML() {
+  const t = mgBracketTournament();
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">Bracket &amp; scores</div></div>`;
+  if (!t) return header + `<div class="pd-empty">No tournament to build a bracket for yet.</div>`;
+  const status = t.status || 'setup';
+  if (status === 'bracket' || status === 'completed') {
+    return header + mgBracketLiveHTML(t) + mgBracketControlsHTML(t, status === 'completed');
+  }
+  return header + mgBracketSeedingHTML(t);
+}
+
+// Pre-bracket seeding (mockup bk-c): the cross-pool seed order (computeSeeding — win% then point diff) with
+// the admin's transient ▲/▼ override applied. REUSES the old shell's seed-override MUTATION (state.seedOverride
+// shape + currentSeedOrder), rendered as the flat bk-c list. Generate is locked until every pool game is final
+// (tdbGenerateBracket enforces it server-checked too).
+function mgBracketSeedingHTML(t) {
+  const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];
+  const poolMatches = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).filter((m) => m.phase === 'pool');
+  if (!poolMatches.length) {
+    return `<div class="pl-sect">Seeding</div>`
+      + `<div class="pd-empty">Draw pools and play them out first — the bracket seeds from the pool results. Set that up in Pools &amp; schedule.</div>`;
+  }
+  let rows = computeSeeding(teams, poolMatches);
+  if (!rows.length) {
+    return `<div class="pl-sect">Seeding</div>`
+      + `<div class="pd-empty">Score a pool game to start the seeding — teams rank by win %, then point differential.</div>`;
+  }
+  let custom = false;
+  if (state.seedOverride && state.seedOverride.id === state.activeTournamentId) {
+    const ov = state.seedOverride.order || [];
+    const byId = {}; rows.forEach((r) => { byId[r.teamId] = r; });
+    if (ov.length === rows.length && ov.every((id) => byId[id])) { rows = ov.map((id, i) => ({ ...byId[id], seed: i + 1 })); custom = true; }
+  }
+  const allFinal = poolMatches.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
+  const last = rows.length - 1;
+  const seedRows = rows.map((r, i) => `<div class="mgbk-seed">`
+    + `<span class="mgbk-sd">${i + 1}</span>`
+    + `<span class="mgbk-snm">${escapeHTML(r.name)}</span>`
+    + `<span class="mgbk-arr">`
+      + `<button type="button" class="mgbk-ab" data-mgbk-seedup="${escapeHTMLText(String(r.teamId))}"${i === 0 ? ' disabled' : ''} aria-label="Move ${escapeHTMLText(r.name)} up">${MGBK_UP_SVG}</button>`
+      + `<button type="button" class="mgbk-ab" data-mgbk-seeddown="${escapeHTMLText(String(r.teamId))}"${i === last ? ' disabled' : ''} aria-label="Move ${escapeHTMLText(r.name)} down">${MGBK_DN_SVG}</button>`
+    + `</span></div>`).join('');
+  const resetLink = custom ? `<button type="button" class="mgbk-seedreset" data-mgbk-seedreset>Reset to the computed seeding</button>` : '';
+  const cta = `<button type="button" class="mgt-cta" data-mgbk-generate${allFinal ? '' : ' disabled'}>Generate the bracket</button>`;
+  const note = allFinal
+    ? `<div class="mgbk-note">Double elimination · seeding saves with the bracket · after this, score on the tree.</div>`
+    : `<div class="mgbk-note">Finish every pool game first — the seeding is provisional until then.</div>`;
+  return `<div class="pl-sect">Seeding — from pool results</div>${seedRows}${resetLink}${cta}${note}`;
+}
+
+// Group the bracket's main matches by round (side + round) and order the groups ACTIVE-FIRST (mockup bk2-c
+// leads with the live round, then up-next, then finished, then still-TBD) — not raw play order. Within a
+// group, rows keep queue/net play order.
+function mgBracketGroups(main) {
+  const byKey = {};
+  main.forEach((m) => {
+    const key = m.side + ':' + m.round;
+    (byKey[key] = byKey[key] || { side: m.side, round: m.round, matches: [] }).matches.push(m);
+  });
+  const groups = Object.keys(byKey).map((k) => {
+    const g = byKey[k];
+    g.matches.sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
+    g.minQ = Math.min(...g.matches.map((m) => m.queue_order || 0));
+    const resolved = g.matches.filter((m) => m.team_a_id && m.team_b_id);
+    const hasLive = g.matches.some((m) => m.status === 'live');
+    const hasReady = resolved.some((m) => m.status !== 'final' && m.status !== 'live');
+    const allFinal = resolved.length > 0 && resolved.every((m) => m.status === 'final');
+    g.prio = hasLive ? 0 : (hasReady ? 1 : (allFinal ? 2 : 3));
+    g.allFinal = allFinal;
+    return g;
+  });
+  groups.sort((a, b) => a.prio - b.prio || a.minQ - b.minQ);
+  return groups;
+}
+
+function mgBracketGroupLabel(g) {
+  if (g.side === 'grand_final') { const m0 = g.matches[0]; return (m0 && m0.round_label) || 'Grand Final'; }
+  const base = (g.side === 'winners' ? 'Winners' : 'Losers') + ' · Round ' + g.round;
+  return g.allFinal ? base + ' · final' : base; // a fully-final round carries the · final suffix (bk2-c)
+}
+
+function mgBracketLiveHTML(t) {
+  const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];
+  const main = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).filter((m) => m.phase === 'main');
+  if (!main.length) return `<div class="pd-empty">The bracket has no games yet.</div>`;
+  return mgBracketGroups(main).map((g) => {
+    const rows = g.matches.map((m) => mgBracketRowHTML(m, teams)).join('');
+    return `<div class="mgbk-rnd">${escapeHTML(mgBracketGroupLabel(g))}</div>${rows}`;
+  }).join('');
+}
+
+// One bracket game row. Resolved rows (both teams set) are the whole-row tap target (data-mgbk-score) → the
+// shared openMgScoreSheet. A TBD row (a slot still fed by an unfinished game) is muted + non-tappable and
+// shows the source labels ("Winner of …") instead of team names.
+function mgBracketRowHTML(m, teams) {
+  const EN = '–';
+  const hasBoth = !!(m.team_a_id && m.team_b_id);
+  if (!hasBoth) {
+    const aLbl = m.team_a_id ? teamNameById(teams, m.team_a_id) : (m.source_a || 'TBD');
+    const bLbl = m.team_b_id ? teamNameById(teams, m.team_b_id) : (m.source_b || 'TBD');
+    return `<div class="mgbk-g mgbk-tbd"><div class="mgbk-gt">`
+      + `<div class="mgbk-gn">${escapeHTML(aLbl)} <span class="mgbk-vs">vs</span> ${escapeHTML(bLbl)}</div>`
+      + `<div class="mgbk-gm">Waiting on the feeding games</div></div></div>`;
+  }
+  const idAttr = escapeHTMLText(String(m.id));
+  const aN = escapeHTML(teamNameById(teams, m.team_a_id));
+  const bN = escapeHTML(teamNameById(teams, m.team_b_id));
+  const net = m.net != null ? ('Net ' + m.net) : '';
+  if (m.status === 'final') {
+    const aWin = m.winner_team_id === m.team_a_id;
+    const w = aWin ? aN : bN, l = aWin ? bN : aN;
+    const ws = aWin ? m.score_a : m.score_b, ls = aWin ? m.score_b : m.score_a;
+    const scr = (ws != null && ls != null) ? `<span class="mgbk-fsc">${escapeHTML(String(ws))}${EN}${escapeHTML(String(ls))}</span>` : '';
+    return `<div class="mgbk-g" data-mgbk-score="${idAttr}"><div class="mgbk-gt">`
+      + `<div class="mgbk-gn"><b>${w}</b> <span class="mgbk-def">def.</span> ${l}</div>`
+      + `<div class="mgbk-gm">Tap to edit</div></div>${scr}</div>`;
+  }
+  if (m.status === 'live') {
+    const sa = Number(m.score_a) || 0, sb = Number(m.score_b) || 0;
+    return `<div class="mgbk-g mgbk-live" data-mgbk-score="${idAttr}"><div class="mgbk-gt">`
+      + `<div class="mgbk-gn">${aN} <span class="mgbk-vs">vs</span> ${bN}</div>`
+      + `<div class="mgbk-gm">${escapeHTML(net ? net + ' · tap to score' : 'Tap to score')}</div></div>`
+      + `<span class="mgbk-sc">${sa}${EN}${sb}</span><span class="mgbk-pill">LIVE</span></div>`;
+  }
+  // scheduled / ready (both teams set) — up next, still tappable to score ahead
+  return `<div class="mgbk-g" data-mgbk-score="${idAttr}"><div class="mgbk-gt">`
+    + `<div class="mgbk-gn">${aN} <span class="mgbk-vs">vs</span> ${bN}</div>`
+    + `<div class="mgbk-gm">${escapeHTML(net ? net + ' when it opens' : 'Up next')}</div></div>`
+    + `<span class="mgbk-up">UP NEXT</span></div>`;
+}
+
+function mgBracketControlsHTML(t, completed) {
+  const doneNote = completed ? `<div class="mgbk-done">Tournament completed — close-out lives in its own page.</div>` : '';
+  return doneNote
+    + `<div class="pl-sect">Bracket controls</div>`
+    + `<button type="button" class="mgbk-players" data-mgbk-players>`
+      + `<div class="mg-rb"><div class="mg-rn">Full bracket tree — the players' view</div>`
+      + `<div class="mg-rs">Open the public bracket page</div></div>${MG_CHEV}</button>`
+    + `<button type="button" class="mgts-danger" data-mgbk-reset>Reset the bracket</button>`
+    + `<div class="mgbk-note">Clears the bracket and returns to pools — pool games and scores are kept. Type the tournament name to confirm.</div>`;
+}
+
+// Nudge a team up (dir -1) / down (dir +1) one seed. Reuses the old shell's mutation exactly (currentSeedOrder
+// + state.seedOverride keyed on the active tournament), then a container-swap repaint (no in-panel input to
+// clobber → no full render()).
+function mgBracketReseed(id, dir) {
+  if (!state.isAdmin) return;
+  const order = currentSeedOrder();
+  const i = order.indexOf(id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= order.length) return;
+  const tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+  state.seedOverride = { id: state.activeTournamentId, order };
+  repaintManage();
+}
+
+// Generate the bracket: persist the FINAL seed order into tournaments.seed_override (0049), THEN run the
+// existing tdbGenerateBracket → generate_bracket_atomic. PRE-0049 TOLERANCE: if the column does not exist yet
+// the persist write throws (undefined column) — we swallow it and generate anyway (the override still applies
+// in-session via the seedOrder argument), telling the admin it will be saved permanently after the update.
+async function mgBracketGenerate() {
+  if (!state.isAdmin) return;
+  const t = mgBracketTournament();
+  if (!t) return;
+  const seedOrder = currentSeedOrder(); // the final order (the admin's override, or the computed seeding)
+  let persisted = true;
+  try {
+    await tdbSetTournamentFields(t.id, { seed_override: seedOrder });
+  } catch (err) {
+    persisted = false; // 0049 not applied yet — proceed; the override still applies this run
+    console.warn('seed_override persist (pre-0049?)', err);
+  }
+  try {
+    await tdbGenerateBracket(t, seedOrder);
+    state.seedOverride = null;
+    state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null;
+    if (typeof _autoGenPrompted !== 'undefined' && _autoGenPrompted) delete _autoGenPrompted[t.id];
+    await tdbRefreshTournaments();
+    repaintManage();
+    if (!persisted) appNotice({ title: 'Bracket is live', message: 'Your seed order applied for this run. It will be saved permanently after the next app update.' });
+  } catch (err) {
+    appNotice({ title: 'Could not generate the bracket', message: (err && err.message) || 'Try again.' });
+  }
+}
+
+// Reset the bracket (type-name unlock, like T6/T7): the existing tdbResetBracket deletes the phase='main'
+// matches and drops status back to 'pools' — pool games and scores are kept. Re-arms the auto-generate prompt.
+async function mgBracketReset() {
+  if (!state.isAdmin) return;
+  const t = mgBracketTournament();
+  if (!t) return;
+  const nm = (t.name || '').trim() || 'this tournament';
+  const typed = await appPrompt({ title: 'Reset the bracket', message: 'This clears the bracket and returns to pools. Pool games and scores are kept — you can re-generate. Type the tournament name to confirm.', placeholder: nm, confirmText: 'Reset the bracket' });
+  if (String(typed || '').trim() !== nm) return;
+  try {
+    await tdbResetBracket(t);
+    if (typeof _autoGenPrompted !== 'undefined' && _autoGenPrompted) delete _autoGenPrompted[t.id];
+    state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null;
+    await tdbRefreshTournaments();
+    repaintManage();
+  } catch (err) { appNotice({ title: 'Could not reset the bracket', message: (err && err.message) || 'Try again.' }); }
 }
 
 // Flip to the old admin shell (temporary — the whole path dies in Task 14). Runs the exact old render
@@ -12443,6 +12673,33 @@ function attachHandlers() {
           const psNets = e.target.closest('[data-mgps-editnets]');
           if (psNets) { void mgPoolsEditNets(psNets.getAttribute('data-mgps-editnets')); return; }
           if (e.target.closest('[data-mgps-reset]')) { void mgPoolsResetPools(); return; }
+        }
+        // Bracket & scores (Task 8, pick R10-C): pre-bracket = ▲/▼ seed reorder + Generate; live/completed =
+        // by-round rows where every resolved row opens the SHARED openMgScoreSheet (no second editor); plus
+        // Reset the bracket (type-name unlock) and the players'-view link out to the public bracket page.
+        // Checked BEFORE the generic hub rows so a seed nudge / score / generate never falls through.
+        if (mgtView === 'bracket') {
+          const bkScore = e.target.closest('[data-mgbk-score]');
+          if (bkScore) { openMgScoreSheet(bkScore.getAttribute('data-mgbk-score')); return; }
+          const seedUp = e.target.closest('[data-mgbk-seedup]');
+          if (seedUp) { mgBracketReseed(seedUp.getAttribute('data-mgbk-seedup'), -1); return; }
+          const seedDn = e.target.closest('[data-mgbk-seeddown]');
+          if (seedDn) { mgBracketReseed(seedDn.getAttribute('data-mgbk-seeddown'), 1); return; }
+          if (e.target.closest('[data-mgbk-seedreset]')) { state.seedOverride = null; repaintManage(); return; }
+          if (e.target.closest('[data-mgbk-generate]')) { void mgBracketGenerate(); return; }
+          if (e.target.closest('[data-mgbk-reset]')) { void mgBracketReset(); return; }
+          if (e.target.closest('[data-mgbk-players]')) {
+            // Route to the PUBLIC bracket page (the players' read-only tree): switch to the Tournament tab
+            // and set its view to bracket (mirrors the tn-view nav, which is gated to non-admins).
+            pdTournamentView = 'bracket';
+            if (activeMainTab !== 'tournament') activateMainTab('tournament');
+            const tc = document.querySelector('#tab-tournament .container');
+            if (tc) tc.innerHTML = buildPublicTournamentRootHTML();
+            layoutBracketTree();
+            const tp = document.getElementById('tab-tournament');
+            if (tp) tp.scrollTop = 0;
+            return;
+          }
         }
         if (e.target.closest('[data-mgt-back]')) { mgtView = null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
         const mgtRow = e.target.closest('[data-mgt-view]');

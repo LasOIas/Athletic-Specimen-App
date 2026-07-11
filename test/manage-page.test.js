@@ -94,6 +94,7 @@ function loadApp() {
       buildTeamSheet: (id) => buildMgTeamSheetHTML(mgFindTeam(id)),
       buildMgPools: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'pools'; mgpPoolFilter = (opts.filter === undefined ? null : opts.filter); mgpControlsOpen = !!opts.controls; return buildMgPoolsHTML(); },
       buildScoreSheet: (m) => buildMgScoreSheetHTML(m),
+      buildBracket: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'bracket'; state.seedOverride = (opts.seedOverride === undefined ? null : opts.seedOverride); return buildMgBracketHTML(); },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -682,10 +683,11 @@ describe('buildManageTournamentHTML — the tournament sub-hub (pick R2, mockup 
   it('the container dispatch shows the hub for null mgtView and a placeholder for the still-unbuilt sub-views', () => {
     setTournamentState(setupOpen);
     expect(bridge.mgtContainer()).toContain('data-mgt-view="registration"'); // hub
-    // Task 7 filled the 'pools' placeholder; 'bracket' is still a placeholder until Task 8.
+    // Task 7 filled 'pools'; Task 8 filled 'bracket' — both dispatch to their real views (own back button,
+    // no placeholder copy). No sub-view still shows the "Coming in the next slices." placeholder.
     const bracketView = bridge.mgtContainer('bracket');
-    expect(bracketView).toContain('Coming in the next slices.');
-    expect(bracketView).toContain('data-mgt-back'); // placeholder returns to the hub, not the lead
+    expect(bracketView).not.toContain('Coming in the next slices.');
+    expect(bracketView).toContain('data-mgt-back'); // real view returns to the hub via the header back button
     // 'pools' now dispatches to the real Pools & schedule view (its own back button, no placeholder copy).
     const poolsView = bridge.mgtContainer('pools');
     expect(poolsView).not.toContain('Coming in the next slices.');
@@ -1058,5 +1060,196 @@ describe('buildMgScoreSheetHTML — the shared score sheet (T7 defines, T8 reuse
     expect(html).toContain('Net 3');
     expect(html).toContain('First to 21'); // bracket_target from the fixture → proves phase-generic
     expect(html).toContain('data-mgss="final"');
+  });
+});
+
+// ── Task 8 (pick R10-C): Bracket admin — by-round rows + the reused score sheet ───────────────
+// Mockups r10-manage/bk2-c (live by-round rows) + bk-c (pre-bracket seeding) + bk2-e (the editor sheet =
+// T7's openMgScoreSheet, reused — NOT a second editor). buildMgBracketHTML dispatches on tournament.status:
+// pre-bracket (setup/pools) → seeding list (rank + ▲/▼) + Generate; live (bracket) → rows grouped BY ROUND
+// (Winners/Losers/Grand Final), each resolved row opens openMgScoreSheet; completed → final rows + a quiet
+// close-out line. Unresolved (TBD) rows render muted + non-tappable.
+
+// A 6-team double-elim mid-play: WB R1 both final, WB R2 both live, LB R1 up-next (both teams set), Grand
+// Final still TBD. Group state priority (live → up-next → final → unresolved) drives the group order.
+function setBracketLiveFixture(extra = {}) {
+  const st = bridge.getState();
+  Object.assign(st, {
+    tournaments: [{ id: 'T', name: 'July 2026', status: 'bracket', registration_open: false,
+      team_size: 4, net_count: 2, bracket_target: 21, bracket_cap: 25, win_by_2: true }],
+    activeTournamentId: 'T',
+    tournamentTeams: [
+      { id: 't1', name: 'Dink Responsibly' }, { id: 't2', name: 'Sets & Reps' },
+      { id: 't3', name: 'Block Party' }, { id: 't4', name: 'Net Gains' },
+      { id: 't5', name: 'Ace Holes' }, { id: 't6', name: 'Dig It' },
+    ],
+    tournamentPools: [],
+    tournamentMatches: [
+      // Winners R1 — both final (winner-first "def." rows)
+      { id: 'bm-w1a', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 0, round_label: 'WB R1 M1', net: 1, queue_order: 0, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 21, score_b: 14, version: 1 },
+      { id: 'bm-w1b', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 1, round_label: 'WB R1 M2', net: 2, queue_order: 1, status: 'final', team_a_id: 't3', team_b_id: 't4', winner_team_id: 't3', score_a: 21, score_b: 18, version: 1 },
+      // Losers R1 — up next (both teams set, not started) — plays earlier (q2) than WB R2 but is NOT live
+      { id: 'bm-l1a', tournament_id: 'T', phase: 'main', side: 'losers', round: 1, slot: 0, round_label: 'LB R1 M1', net: 1, queue_order: 2, status: 'scheduled', team_a_id: 't2', team_b_id: 't4', version: 0 },
+      // Winners R2 — both LIVE at once
+      { id: 'bm-w2a', tournament_id: 'T', phase: 'main', side: 'winners', round: 2, slot: 0, round_label: 'WB R2 M1', net: 1, queue_order: 3, status: 'live', team_a_id: 't1', team_b_id: 't3', score_a: 18, score_b: 15, version: 1 },
+      { id: 'bm-w2b', tournament_id: 'T', phase: 'main', side: 'winners', round: 2, slot: 1, round_label: 'WB R2 M2', net: 2, queue_order: 4, status: 'live', team_a_id: 't5', team_b_id: 't6', score_a: 7, score_b: 4, version: 1 },
+      // Grand Final — still TBD (neither slot resolved)
+      { id: 'bm-gf', tournament_id: 'T', phase: 'main', side: 'grand_final', round: 1, slot: 0, round_label: 'Grand Final', net: 1, queue_order: 9, status: 'scheduled', team_a_id: null, team_b_id: null, source_a: 'Winner of WB R2 M1', source_b: 'Loser of LB R2 M1', version: 0 },
+    ],
+    players: [], checkedIn: [], teamMembers: null, isAdmin: true,
+    ...extra,
+  });
+}
+const BEN = '–'; // EN DASH — the bracket score separator
+
+describe('buildMgBracketHTML — live by-round rows (pick R10-C, mockup bk2-c)', () => {
+  let html;
+  beforeEach(() => { setBracketLiveFixture(); html = bridge.buildBracket(); });
+
+  it('groups games by round with Winners / Losers / Grand Final headers', () => {
+    expect(html).toContain('>Winners · Round 2<');
+    expect(html).toContain('>Losers · Round 1<');
+    expect(html).toContain('>Winners · Round 1 · final<'); // a fully-final round carries the · final suffix
+    expect(html).toContain('>Grand Final<');
+    expect(html).not.toContain('pd-card');
+  });
+
+  it('orders the groups active-first: live round, then up-next, then finished (not raw play order)', () => {
+    const iLive = html.indexOf('Winners · Round 2');   // live → top
+    const iUp = html.indexOf('Losers · Round 1');      // up next (plays earlier, q2) but comes AFTER live
+    const iDone = html.indexOf('Winners · Round 1');   // finished → below up-next
+    const iGf = html.indexOf('Grand Final');           // unresolved → last
+    expect(iLive).toBeGreaterThanOrEqual(0);
+    expect(iLive).toBeLessThan(iUp);
+    expect(iUp).toBeLessThan(iDone);
+    expect(iDone).toBeLessThan(iGf);
+  });
+
+  it('shows multiple LIVE rows at once with green live scores and a LIVE pill each', () => {
+    expect(count(html, '>LIVE<')).toBe(2);
+    expect(html).toContain('>18' + BEN + '15<');
+    expect(html).toContain('>7' + BEN + '4<');
+    expect(html).toContain('class="mgbk-sc"'); // green live score
+  });
+
+  it('shows the UP NEXT faint tag on a ready-but-unscored game', () => {
+    expect(html).toContain('>UP NEXT<');
+    expect(html).toContain('when it opens'); // the net sub for an up-next game
+  });
+
+  it('renders finals winner-first with def. and the final score', () => {
+    expect(html).toContain('def.');
+    expect(html).toContain('>21' + BEN + '14<');
+    expect(html).toContain('>21' + BEN + '18<');
+    expect(html).toContain('class="mgbk-fsc"');
+  });
+
+  it('makes EVERY resolved row (live, up-next, final) open the shared openMgScoreSheet', () => {
+    expect(html).toContain('data-mgbk-score="bm-w2a"'); // live
+    expect(html).toContain('data-mgbk-score="bm-l1a"'); // up next
+    expect(html).toContain('data-mgbk-score="bm-w1a"'); // final
+  });
+
+  it('renders an unresolved (TBD) game muted and non-tappable', () => {
+    expect(html).toContain('class="mgbk-g mgbk-tbd"');
+    expect(html).not.toContain('data-mgbk-score="bm-gf"'); // no score hook on a TBD row
+    expect(html).toContain('Winner of WB R2 M1');          // shows the source labels instead of teams
+  });
+
+  it('offers the reset control + the players-view link + never uses pd-card', () => {
+    expect(html).toContain('data-mgbk-reset');
+    expect(html).toContain('data-mgbk-players');
+    expect(html).toContain("Full bracket tree — the players' view");
+  });
+});
+
+describe('buildMgBracketHTML — completed (mockup bk2-c, quiet close-out pointer)', () => {
+  it('shows the final rows plus the quiet close-out line', () => {
+    setBracketLiveFixture({
+      tournaments: [{ id: 'T', name: 'July 2026', status: 'completed', registration_open: false, bracket_target: 21, bracket_cap: 25, win_by_2: true }],
+      tournamentMatches: [
+        { id: 'bm-w1a', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 0, round_label: 'WB R1 M1', net: 1, queue_order: 0, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 21, score_b: 14, version: 1 },
+        { id: 'bm-gf', tournament_id: 'T', phase: 'main', side: 'grand_final', round: 1, slot: 0, round_label: 'Grand Final', net: 1, queue_order: 9, status: 'final', team_a_id: 't1', team_b_id: 't3', winner_team_id: 't1', score_a: 21, score_b: 19, version: 1 },
+      ],
+    });
+    const html = bridge.buildBracket();
+    expect(html).toContain('Tournament completed — close-out lives in its own page.');
+    expect(html).toContain('def.');            // the final rows still render
+    expect(html).toContain('data-mgbk-reset');  // reset still available
+    expect(html).toContain('>Grand Final<');
+  });
+});
+
+// A pre-bracket state: pools drawn + scored, no bracket yet — the seeding list (bk-c) + Generate.
+function setBracketSeedingFixture(extra = {}) {
+  const st = bridge.getState();
+  Object.assign(st, {
+    tournaments: [{ id: 'T', name: 'July 2026', status: 'pools', registration_open: false,
+      team_size: 4, net_count: 2, pool_count: 1, pool_target: 15, pool_cap: 20, bracket_target: 21, bracket_cap: 25, win_by_2: true }],
+    activeTournamentId: 'T',
+    tournamentTeams: [
+      { id: 't1', name: 'Dink Responsibly', pool_id: 'p1' }, { id: 't2', name: 'Block Party', pool_id: 'p1' },
+      { id: 't3', name: 'Net Gains', pool_id: 'p1' }, { id: 't4', name: 'Dig It', pool_id: 'p1' },
+    ],
+    tournamentPools: [{ id: 'p1', label: 'A', display_order: 0 }],
+    tournamentMatches: [
+      { id: 'gA1', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 1, queue_order: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 15, score_b: 8, version: 1 },
+      { id: 'gA2', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 1, queue_order: 2, status: 'final', team_a_id: 't3', team_b_id: 't4', winner_team_id: 't3', score_a: 15, score_b: 11, version: 1 },
+      { id: 'gA3', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 1, queue_order: 3, status: 'final', team_a_id: 't1', team_b_id: 't3', winner_team_id: 't1', score_a: 15, score_b: 13, version: 1 },
+    ],
+    players: [], checkedIn: [], teamMembers: null, isAdmin: true,
+    ...extra,
+  });
+}
+
+describe('buildMgBracketHTML — pre-bracket seeding (pick R10-C, mockup bk-c)', () => {
+  it('renders the seeding list with rank + ▲/▼ reorder hooks and the Generate CTA', () => {
+    setBracketSeedingFixture();
+    const html = bridge.buildBracket();
+    expect(html).toContain('Seeding — from pool results');
+    expect(html).toContain('class="mgbk-seed"');
+    expect(html).toContain('data-mgbk-seedup="t1"');
+    expect(html).toContain('data-mgbk-seeddown="t1"');
+    expect(html).toContain('data-mgbk-generate');
+    expect(html).toContain('Generate the bracket');
+    expect(html).not.toContain('pd-card');
+  });
+
+  it('enables Generate only when every pool game is final', () => {
+    setBracketSeedingFixture();
+    expect(bridge.buildBracket()).toContain('data-mgbk-generate>'); // all final → enabled
+    // one pool game still open → Generate is locked + the provisional note shows
+    setBracketSeedingFixture({
+      tournamentMatches: [
+        { id: 'gA1', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 1, queue_order: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 15, score_b: 8, version: 1 },
+        { id: 'gA2', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 1, queue_order: 2, status: 'live', team_a_id: 't3', team_b_id: 't4', score_a: 9, score_b: 7, version: 1 },
+      ],
+    });
+    const open = bridge.buildBracket();
+    expect(open).toContain('data-mgbk-generate disabled');
+    expect(open).toContain('provisional');
+  });
+
+  it('applies the admin ▲/▼ seed override when it is a valid permutation of the current teams', () => {
+    setBracketSeedingFixture();
+    const computed = bridge.buildBracket();
+    // by win% then diff, t1 (2-0) seeds first
+    expect(computed.indexOf('Dink Responsibly')).toBeLessThan(computed.indexOf('Dig It'));
+    // now force an override that puts Dig It (t4) first
+    const custom = bridge.buildBracket({ seedOverride: { id: 'T', order: ['t4', 't3', 't1', 't2'] } });
+    const firstSeedNamePos = custom.indexOf('Dig It');
+    expect(firstSeedNamePos).toBeGreaterThanOrEqual(0);
+    expect(custom.indexOf('Dig It')).toBeLessThan(custom.indexOf('Dink Responsibly'));
+    expect(custom).toContain('data-mgbk-seedreset'); // a custom order offers a reset-to-computed
+  });
+
+  it('is honest when pools have not been drawn yet (points to Pools & schedule)', () => {
+    setBracketSeedingFixture({
+      tournaments: [{ id: 'T', name: 'July 2026', status: 'setup', registration_open: true, team_size: 4 }],
+      tournamentPools: [], tournamentMatches: [],
+    });
+    const html = bridge.buildBracket();
+    expect(html).toContain('Draw pools and play them out first');
+    expect(html).not.toContain('data-mgbk-generate');
   });
 });

@@ -1,0 +1,12 @@
+-- 0049_seed_override.sql — persisted bracket seed override per tournament
+-- (session-10 pick R10-C, Mike 2026-07-11). The Manage → Tournament → Bracket view lets the admin reorder
+-- the computed seeding with ▲/▼ before generating; "Generate the bracket" now persists that FINAL order here
+-- (replacing the transient state.seedOverride) and passes it to tdbGenerateBracket → generate_bracket_atomic.
+-- Shape: a jsonb array of team_id strings, in seed order (seed 1 first). Null/absent → the client falls back
+-- to the computed computeSeeding order, so the Bracket view + Generate work unchanged before this lands.
+-- PRE-APPLY TOLERANCE: the client wraps the persist write in try/catch — if this column does not exist yet the
+-- write throws (undefined column) and the client generates anyway (the override still applies in-session via
+-- the seedOrder argument). One nullable jsonb column on public.tournaments; anon-readable via the existing
+-- tournaments select grant/policy (reads only; writes go through the authenticated update path).
+-- Applied to prod by the CONTROLLER via Supabase MCP (builders never apply). Baseline verified after.
+alter table public.tournaments add column if not exists seed_override jsonb;
