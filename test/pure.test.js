@@ -20,7 +20,7 @@ const {
   shouldAutoPromptBracket, assignBracketNets,
   shapeClaimCandidates, filterClaimCandidates,
   resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
-  checkinHeroModel,
+  checkinHeroModel, resolveHistoryChampion,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -1084,5 +1084,34 @@ describe('checkinHeroModel', () => {
   });
   it('is null on malformed rows', () => {
     expect(checkinHeroModel([{ id: null, name: '' }])).toBeNull();
+  });
+});
+
+// Task 10 (pick R12, the June fix): History prefers the STORED champion over the computed one.
+describe('resolveHistoryChampion — stored champion wins over computed', () => {
+  const teams = [{ id: 'a', name: 'Alpha' }, { id: 'b', name: 'Bravo' }];
+  // A decided grand final where the COMPUTED champion is team a.
+  const gf = [{ phase: 'main', side: 'grand_final', round: 1, status: 'final', team_a_id: 'a', team_b_id: 'b', winner_team_id: 'a' }];
+
+  it('returns the stored champion (by champion_team_id) resolving its name from teams', () => {
+    const c = resolveHistoryChampion({ champion_team_id: 'b' }, teams, gf);
+    expect(c).toEqual({ teamId: 'b', name: 'Bravo' });
+  });
+  it('the stored champion overrides the computed bracket champion when they differ', () => {
+    // computeChampion(gf) would say 'a'; the stored value 'b' must win (the admin recorded it deliberately).
+    const c = resolveHistoryChampion({ champion_team_id: 'b' }, teams, gf);
+    expect(c.teamId).toBe('b');
+  });
+  it('falls back to the computed champion when nothing is stored', () => {
+    const c = resolveHistoryChampion({ champion_team_id: null }, teams, gf);
+    expect(c).toEqual({ teamId: 'a', name: 'Alpha' });
+  });
+  it('returns null when neither stored nor computable (→ "No champion recorded")', () => {
+    expect(resolveHistoryChampion({ champion_team_id: null }, teams, [])).toBeNull();
+    expect(resolveHistoryChampion({}, teams, [])).toBeNull();
+  });
+  it('falls back to computed when the stored id points at no known team', () => {
+    const c = resolveHistoryChampion({ champion_team_id: 'ghost' }, teams, gf);
+    expect(c.teamId).toBe('a'); // ghost not in teams → computed wins
   });
 });

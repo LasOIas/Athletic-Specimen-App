@@ -3275,6 +3275,25 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgt-to-r { flex: 1; min-width: 0; font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mgt-cancel { display: block; width: 100%; margin-top: 8px; padding: 10px; border: none; background: none; color: var(--muted); font: 600 13px 'Inter', sans-serif; cursor: pointer; }
 
+/* ── Manage → Close out (Task 10, pick R12 — champion + end/reopen, mockup co-a). The matte-gold champion
+   card REUSES the champions-strip tokens (--gold*, §51 matte — no glow); the End CTA reuses .mgt-cta and the
+   note reuses .mgt-note. The CHANGE picker rides the body-level .pd-reg-scrim/.pd-reg-sheet chrome. ── */
+.mgco-card { display: flex; align-items: center; gap: 12px; margin-top: 6px; padding: 13px; border: 1.5px solid var(--gold-bd); border-radius: 12px; background: var(--gold-soft); }
+.mgco-ic { flex: none; width: 38px; height: 38px; border-radius: 10px; background: var(--card); border: 1px solid var(--gold-bd); display: flex; align-items: center; justify-content: center; color: var(--gold); }
+.mgco-ic svg { width: 20px; height: 20px; }
+.mgco-cn { flex: 1; min-width: 0; }
+.mgco-eyebrow { font: 700 11px var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--gold-ink); }
+.mgco-name { font-size: 16px; font-weight: 700; color: var(--ink); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mgco-change { flex: none; background: none; border: none; font: 700 11.5px var(--font-display); letter-spacing: .05em; color: var(--accent); cursor: pointer; }
+.mgco-reopen { display: block; width: 100%; margin-top: 4px; padding: 13px; border: 1px solid var(--border); border-radius: 11px; background: var(--card); color: var(--ink); font: 600 14px 'Inter', sans-serif; text-align: center; cursor: pointer; }
+.mgco-picklist { margin-top: 6px; }
+.mgco-pickrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 13px 4px; border: none; border-top: 1px solid var(--border); background: none; color: var(--ink); font-size: 15px; cursor: pointer; }
+.mgco-pickrow:first-child { border-top: none; }
+.mgco-pick-on { color: var(--accent); font-weight: 600; }
+.mgco-pickrow-none { color: var(--muted); }
+.mgco-pickck { flex: none; width: 18px; height: 18px; color: var(--accent); }
+.mgco-pickname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ── Manage → Tournament (Task 5, pick R2 sub-hub + pick R7 Registration) — r10-manage t-b + r-b mockups.
    The sub-hub REUSES the mg-row grammar; the mgt-stage line + mgt-on green word are the additions. The
    Registration view adds the mgr-* announcement box, the mg-sw 44×26 switch, and reuses pk-fld/pk-fl/pk-fv

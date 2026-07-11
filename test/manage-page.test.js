@@ -97,6 +97,14 @@ function loadApp() {
       buildBracket: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'bracket'; state.seedOverride = (opts.seedOverride === undefined ? null : opts.seedOverride); return buildMgBracketHTML(); },
       buildSettings: () => { manageView = 'tournament'; mgtView = 'settings'; return buildMgSettingsHTML(); },
       buildRules: () => { manageView = 'tournament'; mgtView = 'rules'; return buildMgRulesHTML(); },
+      buildCloseout: (opts) => {
+        opts = opts || {};
+        manageView = 'tournament'; mgtView = 'closeout';
+        mgCloseoutChampId = ('champId' in opts) ? opts.champId : undefined;
+        return buildMgCloseoutHTML();
+      },
+      closeoutContainer: () => { manageView = 'tournament'; mgtView = 'closeout'; return manageContainerHTML(); },
+      buildChampPicker: (teams, sel) => buildMgChampionPickerHTML(teams, sel),
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -794,8 +802,29 @@ describe('manageLeadTournament — the closed-setup fix', () => {
     expect(bridge.leadTournament()).toBe(newer);
   });
 
-  it('excludes a completed tournament (returns null when only completed exists)', () => {
-    setLead([{ id: 'C', name: 'Done', status: 'completed', registration_open: false }]);
+  it('falls back to a completed tournament as a last resort (Task 10: reopen must be reachable)', () => {
+    // Changed by Task 10 (pick R12): a just-closed tournament stays manageable so the admin can reopen it.
+    const done = { id: 'C', name: 'Done', status: 'completed', registration_open: false, updated_at: '2026-07-10T00:00:00Z' };
+    setLead([done]);
+    expect(bridge.leadTournament()).toBe(done);
+  });
+
+  it('still prefers a setup/live tournament over a completed one (completed is only the last resort)', () => {
+    const done = { id: 'C', name: 'Done', status: 'completed', registration_open: false, updated_at: '2026-07-10T00:00:00Z' };
+    const setup = { id: 'S', name: 'Next', status: 'setup', registration_open: false };
+    setLead([done, setup]);
+    expect(bridge.leadTournament()).toBe(setup);
+  });
+
+  it('returns the MOST-RECENT completed when several completed exist and nothing is live/setup', () => {
+    const older = { id: 'O', name: 'Older', status: 'completed', registration_open: false, updated_at: '2026-06-01T00:00:00Z' };
+    const newer = { id: 'N', name: 'Newer', status: 'completed', registration_open: false, updated_at: '2026-07-01T00:00:00Z' };
+    setLead([older, newer]);
+    expect(bridge.leadTournament().id).toBe('N');
+  });
+
+  it('returns null when there is genuinely no tournament', () => {
+    setLead([]);
     expect(bridge.leadTournament()).toBe(null);
   });
 });
@@ -1368,5 +1397,122 @@ describe('buildMgRulesHTML — one-sheet rules editor (pick R11b, mockup ru-d)',
     expect(view).not.toContain('Coming in the next slices.');
     expect(view).toContain('id="mgru-ta"');
     expect(view).toContain('data-mgt-back');
+  });
+});
+
+// ── Task 10: Close out — champion + end/reopen (pick R12, THE June fix, mockup co-a) ──────────────
+describe('buildMgCloseoutHTML — deliberate close-out (pick R12)', () => {
+  // A bracket-stage tournament whose grand final is decided → computeChampion suggests t1 (Sets & Reps).
+  const bracketT = { id: 'T', name: 'July 2026', status: 'bracket', registration_open: false };
+  const GF = [{ id: 'm', phase: 'main', side: 'grand_final', round: 1, status: 'final',
+    team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1' }];
+
+  it('active (bracket): CHAMPION section + matte-gold card with the bracket suggestion + End CTA + honest note', () => {
+    setTournamentState(bracketT, { tournamentMatches: GF });
+    const html = bridge.buildCloseout();
+    expect(html).toContain('class="pl-sect">Champion<');
+    expect(html).toContain('class="mgco-card"');
+    expect(html).toContain('FROM THE BRACKET');
+    expect(html).toContain('Sets &amp; Reps');            // computeChampion suggestion (t1), escaped
+    expect(html).toContain('data-mgco-change');           // CHANGE opens the picker
+    expect(html).toContain('data-mgco-end');              // End the tournament CTA
+    expect(html).toContain('>End the tournament<');
+    expect(html).toContain('Moves it to Past tournaments'); // honest note
+    expect(html).toContain('you can reopen from there');
+    expect(html).not.toContain('pd-card');                // flat on stone
+    expect(html).not.toContain('data-mgco-reopen');       // active state has no reopen
+  });
+
+  it('active with no decided champion (pools): eyebrow PICK THE CHAMPION, still change + end', () => {
+    setTournamentState({ id: 'T', name: 'July 2026', status: 'pools', registration_open: false }, { tournamentMatches: [] });
+    const html = bridge.buildCloseout();
+    expect(html).toContain('PICK THE CHAMPION');
+    expect(html).not.toContain('FROM THE BRACKET');
+    expect(html).toContain('data-mgco-change');
+    expect(html).toContain('data-mgco-end');
+  });
+
+  it('honors a manual CHANGE override (module var mgCloseoutChampId)', () => {
+    setTournamentState(bracketT, { tournamentMatches: GF });
+    const html = bridge.buildCloseout({ champId: 't2' }); // admin overrode the bracket suggestion
+    expect(html).toContain('Dig It');       // t2
+    expect(html).toContain('YOUR PICK');
+    expect(html).not.toContain('Sets &amp; Reps'); // the bracket suggestion is no longer shown
+    expect(html).toContain('data-mgco-end');
+  });
+
+  it('honors an explicit "no champion" override and still lets you end', () => {
+    setTournamentState(bracketT, { tournamentMatches: GF });
+    const html = bridge.buildCloseout({ champId: '' });
+    expect(html).toContain('No champion recorded');
+    expect(html).toContain('data-mgco-end');       // ending with no champion is allowed
+    expect(html).toContain('data-mgco-change');     // can still pick one
+  });
+
+  it('completed: recorded champion card + Reopen row + Past-tournaments line, no End CTA', () => {
+    // manageLeadTournament must resolve a completed tournament so reopen is reachable.
+    setTournamentState({ id: 'T', name: 'July 2026', status: 'completed', registration_open: false, champion_team_id: 't3' });
+    const html = bridge.buildCloseout();
+    expect(html).toContain('Paid Squad');        // the STORED champion (t3), resolved by name
+    expect(html).toContain('data-mgco-reopen');  // the reopen affordance
+    expect(html).toContain('>Reopen the tournament<');
+    expect(html).toContain('Past tournaments');
+    expect(html).not.toContain('data-mgco-end'); // a completed tournament is not "ended" again
+    expect(html).not.toContain('data-mgco-change');
+  });
+
+  it('completed with no champion recorded: honest card + still reopenable', () => {
+    setTournamentState({ id: 'T', name: 'July 2026', status: 'completed', registration_open: false, champion_team_id: null });
+    const html = bridge.buildCloseout();
+    expect(html).toContain('No champion recorded');
+    expect(html).toContain('data-mgco-reopen');
+  });
+
+  it('setup: honest empty — nothing to close yet, no destructive controls', () => {
+    setTournamentState({ id: 'T', name: 'July 2026', status: 'setup', registration_open: true });
+    const html = bridge.buildCloseout();
+    expect(html).toContain("Nothing to close yet");
+    expect(html).not.toContain('data-mgco-end');
+    expect(html).not.toContain('data-mgco-reopen');
+    expect(html).not.toContain('data-mgco-change');
+  });
+
+  it('escapes a team name with markup in the champion card', () => {
+    setTournamentState({ id: 'T', name: 'July 2026', status: 'completed', champion_team_id: 'evil' },
+      { tournamentTeams: [{ id: 'evil', name: '<img src=x onerror=alert(1)>', paid: true }] });
+    const html = bridge.buildCloseout();
+    expect(html).not.toContain('<img src=x onerror=alert(1)>');
+    expect(html).toContain('&lt;img');
+  });
+
+  it('dispatches through manageContainerHTML (real view, own back button, no placeholder)', () => {
+    setTournamentState(bracketT, { tournamentMatches: GF });
+    const view = bridge.closeoutContainer();
+    expect(view).not.toContain('Coming in the next slices.');
+    expect(view).toContain('data-mgt-back');
+    expect(view).toContain('data-mgco-end');
+  });
+});
+
+describe('buildMgChampionPickerHTML — the CHANGE picker sheet (body-level)', () => {
+  const teams = [
+    { id: 't1', name: 'Sets & Reps', paid: false },
+    { id: 't2', name: 'Dig It', paid: false },
+    { id: 't3', name: 'Paid Squad', paid: true },
+  ];
+  it('lists every team as a pickable row plus a "no champion" option, marking the current pick', () => {
+    const html = bridge.buildChampPicker(teams, 't2');
+    expect(count(html, 'data-mgco-pick=')).toBe(4); // 3 teams + the no-champion option
+    expect(html).toContain('data-mgco-pick="t1"');
+    expect(html).toContain('data-mgco-pick="t3"');
+    expect(html).toContain('data-mgco-pick=""'); // the "No champion" option
+    expect(html).toContain('Sets &amp; Reps');
+    expect(html).toContain('No champion');
+    expect(html).toContain('mgco-pick-on'); // the selected row is marked
+  });
+  it('escapes team names in the picker', () => {
+    const html = bridge.buildChampPicker([{ id: 'x', name: '<b>x</b>', paid: false }], null);
+    expect(html).not.toContain('<b>x</b>');
+    expect(html).toContain('&lt;b&gt;');
   });
 });

@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.9'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.10'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3624,6 +3624,29 @@ async function tdbStartPoolPlayAtomic(tournament) {
     p_tournament_id: tournament.id, p_matches: rows,
   });
   if (error) { if (isFnMissingError(error)) throw new Error(RPC_NOT_READY_MSG); throw error; }
+}
+
+// Task 10 (pick R12) — deliberate close-out RPCs (migration 0050). Both are SECURITY DEFINER + is_organizer-
+// guarded server-side; the client just calls them. GUARD FOR THE PRE-APPLY WINDOW: until the controller applies
+// 0050 the functions don't exist — surface a friendly "still updating" notice (isFnMissingError) and NEVER fall
+// back to a direct status write (a raw client update would bypass the guard/validation the RPC exists to
+// enforce, and re-introduce exactly the June drift this task fixes).
+const CLOSEOUT_RPC_NOT_READY = 'Close-out isn\'t available yet — the server is still updating. Try again in a minute.';
+// close: p_champion_team_id null = "no champion recorded" (allowed). The RPC validates the team belongs to the
+// tournament, refuses to close from 'setup', sets status='completed' + champion + registration_open=false.
+async function tdbCloseTournament(tournamentId, championTeamId) {
+  if (!supabaseClient || !tournamentId) throw new Error('No tournament.');
+  const { error } = await supabaseClient.rpc('close_tournament', {
+    p_tournament_id: tournamentId, p_champion_team_id: championTeamId || null,
+  });
+  if (error) { if (isFnMissingError(error)) throw new Error(CLOSEOUT_RPC_NOT_READY); throw error; }
+}
+// reopen: only from 'completed'; restores status (bracket if main matches exist, else pools). KEEPS the
+// recorded champion (0050 header note) — a quick score fix must not lose a correct champion.
+async function tdbReopenTournament(tournamentId) {
+  if (!supabaseClient || !tournamentId) throw new Error('No tournament.');
+  const { error } = await supabaseClient.rpc('reopen_tournament', { p_tournament_id: tournamentId });
+  if (error) { if (isFnMissingError(error)) throw new Error(CLOSEOUT_RPC_NOT_READY); throw error; }
 }
 
 // C25 item 3: before submitting, sanity-check a lopsided score that still passes validation
@@ -9099,7 +9122,10 @@ async function loadTournamentHistory() {
         name: t.name || 'Tournament',
         date: t.created_at || t.updated_at || null,
         teamCount: (teams || []).length,
-        champion: computeChampion(main || [], teams || []),
+        // Task 10 (pick R12): prefer the STORED champion (deliberate close-out) over re-deriving it, falling
+        // back to the computed bracket champion, then null. tournaments are loaded with select('*'), so
+        // champion_team_id rides in for free once 0050 lands (undefined pre-apply → the computed fallback).
+        champion: resolveHistoryChampion(t, teams || [], main || []),
       };
     }));
     rows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))); // newest first
@@ -9186,8 +9212,13 @@ let mgtView = null;
 // survive the container-swap repaint (a background score sync must not reset the tab or collapse the panel).
 let mgpPoolFilter = null;
 let mgpControlsOpen = false;
+// Task 10 (Close out, pick R12): the champion the admin will record on close. undefined = follow the computed
+// bracket suggestion (computeChampion); a team-id string = a manual CHANGE-picker override; '' = an explicit
+// "no champion recorded". Survives the container-swap repaint (a background sync must not reset the pick); the
+// picker sheet is body-level (poll-clobber-immune). Reset to undefined after a successful close.
+let mgCloseoutChampId = undefined;
 
-const MG_CHEV = '<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
+const MG_CHEV ='<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
 
 // The tournament the Manage lead reports on: a live event (pools/bracket), else the most-recent SETUP
 // tournament — REGARDLESS of registration_open. The old filter (`registration_open && status==='setup'`)
@@ -9198,7 +9229,14 @@ const MG_CHEV = '<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="cu
 // excluded (a finished event isn't the thing you're managing next).
 function manageLeadTournament() {
   return publicLiveTournament()
-    || (state.tournaments || []).find((x) => x && x.status === 'setup') || null;
+    || (state.tournaments || []).find((x) => x && x.status === 'setup')
+    // Task 10 (pick R12): a just-CLOSED tournament stays manageable so the admin can reopen it and so the
+    // Close out sub-view can show the recorded champion. Last resort only (setup/live win): the most-recent
+    // completed tournament. This is what makes "you can reopen from there" actually reachable after close.
+    || (state.tournaments || []).filter((x) => x && x.status === 'completed')
+         .sort((a, b) => String((b && (b.updated_at || b.created_at)) || '')
+           .localeCompare(String((a && (a.updated_at || a.created_at)) || '')))[0]
+    || null;
 }
 
 // The effective pickup-day SET, read by every day-of gate (checkinNavVisible, publicHomeState) and the
@@ -9979,6 +10017,7 @@ function buildManageTournamentContainerHTML() {
   if (mgtView === 'bracket') return buildMgBracketHTML();
   if (mgtView === 'settings') return buildMgSettingsHTML();
   if (mgtView === 'rules') return buildMgRulesHTML();
+  if (mgtView === 'closeout') return buildMgCloseoutHTML();
   if (mgtView) return mgtSubPlaceholderHTML(mgtView);
   return buildManageTournamentHTML();
 }
@@ -10265,6 +10304,175 @@ async function mgSaveRules() {
     console.warn('mgSaveRules', err);
     if (status) status.textContent = 'Could not save — check the connection and try again.';
   }
+}
+
+// ── Task 10: Close out — champion + end/reopen (session-10 pick R12, THE June fix, mockup co-a) ─────────
+// Closing a tournament used to be an accident of drift; here it's DELIBERATE. Active (pools/bracket): a matte-
+// gold champion card seeded by computeChampion (or "PICK THE CHAMPION" when the bracket hasn't decided) with a
+// CHANGE picker, then one primary "End the tournament" CTA + an honest note. Completed: the recorded champion
+// (from the STORED champion_team_id) + a quiet "Reopen the tournament" row. Setup: honest empty. The writes go
+// through the 0050 SECURITY DEFINER RPCs (tdbCloseTournament / tdbReopenTournament) — guarded for the pre-apply
+// window (friendly notice, never a fallback status write). Gold values reuse the champions-strip tokens
+// (--gold*, §51 matte). The picker is body-level (poll-clobber-immune). mgCloseoutChampId survives the swap.
+const MGCO_TROPHY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 4h12v5a6 6 0 0 1-12 0z"/></svg>';
+
+// The tournament's bracket (main-phase) matches — the input computeChampion needs for its suggestion.
+function mgCloseoutMainMatches() {
+  return (state.tournamentMatches || []).filter((m) => m && m.phase === 'main');
+}
+
+// The champion the admin will RECORD on close, plus how to label it. undefined mgCloseoutChampId follows the
+// computed bracket suggestion; a team-id string is a manual CHANGE override; '' is an explicit "no champion".
+// { teamId, name, eyebrow, explicit } — teamId null = none. Consumed by the card, the End confirm, and the
+// picker's initial highlight.
+function mgCloseoutChampionChoice(teams, mainMatches) {
+  if (mgCloseoutChampId === '') return { teamId: null, name: '', eyebrow: 'NO CHAMPION', explicit: true };
+  if (typeof mgCloseoutChampId === 'string' && mgCloseoutChampId) {
+    const tm = (teams || []).find((x) => x && String(x.id) === String(mgCloseoutChampId));
+    if (tm) return { teamId: tm.id, name: tm.name || '', eyebrow: 'YOUR PICK', explicit: true };
+  }
+  const c = computeChampion(mainMatches || [], teams || []);
+  if (c && c.teamId) return { teamId: c.teamId, name: c.name || '', eyebrow: 'FROM THE BRACKET', explicit: false };
+  return { teamId: null, name: '', eyebrow: 'PICK THE CHAMPION', explicit: false };
+}
+
+function buildMgCloseoutHTML() {
+  const t = manageLeadTournament();
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">Close out</div></div>`;
+  if (!t) return header + `<div class="pd-empty">No tournament to close yet.</div>`;
+  const status = t.status;
+  // Setup — nothing has happened, so there is nothing to close (this is the June mistake, guarded honestly).
+  if (status === 'setup') {
+    return header + `<div class="pd-empty">Nothing to close yet — the tournament hasn't started.</div>`;
+  }
+  const teams = state.tournamentTeams || [];
+  // Completed — show the recorded champion (stored champion_team_id) and offer a reopen.
+  if (status === 'completed') {
+    const stored = t.champion_team_id
+      ? teams.find((x) => x && String(x.id) === String(t.champion_team_id))
+      : null;
+    const champName = stored ? (stored.name || '') : '';
+    const card = `<div class="pl-sect">Champion</div>`
+      + `<div class="mgco-card">`
+        + `<span class="mgco-ic">${MGCO_TROPHY}</span>`
+        + `<div class="mgco-cn"><div class="mgco-eyebrow">Champion</div>`
+          + `<div class="mgco-name">${champName ? escapeHTML(champName) : 'No champion recorded'}</div></div>`
+      + `</div>`;
+    const reopen = `<div class="pl-sect">Reopen</div>`
+      + `<button type="button" class="mgco-reopen" data-mgco-reopen>Reopen the tournament</button>`
+      + `<div class="mgt-note">It's in Past tournaments now. Reopen to fix a score or re-crown — the recorded champion stays until you close again.</div>`;
+    return header + card + reopen;
+  }
+  // Active (pools / bracket) — the champion card (bracket suggestion, your pick, or "pick one") + End CTA.
+  const choice = mgCloseoutChampionChoice(teams, mgCloseoutMainMatches());
+  const value = choice.teamId
+    ? escapeHTML(choice.name)
+    : (choice.explicit ? 'No champion recorded' : 'Choose the winning team');
+  const card = `<div class="pl-sect">Champion</div>`
+    + `<div class="mgco-card">`
+      + `<span class="mgco-ic">${MGCO_TROPHY}</span>`
+      + `<div class="mgco-cn"><div class="mgco-eyebrow">${choice.eyebrow}</div><div class="mgco-name">${value}</div></div>`
+      + `<button type="button" class="mgco-change" data-mgco-change>CHANGE</button>`
+    + `</div>`;
+  const cta = `<button type="button" class="mgt-cta" data-mgco-end>End the tournament</button>`
+    + `<div class="mgt-note">Moves it to Past tournaments · registration and scoring close · you can reopen from there</div>`;
+  return header + card + cta;
+}
+
+// The CHANGE picker sheet CONTENT (pure string; openMgChampionPicker wraps it in the body-level scrim). Lists
+// every team as a pickable row + a "No champion" option; the current pick carries mgco-pick-on.
+function buildMgChampionPickerHTML(teams, selectedId) {
+  const CHECK = '<svg class="mgco-pickck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-9"/></svg>';
+  const rows = (teams || []).map((tm) => {
+    const on = String(selectedId) === String(tm.id);
+    return `<button type="button" class="mgco-pickrow${on ? ' mgco-pick-on' : ''}" data-mgco-pick="${escapeHTMLText(String(tm.id))}">`
+      + `<span class="mgco-pickname">${escapeHTML(tm.name || 'Team')}</span>${on ? CHECK : ''}</button>`;
+  }).join('');
+  const noneOn = selectedId === '' || selectedId == null;
+  const noneRow = `<button type="button" class="mgco-pickrow mgco-pickrow-none${noneOn ? ' mgco-pick-on' : ''}" data-mgco-pick="">`
+    + `<span class="mgco-pickname">No champion</span>${noneOn ? CHECK : ''}</button>`;
+  return `<div class="pd-reg-grip"></div>`
+    + `<div class="mgts-head"><div class="mgts-eyebrow">Pick the champion</div>`
+    + `<button type="button" class="pd-reg-sheetx" data-mgco-pickclose aria-label="Close">`
+    + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`
+    + `<div class="mgco-picklist">${rows}${noneRow}</div>`;
+}
+
+function closeMgChampionPicker() { const el = document.getElementById('mgco-picker'); if (el) el.remove(); }
+
+// Open the body-level champion picker. Initial highlight = the current effective choice (the computed
+// suggestion when nothing has been overridden). Tapping a row sets mgCloseoutChampId and repaints the card.
+function openMgChampionPicker() {
+  if (!state.isAdmin) return;
+  const teams = state.tournamentTeams || [];
+  const choice = mgCloseoutChampionChoice(teams, mgCloseoutMainMatches());
+  const sel = (mgCloseoutChampId === undefined) ? (choice.teamId || '') : mgCloseoutChampId;
+  closeMgChampionPicker();
+  const scrim = document.createElement('div');
+  scrim.id = 'mgco-picker';
+  scrim.className = 'pd-reg-scrim';
+  scrim.setAttribute('role', 'dialog');
+  scrim.setAttribute('aria-modal', 'true');
+  scrim.setAttribute('aria-label', 'Pick the champion');
+  scrim.innerHTML = `<div class="pd-reg-sheet">${buildMgChampionPickerHTML(teams, sel)}</div>`;
+  document.body.appendChild(scrim);
+  scrim.addEventListener('click', (ev) => {
+    if (ev.target === scrim) { closeMgChampionPicker(); return; }           // backdrop dismiss (keeps current pick)
+    if (ev.target.closest('[data-mgco-pickclose]')) { closeMgChampionPicker(); return; }
+    const row = ev.target.closest('[data-mgco-pick]');
+    if (!row) return;
+    mgCloseoutChampId = row.getAttribute('data-mgco-pick'); // '' = explicit none; a team-id = a pick
+    closeMgChampionPicker();
+    repaintManage();
+  });
+}
+
+// End the tournament: confirm (naming the champion when there is one) → close_tournament RPC → refresh + repaint
+// (the sub-hub, the Manage lead, and the public pages all pick up 'completed' via the 15s poll). Resets the
+// override so a future tournament starts from its own computed suggestion.
+async function mgCloseoutEnd() {
+  if (!state.isAdmin) return;
+  const t = manageLeadTournament();
+  if (!t) return;
+  const teams = state.tournamentTeams || [];
+  const choice = mgCloseoutChampionChoice(teams, mgCloseoutMainMatches());
+  const champName = choice.teamId ? choice.name : null;
+  const msg = champName
+    ? `Crown ${champName} and end the tournament? It moves to Past tournaments — registration and scoring close. You can reopen it.`
+    : 'End the tournament with no champion recorded? It moves to Past tournaments — registration and scoring close. You can reopen it.';
+  const ok = await appConfirm({ title: 'End the tournament', message: msg, confirmText: 'End the tournament' });
+  if (!ok) return;
+  try {
+    await tdbCloseTournament(t.id, choice.teamId || null);
+    mgCloseoutChampId = undefined;
+    await tdbRefreshTournaments();
+  } catch (err) {
+    appNotice({ title: 'Could not end the tournament', message: (err && err.message) || 'Try again.' });
+  }
+  repaintManage();
+}
+
+// Reopen a completed tournament: confirm → reopen_tournament RPC (restores bracket/pools, KEEPS the champion)
+// → refresh + repaint.
+async function mgCloseoutReopen() {
+  if (!state.isAdmin) return;
+  const t = manageLeadTournament();
+  if (!t) return;
+  const ok = await appConfirm({
+    title: 'Reopen the tournament',
+    message: 'Reopen it to fix a score or re-crown? It leaves Past tournaments and scoring opens back up. The recorded champion stays unless you close again with a different one.',
+    confirmText: 'Reopen',
+  });
+  if (!ok) return;
+  try {
+    await tdbReopenTournament(t.id);
+    await tdbRefreshTournaments();
+  } catch (err) {
+    appNotice({ title: 'Could not reopen', message: (err && err.message) || 'Try again.' });
+  }
+  repaintManage();
 }
 
 // ── Task 6: Teams & payment (session-10 pick R8) — the list + the body-level full-edit team sheet ─────
@@ -12912,6 +13120,14 @@ function attachHandlers() {
         // right away). Checked before the generic hub rows so the Save tap never falls through.
         if (mgtView === 'rules') {
           if (e.target.closest('[data-mgru-save]')) { void mgSaveRules(); return; }
+        }
+        // Close out (Task 10, pick R12, the June fix): CHANGE opens the body-level champion picker; End the
+        // tournament (active) + Reopen (completed) run their confirm→RPC→refresh flows. Checked before the
+        // generic hub rows so a tap never falls through; the header back button carries data-mgt-back (below).
+        if (mgtView === 'closeout') {
+          if (e.target.closest('[data-mgco-change]')) { openMgChampionPicker(); return; }
+          if (e.target.closest('[data-mgco-end]')) { void mgCloseoutEnd(); return; }
+          if (e.target.closest('[data-mgco-reopen]')) { void mgCloseoutReopen(); return; }
         }
         if (e.target.closest('[data-mgt-back]')) { mgtView = null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
         const mgtRow = e.target.closest('[data-mgt-view]');

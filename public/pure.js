@@ -414,6 +414,20 @@ function computeChampion(mainMatches, teams) {
   return { teamId: champId, name: t ? (t.name || '') : '' };
 }
 
+// Task 10 (pick R12): the champion shown on History. Prefers the STORED champion (tournaments.champion_team_id,
+// recorded by a deliberate close-out — migration 0050), resolving its name from the tournament's already-loaded
+// teams; falls back to the COMPUTED bracket champion (computeChampion) when nothing is stored or the stored id
+// no longer matches a team; else null → the caller renders "No champion recorded". This is the June fix: a
+// closed tournament's champion is a stored FACT, not a re-derivation that silently reads empty.
+function resolveHistoryChampion(t, teams, mainMatches) {
+  const storedId = t && t.champion_team_id;
+  if (storedId) {
+    const tm = (teams || []).find((x) => x && x.id === storedId);
+    if (tm) return { teamId: tm.id, name: tm.name || '' };
+  }
+  return computeChampion(mainMatches || [], teams || []);
+}
+
 // Generate a complete double-elimination bracket for N seeded teams.
 // Returns { realMatches } where byes (seeds > N) are pre-resolved away, each match
 // has aSource/bSource ({seed:n} | {type:'winner'|'loser', of:key}) and winnerNext/
@@ -1626,7 +1640,7 @@ if (typeof module !== "undefined" && module.exports) {
     generateOneBalancedCandidate, generateBalancedGroups, validateScores,
     countSharedTeammatePairs, pickMostDifferentTeams,
     generateRoundRobin, decideWinner, computeStandings, applyHeadToHeadGroups,
-    nextPow2, seedOrder, computeSeeding, computeChampion, generateDoubleElim,
+    nextPow2, seedOrder, computeSeeding, computeChampion, resolveHistoryChampion, generateDoubleElim,
     disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName,
     copilotRosterNames, copilotUpNextByNet, buildCopilotContext,
     resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
