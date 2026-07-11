@@ -3120,32 +3120,35 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 /* §13.4 ending micro-state: the eliminated terminal node — muted dot (default) + a quiet "Watch the bracket" chip. */
 .pd-tl.pd-tl-end .pd-tlk { color: var(--muted); }
 .pd-tl-endchip { margin-top: 8px; }
-/* My Team page (LOCKED Option B) — mt-* kit */
-.mt-center { text-align: center; }
-.mt-team { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 1.25rem; color: var(--text); margin-top: 3px; letter-spacing: -.01em; }
-.mt-bigrec { text-align: center; padding: 10px 0 2px; }
-.mt-rn { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 44px; letter-spacing: .02em; color: var(--text); line-height: 1; }
-.mt-pips { display: flex; gap: 5px; justify-content: center; margin-top: 9px; }
+/* My Team page (Mike pick Q, 2026-07-10 atom-up single-scroll) — mt-* kit: flat on stone, Barlow display
+   via --font-display, single --accent (§51 matte — no neon / no frosted pd-card). Hero -> up-next strip ->
+   stacked GAMES (pl-sect labels) -> ROSTER. */
+.mt-hero { text-align: center; padding: 4px 0 2px; }
+.mt-team { font-family: var(--font-display); font-weight: 700; font-size: 26px; color: var(--ink); margin-top: 4px; letter-spacing: -.01em; }
+.mt-rn { font-family: var(--font-display); font-weight: 800; font-size: 44px; letter-spacing: .01em; color: var(--ink); line-height: 1; margin-top: 8px; }
+.mt-pips { display: flex; gap: 5px; justify-content: center; margin-top: 10px; }
 .mt-pip { width: 22px; height: 6px; border-radius: 3px; background: var(--border-2); }
 .mt-pip.w { background: var(--live); }
 .mt-pip.l { background: var(--danger); }
-.mt-next { display: flex; align-items: center; gap: 10px; background: var(--accent-soft); border: 1px solid var(--accent-bd); border-radius: var(--r-md); padding: 10px 12px; margin-top: 14px; }
-.mt-nettile { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 10px; background: var(--accent); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
-.mt-nettile .n1 { font-size: 7.5px; font-weight: 700; opacity: .85; }
-.mt-nettile .n2 { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 17px; }
-.mt-nl { font-size: .6rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
-.mt-nv { font-weight: 700; font-size: .85rem; color: var(--text); }
-.mt-game { display: flex; align-items: center; gap: 11px; padding: 10px 2px; border-bottom: 1px solid var(--border); }
-.mt-game:last-child { border-bottom: 0; }
-.mt-wl { width: 24px; height: 24px; flex: 0 0 24px; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 12px; color: #fff; background: var(--live); }
-.mt-wl.l { background: var(--danger); }
-.mt-gt { font-size: .85rem; font-weight: 600; color: var(--text); }
-.mt-gs { margin-left: auto; font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: .9rem; color: var(--text); }
-.mt-roster { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
-.mt-pl { display: flex; align-items: center; gap: 10px; padding: 6px 2px; }
-.mt-pl .av { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: .8rem; }
-.mt-pl .mt-nm { font-size: .9rem; font-weight: 600; color: var(--text); }
-.mt-you { margin-left: auto; font-size: .66rem; font-weight: 700; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-bd); padding: 1px 8px; border-radius: 999px; }
+.mt-next { display: flex; align-items: center; gap: 11px; background: var(--accent-soft); border: 1px solid var(--accent-bd); border-radius: var(--r-md); padding: 10px 12px; margin-top: 16px; }
+.mt-nettile { width: 48px; height: 48px; flex: 0 0 48px; border-radius: 11px; background: var(--accent); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
+.mt-nettile .n1 { font-size: 8px; font-weight: 700; letter-spacing: .06em; opacity: .85; }
+.mt-nettile .n2 { font-family: var(--font-display); font-weight: 800; font-size: 20px; }
+.mt-nl { font: 800 11px var(--font-display); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.mt-nv { font-weight: 600; font-size: 13.5px; color: var(--ink); margin-top: 2px; }
+.mt-note { padding: 12px 2px; color: var(--muted); font-size: 13px; }
+.mt-game { display: flex; align-items: center; gap: 11px; padding: 10px 2px; border-top: 1px solid var(--border); }
+.pl-sect + .mt-game { border-top: none; }
+.mt-wl { flex: none; width: 16px; text-align: center; font: 800 15px var(--font-display); color: var(--live-ink); }
+.mt-wl.l { color: oklch(0.52 0.13 25); } /* matte muted red (§51) — a lost game's letter */
+.mt-sc { flex: none; font: 800 15px var(--font-display); letter-spacing: -.3px; color: var(--ink); }
+.mt-vs { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.mt-meta { flex: none; font: 700 11px var(--font-display); letter-spacing: .04em; color: var(--faint); }
+.mt-pl { display: flex; align-items: center; gap: 10px; padding: 8px 2px; border-top: 1px solid var(--border); }
+.pl-sect + .mt-pl { border-top: none; }
+.mt-pl .av { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-family: var(--font-display); font-weight: 700; font-size: 13px; }
+.mt-pl .mt-nm { font-size: 15px; font-weight: 600; color: var(--ink); }
+.mt-you { margin-left: auto; font: 700 10.5px var(--font-display); letter-spacing: .04em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-bd); padding: 2px 8px; border-radius: 999px; }
 .pd-tl.done.lost::before { background: var(--danger); } /* green dot = won only; a lost game gets the muted red (§27) */
 
 /* ── Slice 1 (spec §13.1/§13.2): Pools & schedule page + tap-a-team peek. Ported from the Mike-locked
@@ -3563,8 +3566,8 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   /* ---- typography: Sora titles up a notch on the surfaces that go wide (A direction) ---- */
   body.pd-public-active .pd-thero .pd-h { font-size: 22px; }
   body.pd-public-active .pd-htitle { font-size: 24px; }
-  body.pd-public-active .mt-team { font-size: 1.5rem; }
-  body.pd-public-active .mt-rn { font-size: 52px; }
+  body.pd-public-active .mt-team { font-size: 30px; }
+  body.pd-public-active .mt-rn { font-size: 54px; }
 
   /* ---- Tournament hub: header card full width, tiles 4-across ---- */
   body.pd-public-active .pd-tiles { grid-template-columns: repeat(4, 1fr); }

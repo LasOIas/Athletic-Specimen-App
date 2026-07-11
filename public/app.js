@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.21'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.22'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdHistoryTab = 'tournaments'; // public History page: 'tournaments' | 'leaderboard' | 'champions'
@@ -9036,11 +9036,9 @@ function pdPageHeaderHTML(title) {
   </div>`;
 }
 
-// The My Team page (Mike's LOCKED Option B big-record scoreboard, Slice 3c) — centered eyebrow
-// (tournament · Pool · Seed) → team name → 44px Sora W–L + per-game pips → up-next strip →
-// Games ↔ Roster segmented toggle. Renders entirely from state (partialRender-safe rebuild).
-let pdMyTeamTab = 'games'; // 'games' | 'roster' (module var survives partialRender)
-
+// The My Team page (Mike's LOCKED pick Q, session 9 — single-scroll) — flat scoreboard hero
+// (eyebrow tournament · Pool · Seed → team name → Barlow W–L + per-game pips) → up-next strip →
+// stacked GAMES then ROSTER sections, no toggle. Renders entirely from state (partialRender-safe rebuild).
 function buildMyTeamPageHTML() {
   const header = pdPageHeaderHTML('My Team');
   const t = publicLiveTournament()
@@ -9066,40 +9064,41 @@ function buildMyTeamPageHTML() {
   const pips = rec.results.map((g) => `<span class="mt-pip ${g.won ? 'w' : 'l'}"></span>`).join('')
     + Array.from({ length: Math.max(0, myAll.length - rec.results.length) }, () => '<span class="mt-pip"></span>').join('');
 
+  const EN = '–'; // en dash — record + score separator (matches the pl-* pools kit)
   const nextStrip = tl.next ? `<div class="mt-next">
       <div class="mt-nettile"><span class="n1">NET</span><span class="n2">${tl.next.net ? escapeHTML(String(tl.next.net)) : '—'}</span></div>
-      <div><div class="mt-nl">${escapeHTML(tl.next.label)}</div>
+      <div><div class="mt-nl">${tl.next.isNow ? 'UP NEXT — HAPPENING NOW' : 'UP NEXT'}</div>
         <div class="mt-nv">vs ${escapeHTML(tl.next.oppName || '—')}${tl.next.isNow ? '' : (tl.next.etaMin != null ? ' · ~' + tl.next.etaMin + ' min' : (tl.next.gamesAhead ? ' · ' + tl.next.gamesAhead + (tl.next.gamesAhead === 1 ? ' game ahead' : ' games ahead') : ''))}</div>
       </div>
     </div>` : '';
 
-  const view = pdMyTeamTab === 'roster' ? 'roster' : 'games';
-  const toggle = `<div class="pd-seg">
-    <button type="button" class="pd-seg-s ${view === 'games' ? 'pd-on' : ''}" data-pd-myteam-tab="games">Games</button>
-    <button type="button" class="pd-seg-s ${view === 'roster' ? 'pd-on' : ''}" data-pd-myteam-tab="roster">Roster</button>
-  </div>`;
+  // GAMES rows (stacked, no toggle): zip rec.results with the same finals list to recover each game's net
+  // + round for the right-side meta. computeTeamRecord stays untouched — this filter/sort mirrors it
+  // exactly (involves-me + final, oldest-first) so the indices line up.
+  const myFinals = matches
+    .filter((m) => (m.team_a_id === mine.teamId || m.team_b_id === mine.teamId) && m.status === 'final')
+    .sort((a, b) => String(a.updated_at || '').localeCompare(String(b.updated_at || '')));
+  const gamesRows = rec.results.length
+    ? rec.results.map((g, i) => {
+        const m = myFinals[i] || {};
+        const meta = [m.net != null ? ('Net ' + m.net) : '', (m.queue_order || m.round) ? ('R' + (m.queue_order || m.round)) : ''].filter(Boolean).join(' · ');
+        return `<div class="mt-game${g.won ? '' : ' l'}"><span class="mt-wl ${g.won ? 'w' : 'l'}">${g.won ? 'W' : 'L'}</span><span class="mt-sc">${g.myScore}${EN}${g.oppScore}</span><span class="mt-vs">vs ${escapeHTML(g.oppName || '—')}</span>${meta ? `<span class="mt-meta">${escapeHTML(meta)}</span>` : ''}</div>`;
+      }).join('')
+    : '<div class="mt-note">No games scored yet — results land here as they finish.</div>';
 
-  let body = '';
-  if (view === 'games') {
-    body = rec.results.length
-      ? rec.results.map((g) => `<div class="mt-game"><span class="mt-wl ${g.won ? '' : 'l'}">${g.won ? 'W' : 'L'}</span>
-          <div class="mt-gt">vs ${escapeHTML(g.oppName || '—')}</div>
-          <span class="mt-gs">${g.myScore}&ndash;${g.oppScore}</span></div>`).join('')
-      : '<div class="small claim-note">No games scored yet — results land here as they finish.</div>';
-  } else {
-    const roster = (state.teamMembers || []).filter((c) => c.teamId === mine.teamId);
-    body = roster.length
-      ? `<div class="mt-roster">${roster.map((c) => `<div class="mt-pl"><span class="av">${escapeHTML(c.initials)}</span><span class="mt-nm">${escapeHTML(c.name)}</span>${c.id === mine.playerId ? '<span class="mt-you">You</span>' : ''}</div>`).join('')}</div>`
-      : '<div class="small claim-note">No roster on file for this team.</div>';
-  }
+  const roster = (state.teamMembers || []).filter((c) => c.teamId === mine.teamId);
+  const rosterRows = roster.length
+    ? roster.map((c) => `<div class="mt-pl"><span class="av">${escapeHTML(c.initials)}</span><span class="mt-nm">${escapeHTML(c.name)}</span>${c.id === mine.playerId ? '<span class="mt-you">You</span>' : ''}</div>`).join('')
+    : '<div class="mt-note">No roster on file for this team.</div>';
 
-  return `${header}<div class="pd-card">
-    <div class="mt-center"><span class="pd-eyebrow">${escapeHTML(eyebrow)}</span><div class="mt-team">${escapeHTML(mine.teamName)}</div></div>
-    <div class="mt-bigrec"><div class="mt-rn">${rec.wins}&ndash;${rec.losses}</div><div class="mt-pips">${pips}</div></div>
+  // Single scroll (Mike pick Q): flat scoreboard hero -> up-next strip -> stacked GAMES then ROSTER.
+  return `${header}
+    <div class="mt-hero"><span class="pd-eyebrow">${escapeHTML(eyebrow)}</span><div class="mt-team">${escapeHTML(mine.teamName)}</div><div class="mt-rn">${rec.wins}${EN}${rec.losses}</div><div class="mt-pips">${pips}</div></div>
     ${nextStrip}
-    ${toggle}
-    ${body}
-  </div>`;
+    <div class="pl-sect">Games</div>
+    ${gamesRows}
+    <div class="pl-sect">Roster</div>
+    ${rosterRows}`;
 }
 
 // Public History (dashboard remake, Slice 1) — locked mockup Option C: tabbed Tournaments / Leaderboard /
@@ -10784,14 +10783,6 @@ function attachHandlers() {
         pdHistoryTab = segHist.dataset.pdHistoryTab;
         const c = document.querySelector('#tab-history .container');
         if (c) c.innerHTML = buildHistoryPageHTML();
-        return;
-      }
-      // Slice 3c: My Team Games/Roster toggle — same pattern.
-      const segMt = e.target.closest('[data-pd-myteam-tab]');
-      if (segMt) {
-        pdMyTeamTab = segMt.dataset.pdMyteamTab;
-        const c = document.querySelector('#tab-myteam .container');
-        if (c) c.innerHTML = buildMyTeamPageHTML();
         return;
       }
       // C26 item 3b: Dashboard quick-actions wire to existing affordances (Tournament + Session
