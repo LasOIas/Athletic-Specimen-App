@@ -175,14 +175,16 @@ never bare dots · iOS 16px input guard everywhere.
 | Atomic draw/start-play RPCs | R9 | closes the non-atomic 3-write landmine |
 | Copilot gate re-home + audit-actor fix | §1 | same cut as code retirement |
 
-## 6. OPEN — flagged for Mike at spec review (not silently decided)
+## 6. RESOLVED at spec review (Mike, 2026-07-11)
 
-1. **The AI Co-pilot has no home in the locked Manage IA.** It was an old-shell tab
-   and a second write surface. Options: give it a Manage row / retire it this phase
-   (its edge-fn gate breaks with the codes regardless — keeping it costs the re-home
-   work). **Recommendation: retire now, revisit after the admin phase** (DR-5 stays
-   on the backlog).
-2. **Slice order beyond "codes last"** is the build plan's job (writing-plans next).
+1. **Co-pilot KEPT — Mike's own design (R14, ui38-exempt directive):** a small
+   floating bubble ABOVE the bottom nav (admin-only, all Manage-reachable views),
+   tap → the chat opens full-screen: just the stone background with the logo
+   watermark and normal chat bubbles over it. No panel chrome, no card. Consequence:
+   the copilot edge-fn gate re-home (app_metadata.admin → owner/organizer role
+   check) is REQUIRED and must land before codes retire so real accounts can use it.
+2. **Slice order beyond "codes last"** is the build plan's job
+   (`2026-07-11-admin-manage-tab-build.md`).
 
 ## 7. Verification bar (P3, every slice)
 
