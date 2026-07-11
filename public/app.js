@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.20'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.21'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdHistoryTab = 'tournaments'; // public History page: 'tournaments' | 'leaderboard' | 'champions'
@@ -5407,16 +5407,16 @@ function buildPublicTournamentRootHTML() {
 }
 
 // ── Slice 2 (spec §13.3): the public Bracket page — a dedicated destination behind the hub's Bracket tile
-// (fixes both tiles routing to one board). pd chrome (page header + status pill). THREE states driven by
+// (fixes both tiles routing to one board). pd chrome (page header + one quiet status line, Mike pick M). THREE states driven by
 // tournament status + bracket data:
-//   pre-bracket (no main-phase matches / pools running) — a frosted card "The bracket generates when pool
+//   pre-bracket (no main-phase matches / pools running) — a FLAT block (no card) "The bracket generates when pool
 //     play finishes" + a live "N of M pool games final" progress line + a quiet seeding → Standings chip.
 //   live — the FULL real bt-* tree (buildBracketHTML in read-only mode: winners + losers via side tabs,
-//     live game lit matte green) under a status line "Double elimination · <current round>".
+//     live game lit matte green) under one quiet status line "● Live · Double elimination · <current round>".
 //   completed — a matte-gold champions strip above the tree + the decided championship game lit gold; this
 //     is the tournament's ending surface and stays until the next event is scheduled.
 // HARD RULES (Mike): bracket match-node cards stay SOLID var(--card) (never frosted — the page keeps the
-// watermark); gold appears ONLY on the decided championship game + the champions strip + the Completed pill
+// watermark); gold appears ONLY on the decided championship game + the champions strip
 // (nothing gold before a winner exists, no gold path tint). Read-only spectator copy — never "submit results".
 function buildBracketPageHTML() {
   const list = state.tournaments || [];
@@ -5433,17 +5433,12 @@ function buildBracketPageHTML() {
   const isReg = !!(show && show.status === 'setup');
   const regOpen = !!(show && show.registration_open && show.status === 'setup');
   const backSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
-  const pill = stateKind === 'completed'
-    ? '<span class="pd-bk-pill is-gold"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Completed</span>'
-    : stateKind === 'live'
-      ? '<span class="pd-bk-pill is-live"><span class="pd-bk-dot"></span>Live</span>'
-      : isReg
-        ? `<span class="pd-bk-pill is-neutral">${regOpen ? 'Registration' : 'Before pools'}</span>`
-        : '<span class="pd-bk-pill is-neutral">Pools in progress</span>';
-  const header = `<div class="pd-pagehdr pd-bk-hdr">
+  // Mike pick M (2026-07-10): the status pill is OUT of the header. Status lives in ONE quiet line under the
+  // title (LIVE only); the pre + completed states carry their own honest signal (the heading copy / the gold
+  // champions strip). The header is just back + eyebrow + Barlow title in every state.
+  const header = `<div class="pd-pagehdr">
       <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament">${backSvg}</button>
       <div class="ph-titles"><span class="pd-eyebrow">${escapeHTML(show ? (show.name || 'Tournament') : 'Tournament')}</span><div class="pd-htitle">Bracket</div></div>
-      ${pill}
     </div>`;
 
   if (stateKind === 'pre') {
@@ -5468,7 +5463,7 @@ function buildBracketPageHTML() {
     const seedChip = isReg ? '' : `<button type="button" class="pd-bk-chip" data-tn-view="pools" data-pools-tab="seeding">Current seeding
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
           <span class="pd-bk-chip-2">Seeding</span></button>`;
-    return `${header}<div class="pd-card pd-bk-precard">
+    return `${header}<div class="pd-bk-pre">
         <div class="pd-bk-preic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v4a2 2 0 0 0 2 2h4"/><path d="M6 21v-4a2 2 0 0 1 2-2h4"/><path d="M12 12h6"/><path d="M18 8v8"/></svg></div>
         <div class="pd-bk-preh">${escapeHTML(preH)}</div>
         <div class="pd-bk-pres">${escapeHTML(preS)}</div>
@@ -5492,9 +5487,7 @@ function buildBracketPageHTML() {
 
   // live
   const line = bracketStatusLine(main);
-  const statusline = line
-    ? `<div class="pd-bk-statusline"><span class="pd-bk-sl-dot"></span>Double elimination · ${escapeHTML(line)}</div>`
-    : '';
+  const statusline = `<div class="pd-bk-statusline"><span class="pd-bk-sl-dot"></span><b>Live</b> · Double elimination${line ? ' · ' + escapeHTML(line) : ''}</div>`;
   const tree = buildBracketHTML(active, matches, teams, { readOnly: true });
   return `${header}${statusline}${tree}`;
 }

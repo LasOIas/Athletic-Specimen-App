@@ -3246,26 +3246,19 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .pd-peek-rr .nx { font-size: 11px; font-weight: 700; color: var(--accent); }
 .pd-peek-foot { margin-top: 10px; font-size: 10.5px; color: var(--faint); line-height: 1.4; }
 
-/* ── Slice 2 (spec §13.3): the public Bracket page. Ported from the Mike-locked a2-final mockup onto the
-   app kit; reuses the existing pd chrome (.pd-pagehdr/.pd-back/.ph-titles/.pd-eyebrow/.pd-htitle), the
-   frosted .pd-card, and the shipped bt-* tree (buildBracketHTML read-only). Gold (§51 matte) appears ONLY
-   on the decided championship game + the champions strip + the Completed pill — nothing gold before a
-   winner exists, no gold path tint. New classes namespaced pd-bk-*. ── */
+/* ── Slice 2 (spec §13.3) + Mike pick M (2026-07-10): the public Bracket page. Ported from the Mike-locked
+   a2-final mockup onto the app kit; reuses the existing pd chrome (.pd-pagehdr/.pd-back/.ph-titles/
+   .pd-eyebrow/.pd-htitle) and the shipped bt-* tree (buildBracketHTML read-only). FLAT on stone — no frosted
+   .pd-card anywhere on this page (pre + completed de-carded; the header status pill retired for ONE quiet
+   status line under the title). Gold (§51 matte) appears ONLY on the decided championship game + the
+   champions strip — nothing gold before a winner exists, no gold path tint. New classes namespaced pd-bk-*. ── */
 
-/* page header: let the title block flex so the status pill sits hard-right */
-.pd-bk-hdr .ph-titles { flex: 1 1 auto; min-width: 0; }
-
-/* status pill (right of the page title) */
-.pd-bk-pill { display: inline-flex; align-items: center; gap: 5px; flex: none; margin-left: auto; border-radius: 999px; padding: 5px 10px; font-size: 11px; font-weight: 800; letter-spacing: .3px; }
-.pd-bk-pill svg { width: 11px; height: 11px; flex: none; }
-.pd-bk-pill.is-gold { background: var(--gold-soft); border: 1px solid var(--gold-bd); color: var(--gold-ink); }
-.pd-bk-pill.is-live { background: var(--live-soft); border: 1px solid oklch(0.85 0.05 150); color: var(--live-ink); }
-.pd-bk-pill.is-neutral { background: var(--surface-3); border: 1px solid var(--border); color: var(--muted); }
-.pd-bk-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); animation: pdbkpulse 1.8s ease-in-out infinite; }
 @keyframes pdbkpulse { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 
-/* live status line ("Double elimination · Winners round 2") — indented under the title */
-.pd-bk-statusline { display: flex; align-items: center; gap: 7px; margin: -2px 0 12px 41px; font-size: 11.5px; color: var(--muted); }
+/* live status line ("● Live · Double elimination · Winners round 2") — Mike pick M: one quiet line under the
+   title, replacing the old header pill. Live green only on the bold "Live" word + the pulsing dot. */
+.pd-bk-statusline { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 12.5px; color: var(--muted); }
+.pd-bk-statusline b { color: var(--live-ink); font-weight: 600; }
 .pd-bk-sl-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--live); animation: pdbkpulse 1.8s ease-in-out infinite; flex: none; }
 
 /* completed: matte-gold champions strip above the tree (SOLID gold-soft — never frosted) */
@@ -3276,7 +3269,9 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 .pd-bk-cbs { font-size: 12px; font-weight: 600; color: var(--gold-ink); margin-top: 3px; }
 .pd-bk-persist { font-size: 11px; color: var(--faint); text-align: center; margin: 12px 6px 2px; line-height: 1.45; }
 
-/* pre-bracket: frosted .pd-card + these inner bits (icon / heading / progress / seeding chip) */
+/* pre-bracket: Mike pick M — FLAT on stone (no card), just these inner bits (icon / heading / progress /
+   seeding chip). The accent-soft icon tile stays. */
+.pd-bk-pre { padding: 8px 0; }
 .pd-bk-preic { width: 42px; height: 42px; border-radius: 11px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; color: var(--accent); margin-bottom: 13px; }
 .pd-bk-preic svg { width: 22px; height: 22px; }
 .pd-bk-preh { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 16px; letter-spacing: -.2px; color: var(--ink); line-height: 1.28; }
