@@ -1526,6 +1526,45 @@ function tournamentStageModel(tournament, matches) {
   return { phase: 'setup', stageLabel: null, count: 0, total: 0, pct: 0, activeView: null };
 }
 
+// Rules formatter (launch spec 2026-07-10): tournaments.rules is markdown-lite text Mike types —
+// "## " section headings, "- " bullets, "1. " numbered rows, blank lines between sections. The
+// contract is ESCAPE-FIRST: every line runs through the same entity set as app.js escapeHTMLText
+// (& < > " ') BEFORE any transform, so the column can NEVER inject markup — a rules text containing
+// <script> renders as literal text. Blank-line separated blocks group into .rl-sect wrappers; any
+// other non-empty line becomes a paragraph. Pure — no DOM / no DB / no app state.
+function rulesToHTML(text) {
+  if (text == null) return '';
+  const escapeLine = (value) => String(value).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
+  const sections = [];
+  let current = [];
+  const flush = () => {
+    if (current.length) sections.push(`<div class="rl-sect">${current.join('')}</div>`);
+    current = [];
+  };
+  for (const raw of String(text).split(/\r?\n/)) {
+    const line = escapeLine(raw.trim());
+    if (!line) { flush(); continue; }
+    const numbered = line.match(/^(\d+)\.\s+(.*)$/);
+    if (line.startsWith('## ')) {
+      current.push(`<div class="rl-h">${line.slice(3).trim()}</div>`);
+    } else if (line.startsWith('- ')) {
+      current.push(`<div class="rl-li"><span class="rl-dot"></span><span>${line.slice(2).trim()}</span></div>`);
+    } else if (numbered) {
+      current.push(`<div class="rl-li"><span class="rl-num">${numbered[1]}</span><span>${numbered[2].trim()}</span></div>`);
+    } else {
+      current.push(`<p class="rl-p">${line}</p>`);
+    }
+  }
+  flush();
+  return sections.join('');
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -1549,6 +1588,6 @@ if (typeof module !== "undefined" && module.exports) {
     registerEventModel, joinSheetValidate, registerFormValidate, teamNameTaken,
     computeTeamRunEnded, sessionIsUpcoming, sessionIsToday,
     publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel,
-    tournamentStageModel
+    tournamentStageModel, rulesToHTML
   };
 }

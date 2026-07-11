@@ -3510,12 +3510,29 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 .tn-gate-cta { width: 100%; margin-top: 22px; padding: 14px 0; min-height: 0; background: var(--accent); color: #fff; border: none; border-radius: 11px; font: 600 16px 'Inter', sans-serif; }
 .tn-gate-cta:hover { background: var(--brand-dark); }
 .tn-gate-alt { margin-top: 14px; font: 600 13.5px 'Inter', sans-serif; color: var(--brand-dark); cursor: pointer; }
-/* Rules stub (copy pending from Mike) */
+/* Rules stub (shown only while tournaments.rules is unset) */
 .tn-rules-stub { text-align: center; padding: 48px 20px; }
 .tn-rules-ic { width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; }
 .tn-rules-ic svg { width: 26px; height: 26px; }
 .tn-rules-h { font-family: var(--font-display); font-size: 20px; font-weight: 700; color: var(--ink); }
 .tn-rules-s { font-size: 13.5px; color: var(--muted); margin: 8px auto 0; line-height: 1.5; max-width: 300px; }
+
+/* Rules page (tournaments.rules via the escape-first rulesToHTML) — FLAT on the stone, no cards.
+   .rl-h mirrors the locked section-label voice (Barlow caps, letterspaced, hairline underline);
+   rows are 14px Inter with a small muted dot/number gutter. The page scrolls naturally. */
+.rl-body { padding: 2px 2px 30px; }
+.rl-sect { margin: 0 0 26px; }
+.rl-sect:last-child { margin-bottom: 0; }
+.rl-h { font: 700 15px var(--font-display); text-transform: uppercase; letter-spacing: .12em; color: var(--ink); padding-bottom: 7px; border-bottom: 1px solid var(--border); margin: 0 0 12px; }
+.rl-li { display: flex; gap: 11px; font: 400 14px 'Inter', sans-serif; color: var(--ink); line-height: 1.55; margin: 0 0 9px; }
+.rl-li:last-child { margin-bottom: 0; }
+.rl-dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--muted); margin: 8px 4px 0 3px; }
+.rl-num { flex: none; min-width: 12px; text-align: center; font: 700 12.5px var(--font-display); color: var(--muted); line-height: 21.7px; }
+.rl-p { font: 400 14px 'Inter', sans-serif; color: var(--ink); line-height: 1.55; margin: 0 0 10px; }
+.rl-p:last-child { margin-bottom: 0; }
+
+/* The registration form's quiet rules link (routes to the Rules page, back returns to the form). */
+.rf-ruleslink { text-align: center; margin-top: 16px; font: 600 13px 'Inter', sans-serif; color: var(--accent); cursor: pointer; }
 
 /* ===================================================================
    SLICE 5 — DESKTOP FULL-WIDTH TREATMENT (spec §13.8, 2026-07-09)
@@ -3621,6 +3638,8 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   /* ---- Registration page (form / success): centred (a focused form, not a full-width band) ---- */
   body.pd-public-active #tab-tournament > .container:has(> .pd-reg-card) > *,
   body.pd-public-active #tab-tournament > .container:has(> .rf-page) > * { max-width: 600px; margin-left: auto; margin-right: auto; }
+  /* Rules page: long-form text — same centered 600px column as the register page (line measure). */
+  body.pd-public-active #tab-tournament > .container:has(> .rl-body) > * { max-width: 600px; margin-left: auto; margin-right: auto; }
   /* (Bracket keeps its full-width tree + champions strip from the widened container; pan stays available.) */
 
   /* ---- atom-up Home (2026-07-10 spec §3): rail + board at >=1024, CSS-only ----

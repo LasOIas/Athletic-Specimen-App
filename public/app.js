@@ -27,7 +27,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.10.15'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.10.16'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 let pdStandingsView = 'pools'; // public Standings page: 'pools' | 'overall' (segmented toggle; survives partialRender)
@@ -5209,6 +5209,10 @@ function buildPublicRegisterHTML(t, teams, opts = {}) {
 // is a hub (header card + tiles). The pre-existing public register/pool/bracket surface becomes the
 // 'board' sub-view behind the Pools & schedule / Bracket tiles. Admin branch untouched.
 let pdTournamentView = 'hub'; // 'hub' | 'pools' | 'bracket' | 'register' — module var survives partialRender (the shared 'board' view is retired from the public path — spec §13.3/§13.6)
+// Rules back-stack (rules slice 2026-07-10): the Rules page is reachable from TWO places — the hub row
+// and the registration form's "Read the rules" link. Its back button returns to wherever the user came
+// from. Set on every data-tn-view="rules" nav (data-rules-from="register" marks the form's link).
+let rulesReturnView = 'hub'; // 'hub' | 'register'
 // Launch spec (2026-07-10): the just-registered team name, or null. State-driven so the "You're in!" payoff
 // SURVIVES a background partialRenderTournament — the success page has no inputs, so tournamentTabIsDirty()
 // is false and a 15s sync would otherwise rebuild an empty form over it. Reset to null on any hub/sub-page nav.
@@ -5230,23 +5234,30 @@ function buildTournamentGateHTML() {
     </div>`;
 }
 
-// Atom-up redesign (spec 2026-07-10 §2 build note): Rules copy is PENDING from Mike — the row renders but
-// routes to this honest "coming soon" stub (never invent rules content). Reuses the pd chrome (back →
-// data-tn-view="hub", eyebrow + title) like the other sub-pages.
+// Rules slice (2026-07-10): the Rules page renders tournaments.rules (markdown-lite text Mike edits in
+// admin) through the ESCAPE-FIRST rulesToHTML formatter (pure.js) — never raw HTML. Same tournament the
+// hub targets. Empty/unset rules keep the honest "coming soon" stub (never invent rules content). The
+// back button routes through rulesReturnView so the form's "Read the rules" link returns to the form.
 function buildTournamentRulesHTML() {
   const list = state.tournaments || [];
   const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
   const show = active || list[0] || null;
   const backSvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
-  return `<div class="pd-pagehdr">
-      <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament">${backSvg}</button>
+  const back = rulesReturnView === 'register' ? 'register' : 'hub';
+  const header = `<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-tn-view="${back}" aria-label="${back === 'register' ? 'Back to registration' : 'Back to Tournament'}">${backSvg}</button>
       <div class="ph-titles"><span class="pd-eyebrow">${escapeHTML(show ? (show.name || 'Tournament') : 'Tournament')}</span><div class="pd-htitle">Rules</div></div>
-    </div>
+    </div>`;
+  const body = rulesToHTML(show && show.rules);
+  if (!body) {
+    return `${header}
     <div class="tn-rules-stub">
       <div class="tn-rules-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>
       <div class="tn-rules-h">Rules are on the way</div>
       <div class="tn-rules-s">The house rules for how we play will live here. Check back soon.</div>
     </div>`;
+  }
+  return `${header}<div class="rl-body">${body}</div>`;
 }
 
 // Atom-up redesign (spec 2026-07-10 §2): the signed-in hub, transcribed from tn5-assembled.html. FLAT on the
@@ -5363,7 +5374,7 @@ function buildTournamentHubHTML() {
     rows.push(row('data-tn-view="bracket"', 'is-locked', ICON.trophy, 'Bracket', sub, CHEV));
   }
 
-  // Rules — copy pending from Mike → the "coming soon" stub (spec §2 build note); Past tournaments → History.
+  // Rules — tournaments.rules rendered on the Rules page (stub when unset); Past tournaments → History.
   rows.push(row('data-tn-view="rules"', '', ICON.book, 'Rules', 'How we play', CHEV));
   rows.push(row('data-nav-tab="history"', '', ICON.clock, 'Past tournaments', 'Champions &amp; records', CHEV));
 
@@ -5381,10 +5392,13 @@ function buildTournamentHubHTML() {
 // live in the hub itself. Admin keeps buildTournamentTabHTML() directly (its own branch inside that function).
 function buildPublicTournamentRootHTML() {
   if (state.isAdmin) return buildTournamentTabHTML();
+  // Rules slice (2026-07-10): rules are HOUSE rules, not personal data — the one tournament view that
+  // renders for EVERYONE, so the registration form's "Read the rules" link works signed-out (reg is
+  // anon). Checked BEFORE the sign-in gate on purpose; every other view stays behind it.
+  if (pdTournamentView === 'rules') return buildTournamentRulesHTML();
   // Atom-up redesign (spec 2026-07-10 §1): the Tournament page is PERSONAL — signed-out users get ONLY the
   // gate (no hub, no data). Branch on the real signed-in flag (state.authSession) before any view/data.
   if (!state.authSession) return buildTournamentGateHTML();
-  if (pdTournamentView === 'rules') return buildTournamentRulesHTML();
   if (pdTournamentView === 'pools') return buildPoolsSchedulePageHTML();
   if (pdTournamentView === 'bracket') return buildBracketPageHTML();
   if (pdTournamentView === 'register') return buildRegisterPageHTML();
@@ -5606,6 +5620,7 @@ function buildRegisterPageHTML() {
       <p class="rf-msg" id="reg-msg" role="status" aria-live="polite"></p>
       <button type="button" class="rf-cta" data-role="reg-page-submit" disabled aria-disabled="true">Register team</button>
       <div class="rf-ctanote">The button unlocks once payment is checked off.</div>
+      <div class="rf-ruleslink" data-tn-view="rules" data-rules-from="register">Read the rules ›</div>
     </section>`;
 }
 
@@ -10881,6 +10896,8 @@ function attachHandlers() {
         dismissTeamPeek();
         const v = tnBtn.getAttribute('data-tn-view');
         regSubmittedTeam = null; // any explicit nav (open Register fresh / Back to hub) clears the payoff
+        // Rules back-stack: remember where Rules was opened from so its back button returns there.
+        if (v === 'rules') rulesReturnView = tnBtn.getAttribute('data-rules-from') === 'register' ? 'register' : 'hub';
         pdTournamentView = (v === 'pools' || v === 'bracket' || v === 'register' || v === 'rules') ? v : 'hub';
         // §13.4: a data-tn-view chip can live OUTSIDE the Tournament tab (e.g. the Home hero's "Watch the
         // bracket" terminal chip) — switch to the Tournament tab first so the sub-page is actually visible.
