@@ -29,12 +29,41 @@
     .table thead th { text-align:left; font-weight:600; border-bottom:1px solid var(--border); padding:6px 8px; }
     .table tbody td { border-bottom:1px solid var(--border); padding:6px 8px; }
     .badge { display:inline-block; padding:2px 8px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:12px; }
+
+    /* Boot splash (§38 2026-07-11, Mike's pick: A+B hybrid — breathing logo-mark over the wordmark +
+       a sweeping hairline). Paints from pure HTML/CSS the instant the document arrives, replaced when
+       render() swaps #root. SELF-CONTAINED (literal values, not var()) so it renders even if styles.css
+       is still in flight; tokens mirror styles.css :root — stone/ink/muted/accent/border. */
+    .boot-splash { position:fixed; inset:0; background:oklch(0.985 0.003 75);
+      display:flex; align-items:center; justify-content:center; }
+    .boot-splash .bs-inner { display:flex; flex-direction:column; align-items:center; gap:10px; }
+    .boot-splash .bs-mark { width:104px; height:104px; object-fit:contain;
+      animation:bs-breathe 2s ease-in-out infinite; }
+    .boot-splash .bs-wm { font-family:'Barlow Semi Condensed','Inter',sans-serif; font-weight:800;
+      font-size:21px; letter-spacing:.12em; color:oklch(0.18 0.005 75); margin-top:4px; }
+    .boot-splash .bs-co { font-family:'Inter',sans-serif; font-weight:600; font-size:9px;
+      letter-spacing:.42em; color:oklch(0.55 0.07 240); }
+    .boot-splash .bs-ln { width:120px; height:1px; background:oklch(0.90 0.005 75); margin-top:12px;
+      position:relative; overflow:hidden; }
+    .boot-splash .bs-ln::after { content:''; position:absolute; inset:0; background:oklch(0.55 0.07 240);
+      opacity:.55; transform:translateX(-100%); animation:bs-sweep 1.4s ease-in-out infinite; }
+    @keyframes bs-breathe { 50% { opacity:.55; transform:scale(.97); } }
+    @keyframes bs-sweep { 50% { transform:translateX(0); } 100% { transform:translateX(100%); } }
+    @media (prefers-reduced-motion: reduce) {
+      .boot-splash .bs-mark { animation:none; }
+      .boot-splash .bs-ln::after { animation:none; opacity:.25; transform:none; }
+    }
   </style>
 </head>
 <body>
   <div id="root">
-    <div class="loading-message">
-      Loading app, please wait...
+    <div class="boot-splash" aria-label="Athletic Specimen is loading">
+      <div class="bs-inner">
+        <img class="bs-mark" src="/logo-mark.png" alt="" />
+        <div class="bs-wm">ATHLETIC&nbsp;SPECIMEN</div>
+        <div class="bs-co">C O L O R A D O</div>
+        <div class="bs-ln"></div>
+      </div>
     </div>
   </div>
 

@@ -1079,7 +1079,7 @@ select:focus {
 .admin-header h2 { margin: 0; }
 .admin-header-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
-.loading-message { padding: 2rem; text-align: center; font-family: sans-serif; color: #fff; }
+
 
 /* Utility classes */
 .mb-12 { margin-bottom: 12px; }
