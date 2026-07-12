@@ -237,7 +237,7 @@ button {
   text-decoration: none;
   font-size: 16px !important;
 }
-button:hover  { background: var(--brand-dark); }
+@media (hover: hover) and (pointer: fine) { button:hover { background: var(--brand-dark); } }
 button:active { transform: translateY(1px); }
 
 button.secondary {
@@ -245,15 +245,15 @@ button.secondary {
   color: var(--text-2);
   border-color: var(--border);
 }
-button.secondary:hover { background: var(--surface-3); border-color: var(--border-2); }
+@media (hover: hover) and (pointer: fine) { button.secondary:hover { background: var(--surface-3); border-color: var(--border-2); } }
 
 button.danger { background: var(--danger); color: #fff; border-color: transparent; }
-button.danger:hover { background: var(--danger-dark); }
+@media (hover: hover) and (pointer: fine) { button.danger:hover { background: var(--danger-dark); } }
 
 button.success,
 button.winner  { background: var(--success); color: #fff; border-color: transparent; }
-button.success:hover,
-button.winner:hover  { background: #15803d; }
+@media (hover: hover) and (pointer: fine) { button.success:hover,
+button.winner:hover { background: #15803d; } }
 
 /* ── Inputs & selects ── */
 input[type="text"],
@@ -509,7 +509,7 @@ select:focus {
 }
 .nav-btn svg    { width: 22px; height: 22px; }
 .nav-btn.active { color: var(--brand); font-weight: 600; }
-.nav-btn:hover:not(.active) { color: var(--text-3); }
+@media (hover: hover) and (pointer: fine) { .nav-btn:hover:not(.active) { color: var(--text-3); } }
 
 
 /* ── Checkin Stats Card ── */
@@ -578,7 +578,7 @@ select:focus {
   cursor: pointer;
   flex-shrink: 0;
 }
-.roster-add:hover { background: var(--brand-dark); }
+@media (hover: hover) and (pointer: fine) { .roster-add:hover { background: var(--brand-dark); } }
 
 /* ── Filter chips ── */
 .chip-row {
@@ -603,13 +603,13 @@ select:focus {
   white-space: nowrap;
   transition: background .12s, color .12s, border-color .12s;
 }
-.chip:hover { background: var(--surface-3); }
+@media (hover: hover) and (pointer: fine) { .chip:hover { background: var(--surface-3); } }
 .chip.on {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
 }
-.chip.on:hover { background: var(--brand-dark); }
+@media (hover: hover) and (pointer: fine) { .chip.on:hover { background: var(--brand-dark); } }
 #btn-select-all-visible { margin-left: auto; }
 
 /* visually-hidden source-of-truth controls (chips drive the same state) */
@@ -685,9 +685,9 @@ select:focus {
   height: 40px;
 }
 .btn-checkin { background: var(--brand); color: #fff; border-color: transparent; }
-.btn-checkin:hover { background: var(--brand-dark); }
+@media (hover: hover) and (pointer: fine) { .btn-checkin:hover { background: var(--brand-dark); } }
 .btn-checkout { background: var(--surface-3); color: var(--text-2); border: 1px solid var(--border); }
-.btn-checkout:hover { background: var(--border); }
+@media (hover: hover) and (pointer: fine) { .btn-checkout:hover { background: var(--border); } }
 
 /* legacy — .primary on checkin/checkout was removed but keep compat */
 .card-actions { display: none; }
@@ -761,7 +761,7 @@ select:focus {
   cursor: pointer;
   font-weight: 600;
 }
-.btn-save-edit:hover  { background: #15803d; }
+@media (hover: hover) and (pointer: fine) { .btn-save-edit:hover { background: #15803d; } }
 .btn-cancel-edit      { height: 38px; padding: 0 12px; }
 
 /* ── Group select (in edit row) ── */
@@ -803,7 +803,7 @@ select:focus {
   font-size: 14px !important;
   min-height: 0;
 }
-.group-list .group-item:hover { background: var(--surface-3); }
+@media (hover: hover) and (pointer: fine) { .group-list .group-item:hover { background: var(--surface-3); } }
 
 .group-chips { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
 
@@ -952,7 +952,7 @@ select:focus {
   cursor: pointer;
   transition: background .15s, border-color .15s, box-shadow .15s, transform .05s;
 }
-.team-size-chip:hover { background: var(--accent-soft); border-color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { .team-size-chip:hover { background: var(--accent-soft); border-color: var(--accent); } }
 .team-size-chip:active { transform: translateY(1px); }
 .team-size-chip.is-active {
   background: var(--accent);
@@ -1026,7 +1026,7 @@ select:focus {
   min-height: 44px;
   transition: box-shadow .12s, border-color .12s, background .12s;
 }
-.team-player-card:hover  { border-color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { .team-player-card:hover { border-color: var(--accent); } }
 .team-player-card:active { cursor: grabbing; }
 .team-player-card .name  { font-weight: 600; font-size: .9rem; color: var(--text); }
 .team-player-card .small { color: var(--text-3); font-weight: 600; }
@@ -1104,7 +1104,7 @@ select:focus {
 .qr-modal-card { position: relative; background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 36px 32px 28px; max-width: 440px; width: 100%; text-align: center; box-shadow: var(--shadow-md); animation: qrFadeIn .2s ease-out; }
 @keyframes qrFadeIn { from { opacity: 0; transform: scale(.95); } to { opacity: 1; transform: scale(1); } }
 .qr-modal-close { position: absolute; top: 12px; right: 14px; width: 36px; height: 36px; border: none; background: transparent; font-size: 28px; line-height: 1; color: var(--muted); cursor: pointer; border-radius: var(--r-sm); transition: background .15s; }
-.qr-modal-close:hover { background: var(--accent-soft); color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .qr-modal-close:hover { background: var(--accent-soft); color: var(--ink); } }
 .qr-modal-title    { font-size: 24px; font-weight: 700; margin: 0 0 6px; color: var(--ink); }
 .qr-modal-subtitle { color: var(--muted); font-size: 15px; margin: 0 0 24px; }
 .qr-code-container { display: flex; justify-content: center; margin: 0 auto 20px; padding: 16px; background: #fff; border: 1px solid var(--border); border-radius: 12px; width: fit-content; }
@@ -1114,9 +1114,9 @@ select:focus {
 .qr-modal-actions  { display: flex; gap: 10px; justify-content: center; }
 .qr-modal-actions .btn { flex: 1; padding: 12px 16px; border-radius: var(--r-sm); font-size: 15px; font-weight: 600; border: none; cursor: pointer; }
 .qr-modal-actions .btn-primary   { background: var(--brand); color: #fff; }
-.qr-modal-actions .btn-primary:hover { background: var(--brand-dark); }
+@media (hover: hover) and (pointer: fine) { .qr-modal-actions .btn-primary:hover { background: var(--brand-dark); } }
 .qr-modal-actions .btn-secondary { background: var(--surface-3); color: var(--ink); border: 1px solid var(--border); }
-.qr-modal-actions .btn-secondary:hover { background: var(--border); }
+@media (hover: hover) and (pointer: fine) { .qr-modal-actions .btn-secondary:hover { background: var(--border); } }
 
 /* ── Mobile ── */
 @media (max-width: 768px) {
@@ -1242,7 +1242,7 @@ select:focus {
   cursor: pointer;
   white-space: nowrap;
 }
-.cop-chip:hover { border-color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { .cop-chip:hover { border-color: var(--accent); } }
 .cop-inbar { margin-top: 10px; }
 .cop-inbar input { color: var(--ink); }
 .cop-send { opacity: 1; cursor: pointer; }
@@ -1479,7 +1479,7 @@ body.copilot-open #cop-chat {
   cursor: pointer;
   transition: border-color .15s, background .15s;
 }
-.ckx-row:hover { border-color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { .ckx-row:hover { border-color: var(--accent); } }
 .ckx-row:active { transform: translateY(1px); }
 .ckx-nm { flex: 1; min-width: 0; font-size: 17px; font-weight: 600; color: var(--text); white-space: normal; overflow-wrap: anywhere; }
 .ckx-nm b { color: var(--accent); font-weight: 700; }
@@ -1503,7 +1503,7 @@ body.copilot-open #cop-chat {
   cursor: pointer;
   transition: border-color .15s, background .15s, box-shadow .15s;
 }
-.cik-btn:hover { border-color: var(--border-2); }
+@media (hover: hover) and (pointer: fine) { .cik-btn:hover { border-color: var(--border-2); } }
 .cik-btn:active { transform: translateY(1px); }
 .cik-btn .av {
   width: 46px;
@@ -1567,7 +1567,7 @@ body.copilot-open #cop-chat {
   cursor: pointer;
   transition: border-color .15s, color .15s, background .15s;
 }
-.cik-new:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+@media (hover: hover) and (pointer: fine) { .cik-new:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); } }
 .cik-new svg { width: 20px; height: 20px; }
 
 .cik-toast {
@@ -1667,7 +1667,9 @@ body.copilot-open #cop-chat {
    (the v.7 :active gate fixed the wrong pseudo-class). Mike: "only have the text highlight blue ...
    not the whole box." Force nav buttons transparent in EVERY state; the active tab is shown by
    color alone (.nav-btn.active { color: var(--brand) }). */
-.nav-btn, .nav-btn:hover, .nav-btn:active, .nav-btn:focus { background: transparent; }
+.nav-btn, .nav-btn:active, .nav-btn:focus { background: transparent; }
+@media (hover: hover) and (pointer: fine) { .nav-btn:hover { background: transparent; } }
+
 .nav-btn:focus-visible,
 .roster-add:focus-visible, .app-header-logout:focus-visible, .chip:focus-visible{
   outline: 2px solid var(--accent); outline-offset: 2px;
@@ -1851,18 +1853,19 @@ body.copilot-open #cop-chat {
 .brm-tile.win .brm-num { color: var(--live); }
 .brm-steps { display: flex; gap: 8px; justify-content: center; }
 .brm-step { width: 46px; height: 46px; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--card); color: var(--ink); font-size: 23px; font-weight: 700; line-height: 1; }
-.brm-step:hover { background: var(--surface-3); }
+@media (hover: hover) and (pointer: fine) { .brm-step:hover { background: var(--surface-3); } }
 .brm-step:active { transform: translateY(1px); }
 .brm-typehint { text-align: center; font-size: 12px; color: var(--faint); margin: 12px 0 0; }
 .brm-err { color: var(--danger); font-size: 13px; margin-top: 12px; }
-.brm-forfeit { display: block; width: 100%; margin-top: 14px; padding: 4px; background: transparent; border: none; color: var(--faint); font-size: 13px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
-.brm-forfeit:hover, .brm-forfeit:active { background: transparent; color: var(--muted); }
+.brm-forfeit { display: block; width: 100%; margin-top: 14px; padding: 4px; background: transparent; border: none; color: var(--faint); font-size: 13px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; } .brm-forfeit:active { background: transparent; color: var(--muted); }
+@media (hover: hover) and (pointer: fine) { .brm-forfeit:hover { background: transparent; color: var(--muted); } }
+
 /* C71: forfeit -> "who showed up?" mini choice (no winner tap in this layout) */
 .brm-fchoice { margin-top: 10px; padding: 12px; border: 1px dashed var(--border); border-radius: var(--r-md); }
 .brm-fq { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); text-align: center; margin-bottom: 8px; }
 .brm-frow { display: flex; gap: 8px; }
 .brm-fbtn { flex: 1; min-height: 44px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--card); color: var(--ink); font-size: 14px; font-weight: 600; }
-.brm-fbtn:hover { background: var(--surface-3); }
+@media (hover: hover) and (pointer: fine) { .brm-fbtn:hover { background: var(--surface-3); } }
 .brm-actions { display: flex; gap: 10px; margin-top: 18px; }
 .brm-actions button { flex: 1; min-height: 48px; font-size: 15px; border-radius: var(--r-md); }
 
@@ -1871,14 +1874,16 @@ body.copilot-open #cop-chat {
 .ppl-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .ppl-name { font-family: 'Sora','Inter',sans-serif; font-size: 21px; font-weight: 800; color: var(--ink); }
 .ppl-nets { font-size: 13px; font-weight: 800; color: var(--accent); white-space: nowrap; }
-.ppl-nets-edit { background: var(--accent-soft); color: var(--accent); border: none; border-radius: 999px; padding: 5px 11px; cursor: pointer; line-height: 1; }
-.ppl-nets-edit:hover, .ppl-nets-edit:active { background: var(--accent-soft); color: var(--accent); }
+.ppl-nets-edit { background: var(--accent-soft); color: var(--accent); border: none; border-radius: 999px; padding: 5px 11px; cursor: pointer; line-height: 1; } .ppl-nets-edit:active { background: var(--accent-soft); color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { .ppl-nets-edit:hover { background: var(--accent-soft); color: var(--accent); } }
+
 .ppl-teams { font-size: 12px; color: var(--faint); margin: 5px 0 2px; line-height: 1.4; }
 .ppl-ng { margin-top: 14px; }
 .ppl-nglabel { font-family: 'Sora','Inter',sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
 .ppg { display: flex; align-items: center; gap: 11px; padding: 11px 0; border-top: 1px solid var(--border); width: 100%; text-align: left; background: none; }
-.ppg[role="button"] { cursor: pointer; }
-.ppg[role="button"]:hover .ppg-m, .ppg[role="button"]:active .ppg-m { color: var(--accent); }
+.ppg[role="button"] { cursor: pointer; } .ppg[role="button"]:active .ppg-m { color: var(--accent); }
+@media (hover: hover) and (pointer: fine) { .ppg[role="button"]:hover .ppg-m { color: var(--accent); } }
+
 .ppg-m { flex: 1; min-width: 0; font-size: 16px; font-weight: 700; color: var(--ink); line-height: 1.3; display: flex; flex-direction: column; gap: 2px; }
 /* "game N" eyebrow label above each matchup (Mike, 2026-06-27; §38 option C of 3). */
 .ppg-kick { font-family: 'Sora','Inter',sans-serif; font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--faint); line-height: 1; }
@@ -1890,7 +1895,7 @@ body.copilot-open #cop-chat {
 .ppg-now { font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #fff; background: var(--live); border-radius: 999px; padding: 3px 9px; }
 .ppg-score { font-family: 'Sora','Inter',sans-serif; font-size: 15px; font-weight: 800; color: var(--ink); }
 .ppg-btn { min-height: 28px; padding: 3px 9px; font-size: 11px; background: var(--card); color: var(--muted); border: 1px solid var(--border); border-radius: var(--r-sm); }
-.ppg-btn:hover { background: var(--surface-3); }
+@media (hover: hover) and (pointer: fine) { .ppg-btn:hover { background: var(--surface-3); } }
 .ppg.is-now { background: var(--live-soft); border-radius: var(--r-md); border-top-color: transparent; padding: 11px 10px; margin: 3px 0; }
 .ppg.is-now + .ppg { border-top-color: transparent; }
 .ppg.is-final .ppg-m { color: var(--muted); font-weight: 600; }
@@ -1914,8 +1919,9 @@ body.copilot-open #cop-chat {
 .pl-row:first-child { border-top: none; }
 .pl-av { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 14px; display: flex; align-items: center; justify-content: center; }
 .pl-name { font-size: 16px; font-weight: 600; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tc-close { display: block; width: 100%; margin-top: 18px; min-height: 46px; border-radius: var(--r-md); background: var(--accent); color: #fff; border: none; font-size: 15px; font-weight: 600; }
-.tc-close:hover, .tc-close:active { background: var(--brand-dark); }
+.tc-close { display: block; width: 100%; margin-top: 18px; min-height: 46px; border-radius: var(--r-md); background: var(--accent); color: #fff; border: none; font-size: 15px; font-weight: 600; } .tc-close:active { background: var(--brand-dark); }
+@media (hover: hover) and (pointer: fine) { .tc-close:hover { background: var(--brand-dark); } }
+
 
 /* C72 — match-action chooser (Score live / Enter final). */
 .mac-card { width: min(360px, 94vw); padding: 20px; text-align: left; }
@@ -1923,13 +1929,13 @@ body.copilot-open #cop-chat {
 .mac-teams { font-size: 14px; color: var(--muted); margin: 4px 0 16px; }
 .mac-teams .mac-vs { color: var(--faint); }
 .mac-opt { display: block; width: 100%; text-align: left; white-space: normal; border: 1px solid var(--border); background: var(--card); border-radius: var(--r-md); padding: 14px; margin-bottom: 10px; cursor: pointer; }
-.mac-opt:hover { background: var(--surface-3); }
+@media (hover: hover) and (pointer: fine) { .mac-opt:hover { background: var(--surface-3); } }
 .mac-live { border-color: var(--live); background: var(--live-soft); }
-.mac-live:hover { background: var(--live-soft); }
+@media (hover: hover) and (pointer: fine) { .mac-live:hover { background: var(--live-soft); } }
 .mac-opt-t { display: block; font-size: 16px; font-weight: 700; color: var(--ink); }
 .mac-opt-s { display: block; font-size: 12.5px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
 .mac-cancel { display: block; width: 100%; min-height: 44px; margin-top: 4px; background: var(--card); color: var(--muted); border: 1px solid var(--border); border-radius: var(--r-md); font-size: 14px; font-weight: 600; }
-.mac-cancel:hover { background: var(--surface-3); }
+@media (hover: hover) and (pointer: fine) { .mac-cancel:hover { background: var(--surface-3); } }
 
 /* C72 — live scorer (full screen, §38 Option A "tap the team"). */
 .live-overlay { position: fixed; inset: 0; z-index: 13000; background: var(--surface-3); animation: as-overlay-in .16s ease-out; }
@@ -1951,7 +1957,7 @@ body.copilot-open #cop-chat {
 .lsc-tap { font-size: 12px; font-weight: 800; color: var(--accent); letter-spacing: .03em; }
 .lsc-minus { display: flex; gap: 10px; padding: 0 12px; }
 .lsc-minusbtn { flex: 1; min-width: 0; min-height: 44px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--card); color: var(--muted); font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lsc-minusbtn:hover { background: var(--surface-3); }
+@media (hover: hover) and (pointer: fine) { .lsc-minusbtn:hover { background: var(--surface-3); } }
 .lsc-err { color: var(--danger); font-size: 13px; text-align: center; padding: 6px 12px 0; }
 .lsc-f { padding: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); text-align: center; }
 .lsc-final { background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
@@ -2055,8 +2061,8 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
 /* -- tile grid (Home) -- */
 .pd-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }
 .pd-tile { background: oklch(0.98 0.004 75 / 0.30); -webkit-backdrop-filter: blur(3px) saturate(1.05); backdrop-filter: blur(3px) saturate(1.05); border: 1px solid oklch(1 0 0 / 0.6); border-radius: var(--r-md); box-shadow: var(--shadow-sm); padding: 13px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; }
-/* §31 hover fix: global button:hover (--brand-dark) outweighs .pd-tile's frosted bg — keep hub/Home tiles frosted on desktop hover. */
-.pd-tile:hover { background: oklch(0.98 0.004 75 / 0.30); }
+@media (hover: hover) and (pointer: fine) { /* §31 hover fix: global button:hover (--brand-dark) outweighs .pd-tile's frosted bg — keep hub/Home tiles frosted on desktop hover. */
+.pd-tile:hover { background: oklch(0.98 0.004 75 / 0.30); } }
 .pd-tile:active { background: var(--surface-3); }
 .pd-ti { width: 33px; height: 33px; border-radius: 9px; background: var(--accent-soft); display: flex; align-items: center; justify-content: center; color: var(--accent); }
 .pd-ti svg { width: 18px; height: 18px; }
@@ -2150,7 +2156,7 @@ body.pd-public-active .statbig .n { font-family: var(--font-display); }
   display: flex; align-items: center; justify-content: center; color: var(--muted);
 }
 .auth-back svg { width: 18px; height: 18px; flex-shrink: 0; }
-.auth-back:hover { background: var(--surface-3); }
+@media (hover: hover) and (pointer: fine) { .auth-back:hover { background: var(--surface-3); } }
 .auth-inner { width: 100%; max-width: 340px; display: flex; flex-direction: column; }
 /* Mike AD+AC hybrid (task-#11, 2026-07-10): big centered brand block on TOP (logo ~110px + Barlow
    wordmark) with breathing room so the form settles into the lower half; matte muted blue (§51). */
@@ -2170,7 +2176,7 @@ input.auth-input:focus { outline: none; border-bottom-color: var(--accent); box-
 input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .auth-err { background: var(--danger-soft); border: 1px solid var(--danger-light); color: var(--danger-dark); font-size: 12.5px; line-height: 1.35; padding: 9px 11px; border-radius: var(--r-sm); margin-top: 12px; }
 .auth-submit { width: 100%; height: 48px; margin-top: 22px; border: none; border-radius: 11px; background: var(--accent); color: #fff; font-family: inherit; font-size: 16px; font-weight: 700; cursor: pointer; }
-.auth-submit:hover { background: var(--brand-dark); }
+@media (hover: hover) and (pointer: fine) { .auth-submit:hover { background: var(--brand-dark); } }
 .auth-submit:disabled { opacity: .65; cursor: default; }
 .auth-alt { display: block; width: 100%; margin-top: 14px; padding: 8px; background: transparent; border: 0; color: var(--accent); font-size: 13.5px; font-weight: 600; cursor: pointer; }
 /* signed-in header chip: the account initial in the accent tint */
@@ -2716,7 +2722,7 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 /* full-width primary CTA (shared: event card, sheet submit, success claim) */
 .pd-reg-cta { width: 100%; min-height: 56px; border: none; border-radius: var(--r-lg); background: var(--accent); color: oklch(0.99 0.01 240); font-family: 'Sora','Inter',sans-serif; font-weight: 700; letter-spacing: -.1px; display: flex; align-items: center; justify-content: center; gap: 9px; box-shadow: var(--shadow); }
 .pd-reg-cta svg { width: 19px; height: 19px; }
-.pd-reg-cta:hover { background: var(--brand-dark); }
+@media (hover: hover) and (pointer: fine) { .pd-reg-cta:hover { background: var(--brand-dark); } }
 .pd-reg-cta:active { background: var(--brand-dark); }
 .pd-reg-cta[disabled] { opacity: .6; }
 .pd-reg-foot { text-align: center; font-size: 12px; font-weight: 500; color: var(--faint); margin-top: 11px; }
@@ -2731,7 +2737,7 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .pd-reg-sheeteyebrow { font-size: 10.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); }
 .pd-reg-sheetteam { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 22px; letter-spacing: -.3px; color: var(--ink); margin-top: 3px; line-height: 1.08; }
 .pd-reg-sheetx { margin-left: auto; width: 32px; height: 32px; min-height: 0; padding: 0; flex: none; border-radius: 9px; background: var(--surface-3); border: 1px solid var(--border); color: var(--muted); display: flex; align-items: center; justify-content: center; }
-.pd-reg-sheetx:hover { background: var(--surface-3); }
+@media (hover: hover) and (pointer: fine) { .pd-reg-sheetx:hover { background: var(--surface-3); } }
 .pd-reg-sheetx svg { width: 15px; height: 15px; }
 
 .pd-reg-flbl { display: block; font-size: 10.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: var(--muted); margin: 16px 2px 8px; }
@@ -2767,7 +2773,7 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .pd-reg-paychip { display: inline-flex; align-items: center; gap: 7px; background: oklch(0.95 0.035 75); border: 1px solid oklch(0.86 0.06 78); color: oklch(0.46 0.08 70); border-radius: 999px; padding: 7px 13px 7px 11px; font-size: 12.5px; font-weight: 700; margin-bottom: 16px; }
 .pd-reg-paychip svg { width: 15px; height: 15px; flex: none; }
 .pd-reg-backlink { display: block; width: 100%; margin: 12px auto 0; min-height: 0; padding: 6px; background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 600; }
-.pd-reg-backlink:hover { background: none; color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .pd-reg-backlink:hover { background: none; color: var(--ink); } }
 
 /* ── Launch spec (2026-07-10, v2026.07.10.14 restyle): the registration PAGE, transcribed LITERALLY from
    Mike's approved mockup (scratchpad ladder/reg2-page.html). FLAT on the stone background — NO card, the
@@ -2825,7 +2831,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 .rf-msg { min-height: 0; margin: 14px 2px 0; font-size: 13px; font-weight: 600; text-align: center; }
 .rf-msg:empty { margin: 0; }
 .rf-cta { width: 100%; margin-top: 18px; padding: 14px 0; min-height: 0; border: none; border-radius: 11px; background: var(--accent); color: #fff; font-family: inherit; font-weight: 600; font-size: 16px; box-shadow: none; }
-.rf-cta:hover:not([disabled]) { background: var(--brand-dark); }
+@media (hover: hover) and (pointer: fine) { .rf-cta:hover:not([disabled]) { background: var(--brand-dark); } }
 .rf-cta[disabled] { opacity: .45; box-shadow: none; cursor: not-allowed; }
 .rf-ctanote { text-align: center; font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 8px; }
 
@@ -2871,7 +2877,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 .tn-gate-h { font-family: var(--font-display); font-size: 26px; font-weight: 700; color: var(--ink); margin: 0; }
 .tn-gate-p { font-size: 14px; color: var(--muted); margin-top: 8px; line-height: 1.5; padding: 0 18px; }
 .tn-gate-cta { width: 100%; margin-top: 22px; padding: 14px 0; min-height: 0; background: var(--accent); color: #fff; border: none; border-radius: 11px; font: 600 16px 'Inter', sans-serif; }
-.tn-gate-cta:hover { background: var(--brand-dark); }
+@media (hover: hover) and (pointer: fine) { .tn-gate-cta:hover { background: var(--brand-dark); } }
 .tn-gate-alt { margin-top: 14px; font: 600 13.5px 'Inter', sans-serif; color: var(--brand-dark); cursor: pointer; }
 /* Rules stub (shown only while tournaments.rules is unset) */
 .tn-rules-stub { text-align: center; padding: 48px 20px; }
@@ -3072,7 +3078,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 /* — kit extensions required to render the spec states as <button>s (reset the global button chrome);
    matte, existing tokens only (§51). — */
 .hm-link{ width: 100%; background: none; border: none; text-align: left; gap: 10px; }
-.hm-link:hover{ background: none; }
+@media (hover: hover) and (pointer: fine) { .hm-link:hover { background: none; } }
 .hm-link > span{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hm-link .hm-chev{ flex: none; }
 .hm-empty{ padding: 8px 2px; color: var(--muted); font-size: 13px; }

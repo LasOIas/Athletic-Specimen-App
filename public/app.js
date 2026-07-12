@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.20'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.21'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4277,9 +4277,11 @@ function buildTournamentHubHTML() {
 // The public Tournament tab root: the hub, or one of its dedicated sub-pages (each its own destination).
 // Slice 2 (§13.3/§13.6): the legacy shared 'board' view is RETIRED from the public path — Pools & schedule,
 // Bracket, and Register are their own pages in pd chrome; the no-tournament / registration-closed fallbacks
-// live in the hub itself. Admin keeps buildTournamentTabHTML() directly (its own branch inside that function).
+// live in the hub itself. Mike (2026-07-11): admins see the SAME public Tournament page as everyone —
+// "no editing or creating on the tournament page for admin, just in Manage." The old isAdmin short-circuit
+// to the admin tournament tab ALSO swallowed the register view (an admin tapping Home's "Register your
+// team" never reached the form — his "i cant register" report).
 function buildPublicTournamentRootHTML() {
-  if (state.isAdmin) return buildTournamentTabHTML();
   // Rules slice (2026-07-10): rules are HOUSE rules, not personal data — the one tournament view that
   // renders for EVERYONE, so the registration form's "Read the rules" link works signed-out (reg is
   // anon). Checked BEFORE the sign-in gate on purpose; every other view stays behind it.
@@ -10669,7 +10671,7 @@ function attachHandlers() {
       // Pools & schedule tab strip (Mike H): POOL + SEEDING tabs — client-side, pdPoolFilter survives
       // partialRender. Container-swap partial repaint only (never a full render() from a tab tap).
       const plTab = e.target.closest('[data-pl-tab]');
-      if (plTab && !state.isAdmin) {
+      if (plTab) { // admins use the same public pools page now (Mike 2026-07-11)
         dismissTeamPeek();
         pdPoolFilter = plTab.getAttribute('data-pl-tab') || '';
         const c = document.querySelector('#tab-tournament .container');
@@ -10679,7 +10681,9 @@ function attachHandlers() {
       // Round 2 (spec §12.4) / Slice 2 (§13.3): the public Tournament hub tiles/back toggle the hub<->sub-page
       // views (pools / bracket / register — the shared 'board' is retired from the public path).
       const tnBtn = e.target.closest('[data-tn-view]');
-      if (tnBtn && !state.isAdmin) {
+      // Mike (2026-07-11): the Tournament tab is the SAME public page for admins — the old `!state.isAdmin`
+      // guard (from the admin-tab era) left admins unable to navigate it (or reach the register form).
+      if (tnBtn) {
         dismissTeamPeek();
         const v = tnBtn.getAttribute('data-tn-view');
         regSubmittedTeam = null; // any explicit nav (open Register fresh / Back to hub) clears the payoff
