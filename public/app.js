@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.16'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.17'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -43,7 +43,6 @@ const SHARED_SYNC_FALLBACK = 'fallback';
 const SHARED_SYNC_LOCAL_ONLY = 'local-only';
 const SHARED_SYNC_CONFLICT_RESOLVED = 'conflict-resolved';
 
-const selectedSet = () => new Set(state.selectedIds || []);
 
 function computeCheckedInByGroup() {
   const byGroup = new Map();
@@ -99,11 +98,10 @@ function closePlayerEditPopup() {
   if (body) body.innerHTML = '';
 }
 
-// Task 3: the player edit sheet's DOM lives in the OLD admin players panel (adminPlayersHTML). The Manage
-// Players directory runs on the PUBLIC shell, which has no such panel — so ensure the modal container exists
-// (create + append to <body> once, mirroring ensureKioskConfirmModal) before openPlayerEditPopup populates
-// it. The Save/Cancel buttons inside the body are document-delegated (ensureSaveDelegationBound), so the
-// EXISTING popup works unchanged from either shell — nothing about the popup itself is rebuilt.
+// Task 3: the player edit sheet is a body-level modal (the old in-panel admin players markup is gone).
+// Ensure the modal container exists (create + append to <body> once, mirroring ensureKioskConfirmModal)
+// before openPlayerEditPopup populates it. The Save/Cancel buttons inside the body are document-delegated
+// (ensureSaveDelegationBound), so the popup works from any surface — nothing about it is rebuilt per render.
 function ensurePlayerEditModal() {
   let el = document.getElementById('player-edit-modal');
   if (el) return el;
@@ -229,25 +227,6 @@ function closeInlineEditRow(row) {
   row.querySelectorAll('.group-select.open').forEach((el) => el.classList.remove('open'));
 }
 
-function closeAllInlineEditRows(exceptRow = null) {
-  document.querySelectorAll('.edit-row.show').forEach((row) => {
-    if (exceptRow && row === exceptRow) return;
-    closeInlineEditRow(row);
-  });
-}
-
-function openInlineEditRow(row) {
-  if (!row) return;
-  closeAllInlineEditRows(row);
-  row.classList.add('show');
-  const card = row.closest('.player-card');
-  if (card) card.classList.add('is-editing');
-  const nameInput = row.querySelector('.edit-name');
-  if (nameInput) {
-    nameInput.focus({ preventScroll: true });
-    if (typeof nameInput.select === 'function') nameInput.select();
-  }
-}
 
 function findInlineEditRowByPlayerKey(playerKey) {
   const key = String(playerKey || '').trim();
@@ -261,111 +240,6 @@ function findInlineEditRowByPlayerKey(playerKey) {
   return null;
 }
 
-function captureTransientInteractionState() {
-  const snapshot = {
-    searchFocused: false,
-    searchSelectionStart: null,
-    searchSelectionEnd: null,
-    openMenuPlayerKey: '',
-    openMenuPlayerId: '',
-    openEditRowPlayerKey: '',
-    openGroupSelectPlayerKey: '',
-    openPopupId: ''
-  };
-
-  const searchInput = document.getElementById('player-search');
-  if (searchInput && document.activeElement === searchInput) {
-    snapshot.searchFocused = true;
-    snapshot.searchSelectionStart = typeof searchInput.selectionStart === 'number'
-      ? searchInput.selectionStart
-      : null;
-    snapshot.searchSelectionEnd = typeof searchInput.selectionEnd === 'number'
-      ? searchInput.selectionEnd
-      : null;
-  }
-
-  const openMenuButton = document.querySelector('.menu-wrap.menu-open .btn-actions');
-  if (openMenuButton) {
-    snapshot.openMenuPlayerKey = String(openMenuButton.getAttribute('data-player-key') || '');
-    snapshot.openMenuPlayerId = String(openMenuButton.getAttribute('data-id') || '');
-  }
-
-  // Bug B fix (2026-06-21): exclude the player-edit MODAL (.popup-edit-row) from transient
-  // capture/restore. The modal lives OUTSIDE `.players`, so partialRender never rebuilds it —
-  // capturing it only made restore -> openInlineEditRow re-focus+select Name on every background
-  // sync (15s poll / realtime), stealing the keyboard + selecting text mid-typing.
-  const openEditRow = document.querySelector('.edit-row.show[data-player-key]:not(.popup-edit-row)');
-  if (openEditRow) {
-    snapshot.openEditRowPlayerKey = String(openEditRow.getAttribute('data-player-key') || '');
-  }
-
-  const openGroupSelect = document.querySelector('.group-select.open[data-player-key]');
-  if (openGroupSelect) {
-    snapshot.openGroupSelectPlayerKey = String(openGroupSelect.getAttribute('data-player-key') || '');
-  }
-
-  const openPopup = document.querySelector('.popup-overlay[aria-hidden="false"]');
-  if (openPopup && openPopup.id) {
-    snapshot.openPopupId = String(openPopup.id);
-  }
-
-  return snapshot;
-}
-
-function restoreTransientInteractionState(snapshot) {
-  if (!snapshot || typeof snapshot !== 'object') return;
-
-  if (snapshot.openPopupId) {
-    const popup = document.getElementById(snapshot.openPopupId);
-    if (popup) {
-      popup.style.display = 'flex';
-      popup.setAttribute('aria-hidden', 'false');
-    }
-  }
-
-  if (snapshot.openEditRowPlayerKey) {
-    const row = findInlineEditRowByPlayerKey(snapshot.openEditRowPlayerKey);
-    if (row) openInlineEditRow(row);
-  }
-
-  if (snapshot.openGroupSelectPlayerKey) {
-    const select = Array.from(document.querySelectorAll('.group-select[data-player-key]'))
-      .find((el) => String(el.getAttribute('data-player-key') || '') === snapshot.openGroupSelectPlayerKey);
-    if (select) select.classList.add('open');
-  }
-
-  if (snapshot.openMenuPlayerKey || snapshot.openMenuPlayerId) {
-    const menuButton = Array.from(document.querySelectorAll('.menu-wrap .btn-actions'))
-      .find((button) => {
-        const buttonKey = String(button.getAttribute('data-player-key') || '');
-        const buttonId = String(button.getAttribute('data-id') || '');
-        if (snapshot.openMenuPlayerKey && buttonKey === snapshot.openMenuPlayerKey) return true;
-        return !snapshot.openMenuPlayerKey && snapshot.openMenuPlayerId && buttonId === snapshot.openMenuPlayerId;
-      });
-    if (menuButton) {
-      const wrap = menuButton.closest('.menu-wrap');
-      if (wrap) wrap.classList.add('menu-open');
-      menuButton.setAttribute('aria-expanded', 'true');
-    }
-  }
-
-  if (snapshot.searchFocused) {
-    const searchInput = document.getElementById('player-search');
-    if (searchInput) {
-      searchInput.focus({ preventScroll: true });
-      if (
-        typeof snapshot.searchSelectionStart === 'number' &&
-        typeof snapshot.searchSelectionEnd === 'number' &&
-        typeof searchInput.setSelectionRange === 'function'
-      ) {
-        const max = searchInput.value.length;
-        const start = Math.max(0, Math.min(max, snapshot.searchSelectionStart));
-        const end = Math.max(start, Math.min(max, snapshot.searchSelectionEnd));
-        searchInput.setSelectionRange(start, end);
-      }
-    }
-  }
-}
 
 // -- Robust global click handler for player card menus (capture phase) --
 (function ensureMenuActionsBound() {
@@ -376,36 +250,6 @@ function restoreTransientInteractionState(snapshot) {
     const target = e.target;
     if (!(target instanceof Element)) return;
 
-    const collapseToggle = e.target.closest('[data-role="toggle-card-collapse"]');
-    if (collapseToggle) {
-      e.stopPropagation();
-      e.preventDefault();
-      const cardId = String(collapseToggle.getAttribute('data-card-id') || '').trim();
-      if (!cardId) return;
-      const nextCollapsed = { ...(state.collapsedCards || {}) };
-      if (nextCollapsed[cardId]) delete nextCollapsed[cardId];
-      else nextCollapsed[cardId] = true;
-      state.collapsedCards = nextCollapsed;
-      saveLocal();
-      render();
-      return;
-    }
-    // C48.5 — admin Players grouped-section collapse toggle. Surgical (toggle the class only, no
-    // re-render) so it can't disturb scroll/search/selection; persisted to sessionStorage.
-    const groupToggle = e.target.closest('[data-role="toggle-group"]');
-    if (groupToggle) {
-      e.stopPropagation();
-      e.preventDefault();
-      const groupKey = String(groupToggle.getAttribute('data-group-key') || '').trim();
-      const section = groupToggle.closest('.roster-group');
-      if (!section) return;
-      const nowCollapsed = !section.classList.contains('is-collapsed');
-      section.classList.toggle('is-collapsed', nowCollapsed);
-      groupToggle.setAttribute('aria-expanded', String(!nowCollapsed));
-      setGroupCollapsed(groupKey, nowCollapsed);
-      refreshAzStripAvailability();
-      return;
-    }
     // Finish-line Slice 3 (spec §13.5): the event card's "Register your team" CTA opens the join sheet — a
     // body-level overlay (openJoinSheet) so a background sync can never wipe a typed roster. Early-return
     // like the toggles above; the sheet's own buttons (submit / close / claim / back) bind in openJoinSheet.
@@ -426,25 +270,6 @@ function restoreTransientInteractionState(snapshot) {
       return;
     }
 
-    // 1) Toggle the dropdown when ⋮ is clicked
-    const dots = e.target.closest('.btn-actions');
-    if (dots) {
-      e.stopPropagation();
-      e.preventDefault();
-      const wrap = dots.closest('.menu-wrap');
-      const isOpen = wrap && wrap.classList.contains('menu-open');
-      // close all others
-      document.querySelectorAll('.menu-wrap.menu-open').forEach((w) => {
-        w.classList.remove('menu-open');
-        const button = w.querySelector('.btn-actions');
-        if (button) button.setAttribute('aria-expanded', 'false');
-      });
-      if (wrap) {
-        wrap.classList.toggle('menu-open', !isOpen);
-        dots.setAttribute('aria-expanded', String(!isOpen));
-      }
-      return;
-    }
 
     // Group select toggle / selection (inside edit-row)
     const groupBtn = e.target.closest('.group-btn');
@@ -514,111 +339,15 @@ function restoreTransientInteractionState(snapshot) {
       return;
     }
 
-    // 2) Keep clicks inside an open dropdown from closing it via bubbling
-    if (
-      e.target.closest('.card-menu') &&
-      !e.target.closest('[data-role="menu-edit"]') &&
-      !e.target.closest('[data-role="menu-delete"]')
-    ) {
-      e.stopPropagation();
-      return;
-    }
+    // Keep clicks inside the open group picker from closing it via bubbling
     if (e.target.closest('.group-select')) {
       e.stopPropagation();
       return;
     }
 
-    // 3) Edit action
-    const editBtn = e.target.closest('[data-role="menu-edit"]');
-    if (editBtn) {
-      e.stopPropagation();
-      e.preventDefault();
-      const playerKey = String(editBtn.getAttribute('data-player-key') || '').trim();
-      // close menu first
-      const wrap = editBtn.closest('.menu-wrap');
-      if (wrap) {
-        wrap.classList.remove('menu-open');
-        const button = wrap.querySelector('.btn-actions');
-        if (button) button.setAttribute('aria-expanded', 'false');
-      }
-      openPlayerEditPopup(playerKey);
-      return;
-    }
 
-    // 4) Delete action
-    const delBtn = e.target.closest('[data-role="menu-delete"]');
-    if (delBtn) {
-      e.stopPropagation();
-      e.preventDefault();
-      const id = String(delBtn.getAttribute('data-id') || '');
-      if (!id) return;
-
-      const idx = state.players.findIndex(p => String(p.id) === id);
-      if (idx === -1) return;
-
-      const removed = state.players[idx];
-      const removedName = String(removed && removed.name || '').trim() || `Player ${id}`;
-      const confirmed = confirmDangerousActionOrAbort({
-        title: `Delete player "${removedName}"?`,
-        detail: 'This permanently removes the player from roster and check-in data.',
-        confirmText: 'DELETE'
-      });
-      if (!confirmed) return;
-
-      let remoteDeleteFailed = false;
-      if (supabaseClient && removed.id) {
-        try {
-          const { error } = await supabaseClient.from('players').delete().eq('id', removed.id);
-          if (error) throw error;
-        } catch (err) {
-          remoteDeleteFailed = true;
-          console.error('Supabase delete error', err);
-          await reconcileToSupabaseAuthority('player-delete');
-          recordOperatorAction({
-            scope: 'players',
-            action: 'delete-player-failed',
-            entityType: 'player',
-            entityId: String(removed.id || playerIdentityKey(removed) || ''),
-            title: `Delete failed for "${removedName}".`,
-            detail: 'Supabase write failed. Latest shared state was restored.',
-            tone: 'error'
-          });
-        }
-      }
-      if (remoteDeleteFailed) return;
-
-      state.players = state.players.filter(p => String(p.id) !== id);
-      checkOutPlayer(removed);
-      saveLocal();
-
-      // close any open menu and re-render
-      document.querySelectorAll('.menu-wrap.menu-open').forEach((w) => {
-        w.classList.remove('menu-open');
-        const button = w.querySelector('.btn-actions');
-        if (button) button.setAttribute('aria-expanded', 'false');
-      });
-      if (supabaseClient && removed.id) queueSupabaseRefresh();
-      recordOperatorAction({
-        scope: 'players',
-        action: 'delete-player',
-        entityType: 'player',
-        entityId: String(removed.id || playerIdentityKey(removed) || ''),
-        title: `Deleted player "${removedName}".`,
-        detail: 'Player removal was applied.',
-        tone: 'warning'
-      });
-      render();
-      return;
-    }
 
     // 4) Clicked outside controls: close only when truly outside.
-    if (!e.target.closest('.menu-wrap')) {
-      document.querySelectorAll('.menu-wrap.menu-open').forEach((w) => {
-        w.classList.remove('menu-open');
-        const button = w.querySelector('.btn-actions');
-        if (button) button.setAttribute('aria-expanded', 'false');
-      });
-    }
     if (!e.target.closest('.group-select')) {
       document.querySelectorAll('.group-select.open').forEach((el) => el.classList.remove('open'));
     }
@@ -1014,80 +743,6 @@ function resetGeneratedTeamDragState() {
   document.addEventListener('touchcancel', cleanup);
 })();
 
-// -- One delegated handler for Check In and Check Out buttons (capture phase) --
-(function ensureCheckDelegationBound() {
-  if (window.__checkDelegated) return;
-  window.__checkDelegated = true;
-
-  document.addEventListener('click', function onCheckDelegated(e) {
-    const inBtn = e.target.closest('.btn-checkin');
-    const outBtn = e.target.closest('.btn-checkout');
-    if (!inBtn && !outBtn) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    const btn = inBtn || outBtn;
-    const id = btn.getAttribute('data-id');
-    if (!id) return;
-
-    const player = state.players.find(p => String(p.id) === String(id));
-    if (!player) return;
-
-    let changed = false;
-    if (inBtn) {
-      changed = checkInPlayer(player);
-    } else if (outBtn) {
-      changed = checkOutPlayer(player);
-    }
-
-    if (!changed) return;
-
-    saveLocal();
-    // C48.3 (perf): a check-in/out toggle changes exactly ONE player's state. The old path called
-    // partialRender(), which rebuilt ALL ~215 roster rows (playersEl.innerHTML = renderFilteredPlayers()).
-    // Update only the tapped row instead: toggle the card's `is-in` class + swap the toggle button to
-    // reflect STATE (checked-in => green "In" via `btn-checkout tg in`; out => grey "Out" via `btn-checkin
-    // tg` — label+color both = STATE, the 2026-06-20 truthfulness fix, preserved exactly), refresh the
-    // checked-in stat cards, and if the active filter (Checked in / Out) now excludes the row, drop it.
-    // Byte-identical to a full re-filter: only this player's filter-membership changed, the list is
-    // alphabetical, so no other row moves. Falls back to partialRender() if the row isn't on screen (the
-    // public kiosk path, or an off-screen toggle) so behavior is never lost.
-    surgicalToggleRowUpdate(player);
-
-    if (supabaseClient && player.id) {
-      (async () => {
-        try {
-          // C21: route through the SECURITY DEFINER RPCs (the only anon write door under locked
-          // RLS); works for authenticated admins too. Same single-row effect as the prior update.
-          const { error } = await supabaseClient
-            .rpc(inBtn ? 'check_in' : 'check_out', { p_id: player.id });
-          if (error) throw error;
-          queueSupabaseRefresh();
-        } catch (err) {
-          console.error(inBtn ? 'Supabase update error' : 'Supabase check-out error', err);
-          // C22 item 3: queue the write to retry on reconnect; keep the optimistic flip (the merge
-          // overlay preserves it across syncs) instead of reverting to DB authority.
-          outboxEnqueue({ key: 'att:' + player.id, kind: inBtn ? 'check_in' : 'check_out', payload: { p_id: player.id }, ts: Date.now() });
-        }
-      })();
-    }
-  }, true);
-})();
-
-function updateBulkBarVisibility() {
-  const bar = document.getElementById('bulkBar');
-  const countEl = document.getElementById('bulkCount');
-  const n = (state.selectedIds || []).length;
-  if (!bar || !countEl) return;
-  if (n > 0) {
-    bar.style.display = 'block';
-    countEl.textContent = `${n} selected`;
-  } else {
-    bar.style.display = 'none';
-  }
-}
-
 // -- Tap the "Athletic Specimen" title in the header → scroll active tab to top --
 (function ensureHeaderTapToTop() {
   if (window.__headerTapBound) return;
@@ -1204,147 +859,6 @@ function debounce(fn, ms) {
   }, { passive: true });
 })();
 
-// -- A–Z jump strip: tap or drag a letter to scroll to that section --
-function refreshAzStripAvailability() {
-  const strip = document.querySelector('.players-az-strip');
-  if (!strip) return;
-  const letters = new Set();
-  // C48.5: only count cards in a non-collapsed group section — a letter that lands solely in a
-  // collapsed section can't be scrolled to, so dim it like any other empty letter.
-  document.querySelectorAll('.players .player-card .player-name').forEach((el) => {
-    const card = el.closest('.player-card');
-    if (card && card.closest('.roster-group.is-collapsed')) return;
-    const ch = (el.textContent || '').trim().charAt(0).toUpperCase();
-    if (ch) letters.add(ch);
-  });
-  strip.querySelectorAll('.az-letter').forEach((btn) => {
-    btn.classList.toggle('is-empty', !letters.has(btn.dataset.letter));
-  });
-}
-
-(function ensureAzStripBound() {
-  if (window.__azStripBound) return;
-  window.__azStripBound = true;
-
-  function jumpToLetter(letter, smooth) {
-    if (!letter) return false;
-    const target = String(letter).toUpperCase();
-    const cards = document.querySelectorAll('.players .player-card');
-    for (const card of cards) {
-      // C48.5: skip cards inside a collapsed group section (they're hidden → scrollIntoView is a no-op).
-      if (card.closest('.roster-group.is-collapsed')) continue;
-      const name = (card.querySelector('.player-name')?.textContent || '').trim();
-      if (name && name.charAt(0).toUpperCase() === target) {
-        card.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'start' });
-        return true;
-      }
-    }
-    return false;
-  }
-
-  function letterAtPoint(x, y) {
-    // Direct hit — touch landed exactly on a letter button
-    const el = document.elementFromPoint(x, y);
-    if (el && el.closest) {
-      const btn = el.closest('.az-letter');
-      if (btn && !btn.classList.contains('is-empty')) return btn.dataset.letter || null;
-    }
-    // Fallback — touch is within the strip's vertical range but possibly between letters
-    // (or in the small horizontal margin around it). Compute letter from Y position.
-    const strip = document.querySelector('.players-az-strip');
-    if (!strip) return null;
-    const sRect = strip.getBoundingClientRect();
-    if (!(sRect.height > 0)) return null; // strip not visible (another tab active) — avoids NaN idx
-    if (x < sRect.left - 12 || x > sRect.right + 12) return null;
-    if (y < sRect.top || y > sRect.bottom) return null;
-    const letters = strip.querySelectorAll('.az-letter');
-    if (!letters.length) return null;
-    const ratio = (y - sRect.top) / sRect.height;
-    let idx = Math.floor(ratio * letters.length);
-    idx = Math.max(0, Math.min(letters.length - 1, idx));
-    if (!letters[idx].classList.contains('is-empty')) return letters[idx].dataset.letter;
-    // Snap to nearest non-empty letter
-    for (let off = 1; off < letters.length; off++) {
-      const above = letters[idx - off];
-      const below = letters[idx + off];
-      if (above && !above.classList.contains('is-empty')) return above.dataset.letter;
-      if (below && !below.classList.contains('is-empty')) return below.dataset.letter;
-    }
-    return null;
-  }
-
-  function setActive(letter) {
-    document.querySelectorAll('.az-letter.is-active').forEach((b) => b.classList.remove('is-active'));
-    if (!letter) return;
-    document.querySelectorAll(`.az-letter[data-letter="${letter}"]`).forEach((b) => b.classList.add('is-active'));
-  }
-
-  let scrubbing = false;
-  let lastJumpedLetter = null;
-
-  // Tap (no drag) → smooth scroll to first matching player
-  document.addEventListener('click', (e) => {
-    if (scrubbing) return; // a drag just ended; the touchend handler already settled position
-    let letter = null;
-    const btn = e.target.closest && e.target.closest('.az-letter');
-    if (btn) {
-      if (btn.classList.contains('is-empty')) return;
-      letter = btn.dataset.letter;
-    } else {
-      // near-miss tap (between letters or just off the strip): snap to the nearest
-      // non-empty letter by Y position — same forgiving logic as the scrub path
-      letter = letterAtPoint(e.clientX, e.clientY);
-      if (!letter) return;
-    }
-    e.preventDefault();
-    e.stopPropagation();
-    jumpToLetter(letter, true);
-    setActive(letter);
-    setTimeout(() => setActive(null), 600);
-  }, true);
-
-  // Touch start on the strip → start scrubbing (instant scroll while finger is down)
-  document.addEventListener('touchstart', (e) => {
-    if (!(e.target.closest && e.target.closest('.players-az-strip'))) return;
-    scrubbing = true;
-    lastJumpedLetter = null;
-    const t = e.touches[0];
-    if (!t) return;
-    const letter = letterAtPoint(t.clientX, t.clientY);
-    if (letter && letter !== lastJumpedLetter) {
-      jumpToLetter(letter, false);
-      setActive(letter);
-      lastJumpedLetter = letter;
-    }
-  }, { passive: false });
-
-  document.addEventListener('touchmove', (e) => {
-    if (!scrubbing) return;
-    e.preventDefault(); // stop the page from scrolling while finger is on the strip
-    const t = e.touches[0];
-    if (!t) return;
-    const letter = letterAtPoint(t.clientX, t.clientY);
-    if (letter && letter !== lastJumpedLetter) {
-      jumpToLetter(letter, false);
-      setActive(letter);
-      lastJumpedLetter = letter;
-    }
-  }, { passive: false });
-
-  document.addEventListener('touchend', () => {
-    if (!scrubbing) return;
-    setTimeout(() => {
-      scrubbing = false;
-      lastJumpedLetter = null;
-      setActive(null);
-    }, 200);
-  });
-  document.addEventListener('touchcancel', () => {
-    scrubbing = false;
-    lastJumpedLetter = null;
-    setActive(null);
-  });
-})();
 
 // Create Supabase client if credentials are provided. The global `supabase`
 // object is exported by vendor/supabase.js. When both values are falsy
@@ -1555,144 +1069,10 @@ function partialRender() {
     return;
   }
 
-  if (!syncNoticeEl || !playersEl) { render(); return; }
-
-  syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
-  // C40 (2026-06-20): the checked-in stat card was removed from the admin Players page (it duplicated
-  // the Dashboard stat), so #js-checkin-stats may be absent on the admin surface — guard it.
-  if (statsEl) statsEl.innerHTML = buildCheckinStatsHTML();
-  // Reliability fix (2026-06-20): keep the admin Dashboard checked-in stat live (it lives in the
-  // hidden dashboard panel; activateMainTab doesn't re-render, so without this it shows the stale
-  // login-time count after a check-in).
-  const dashStatEl = document.getElementById('js-dashboard-stat');
-  if (dashStatEl) dashStatEl.innerHTML = buildDashboardStatHTML();
-
-  // Scroll-jump fix (2026-06-30, F5): #tab-players is the overflow scroll container; iOS resets its scrollTop
-  // when .players innerHTML is replaced, yanking the admin to the top of the ~215-row roster on every 15s poll
-  // + every cross-device check-in. render() saves+restores this; this background path must too. Most-polled
-  // admin surface (mid-check-in). captureTransientInteractionState preserves focus/selection only, not scroll.
-  const playersPanel = document.getElementById('tab-players');
-  const playersSaved = playersPanel ? playersPanel.scrollTop : 0;
-  const snapshot = captureTransientInteractionState();
-  playersEl.innerHTML = renderFilteredPlayers();
-  bindPlayerRowHandlers();
-  bindSelectionHandlers();
-  updateBulkBarVisibility();
-  restoreTransientInteractionState(snapshot);
-  if (playersPanel && playersSaved > 0 && playersPanel.scrollTop !== playersSaved) playersPanel.scrollTop = playersSaved;
-  refreshAzStripAvailability();
+  render();
 }
 
-// C48.3 (perf): scoped re-render of ONLY the admin Players panel (#tab-players). The high-frequency
-// admin filter actions (filter chips, the #player-tab-select source-of-truth select, the group-filter
-// select) only change which roster rows show + which chip/sub-control is active — none of them touch
-// the header, the bottom nav, or any other panel. The old path called full render(), which rebuilt the
-// ENTIRE #root (every panel) + forced a reflow (`void root.offsetHeight`) + re-ran activateMainTab — a
-// measured ~383ms block on a single chip tap at 4x CPU throttle, almost all of it the teardown +
-// 215-row rebuild of the whole shell. This rebuilds just the Players panel via adminPlayersHTML() (the
-// SAME builder render() uses, in the SAME `.container` wrapper) so the chips' .on highlight, the Skill
-// sub-tab, and the Groups sub-control all stay byte-identical to a full render() — then re-binds only
-// the players-panel handlers (NOT attachHandlers() wholesale, which would double-bind the non-idempotent
-// nav/login/kiosk/team/session handlers). Row-level handlers (in/out toggle, select checkbox, kebab
-// edit/delete, A-Z strip) are document-delegated and bound once, so the innerHTML swap leaves them intact.
-// Transient interaction state (search text/focus/selection, open kebab, open edit row, open group-select,
-// open modal) is preserved exactly the way partialRender does. Falls back to full render() if the panel
-// is absent or we're not on the admin surface — so it can never silently no-op on the public shell.
-function renderPlayersPanel() {
-  const panel = document.getElementById('tab-players');
-  if (!state.isAdmin || !panel) { render(); return; }
 
-  const snapshot = captureTransientInteractionState();
-  // Reproduce adminPlayersHTML()'s EXACT #tab-players innerHTML (incl. the template-literal whitespace
-  // around the .container wrapper) so a scoped re-render is byte-identical to a full render(), not just
-  // pixel-identical.
-  panel.innerHTML = `
-      <div class="container">
-        ${adminPlayersHTML()}
-      </div>
-    `;
-  bindPlayersPanelHandlers();
-  // Row + selection handlers are document-delegated no-ops (kept for call-site parity with render/partialRender).
-  bindPlayerRowHandlers();
-  bindSelectionHandlers();
-  updateBulkBarVisibility();
-  restoreTransientInteractionState(snapshot);
-  refreshAzStripAvailability();
-}
-
-// C48.3 (perf): surgical single-row update for the admin Players in/out toggle (the highest-frequency
-// admin gesture). Replaces partialRender()'s full 215-row rebuild with a one-element DOM edit. The
-// toggle button markup MUST stay byte-identical to renderFilteredPlayers() (app.js ~2588-2591):
-//   checked-in => <button class="btn-checkout tg in" data-id aria-label="…is checked in — tap to check out"><span class="tg-dot"></span>In</button>
-//   out         => <button class="btn-checkin tg"     data-id aria-label="…is checked out — tap to check in"><span class="tg-dot"></span>Out</button>
-// (label + color both = STATE — green "In" / grey "Out" — the 2026-06-20 truthfulness fix.) If the row
-// isn't currently rendered (e.g. the public kiosk has no .prow, or the toggled player is filtered out of
-// view), fall back to partialRender() so nothing is lost.
-function buildRowToggleButtonHTML(player, isCheckedIn) {
-  const safeName = escapeHTMLText(player.name || '');
-  return isCheckedIn
-    ? `<button class="btn-checkout tg in" data-id="${player.id}" aria-label="${safeName} is checked in — tap to check out"><span class="tg-dot"></span>In</button>`
-    : `<button class="btn-checkin tg" data-id="${player.id}" aria-label="${safeName} is checked out — tap to check in"><span class="tg-dot"></span>Out</button>`;
-}
-
-function surgicalToggleRowUpdate(player) {
-  const playersEl = document.querySelector('.players');
-  const row = playersEl ? playersEl.querySelector(`.prow[data-id="${CSS.escape(String(player.id))}"]`) : null;
-  // No on-screen row to surgically edit (kiosk has none; off-screen/filtered row) → keep the prior
-  // safe behavior so the UI never goes stale.
-  if (!playersEl || !row) { partialRender(); return; }
-
-  // C48.5 — CORRECTNESS over micro-optimization for the grouped view (Option C). The grouped sections
-  // carry a per-section COUNT = matching players in that group; under the membership-sensitive filters
-  // (Checked in / Out / Unset) a single in/out toggle changes which players match → every relevant
-  // header count moves and rows leave/enter sections. Rebuilding the whole #tab-players panel
-  // (~78ms) is the simple, always-correct option — a stale group count is a visible bug. The pure
-  // single-row fast path below stays for the flat list (search/skill) AND for the grouped "All"
-  // filter (where a section's "everyone in this group" count never changes on a check-in toggle).
-  const isGroupedView = !!playersEl.querySelector('.roster-group');
-  const membershipSensitiveFilter =
-    state.playerTab === 'in' || state.playerTab === 'out' || state.playerTab === 'unrated';
-  if (isGroupedView && membershipSensitiveFilter) { renderPlayersPanel(); return; }
-
-  const nowCheckedIn = (state.checkedIn || []).includes(playerIdentityKey(player));
-
-  // 1) Card class — set the WHOLE className to the exact string renderFilteredPlayers() builds
-  //    (`player-card prow ${isSelected?'is-selected':''} ${checked?'is-in':''}`, double/trailing spaces
-  //    and all) so the row is byte-identical to a full render, not just classList-equivalent.
-  const isSelected = new Set((state.selectedIds || []).map((x) => String(x))).has(String(player.id));
-  row.className = 'player-card prow ' + (isSelected ? 'is-selected' : '') + ' ' + (nowCheckedIn ? 'is-in' : '');
-
-  // 2) Swap the toggle button (the ONLY part of .prow-actions that differs by state; the kebab is identical).
-  const toggleBtn = row.querySelector('.btn-checkin, .btn-checkout');
-  if (toggleBtn) {
-    const tmp = document.createElement('div');
-    tmp.innerHTML = buildRowToggleButtonHTML(player, nowCheckedIn);
-    const fresh = tmp.firstElementChild;
-    if (fresh) toggleBtn.replaceWith(fresh);
-  }
-
-  // 3) Stat cards — same surgical updates partialRender does (each guarded; may be absent per surface).
-  const statsEl = document.getElementById('js-checkin-stats');
-  if (statsEl) statsEl.innerHTML = buildCheckinStatsHTML();
-  const dashStatEl = document.getElementById('js-dashboard-stat');
-  if (dashStatEl) dashStatEl.innerHTML = buildDashboardStatHTML();
-
-  // 4) If the active filter now excludes this row, drop it (the list is alphabetical and only THIS
-  // player's membership changed, so removing the one row yields the same DOM as a full re-filter).
-  const filterExcludes =
-    (state.playerTab === 'in' && !nowCheckedIn) ||
-    (state.playerTab === 'out' && nowCheckedIn);
-  if (filterExcludes) {
-    row.remove();
-    // If that emptied the list, render the exact empty-state message renderFilteredPlayers() would show,
-    // wrapped in the SAME whitespace adminPlayersHTML() uses for `<div class="players">…</div>` so the
-    // `.players` innerHTML is byte-identical to a full render's empty state.
-    if (!playersEl.querySelector('.prow')) {
-      playersEl.innerHTML = `\n    ${renderFilteredPlayers()}\n  `;
-    }
-    refreshAzStripAvailability();
-  }
-}
 
 // ---------------------------------------------------------------------------
 // C24 reliability core: error funnel, render coalescer, top-level error boundary.
@@ -1999,91 +1379,6 @@ function enforceSharedPlayerModelParity() {
   return changed;
 }
 
-function parseAdminGroupsInput(rawValue) {
-  if (!rawValue) return [];
-  return normalizeGroupList(String(rawValue).split(/[,;\n]/g));
-}
-
-function getTopFormContextGroup() {
-  const active = normalizeActiveGroupSelection(state.activeGroup || 'All');
-  if (!active || active === 'All' || active === UNGROUPED_FILTER_VALUE) return '';
-  return normalizeGroupName(active);
-}
-
-function getTopFormGroupsHelpText() {
-  const contextGroup = getTopFormContextGroup();
-  if (contextGroup) {
-    return `Roster context: ${contextGroup}. Leave Groups blank to use it for new players.`;
-  }
-  const active = normalizeActiveGroupSelection(state.activeGroup || 'All');
-  if (active === UNGROUPED_FILTER_VALUE) {
-    return 'Roster context: Ungrouped. Leave Groups blank to keep new players ungrouped.';
-  }
-  return 'Use commas to add groups. First group is primary.';
-}
-
-function renderAdminGroupsPreviewMarkup(rawValue, options = {}) {
-  const groups = Array.isArray(rawValue)
-    ? normalizeGroupList(rawValue)
-    : parseAdminGroupsInput(rawValue);
-  const contextGroup = normalizeGroupName(options.contextGroup || '');
-  const isContextDefault = !groups.length && !!contextGroup;
-  const groupsToShow = groups.length ? groups : (isContextDefault ? [contextGroup] : []);
-  const contextSuffix = options.contextSuffix || ' (Default Primary)';
-
-  if (!groupsToShow.length) {
-    return '<span class="admin-groups-empty small">No groups set</span>';
-  }
-  const chips = groupsToShow.map((group, idx) =>
-    `<span class="admin-groups-chip ${idx === 0 ? 'is-primary' : ''} ${isContextDefault ? 'is-context-default' : ''}">${escapeHTMLText(group)}${idx === 0 ? (isContextDefault ? contextSuffix : ' (Primary)') : ''}</span>`
-  ).join('');
-  if (!isContextDefault) return chips;
-  return `${chips}<span class="small admin-groups-context-note">Applied only when adding a new player with blank Groups.</span>`;
-}
-
-function getTopFormGroupDatalistOptions() {
-  const available = getAvailableGroups();
-  const contextGroup = getTopFormContextGroup();
-  if (!contextGroup) return available;
-  return [contextGroup, ...available.filter((groupName) => groupName !== contextGroup)];
-}
-
-function getTopFormContextPreviewOptions() {
-  const contextGroup = getTopFormContextGroup();
-  if (contextGroup) return { contextGroup, contextSuffix: ' (Context Primary)' };
-  return {};
-}
-
-function findPlayerIndexByTopFormName(nameValue) {
-  const needle = normalize(nameValue);
-  if (!needle) return -1;
-  return state.players.findIndex((p) => normalize(p.name) === needle);
-}
-
-function getTopFormGroupsPreviewMarkup(nameValue, groupsRawValue) {
-  const groups = parseAdminGroupsInput(groupsRawValue);
-  if (groups.length) return renderAdminGroupsPreviewMarkup(groups);
-  const idx = findPlayerIndexByTopFormName(nameValue);
-  if (idx !== -1) {
-    return renderAdminGroupsPreviewMarkup(getPlayerGroups(state.players[idx]));
-  }
-  return renderAdminGroupsPreviewMarkup('', getTopFormContextPreviewOptions());
-}
-
-function getTopFormModeHint(nameValue) {
-  const idx = findPlayerIndexByTopFormName(nameValue);
-  if (idx !== -1) {
-    return 'Updating existing player. Leave Groups blank to keep current memberships.';
-  }
-  return getTopFormGroupsHelpText();
-}
-
-function renderTopFormGroupsHelpAndPreview(nameValue, groupsRawValue) {
-  return {
-    helpText: getTopFormModeHint(nameValue),
-    previewHTML: getTopFormGroupsPreviewMarkup(nameValue, groupsRawValue)
-  };
-}
 
 function parseEditGroupsValue(rawValue) {
   if (!rawValue) return [];
@@ -2879,166 +2174,7 @@ function showTeamMoveToast(message) {
   } catch {}
 }
 
-function renderFilteredPlayers() {
-  // start from all players
-  let filtered = state.players.slice();
-  const activeGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
-  const checkedSet = new Set(state.checkedIn || []);
-  const selectedIds = new Set((state.selectedIds || []).map((id) => String(id)));
 
-  // group filter
-  if (activeGroup && activeGroup !== 'All') {
-    if (activeGroup === UNGROUPED_FILTER_VALUE) {
-      filtered = filtered.filter((p) => isPlayerUngrouped(p));
-    } else {
-      filtered = filtered.filter((p) => playerBelongsToGroup(p, activeGroup));
-    }
-  }
-
-  // tab filters
-  if (state.playerTab === 'in') {
-    filtered = filtered.filter((p) => checkedSet.has(playerIdentityKey(p)));
-  } else if (state.playerTab === 'out') {
-    filtered = filtered.filter((p) => !checkedSet.has(playerIdentityKey(p)));
-  } else if (state.playerTab === 'skill' && state.skillSubTab) {
-    const min = parseFloat(state.skillSubTab);
-    const max = min === 9.0 ? 10 : min + 0.9;
-    filtered = filtered
-  .filter(p => p.skill >= min && p.skill <= max)
-  .sort((a, b) => (b.skill - a.skill) || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-  } else if (state.playerTab === 'unrated') {
-    filtered = filtered.filter(p => !p.skill || p.skill === 0);
-  }
-
-  // search
-  const q = (state.searchTerm || '').toLowerCase().trim();
-  if (q) {
-    filtered = filtered.filter(p => {
-      const nm = (p.name || '').toLowerCase();
-      const tg = (p.tag  || '').toLowerCase();
-      const gp = getPlayerGroups(p).join(' ').toLowerCase();
-      return nm.includes(q) || tg.includes(q) || gp.includes(q);
-    });
-  }
-
-  // sort alphabetically by name (A–Z jump strip relies on this)
-  filtered.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-
-  if (!filtered.length) {
-    // C44: distinguish loading vs empty-roster vs no-match (was a bare "No players found.")
-    if (!state.loaded) return '<p class="roster-empty">Loading players…</p>';
-    if (!(state.players || []).length) return '<p class="roster-empty">No players yet — tap <strong>+</strong> to add the first one.</p>';
-    return '<p class="roster-empty">No players match — try clearing the search or filters.</p>';
-  }
-
-  // C48.5 — single dense one-line row builder (extracted so both the flat list and the grouped
-  // sections render byte-identical .prow markup). The row class string + toggle button markup MUST
-  // stay byte-identical to surgicalToggleRowUpdate()/buildRowToggleButtonHTML() so the delegated
-  // handlers + surgical fast path keep working.
-  const renderRow = (player) => {
-    const checked = checkedSet.has(playerIdentityKey(player));
-    const isSelected = selectedIds.has(String(player.id));
-    const playerKey = playerIdentityKey(player);
-    const playerKeyValue = escapeHTMLText(playerKey);
-    const playerGroups = getPlayerGroups(player);
-    const playerGroupsValue = escapeHTMLText(JSON.stringify(playerGroups));
-    void playerGroupsValue; // retained for parity with edit-row group machinery
-    const initials = String(player.name || '')
-      .trim()
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((part) => part.charAt(0).toUpperCase())
-      .join('') || '?';
-    // Option C: the group section header carries the group → NO per-row group badge. Skill stays
-    // inline + admin-only (the .skill-pill / state.isAdmin gating is preserved — players never see skill).
-    return `
-      <div class="player-card prow ${isSelected ? 'is-selected' : ''} ${checked ? 'is-in' : ''}" data-id="${player.id}" data-player-key="${playerKeyValue}">
-        ${state.isAdmin ? `<input type="checkbox" class="player-select" data-id="${player.id}" aria-label="Select ${escapeHTMLText(player.name || '')}" ${isSelected ? 'checked' : ''} />` : ''}
-        <span class="prow-av" aria-hidden="true">${escapeHTMLText(initials)}</span>
-        <div class="prow-id">
-          <span class="player-name">${escapeHTMLText(player.name || '')}</span>
-          ${state.isAdmin ? `<div class="player-meta-row"><span class="skill-pill">Skill ${player.skill === 0 ? 'Unset' : player.skill}</span></div>` : ''}
-        </div>
-        <div class="prow-actions">
-          ${checked
-            ? `<button class="btn-checkout tg in" data-id="${player.id}" aria-label="${escapeHTMLText(player.name || '')} is checked in — tap to check out"><span class="tg-dot"></span>In</button>`
-            : `<button class="btn-checkin tg" data-id="${player.id}" aria-label="${escapeHTMLText(player.name || '')} is checked out — tap to check in"><span class="tg-dot"></span>Out</button>`
-          }
-          ${state.isAdmin ? `
-            <div class="menu-wrap">
-              <button type="button" class="btn-actions" aria-haspopup="true" aria-expanded="false"
-                      data-id="${player.id}" data-player-key="${playerKeyValue}" title="More actions" aria-label="More actions">
-                <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false"><circle cx="10" cy="4" r="1.6"/><circle cx="10" cy="10" r="1.6"/><circle cx="10" cy="16" r="1.6"/></svg>
-              </button>
-              <div class="card-menu" role="menu">
-                <button type="button" class="menu-item" data-role="menu-edit" data-player-key="${playerKeyValue}">Edit</button>
-                <button type="button" class="menu-item danger" data-role="menu-delete" data-id="${player.id}">Delete</button>
-              </div>
-            </div>
-          ` : ''}
-        </div>
-      </div>
-    `;
-  };
-
-  // C48.5 — Option C grouped collapsible sections, with the documented reconciliations:
-  //   • Search active (query non-empty)  → FLAT alphabetical (search is a global lookup; grouping it
-  //     is confusing). Returns to grouped when the query clears.
-  //   • Skill filter (skill-sorted)       → FLAT (grouping conflicts with a skill sort).
-  //   • Public surface (kiosk has no .prow here, but guard anyway) → FLAT.
-  //   • All / Checked in / Out / Unset    → GROUPED; per-section count = matching players in that
-  //     group; empty sections are never emitted (the grouping helper only makes a section with rows).
-  //   • Groups filter (single group active) → only that one group's section shows (grouping over a
-  //     1-group set yields exactly one section), forced EXPANDED so the operator sees the result.
-  const q2 = (state.searchTerm || '').toLowerCase().trim();
-  const useFlat = !state.isAdmin || !!q2 || state.playerTab === 'skill';
-  if (useFlat) {
-    return filtered.map(renderRow).join('');
-  }
-
-  const activeGroupSel = normalizeActiveGroupSelection(state.activeGroup || 'All');
-  const singleGroupActive = activeGroupSel && activeGroupSel !== 'All' && activeGroupSel !== UNGROUPED_FILTER_VALUE;
-  const collapsed = getCollapsedGroupState();
-  const sections = groupRosterPlayersBySection(filtered, getPlayerGroups);
-  return sections.map((section) => {
-    // A single active group is always shown expanded (the operator just asked to see it).
-    const isCollapsed = singleGroupActive ? false : !!collapsed[section.key];
-    const labelId = `roster-group-label-${section.key.replace(/[^a-z0-9_-]/gi, '-')}`;
-    const caretSVG = '<svg class="roster-group-caret" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false"><path d="M5 3l6 5-6 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    return `
-      <section class="roster-group ${isCollapsed ? 'is-collapsed' : ''}" data-group-key="${escapeHTMLText(section.key)}">
-        <button type="button" class="roster-group-head" data-role="toggle-group" data-group-key="${escapeHTMLText(section.key)}" aria-expanded="${isCollapsed ? 'false' : 'true'}" aria-controls="${labelId}-body">
-          <span class="roster-group-title" id="${labelId}">${escapeHTMLText(section.name)}</span>
-          <span class="roster-group-count">${section.players.length}</span>
-          ${caretSVG}
-        </button>
-        <div class="roster-group-body" id="${labelId}-body">
-          ${section.players.map(renderRow).join('')}
-        </div>
-      </section>
-    `;
-  }).join('');
-}
-
-// C48.5 — per-group collapse state for the admin Players grouped sections. Persisted in
-// sessionStorage (survives background syncs/partialRender within the session; default EXPANDED).
-// Keyed by the section key the grouping helper produces (lowercased group name / '__ungrouped__').
-const GROUP_COLLAPSE_KEY = 'as_group_collapsed';
-function getCollapsedGroupState() {
-  try {
-    const raw = sessionStorage.getItem(GROUP_COLLAPSE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return (parsed && typeof parsed === 'object') ? parsed : {};
-  } catch (_) { return {}; }
-}
-function setGroupCollapsed(groupKey, collapsed) {
-  const key = String(groupKey || '').trim();
-  if (!key) return;
-  const map = getCollapsedGroupState();
-  if (collapsed) map[key] = true; else delete map[key];
-  try { sessionStorage.setItem(GROUP_COLLAPSE_KEY, JSON.stringify(map)); } catch (_) { /* storage may be full/blocked */ }
-}
 
 // Global state. We use a simple object to hold application state. When
 // properties change the UI is rebuilt. Keeping all state in one place
@@ -3060,7 +2196,6 @@ const state = {
   collapsedCards: {}, // map of card id -> true when collapsed
   groups: ['All', 'Athletic Specimen'],
   activeGroup: 'All',
-  selectedIds: [], // player.id[] currently selected (admin bulk)
   masterAdminAuthenticated: false, // true only for an owner-role server session
   // Identity/Accounts (2026-07-08) — real email+password sign-in on top of the additive DB foundation.
   // authSession = live Supabase session (null when signed out); account = { id, email };
@@ -3669,8 +2804,8 @@ async function tdbSetPoolNets(pool, newNets, matches) {
 // net_count=9"). computeNetAssignments derives the new net (and, for pools, queue_order) of every UNPLAYED
 // match using the SAME pure helpers the draw/generate use; tdbApplyNetCountChange then writes net_count + every
 // match in ONE transaction (migration 0031) with a per-row version-CAS, so a concurrent score either succeeds
-// cleanly or rolls the WHOLE change back (true atomicity — no half-applied drift). Used by BOTH settings save
-// paths: the Manage Settings PAGE (tv2-save-settings-page) and the classic Tournament-tab Edit MODAL.
+// cleanly or rolls the WHOLE change back (true atomicity — no half-applied drift). Used by the settings save
+// paths: the new Manage settings view and the classic Tournament-tab Edit MODAL.
 function computeNetAssignments(status, pools, matches, newNets) {
   const ms = matches || [];
   const out = [];
@@ -3964,25 +3099,6 @@ function partialRenderTournament() {
   // team's in-progress registration (or a half-typed score). User actions that need a refresh call render().
   if (c && !tournamentTabIsDirty()) c.innerHTML = buildPublicTournamentRootHTML();
   // tournament-mode dashboard surfaces the same data on the Manage + Live panels.
-  if (state.tournamentMode) {
-    // The Manage panel is an admin EDITING surface (Settings / Teams / Registration forms). A BACKGROUND
-    // realtime sync must NOT rebuild it from stored values mid-edit — that wipes the admin's in-progress
-    // typing, so a Save then persists the OLD values ("I edit a setting but nothing saves", Mike 2026-06-27).
-    // Only refresh it on a sync when it's the input-free BRACKET PREVIEW (which the tv2-bracket-side switch
-    // also routes through here); every manage action that changes data calls render() directly afterward.
-    // Refresh #tab-manage on a background sync ONLY when it shows a tap/read BOARD with no in-progress form
-    // input to clobber: the bracket tree/preview (any status), or the RUNNING pool board. NEVER a form page
-    // (pools-draw selects, Settings/Teams/Reg) — a sync would wipe mid-edit (#21/#22). Scoring is a
-    // body-level modal (not in-panel), so a board rebuild can't clobber it.
-    const mActive = state.activeTournamentId ? (state.tournaments || []).find((x) => x.id === state.activeTournamentId) : null;
-    const manageShowsBoard = state.manageView === 'bracket' || (state.manageView === 'pools' && mActive && mActive.status !== 'setup');
-    if (manageShowsBoard) {
-      const mc = document.querySelector('#tab-manage .container');
-      if (mc) mc.innerHTML = buildManageTabHTML();
-    }
-    const lc = document.querySelector('#tab-live .container'); // Live = read-only board/bracket, safe to refresh
-    if (lc) lc.innerHTML = buildLiveTabHTML();
-  }
   layoutBracketTree(); // draw connectors + fit/zoom the bracket tree (no-op if no tree present)
   // Restore scroll if the rebuild reset it (iOS overflow-container behavior) so a background sync never
   // yanks the operator off the spot they're scrolled to mid-event.
@@ -4003,7 +3119,7 @@ async function maybeAutoGenerateBracket() {
   // hit "pool play is done but there's no way to generate the bracket" mid-event. The pure predicate fires
   // for an admin in tournament mode (or on the legacy 'tournament' tab) when every pool game is decided.
   if (!shouldAutoPromptBracket({
-    isAdmin: state.isAdmin, tournamentMode: state.tournamentMode, activeMainTab,
+    isAdmin: state.isAdmin, tournamentMode: false, activeMainTab,
     status: t.status, poolMatches: pm, alreadyPrompted: _autoGenPrompted[t.id],
   })) return;
   _autoGenPrompted[t.id] = true; // claim the one-shot up front so re-renders during the await can't double-prompt
@@ -4052,12 +3168,7 @@ async function refreshTournamentLive() {
     return;
   }
   const prevNav = tournamentNavVisible();
-  // F3 (2026-06-30): the admin tournament-mode board lives on the manage/live tabs, NOT activeMainTab==='tournament'
-  // (that's the PUBLIC Bracket tab). Without including tournament mode here, a background sync took the else-branch
-  // and the inline Manage/Live board never auto-updated from another device's scoring (stale all event). Treat
-  // tournament mode (manage/live) as a live tournament surface too.
-  const onTournamentSurface = () => activeMainTab === 'tournament'
-    || (state.tournamentMode && (activeMainTab === 'manage' || activeMainTab === 'live'));
+  const onTournamentSurface = () => activeMainTab === 'tournament';
   if (onTournamentSurface()) {
     // Don't clobber a half-typed score OR a half-filled team registration (incl. the "We paid" checkbox) even
     // after the field blurs — a background sync (esp. a `teams` realtime ping when ANOTHER team registers) must
@@ -4215,44 +3326,21 @@ function buildStandingsTableHTML(poolTeams, poolMatches) {
 // win% then point differential, the SAME ranking that sets the bracket). Shown on the public Bracket tab +
 // the admin tournament view once any pool game is final (provisional during pools, final once pools end).
 // Read-only; no skill shown. Returns '' when there are no finished pool games yet.
-// `editable` (admin, pre-generate only): render an editable variant with ▲/▼ to reorder the seeds
-// before Generate (a transient manual override held in state.seedOverride; computeSeeding is the
-// default). The public + post-generate views pass editable=false → the read-only table is unchanged.
-function buildSeedingTableHTML(teams, matches, editable) {
+function buildSeedingTableHTML(teams, matches) {
   const poolMatches = (matches || []).filter((m) => m.phase === 'pool');
   if (!poolMatches.some((m) => m.status === 'final')) return '';
-  let rows = computeSeeding(teams || [], poolMatches);
+  const rows = computeSeeding(teams || [], poolMatches);
   if (!rows.length) return '';
-  // apply the admin's transient reorder if it's a valid permutation of the current teams
-  let custom = false;
-  if (editable && state.seedOverride && state.seedOverride.id === state.activeTournamentId) {
-    const ov = state.seedOverride.order || [];
-    const byId = {}; rows.forEach((r) => { byId[r.teamId] = r; });
-    if (ov.length === rows.length && ov.every((id) => byId[id])) {
-      rows = ov.map((id, i) => ({ ...byId[id], seed: i + 1 })); custom = true;
-    }
-  }
-  const last = rows.length - 1;
-  const upSvg = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const dnSvg = '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  const mvCell = (r, i) => editable ? `<td class="sd-mv">
-      <button type="button" class="sd-mvbtn" data-role="tv2-seed-up" data-id="${escapeHTML(r.teamId)}" ${i === 0 ? 'disabled' : ''} aria-label="Move ${escapeHTMLText(r.name)} up">${upSvg}</button>
-      <button type="button" class="sd-mvbtn" data-role="tv2-seed-down" data-id="${escapeHTML(r.teamId)}" ${i === last ? 'disabled' : ''} aria-label="Move ${escapeHTMLText(r.name)} down">${dnSvg}</button>
-    </td>` : '';
-  const sub = editable
-    ? `Reorder for your bracket seeds &middot; ${custom ? 'custom order' : 'by win% then point diff'}${custom ? ' &middot; <button type="button" class="sd-reset" data-role="tv2-seed-reset">reset</button>' : ''}`
-    : `${rows.length} teams &middot; by win% then point differential`;
   return `<div class="card sd-card">
     <div class="sd-h">Seeding</div>
-    <div class="sd-sub">${sub}</div>
+    <div class="sd-sub">${rows.length} teams &middot; by win% then point differential</div>
     <table class="sd-tbl">
-      <thead><tr><th>Seed</th><th>Team</th><th class="r">W-L</th><th class="r">Diff</th>${editable ? '<th class="r">Move</th>' : ''}</tr></thead>
-      <tbody>${rows.map((r, i) => `<tr${r.seed === 1 ? ' class="top"' : ''}>
+      <thead><tr><th>Seed</th><th>Team</th><th class="r">W-L</th><th class="r">Diff</th></tr></thead>
+      <tbody>${rows.map((r) => `<tr${r.seed === 1 ? ' class="top"' : ''}>
         <td class="sd-seed">${r.seed}</td>
         <td class="sd-nm">${escapeHTML(r.name)}</td>
         <td class="r">${r.wins}-${r.losses}</td>
         <td class="r ${r.pointDiff > 0 ? 'sd-pos' : r.pointDiff < 0 ? 'sd-neg' : ''}">${r.pointDiff > 0 ? '+' : ''}${r.pointDiff}</td>
-        ${mvCell(r, i)}
       </tr>`).join('')}</tbody>
     </table>
   </div>`;
@@ -4425,46 +3513,6 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam,
 // NF-10: edit a tournament's settings after create (name, nets, pool/bracket targets + cap, win-by-2) so
 // "created to 25, played to 21" no longer means delete+rebuild. Saves via the guarded tdbSetTournamentFields;
 // match_cap is kept = bracket_target (NF-1 back-compat). Shown in setup/pools (moot once the bracket runs).
-// Edit a team's roster in a proper modal — per-player inputs (pre-filled), upgrading the comma-prompt
-// (Mike, 2026-06-27). Saves via tdbSetTeamRoster (enforces exactly team_size). Reuses .popup-card + .card.
-function openEditRosterModal(teamId) {
-  const tm = (state.tournamentTeams || []).find((x) => x.id === teamId);
-  if (!tm) return;
-  const active = (state.tournaments || []).find((x) => x.id === state.activeTournamentId) || {};
-  const teamSize = Number(active.team_size) || 4;
-  const roster = Array.isArray(tm.roster) ? tm.roster : [];
-  const overlay = document.createElement('div');
-  overlay.className = 'popup-overlay';
-  overlay.style.display = 'flex';
-  overlay.innerHTML = `<div class="popup-card card er-card" role="dialog" aria-modal="true" aria-label="Edit roster">
-    <div class="brm-title">Edit roster — ${escapeHTML(tm.name || 'team')}</div>
-    <p class="small" style="color:var(--muted);margin:0 0 10px;">${teamSize} players</p>
-    <div class="tm-pgrid">${Array.from({ length: teamSize }, (_, i) => `<input type="text" class="reg-input er-p" placeholder="Player ${i + 1}" autocomplete="off" autocapitalize="words" value="${escapeHTMLText(roster[i] || '')}" />`).join('')}</div>
-    <div id="er-err" hidden style="color:var(--danger);margin-top:8px;font-size:13px;"></div>
-    <div style="display:flex;gap:8px;margin-top:12px;">
-      <button type="button" class="secondary" id="er-cancel" style="flex:1;">Cancel</button>
-      <button type="button" class="primary" id="er-save" style="flex:1;">Save roster</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  overlay.querySelector('#er-cancel').onclick = close;
-  let saving = false;
-  overlay.querySelector('#er-save').onclick = async () => {
-    if (saving) return;
-    const vals = [...overlay.querySelectorAll('.er-p')].map((i) => i.value.trim()).filter(Boolean);
-    const err = overlay.querySelector('#er-err');
-    if (vals.length !== teamSize) { err.textContent = 'Enter exactly ' + teamSize + ' players.'; err.hidden = false; return; }
-    saving = true;
-    try {
-      await tdbSetTeamRoster(teamId, vals);
-      await tdbRefreshTournaments();
-      close();
-      render();
-    } catch (e) { saving = false; err.textContent = (e && e.message) || 'Could not save the roster.'; err.hidden = false; }
-  };
-}
 
 function openTournamentSettingsModal(tournamentId) {
   const t = (state.tournaments || []).find((x) => x.id === tournamentId);
@@ -5631,7 +4679,7 @@ async function submitJoinSheet(btn) {
   if (!v.ok) { setMsg(v.message, false); return; }
   if (btn) btn.setAttribute('disabled', 'true'); // in-flight guard (double-tap)
   try {
-    // The PROVEN write path, verbatim (tv2-register-team). paid=false: payment moves to check-in (§13.5).
+    // The PROVEN write path, verbatim (tdbRegisterTeam). paid=false: payment moves to check-in (§13.5).
     await tdbRegisterTeam(state.activeTournamentId, v.teamName, v.roster, null, false);
   } catch (err) {
     if (btn) btn.removeAttribute('disabled');
@@ -6059,193 +5107,6 @@ function buildTournamentTabHTML() {
   ${poolSetup}`;
 }
 
-// ── Tournament MODE (Mike, 2026-06-27): tap the admin Tournament card → a focused mode with its own bottom
-// nav (Home · Manage · Live · Co-pilot) + a clear way back to normal AS. MANAGE = everything editable at
-// EVERY phase (§38 layout C: teams-first + toolbar). LIVE = the read-first board/bracket + seeding. Additive
-// + gated behind state.tournamentMode; reuses the existing tv2-* roles + helpers (only new write = roster edit).
-function tournamentTargetLabel(t) {
-  if (!t) return '';
-  return (t.status === 'bracket' || t.status === 'completed')
-    ? 'to ' + escapeHTML(String(t.bracket_target != null ? t.bracket_target : t.match_cap))
-    : 'to ' + escapeHTML(String(t.pool_target != null ? t.pool_target : t.match_cap)) + (t.pool_cap != null ? ' (cap ' + escapeHTML(String(t.pool_cap)) + ')' : '');
-}
-function buildTournamentModeBarHTML(active) {
-  const sub = active ? `${escapeHTML(tournamentStatusLabel(active.status))} · ${escapeHTML(String((active.team_size) || 4))}/team · ${tournamentTargetLabel(active)}` : '';
-  return `<div class="tm-bar">
-    <div class="tm-bar-id"><div class="tm-bar-nm">${active ? escapeHTML(active.name || 'Tournament') : 'Tournament'}</div>${sub ? `<div class="tm-bar-sub">${sub}</div>` : ''}</div>
-    <button type="button" class="tm-exit" data-role="tv2-exit-mode">&lsaquo; Exit tournament view</button>
-  </div>`;
-}
-// Manage = a HUB of tiles; each tile opens its OWN page (Mike, 2026-06-27, §38 layout B — tile grid). One
-// purpose per screen for clarity. Pages: Teams (incl. add) · Pools · Bracket · Settings · Registration &
-// payment · Tournament. Each page reuses the existing tv2-* roles + helpers; "‹ Manage" returns to the hub.
-const MANAGE_TILES = [
-  ['teams', 'Teams', '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/>'],
-  ['pools', 'Pools', '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'],
-  ['bracket', 'Bracket', '<path d="M6 4v16M6 8h6v4H6M18 12v8M18 12h-6"/>'],
-  ['settings', 'Settings', '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/>'],
-  ['reg', 'Registration & payment', '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13l2 2 4-4"/>'],
-  ['tournament', 'Tournament', '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M6 4h12v4a6 6 0 0 1-12 0Z"/><path d="M9 18h6M10 21h4M12 14v4"/>'],
-];
-function manageTileStatus(view, active, teams, pools, matches) {
-  if (view === 'teams') return teams.length + (teams.length === 1 ? ' team' : ' teams');
-  if (view === 'pools') return active.status !== 'setup' ? 'running' : (pools.length ? 'drawn' : 'not drawn');
-  if (view === 'bracket') return (active.status === 'bracket' || active.status === 'completed') ? 'live' : 'not generated';
-  if (view === 'settings') return tournamentTargetLabel(active);
-  if (view === 'reg') return (active.registration_open ? 'open' : 'closed') + ' · ' + teams.filter((t) => t.paid).length + '/' + teams.length + ' paid';
-  if (view === 'tournament') return tournamentStatusLabel(active.status);
-  return '';
-}
-function manageHubHTML(active, teams, pools, matches) {
-  const tiles = MANAGE_TILES.map(([view, label, svg]) => `<button type="button" class="tm-tile" data-role="tv2-manage-nav" data-view="${view}">
-    <svg class="tm-tile-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${svg}</svg>
-    <span class="tm-tile-lb">${label}</span><span class="tm-tile-st">${escapeHTML(String(manageTileStatus(view, active, teams, pools, matches) || ''))}</span>
-  </button>`).join('');
-  return `<div class="tm-grid">${tiles}</div>`;
-}
-function buildManageTabHTML() {
-  const list = state.tournaments || [];
-  const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
-  if (!active) {
-    // No active tournament → the Tournament page (switch/create) is the only thing to do.
-    return `${buildTournamentModeBarHTML(null)}${manageTournamentPageHTML(null, list)}`;
-  }
-  const teams = state.tournamentTeams || [];
-  const pools = state.tournamentPools || [];
-  const matches = state.tournamentMatches || [];
-  const view = state.manageView || 'hub';
-  if (view === 'hub') return `${buildTournamentModeBarHTML(active)}${manageHubHTML(active, teams, pools, matches)}`;
-  const titles = { teams: 'Teams', pools: 'Pools', bracket: 'Bracket', settings: 'Settings', reg: 'Registration & payment', tournament: 'Tournament' };
-  const backBar = `<div class="tm-bar"><button type="button" class="tm-exit" data-role="tv2-manage-back">&lsaquo; Manage</button><div class="tm-pagetitle">${escapeHTML(titles[view] || 'Manage')}</div></div>`;
-  let body = '';
-  if (view === 'teams') body = manageTeamsPageHTML(active, teams, matches);
-  else if (view === 'pools') body = managePoolsPageHTML(active, teams, pools, matches);
-  else if (view === 'bracket') body = manageBracketPageHTML(active, teams, matches);
-  else if (view === 'settings') body = manageSettingsPageHTML(active);
-  else if (view === 'reg') body = manageRegPageHTML(active, teams);
-  else if (view === 'tournament') body = manageTournamentPageHTML(active, list);
-  return `${backBar}${body}`;
-}
-function manageTeamsPageHTML(active, teams, matches) {
-  const status = active.status;
-  const teamSize = Number(active.team_size) || 4;
-  const seedByTeam = {};
-  computeSeeding(teams, matches.filter((m) => m.phase === 'pool')).forEach((r) => { seedByTeam[r.teamId] = r.seed; });
-  // Manage>Teams add card (§38 Option A, Mike 2026-06-30): a Quick (name only) / Full-roster mode toggle.
-  // Quick = name-only via tv2-quick-add-team (closes the audit's #3 "forces a full 4-player roster" friction);
-  // Full = the existing roster path via tv2-register-team. Default = quick (the fast day-of path).
-  const addForm = `<div class="card tm-addcard is-quick" id="tm-addcard">
-    <div class="sd-h" style="font-size:14px;margin:0 0 8px;">Add a team</div>
-    <div class="qa-seg">
-      <button type="button" class="qa-seg-btn is-on" data-role="tv2-add-mode" data-mode="quick">Quick &middot; name only</button>
-      <button type="button" class="qa-seg-btn" data-role="tv2-add-mode" data-mode="full">Full roster (${teamSize})</button>
-    </div>
-    <input type="text" id="reg-team" class="reg-input" placeholder="Team name" autocomplete="off" autocapitalize="words" style="margin-top:8px;" />
-    <div class="tm-pgrid tm-add-roster">${Array.from({ length: teamSize }, (_, i) => `<input type="text" id="reg-p${i + 1}" class="reg-input" placeholder="Player ${i + 1}" autocomplete="off" autocapitalize="words" />`).join('')}</div>
-    <label class="reg-check" style="margin:6px 0;"><input type="checkbox" id="reg-paid" /> Paid</label>
-    <button type="button" class="primary tm-add-submit" data-role="tv2-quick-add-team" style="width:100%;">Add team</button>
-    <p class="reg-teamspill" id="reg-msg"></p>
-  </div>`;
-  const removeBtn = (tm) => status === 'setup'
-    ? `<button type="button" class="tm-mini tm-mini-dang" data-role="tv2-delete-team" data-id="${escapeHTML(tm.id)}">Remove</button>`
-    : `<button type="button" class="tm-mini tm-mini-dang" data-role="tv2-withdraw-team" data-id="${escapeHTML(tm.id)}" data-name="${escapeHTMLText(tm.name || '')}">Withdraw</button>`;
-  const teamCards = teams.length ? teams.map((tm) => {
-    const seed = seedByTeam[tm.id];
-    const rost = Array.isArray(tm.roster) ? tm.roster : [];
-    return `<div class="card tm-team">
-      <div class="tm-team-top">
-        <div class="tm-team-id"><div class="tm-team-nm">${seed ? `<span class="tm-seed">${seed}</span>` : ''}${escapeHTML(tm.name || '')}</div>
-          <div class="tm-team-pl">${rost.length ? rost.map((n) => escapeHTML(String(n))).join(', ') : '<span style="color:var(--faint);">no players</span>'}</div></div>
-        <span class="${tm.paid ? 'reg-paidtag' : 'reg-unpaidtag'}">${tm.paid ? 'paid' : 'unpaid'}</span>
-      </div>
-      <div class="tm-team-acts">
-        <button type="button" class="tm-mini" data-role="tv2-rename-team" data-id="${escapeHTML(tm.id)}" data-name="${escapeHTMLText(tm.name || '')}">Rename</button>
-        <button type="button" class="tm-mini" data-role="tv2-edit-roster" data-id="${escapeHTML(tm.id)}" data-name="${escapeHTMLText(tm.name || '')}">Edit roster</button>
-        <button type="button" class="tm-mini" data-role="tv2-toggle-paid" data-id="${escapeHTML(tm.id)}">${tm.paid ? 'Mark unpaid' : 'Mark paid'}</button>
-        ${removeBtn(tm)}
-      </div>
-    </div>`;
-  }).join('') : `<div class="card"><p class="small" style="color:var(--muted);margin:0;">No teams yet — add one above.</p></div>`;
-  return `${addForm}<div class="tm-sec">Teams (${teams.length})</div>${teamCards}`;
-}
-function managePoolsPageHTML(active, teams, pools, matches) {
-  if (active.status === 'setup') {
-    if (teams.length < 2) return `<div class="card"><p class="small" style="color:var(--muted);margin:0;">Add at least 2 teams first (Teams page).</p></div>`;
-    if (!pools.length) return `<div class="card"><h3 style="margin:0 0 8px;">Pools</h3>
-      <p class="small" style="color:var(--muted);margin:0 0 8px;">Randomly draw ${escapeHTML(String(active.pool_count))} pools from your ${teams.length} teams.</p>
-      <button type="button" class="primary" data-role="tv2-draw-pools" style="width:100%;">Draw pools</button></div>`;
-    const poolBlocks = pools.map((p) => {
-      const pt = teams.filter((t) => t.pool_id === p.id);
-      const rows = pt.map((t) => `<div class="row" style="align-items:center;gap:8px;padding:4px 0;">
-        <span style="flex:1;min-width:0;">${escapeHTML(t.name)}</span>
-        <select data-role="tv2-move-team" data-id="${escapeHTML(t.id)}" style="width:auto;flex:0 0 auto;">
-          ${pools.map((pp) => `<option value="${escapeHTML(pp.id)}" ${pp.id === t.pool_id ? 'selected' : ''}>Pool ${escapeHTML(pp.label)}</option>`).join('')}
-        </select></div>`).join('');
-      return `<div style="margin-bottom:10px;"><strong>Pool ${escapeHTML(p.label)}</strong>${rows || '<p class="small" style="color:var(--muted);margin:0;">empty</p>'}</div>`;
-    }).join('');
-    return `<div class="card"><h3 style="margin:0 0 8px;">Pools (drawn)</h3>${poolBlocks}
-      <button type="button" class="secondary" data-role="tv2-draw-pools" style="width:100%;margin-bottom:8px;">Re-draw randomly</button>
-      <button type="button" class="primary" data-role="tv2-start-pools" style="width:100%;">Start pool play</button></div>`;
-  }
-  // Running: the live admin pool board INLINE (Mike 2026-06-28, §38 layout B). Admins score + manage from
-  // Manage itself — no jump to Live. A command bar (live status + Reset) sits above the reused Live board
-  // (buildPoolPlayHTML admin=true, same call as buildLiveTabHTML). The board's only controls are taps that
-  // open a BODY-LEVEL modal (no in-panel inputs), so the background-sync rebuild in partialRenderTournament
-  // is safe here (its guard allows pools-running; per-pool net editing is already a chip on the board).
-  const pm = (matches || []).filter((m) => m.phase === 'pool' && m.team_a_id && m.team_b_id);
-  const poolDone = pm.filter((m) => m.status === 'final').length;
-  // #5 (Mike 2026-06-30, §38 Option B): when every real pool game is final, a prominent green CTA banner
-  // above the board so the admin can't miss "generate the bracket" (the mid-event discoverability gap —
-  // the only Generate button used to be buried on Manage>Bracket). Reuses the existing tv2-generate-bracket.
-  const allFinal = pm.length > 0 && poolDone === pm.length;
-  const genBanner = allFinal
-    ? `<div class="card gen-banner"><span class="gen-banner-t">All pool games are final</span><button type="button" class="primary" data-role="tv2-generate-bracket">Generate bracket &rarr;</button></div>`
-    : '';
-  return `${genBanner}<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <span class="badge">${pools.length} pool${pools.length === 1 ? '' : 's'} · ${poolDone}/${pm.length} games done</span>
-      <button type="button" class="danger" data-role="tv2-reset-pools" style="margin-left:auto;">Reset pools</button>
-    </div>${buildPoolPlayHTML(active, pools, teams, matches, true, state.tournamentPickedTeamId)}`;
-}
-// Bracket FORMAT preview (Mike, 2026-06-27): show what the bracket games will look like BEFORE pools end —
-// the structure only, no teams (slots read "Seed N" in round 1, then "Winner of G#"/"Loser of G#"). Teams
-// drop in when pools finish + the real bracket is generated. Teamless rows from generateDoubleElim, reusing
-// the same labels/nets/queue logic as tdbGenerateBracket so the G-numbers match the eventual real bracket.
-function buildBracketPreviewRows(n, netCount, reset) {
-  if (!n || n < 2) return [];
-  const gen = generateDoubleElim(n, !!reset);
-  const real = gen.realMatches;
-  const labelOf = (key) => {
-    const m = real.find((x) => x.key === key);
-    if (!m) return key;
-    if (m.side === 'grand_final') return m.isReset ? 'Grand Final (reset)' : 'Grand Final';
-    return `${m.side === 'winners' ? 'WB' : 'LB'} R${m.round} M${m.slot + 1}`;
-  };
-  const srcLabel = (s) => {
-    if (!s) return null;
-    if (s.seed) return 'Seed ' + s.seed;
-    return (s.type === 'winner' ? 'Winner of ' : 'Loser of ') + labelOf(s.of);
-  };
-  const nc = Math.max(1, Number(netCount) || 1);
-  const sidePri = (s) => (s === 'winners' ? 0 : s === 'losers' ? 1 : 2);
-  const maxRound = real.reduce((mx, m) => Math.max(mx, m.round || 0), 0);
-  const playRound = (m) => (m.side === 'grand_final' ? maxRound + m.round : m.round);
-  const netInfo = {}; const perRound = {}; let q = 0;
-  real.slice().sort((a, b) => playRound(a) - playRound(b) || sidePri(a.side) - sidePri(b.side) || a.slot - b.slot)
-    .forEach((m) => {
-      if (m.side === 'grand_final') { netInfo[m.key] = { net: null, queue_order: q++ }; return; }
-      const rk = m.side + ':' + m.round; perRound[rk] = perRound[rk] || 0;
-      netInfo[m.key] = { net: (perRound[rk] % nc) + 1, queue_order: q++ }; perRound[rk]++;
-    });
-  return real.map((m) => ({
-    id: 'preview-' + m.key, phase: 'main', side: m.side, round: m.round, slot: m.slot,
-    round_label: labelOf(m.key), net: netInfo[m.key].net, queue_order: netInfo[m.key].queue_order,
-    team_a_id: null, team_b_id: null, source_a: srcLabel(m.aSource), source_b: srcLabel(m.bSource),
-    // carry the winner-advances-to pointer (mapped to preview ids) so layoutBracketTree draws the
-    // connector lines between games for the preview too — same field name as the real bracket row.
-    winner_next_match_id: m.winnerNext ? ('preview-' + m.winnerNext.key) : null,
-    status: 'scheduled',
-  }));
-}
 // The current pre-generate seed order (array of teamIds): the admin's transient ▲/▼ override if set
 // for the active tournament, else the computed (computeSeeding) order. Drives the reorder handlers.
 function currentSeedOrder() {
@@ -6253,100 +5114,6 @@ function currentSeedOrder() {
   const teams = state.tournamentTeams || [];
   const poolMatches = (state.tournamentMatches || []).filter((m) => m.phase === 'pool');
   return computeSeeding(teams, poolMatches).map((r) => r.teamId);
-}
-function manageBracketPageHTML(active, teams, matches) {
-  if (active.status === 'setup' || active.status === 'pools') {
-    const poolMatches = matches.filter((m) => m.phase === 'pool');
-    const done = poolMatches.length > 0 && poolMatches.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
-    const genCard = `<div class="card">${done
-      ? '<p class="small" style="color:var(--muted);margin:0 0 8px;">All pool games are final — reorder the seeding above if you want, then generate the bracket.</p><button type="button" class="primary" data-role="tv2-generate-bracket" style="width:100%;">Generate bracket</button>'
-      : '<p class="small" style="color:var(--muted);margin:0;">Pools aren’t finished yet. Below is the bracket FORMAT — the exact games + structure; teams drop into their seeds once pool play ends.</p>'}</div>`;
-    if (teams.length < 2) return genCard;
-    const seedingEditor = done ? buildSeedingTableHTML(teams, matches, true) : ''; // #7: editable seeds above Generate
-    // Render the REAL bracket tree (same component as Live) with teamless rows so admins see the actual
-    // shape — cols, connectors, side tabs, "Seed N" / "Winner of G#" / "Loser of G#" — not a flat list.
-    const previewRows = buildBracketPreviewRows(teams.length, active.net_count, active.grand_final_reset);
-    return `${seedingEditor}${genCard}<div class="tm-sec" style="margin-top:12px;">Bracket format — ${teams.length} teams</div>${buildBracketHTML(active, previewRows, [], { preview: true })}`;
-  }
-  // Generated: the live bracket tree INLINE (Mike 2026-06-28, §38 layout B) — score/clear on the nodes here,
-  // no jump to Live. Same component + call as buildLiveTabHTML; layoutBracketTree fires via activateMainTab
-  // (manage+bracket) and partialRenderTournament. Command bar shows live progress; the tree carries the
-  // champion banner + the admin score/clear rows itself.
-  const bm = (matches || []).filter((m) => m.phase !== 'pool');
-  const bracketDone = bm.filter((m) => m.status === 'final').length;
-  return `<div class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <span class="badge">Bracket · ${bracketDone}/${bm.length} games</span>
-      <button type="button" class="danger" data-role="tv2-reset-bracket" style="margin-left:auto;">Reset bracket</button>
-    </div>${buildBracketHTML(active, matches, teams)}${buildSeedingTableHTML(teams, matches)}`;
-}
-function manageSettingsPageHTML(t) {
-  const num = (v, d) => (v == null || v === '' ? d : v);
-  return `<div class="card">
-    <label class="reg-label" for="ts-name">Name</label>
-    <input type="text" id="ts-name" class="reg-input" value="${escapeHTMLText(t.name || '')}" autocapitalize="words" />
-    <label class="reg-label" for="ts-nets">Nets / courts</label>
-    <input type="number" inputmode="numeric" min="1" id="ts-nets" class="reg-input" value="${escapeHTML(String(num(t.net_count, 10)))}" />
-    <label class="reg-label" for="ts-pt">Pool game to</label>
-    <input type="number" inputmode="numeric" min="1" id="ts-pt" class="reg-input" value="${escapeHTML(String(num(t.pool_target, 15)))}" />
-    <label class="reg-label" for="ts-pc">Pool cap (blank = none)</label>
-    <input type="number" inputmode="numeric" min="1" id="ts-pc" class="reg-input" value="${t.pool_cap != null ? escapeHTML(String(t.pool_cap)) : ''}" />
-    <label class="reg-label" for="ts-bt">Bracket game to</label>
-    <input type="number" inputmode="numeric" min="1" id="ts-bt" class="reg-input" value="${escapeHTML(String(num(t.bracket_target, num(t.match_cap, 25))))}" />
-    <label class="reg-check" style="margin-top:8px;"><input type="checkbox" id="ts-wb2" ${(t.win_by_2 == null || t.win_by_2) ? 'checked' : ''} /> Win by 2</label>
-    <div id="ts-err" hidden style="color:var(--danger);margin-top:8px;font-size:13px;"></div>
-    <button type="button" class="primary" data-role="tv2-save-settings-page" data-id="${escapeHTML(t.id)}" style="width:100%;margin-top:12px;">Save settings</button>
-  </div>`;
-}
-function manageRegPageHTML(active, teams) {
-  const registered = teams.length ? `<div class="card"><div class="reg-label">Registered (${teams.length})</div>${buildPaymentSummaryHTML(teams, active)}${teams.map((tm) => `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
-      <span style="flex:1;min-width:0;">${escapeHTMLText(tm.name || '')} ${tm.paid ? '<span class="reg-paidtag">paid</span>' : '<span class="reg-unpaidtag">unpaid</span>'}</span>
-      <button type="button" class="tm-mini" data-role="tv2-toggle-paid" data-id="${escapeHTML(tm.id)}">${tm.paid ? 'Unpaid' : 'Paid'}</button>
-    </div>`).join('')}</div>` : '';
-  return `<div class="card">
-    <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
-      <strong>Registration</strong>
-      <button type="button" class="${active.registration_open ? 'danger' : 'primary'}" data-role="tv2-toggle-registration">${active.registration_open ? 'Close' : 'Open'}</button>
-    </div>
-    <p class="small" style="color:var(--muted);margin:6px 0 10px;">${active.registration_open ? 'Teams can self-register — share the link in GroupMe.' : 'Open registration so teams sign themselves up.'}</p>
-    <label class="reg-label" for="tv2-venmo">Venmo payment link</label>
-    <input type="text" id="tv2-venmo" class="reg-input" placeholder="https://venmo.com/u/yourname" value="${escapeHTMLText(active.venmo_link || '')}" />
-    <label class="reg-label" for="tv2-buyin">Buy-in (shown to teams)</label>
-    <input type="text" id="tv2-buyin" class="reg-input" placeholder="$80 per team" value="${escapeHTMLText(active.buy_in || '')}" />
-    <button type="button" class="secondary" data-role="tv2-save-registration" style="width:100%;">Save</button>
-    ${active.registration_open ? '<button type="button" class="secondary" data-role="tv2-share-registration" style="width:100%;margin-top:8px;">Copy registration link</button>' : ''}
-  </div>${registered}`;
-}
-function manageTournamentPageHTML(active, list) {
-  const others = (list || []).filter((t) => !active || t.id !== active.id);
-  const switchList = others.length ? `<div class="card"><div class="reg-label">${active ? 'Switch to' : 'Pick a tournament'}</div>${others.map((t) => `<div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
-      <button type="button" data-role="tv2-select-tournament" data-id="${escapeHTML(t.id)}" style="background:none;border:none;text-align:left;flex:1;font-size:15px;color:var(--brand);cursor:pointer;padding:4px 0;">${escapeHTML(t.name || '')} <span class="small" style="color:var(--muted);">· ${escapeHTML(tournamentStatusLabel(t.status))}</span></button>
-      <button type="button" class="tm-mini tm-mini-dang" data-role="tv2-delete-tournament" data-id="${escapeHTML(t.id)}">Delete</button>
-    </div>`).join('')}</div>` : '';
-  return `${switchList}
-    <div class="card"><div class="reg-label">Create a new tournament</div>
-      <input type="text" id="tv2-name" placeholder="Tournament name" />
-      <div id="tv2-format-picker" style="margin-top:12px;">${buildFormatPickerHTML()}</div>
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);">Pools<input type="number" id="tv2-pools" value="4" min="1" inputmode="numeric" /></label>
-        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);">Nets<input type="number" id="tv2-nets" value="10" min="1" inputmode="numeric" /></label>
-      </div>
-      <button type="button" class="primary" data-role="tv2-create-tournament" style="margin-top:12px;width:100%;">Create tournament</button>
-    </div>
-    ${active ? `<div class="card"><div class="reg-label" style="color:var(--danger);">Danger</div>
-      <button type="button" class="danger" data-role="tv2-delete-tournament" data-id="${escapeHTML(active.id)}" style="width:100%;">Delete this tournament</button>
-    </div>` : ''}`;
-}
-function buildLiveTabHTML() {
-  const active = state.activeTournamentId ? (state.tournaments || []).find((x) => x.id === state.activeTournamentId) : null;
-  if (!active) return `${buildTournamentModeBarHTML(null)}<div class="card"><p class="small" style="color:var(--muted);margin:0;">No tournament selected.</p></div>`;
-  const teams = state.tournamentTeams || [];
-  const pools = state.tournamentPools || [];
-  const matches = state.tournamentMatches || [];
-  let body;
-  if (active.status === 'bracket' || active.status === 'completed') body = buildBracketHTML(active, matches, teams);
-  else if (active.status === 'pools') body = buildPoolPlayHTML(active, pools, teams, matches, true, state.tournamentPickedTeamId);
-  else body = `<div class="card"><p class="small" style="color:var(--muted);margin:0;">Pool play hasn’t started yet. Add teams + draw pools on the Manage tab.</p></div>`;
-  return `${buildTournamentModeBarHTML(active)}${body}${buildSeedingTableHTML(teams, matches)}`;
 }
 
 function formatLastSharedSyncLabel() {
@@ -7713,51 +6480,7 @@ async function forceSaveAllToSupabase() {
 // -----------------------------------------------------------------------------
 // UI Helpers
 
-function bindPlayerRowHandlers() {
-  // Intentionally a no-op.
-  // Menu interactions are delegated globally and do not require per-render rebinding.
-}
 
-function bindSelectionHandlers() {
-  // Intentionally a no-op.
-  // Selection interactions are delegated globally and do not require per-render rebinding.
-}
-
-(function ensureSelectionDelegationBound() {
-  if (window.__selectionDelegated) return;
-  window.__selectionDelegated = true;
-
-  const nonToggleSelector = [
-    'button',
-    'a',
-    'input',
-    'select',
-    'textarea',
-    'label',
-    '.menu-wrap',
-    '.card-menu',
-    '.edit-row',
-    '.group-select',
-    '.group-list',
-    '.group-item'
-  ].join(',');
-
-  document.addEventListener('change', (e) => {
-    const checkbox = e.target.closest('.player-select');
-    if (!checkbox) return;
-
-    const id = String(checkbox.getAttribute('data-id') || '');
-    if (!id) return;
-
-    const set = selectedSet();
-    if (checkbox.checked) set.add(id); else set.delete(id);
-    state.selectedIds = Array.from(set);
-    const card = checkbox.closest('.player-card');
-    if (card) card.classList.toggle('is-selected', checkbox.checked);
-    updateBulkBarVisibility();
-  });
-
-})();
 // Render the entire application into the root element. Each call replaces
 // existing content to reflect the current state. Event handlers are
 // attached inline within this function. To minimize reflows, we build
@@ -7768,206 +6491,6 @@ function currentTabKey() { return state.isAdmin ? 'as_main_tab_admin' : 'as_main
 
 // C26 item 2: Admin Players panel. Markup moved verbatim from render(); locals recomputed at the top
 // (byte-identical to render()'s former locals), the old `state.isAdmin ? … : ''` wrapper removed.
-function adminPlayersHTML() {
-  const normalizedActiveGroup = normalizeActiveGroupSelection(state.activeGroup || 'All');
-  const activeGroupLabel = normalizedActiveGroup === UNGROUPED_FILTER_VALUE ? UNGROUPED_FILTER_LABEL : (normalizedActiveGroup || 'All');
-  const isActiveGroupValue = (value) => normalizeActiveGroupSelection(value || 'All') === normalizedActiveGroup;
-  const topFormGroupOptions = getTopFormGroupDatalistOptions();
-  const topFormContext = renderTopFormGroupsHelpAndPreview('', '');
-  const rosterCount = (state.players || []).length;
-  const chip = (value, label) => `<button type="button" class="chip ${state.playerTab === value ? 'on' : ''}" data-chip-tab="${value}" aria-pressed="${state.playerTab === value ? 'true' : 'false'}">${label}</button>`;
-  const groupsChipOn = normalizedActiveGroup !== 'All';
-  return `
-    <div id="admin-players-shell">
-      <!-- Compact header: title + add + overflow toolbar -->
-      <div class="roster-head">
-        <h3 class="roster-title">Players <span class="roster-count">· ${rosterCount}</span>${normalizedActiveGroup !== 'All' ? ` <span class="small roster-scope">(${escapeHTML(activeGroupLabel)})</span>` : ''}</h3>
-        <div class="roster-head-actions">
-          <button type="button" id="roster-add-player" class="roster-add" aria-label="Add or update player" title="Add / update player">
-            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true" focusable="false"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
-          </button>
-        </div>
-      </div>
-
-<div class="card card-players">
-  <div id="card-body-admin-players">
-
-  <!-- Sticky search bar -->
-  <div class="sticky-search-bar">
-    <div id="player-search-container">
-      <input
-        type="text"
-        id="player-search"
-        placeholder="Search players…"
-        value="${escapeHTML(state.searchTerm || '')}"
-      />
-      <span
-        id="player-search-clear"
-        style="${state.searchTerm ? '' : 'display:none;'}"
-        aria-label="Clear search"
-      >✕</span>
-    </div>
-  </div>
-
-  <div id="filtersBody">
-    <!-- Filter chips (drive state.playerTab + group/skill sub-controls) -->
-    <div class="chip-row" role="group" aria-label="Filter players">
-      ${chip('all', 'All')}
-      ${chip('in', 'Checked in')}
-      ${chip('out', 'Out')}
-      ${chip('skill', 'Skill')}
-      ${chip('unrated', 'Unset')}
-      <button type="button" class="chip ${groupsChipOn ? 'on' : ''}" data-chip-groups aria-pressed="${groupsChipOn ? 'true' : 'false'}">Groups</button>
-    </div>
-    <!-- C45 (rank 17): "Select all shown" is a SELECTION action, not a filter — moved out of the chip row. -->
-    <div class="select-all-row"><button type="button" id="btn-select-all-visible" class="select-all-btn">Select all shown</button></div>
-
-    <!-- Source-of-truth filter select (visually hidden; chips set the same state) -->
-    <select id="player-tab-select" class="sr-only-control" aria-hidden="true" tabindex="-1">
-      <option value="all" ${state.playerTab === 'all' ? 'selected' : ''}>All Players</option>
-      <option value="in" ${state.playerTab === 'in' ? 'selected' : ''}>Checked In</option>
-      <option value="out" ${state.playerTab === 'out' ? 'selected' : ''}>Checked Out</option>
-      <option value="skill" ${state.playerTab === 'skill' ? 'selected' : ''}>Skill Number</option>
-      <option value="unrated" ${state.playerTab === 'unrated' ? 'selected' : ''}>Unset Skill</option>
-    </select>
-
-    <!-- Group filter + group management (revealed by the Groups chip, or when a group is active) -->
-  <div class="filter-sub ${groupsChipOn ? 'is-open' : ''}" id="group-filter-sub" style="margin-top: 0.5rem; align-items:center;">
-    <label for="group-filter-select">Group:</label>
-    <select id="group-filter-select">
-      <option value="All" ${isActiveGroupValue('All') ? 'selected' : ''}>All</option>
-      ${getAvailableGroups().map((groupName) => `<option value="${escapeHTML(groupName)}" ${isActiveGroupValue(groupName) ? 'selected' : ''}>${escapeHTML(groupName)}</option>`).join('')}
-      <option value="${UNGROUPED_FILTER_VALUE}" ${isActiveGroupValue(UNGROUPED_FILTER_VALUE) ? 'selected' : ''}>${UNGROUPED_FILTER_LABEL}</option>
-    </select>
-
-    <button id="btn-open-group-manager" class="secondary">Manage Groups</button>
-  </div>
-    <!-- Skill range sub-filter (only when Filter = Skill) -->
-    ${state.playerTab === 'skill' ? `
-      <div class="filter-sub is-open" style="margin-top: 0.5rem;">
-        <label for="skill-subtab-select">Skill range:</label>
-        <select id="skill-subtab-select">
-          ${Array.from({ length: 9 }, (_, i) => {
-            const base = `${i + 1}.0`;
-            const selected = state.skillSubTab === base ? 'selected' : '';
-            const label = base === '9.0' ? '9.0–10' : `${base}–${i + 1}.9`;
-            return `<option value="${base}" ${selected}>${label}</option>`;
-          }).join('')}
-        </select>
-      </div>
-    ` : ''}
-
-  </div> <!-- /#filtersBody -->
-
-  <!-- Filtered Player rows -->
-  <div class="players">
-    ${renderFilteredPlayers()}
-  </div>
-  </div>
-
-  <!-- A–Z jump strip (iOS Contacts style) — pinned to right edge of Players tab -->
-  <div class="players-az-strip" role="navigation" aria-label="Jump to letter">
-    ${'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(L =>
-      `<button type="button" class="az-letter" data-letter="${L}" aria-label="Jump to ${L}">${L}</button>`
-    ).join('')}
-  </div>
-</div>
-
-  <!-- Floating Bulk Bar (shows only when you select players) -->
-  <div id="bulkBar" class="bulkbar" style="display:none;">
-    <div class="bulkbar-inner">
-      <strong id="bulkCount">0 selected</strong>
-      <span class="bulkbar-spacer"></span>
-
-      <button id="btn-bulk-checkin" class="secondary">Check In</button>
-      <button id="btn-bulk-checkout" class="secondary">Check Out</button>
-
-      <label for="bulk-dest-group" class="bulkbar-grouplabel">Group:</label>
-      <select id="bulk-dest-group">
-        <option value="">— choose —</option>
-        ${getAvailableGroups().map(g => `<option value="${g}">${g}</option>`).join('')}
-      </select>
-      <button id="btn-assign-to-group" class="primary">Add</button>
-      <button id="btn-remove-from-group" class="danger">Remove</button>
-      <button id="btn-clear-selection" class="secondary">Clear</button>
-    </div>
-  </div>
-</div>
-
-<div id="player-edit-modal" class="popup-overlay" style="display:none;" aria-hidden="true">
-  <div class="popup-card card" role="dialog" aria-modal="true" aria-labelledby="player-edit-modal-title">
-    <div class="popup-header">
-      <h3 id="player-edit-modal-title">Edit Player</h3>
-      <button type="button" class="secondary" data-role="close-popup" data-target="player-edit-modal">Cancel</button>
-    </div>
-    <div class="popup-body" id="player-edit-modal-body"></div>
-  </div>
-</div>
-
-<div id="admin-add-player-modal" class="popup-overlay" style="display:none;" aria-hidden="true">
-  <div class="popup-card card" role="dialog" aria-modal="true" aria-labelledby="admin-add-player-modal-title">
-    <div class="popup-header">
-      <h3 id="admin-add-player-modal-title">Add/Update Player</h3>
-      <button type="button" class="secondary" data-role="close-popup" data-target="admin-add-player-modal">Close</button>
-    </div>
-    <div class="popup-body">
-      <div class="row admin-player-form-row">
-        <input type="text" id="admin-player-name" placeholder="First and last name" autocapitalize="words" autocomplete="off" spellcheck="false" />
-        <input type="number" id="admin-player-skill" placeholder="Skill" step="0.1" />
-        <div class="admin-player-groups-field">
-          <input
-            type="text"
-            id="admin-player-groups"
-            list="admin-player-groups-options"
-            placeholder="Groups (comma separated)"
-            autocomplete="off"
-            spellcheck="false"
-            aria-describedby="admin-player-groups-help"
-          />
-          <datalist id="admin-player-groups-options">
-            ${topFormGroupOptions.map((groupName) => `<option value="${escapeHTML(groupName)}"></option>`).join('')}
-          </datalist>
-          <div id="admin-player-groups-help" class="small admin-player-groups-help">
-            ${escapeHTML(topFormContext.helpText)}
-          </div>
-          <div id="admin-player-groups-preview" class="admin-player-groups-preview">${topFormContext.previewHTML}</div>
-        </div>
-        <button id="btn-save-player" class="admin-player-save-btn">Save</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div id="groupManager" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:12500; padding:12px; overflow:auto;">
-  <div style="max-width:720px; max-height:calc(100dvh - 24px); margin:0 auto; background:var(--card); border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow-md); overflow:hidden; display:flex; flex-direction:column;">
-    <div style="display:flex; align-items:center; padding:12px 16px; background:var(--bg); border-bottom:1px solid var(--border);">
-      <h3 style="margin:0; font-size:18px; font-family:'Sora','Inter',sans-serif;">Manage Groups</h3>
-      <span style="flex:1"></span>
-      <button id="btn-close-group-manager" class="secondary">Close</button>
-    </div>
-
-    <div style="padding:16px; overflow:auto; -webkit-overflow-scrolling:touch;">
-      <!-- add -->
-      <div class="card" style="padding:12px; margin-bottom:12px;">
-        <div class="row">
-          <input type="text" id="gm-new-name" placeholder="New group name" />
-          <button id="gm-add" class="primary">Add Group</button>
-        </div>
-      </div>
-      <!-- list -->
-      <div class="card gm-table-wrap" style="padding:12px;">
-        <table class="table gm-table" style="width:100%;">
-          <thead>
-            <tr><th style="text-align:left;">Group</th><th>Checked In</th><th>Total</th><th style="text-align:left;">Actions</th></tr>
-          </thead>
-          <tbody id="gm-rows"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-</div>
-  `;
-}
 
 // C36 T1: PUBLIC Check In → kiosk "type your name → tap it → checked in" (design LOCKED §38 B).
 // NO skill anywhere (rulebook §AS-1 — public surface): same-name players are disambiguated by
@@ -8781,8 +7304,8 @@ function buildHistoryPageHTML() {
 // The lead: title flush top -> NEEDS YOU (omitted when nothing is pending) -> EVERYTHING rows
 // (Tournament · Pickup days · Players · Teams · Admins), each a flat tappable row with a one-line status
 // sub + chevron. Flat on stone (NO pd-card), pl-sect section labels, mg-* kit, SVG chevrons, plain English.
-// `manageView` ('lead' | area) is a MODULE var (distinct from state.manageView — the legacy tournament-mode
-// sub-view); it survives partialRender so a background sync repaints the current Manage surface, never a full render().
+// `manageView` ('lead' | area) is a MODULE var (the legacy tournament-mode state.manageView is deleted);
+// it survives partialRender so a background sync repaints the current Manage surface, never a full render().
 let manageView = 'lead';  // 'lead' = the needs-you lead; 'pickup'/'pickup-form' (Task 2); 'players' (Task 3); else an area id (placeholder)
 let pickupEditId = null;  // Task 2: the pickup_days row id being edited in 'pickup-form' (null = adding a new day)
 // Task 3 (Players directory, pick R4): the live-search value + Select(bulk) state. All survive the container-
@@ -11695,7 +10218,6 @@ function render() {
   if (!root) return;
   const existingPanel = document.getElementById('tab-' + activeMainTab);
   const savedScrollY = existingPanel ? existingPanel.scrollTop : 0;
-  const interactionSnapshot = captureTransientInteractionState();
 
 
   // C26 item 2: per-surface active-tab memory (set just before activateMainTab below).
@@ -11721,281 +10243,11 @@ function render() {
   const shellHtml = renderPublicShell();
   root.innerHTML = shellHtml.replace(/\n?\]\s*$/, '');
 
-// ---- dropdown menu CSS (keep ONLY this block) ----
-let menuStyle = document.getElementById('menu-css');
-const cssText = `
-/* ---------------- Player card menu styling ---------------- */
 
-.player-card .menu-wrap {
-  position: relative;
-  flex-shrink: 0;
-}
-
-.btn-actions {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-  color: var(--brand-dark, #2563eb);
-  background: var(--accent-soft, #e0e7ff);
-  border: none;
-  border-radius: 8px;
-  width: 38px;
-  height: 38px;
-  min-height: 38px;
-  min-width: 38px;
-  padding: 0;
-  cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  transition: background 0.2s ease, transform 0.1s ease;
-}
-.btn-actions svg { display: block; }
-.btn-actions svg circle { fill: currentColor; }
-.btn-actions:hover {
-  background: color-mix(in oklch, var(--accent-soft, #c7d2fe) 70%, var(--accent) 14%);
-  transform: translateY(-1px);
-}
-
-/* Dropdown box */
-.card-menu {
-  display: none;
-  position: absolute;
-  right: 0;
-  top: calc(100% + 4px);
-  min-width: 150px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  box-shadow: var(--shadow-md);
-  padding: 4px 0;
-  z-index: 1000;
-}
-
-/* Open state */
-.menu-wrap.menu-open .card-menu {
-  display: block;
-}
-
-/* Menu item buttons */
-.menu-item {
-  display: block;
-  width: 100%;
-  padding: 10px 14px;
-  background: transparent;
-  border: none;
-  text-align: left;
-  font-size: 15px;
-  color: var(--ink);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.menu-item:hover {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.menu-item.danger {
-  color: var(--danger);
-  font-weight: 600;
-}
-.menu-item.danger:hover {
-  background: var(--danger-soft);
-  color: var(--danger-dark);
-}
-
-/* Dropdown only jumps above the rest of the UI when it's actually open */
-.menu-wrap.menu-open,
-.menu-wrap.menu-open .card-menu,
-.menu-wrap.menu-open .btn-actions {
-  z-index: 10000;
-}
-.card-menu, .menu-item { pointer-events: auto; }
-/* prevent any ancestor overlay from eating clicks */
-.player-card .menu-wrap { pointer-events: auto; }
-
-/* --- Dropdown 'Delete' should NOT look like a big red button --- */
-.card-menu .menu-item.danger {
-  background: transparent !important;
-  color: var(--danger) !important;
-  font-weight: 600;
-  border-radius: var(--r-sm);
-}
-.card-menu .menu-item.danger:hover {
-  background: var(--danger-soft) !important;
-  color: var(--danger-dark) !important;
-}
-`;
-
-if (!menuStyle) {
-  menuStyle = document.createElement('style');
-  menuStyle.id = 'menu-css';
-  menuStyle.type = 'text/css';
-  document.head.appendChild(menuStyle);
-}
-if (menuStyle.textContent !== cssText) {
-  menuStyle.textContent = cssText;
-}
-
-let editStyle = document.getElementById('edit-css');
-const editCss = `
-/* --- Keep player cards compact, ignore any global min-height --- */
-.players .player-card { min-height: auto !important; }
-.players .player-card .row { min-height: 0 !important; }
-.player-card.is-editing{
-  box-shadow: 0 0 0 2px var(--success-border);
-  background: var(--card);
-}
-.player-card.is-editing .card-actions{
-  display:none;
-}
-
-/* ----- Compact inline edit row (grid) ----- */
-.player-card .edit-row{
-  display:none !important;
-  grid-template-columns: minmax(220px, 1fr) 90px minmax(220px, 1fr) auto; /* name | skill | groups | actions */
-  align-items:start;
-  gap:8px;
-  margin-top:8px;
-  padding:8px;
-  border-radius:var(--r-sm);
-  background:var(--surface-3);            /* subtle background so it reads as an editor */
-  box-shadow: inset 0 0 0 1px var(--border);
-}
-.player-card .edit-row.show{
-  display:grid !important;
-}
-
-/* Inputs: kill any giant/global styles */
-.player-card .edit-row input{
-  box-sizing:border-box;
-  height:36px !important;
-  line-height:1.2;
-  padding:6px 10px;
-  border-radius:6px;
-  border:1px solid var(--border);
-  background:var(--card);
-  max-width:unset;
-  width:100%;
-  appearance:textfield;
-}
-
-/* Per-field sizing still feels right */
-.player-card .edit-row .edit-name{ min-width:220px; }
-.player-card .edit-row .edit-skill{ width:90px; text-align:right; }
-.player-card .edit-row .group-select{ width:100%; }
-.player-card .edit-row .group-btn{
-  width:100%;
-  height:36px !important;
-  border:1px solid var(--border);
-  border-radius:6px;
-  background:var(--card);
-  text-align:left;
-  padding:0 10px;
-  color:var(--ink);
-}
-.player-card .edit-row .group-list{
-  max-height:220px;
-  overflow:auto;
-}
-.player-card .edit-row .group-list .group-item.is-member{
-  font-weight:600;
-}
-.player-card .edit-row .group-list .group-item.is-primary{
-  color:var(--live);
-}
-.player-card .edit-row .group-chips{
-  display:flex;
-  flex-wrap:wrap;
-  gap:6px;
-  margin-top:6px;
-}
-.player-card .edit-row .group-chip{
-  display:inline-flex;
-  align-items:center;
-  gap:4px;
-  border:1px solid var(--border);
-  background:var(--card);
-  border-radius:999px;
-  padding:2px 6px;
-}
-.player-card .edit-row .group-chip.is-primary{
-  border-color:var(--success-border);
-  background:var(--live-soft);
-}
-.player-card .edit-row .group-chip-label{
-  border:none;
-  background:transparent;
-  color:var(--ink);
-  cursor:pointer;
-  font-size:12px;
-  line-height:1.2;
-  padding:0;
-}
-.player-card .edit-row .group-chip-remove{
-  border:none;
-  background:transparent;
-  color:var(--danger);
-  cursor:pointer;
-  font-size:14px;
-  line-height:1;
-  padding:0 2px;
-}
-.player-card .edit-row .group-chip-empty{
-  color:var(--muted);
-}
-
-.player-card .edit-row .edit-actions{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  justify-self:end;
-}
-
-/* Action buttons align with inputs and stay compact */
-.player-card .edit-row .btn-save-edit,
-.player-card .edit-row .btn-cancel-edit{
-  height:36px !important;
-  padding:0 12px;
-  border-radius:6px;
-}
-.player-card .edit-row .btn-cancel-edit{
-  border:1px solid var(--border);
-  background:var(--card);
-  color:var(--ink);
-}
-
-/* Don't let any nested .row inside the edit area expand vertically */
-.player-card .edit-row .row{ min-height:0 !important; }
-@media (max-width:640px){
-  .player-card .edit-row.show{
-    grid-template-columns:1fr;
-  }
-  .player-card .edit-row .edit-actions{
-    justify-self:stretch;
-    width:100%;
-  }
-  .player-card .edit-row .btn-save-edit,
-  .player-card .edit-row .btn-cancel-edit{
-    width:100%;
-  }
-}
-`;
-if (!editStyle) {
-  editStyle = document.createElement('style');
-  editStyle.id = 'edit-css';
-  editStyle.type = 'text/css';
-  document.head.appendChild(editStyle);
-}
-if (editStyle.textContent !== editCss) {
-  editStyle.textContent = editCss;
-}
 
 // at the end of render()
 attachHandlers();
 bindTournamentTabV2();
-bindPlayerRowHandlers();
-bindSelectionHandlers();
-updateBulkBarVisibility();
 // Task 14: these mirror the pre-shell guards above (the old admin shell is gone — all sessions are on the public shell).
 if (['dashboard', 'session', 'teams', 'scores', 'live'].includes(activeMainTab)) activeMainTab = 'home';
 if (activeMainTab === 'manage' && !state.isAdmin) activeMainTab = 'home'; // Manage is admin-only
@@ -12006,8 +10258,6 @@ if (activeMainTab === 'standings') activeMainTab = 'tournament';
 // Wave 1e: reset a stale 'tournament' tab to Home when no tournament is live (else an empty panel + no nav button).
 if (activeMainTab === 'tournament' && !(state.tournaments || []).some((t) => t.registration_open || ['pools', 'bracket', 'completed'].includes(t.status))) activeMainTab = 'home';
 activateMainTab(activeMainTab);
-restoreTransientInteractionState(interactionSnapshot);
-refreshAzStripAvailability();
 void root.offsetHeight;
 const restoredPanel = document.getElementById('tab-' + activeMainTab);
 if (savedScrollY > 0 && restoredPanel) restoredPanel.scrollTop = savedScrollY;
@@ -12037,7 +10287,6 @@ function bindTournamentTabV2() {
           name: val('tv2-name'), pool_count: val('tv2-pools'), net_count: val('tv2-nets'), preset
         });
         state.activeTournamentId = created.id;
-        state.manageView = 'hub';
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-pick-format') {
@@ -12092,28 +10341,6 @@ function bindTournamentTabV2() {
         if (state.selectedFormatId === id) state.selectedFormatId = state.scoringPresets[0] ? state.scoringPresets[0].id : null;
         const picker = document.getElementById('tv2-format-picker');
         if (picker) picker.innerHTML = buildFormatPickerHTML();
-      } else if (role === 'tv2-register-team') {
-        // PUBLIC: a team signs itself up (replaces the Google Form). Errors shown inline in #reg-msg.
-        const fv = (fid) => ((document.getElementById(fid) || {}).value || '').trim();
-        const teamName = fv('reg-team');
-        const teamSize = Number((state.tournaments.find((x) => x.id === state.activeTournamentId) || {}).team_size) || 4;
-        const roster = Array.from({ length: teamSize }, (_, i) => fv('reg-p' + (i + 1))).filter(Boolean);
-        const paid = !!((document.getElementById('reg-paid') || {}).checked);
-        const setMsg = (txt, ok) => { const m = document.getElementById('reg-msg'); if (m) { m.textContent = txt; m.style.color = ok ? 'var(--live, #16a34a)' : 'var(--danger)'; } };
-        if (!teamName) { setMsg('Enter a team name.', false); return; }
-        if (roster.length !== teamSize) { setMsg('Enter all ' + teamSize + ' players.', false); return; } // C68: exactly the format's team size (supersedes NF-3 >=2)
-        el.setAttribute('disabled', 'true'); // in-flight guard (double-tap)
-        try {
-          await tdbRegisterTeam(state.activeTournamentId, teamName, roster, null, paid);
-        } catch (err) {
-          el.removeAttribute('disabled');
-          setMsg((err && err.message) || 'Could not register — try again.', false);
-          return;                   // the INSERT failed → real error
-        }
-        // Registered for real — a refresh/render hiccup must NOT claim it failed.
-        try { await tdbRefreshTournaments(); render(); } catch (_) {} // rebuilds the screen: form clears, team + count update
-        setMsg(teamName + ' is registered — you\'re in!', true);
-        return;                     // handled inline (public has no admin error card)
       } else if (role === 'tv2-toggle-registration') {
         if (!state.isAdmin) return;
         const t = (state.tournaments || []).find((x) => x.id === state.activeTournamentId);
@@ -12163,62 +10390,11 @@ function bindTournamentTabV2() {
         render();
       } else if (role === 'tv2-select-tournament') {
         state.activeTournamentId = id;
-        state.manageView = 'hub';
         await tdbRefreshTournaments();
         render();
       } else if (role === 'tv2-edit-settings') {
         if (!state.isAdmin) return;
         openTournamentSettingsModal(id); // NF-10: edit name/nets/scoring after create (no delete+rebuild)
-      } else if (role === 'tv2-exit-mode') {
-        exitTournamentMode(); // tournament-mode: explicit "Exit tournament view" → back to normal AS
-        return;
-      } else if (role === 'tv2-toggle-addteam') {
-        const f = document.getElementById('tm-addform'); // tournament-mode Manage: expand/collapse the add-team form
-        if (f) { f.hidden = !f.hidden; if (!f.hidden) { const n = document.getElementById('reg-team'); if (n) n.focus(); } }
-        return;
-      } else if (role === 'tv2-edit-roster') {
-        if (!state.isAdmin) return; // tournament-mode Manage: edit a team's players in a per-player modal
-        openEditRosterModal(id);
-        return;
-      } else if (role === 'tv2-manage-nav') {
-        state.manageView = el.getAttribute('data-view') || 'hub'; // Manage hub → open a sub-page
-        render();
-        return;
-      } else if (role === 'tv2-manage-back') {
-        state.manageView = 'hub'; // sub-page → back to the Manage hub
-        render();
-        return;
-      } else if (role === 'tv2-save-settings-page') {
-        if (!state.isAdmin) return; // Settings page (NF-10 as a page, not a modal): save then back to hub
-        const g = (i) => document.getElementById(i) || {};
-        const name = (g('ts-name').value || '').trim();
-        const nets = parseInt(g('ts-nets').value, 10);
-        const pt = parseInt(g('ts-pt').value, 10);
-        const pcRaw = (g('ts-pc').value || '').trim();
-        const pc = pcRaw === '' ? null : parseInt(pcRaw, 10);
-        const bt = parseInt(g('ts-bt').value, 10);
-        const wb2 = !!g('ts-wb2').checked;
-        const errEl = document.getElementById('ts-err');
-        const fail = (m) => { if (errEl) { errEl.textContent = m; errEl.hidden = false; } };
-        if (!name) return fail('Name is required.');
-        if (!(nets >= 1) || !(pt >= 1) || !(bt >= 1)) return fail('Nets, pool target, and bracket target must each be at least 1.');
-        if (pc != null && pc < pt) return fail('Pool cap cannot be less than the pool target.');
-        const tBefore = (state.tournaments || []).find((x) => x.id === id);
-        const oldNets = tBefore ? Number(tBefore.net_count) : null;
-        // Data-integrity (2026-06-30): a net-count change during pools OR bracket re-nets the matches ATOMICALLY
-        // (migration 0031) so net_count + matches.net never drift. Compute the new assignments client-side (same
-        // pure scheme as draw/generate), apply net_count + all match nets in ONE transaction, then the other
-        // fields. No change / setup phase -> a plain field write incl. net_count. Shared with the Edit modal.
-        if (tBefore && nets !== oldNets && (tBefore.status === 'pools' || tBefore.status === 'bracket')) {
-          const fresh = await tdbListMatches(id);
-          await tdbApplyNetCountChange(id, nets, computeNetAssignments(tBefore.status, state.tournamentPools, fresh, nets));
-          await tdbSetTournamentFields(id, { name, pool_target: pt, pool_cap: pc, bracket_target: bt, match_cap: bt, win_by_2: wb2 });
-        } else {
-          await tdbSetTournamentFields(id, { name, net_count: nets, pool_target: pt, pool_cap: pc, bracket_target: bt, match_cap: bt, win_by_2: wb2 });
-        }
-        await tdbRefreshTournaments();
-        state.manageView = 'hub';
-        render();
       } else if (role === 'tv2-back') {
         state.activeTournamentId = null;
         state.tournamentTeams = [];
@@ -12240,34 +10416,6 @@ function bindTournamentTabV2() {
         await tdbAddTeam(state.activeTournamentId, teamName);
         await tdbRefreshTournaments();
         render();
-      } else if (role === 'tv2-add-mode') {
-        // Manage>Teams add card: switch Quick (name only) <-> Full roster WITHOUT a re-render (keeps the
-        // typed name); the roster grid's visibility + the submit button's role follow the mode.
-        const mode = el.getAttribute('data-mode');
-        const card = document.getElementById('tm-addcard');
-        if (card) {
-          card.classList.toggle('is-quick', mode === 'quick');
-          card.querySelectorAll('[data-role="tv2-add-mode"]').forEach((b) => b.classList.toggle('is-on', b.getAttribute('data-mode') === mode));
-          const submit = card.querySelector('.tm-add-submit');
-          if (submit) submit.setAttribute('data-role', mode === 'quick' ? 'tv2-quick-add-team' : 'tv2-register-team');
-        }
-        return;
-      } else if (role === 'tv2-quick-add-team') {
-        // Name-only quick-add (audit #3 day-of friction): a team with just a name (+ optional paid), reusing
-        // tdbAddTeam; players can be filled in later via Edit roster. Admin-only; separate from the shared
-        // (public) tv2-register-team so the public self-registration keeps its full-roster requirement.
-        if (!state.isAdmin) return;
-        const name = ((document.getElementById('reg-team') || {}).value || '').trim();
-        const paid = !!((document.getElementById('reg-paid') || {}).checked);
-        const setMsg = (txt, ok) => { const m = document.getElementById('reg-msg'); if (m) { m.textContent = txt; m.style.color = ok ? 'var(--live, #16a34a)' : 'var(--danger)'; } };
-        if (!name) { setMsg('Enter a team name.', false); return; }
-        if ((state.tournamentTeams || []).some((t) => normalize(t.name) === normalize(name))) { setMsg('A team named "' + name + '" is already in.', false); return; }
-        el.setAttribute('disabled', 'true'); // in-flight guard (double-tap)
-        let team;
-        try { team = await tdbAddTeam(state.activeTournamentId, name); if (paid && team) await tdbSetTeamPaid(team.id, true); }
-        catch (err) { el.removeAttribute('disabled'); setMsg((err && err.message) || 'Could not add — try again.', false); return; }
-        try { await tdbRefreshTournaments(); render(); } catch (_) {} // rebuilds the page: form clears, team + count update
-        return;
       } else if (role === 'tv2-delete-team') {
         const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
         if (t && t.status !== 'setup') throw new Error('Teams are locked once pool play starts.');
@@ -12302,30 +10450,6 @@ function bindTournamentTabV2() {
         delete _autoGenPrompted[t.id]; // re-arm the auto-generate prompt for the re-played pools
         await tdbDrawPools(t);
         await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-reset-bracket') {
-        // #6: clear the bracket and go back to pools (pool games + scores kept) so the admin can re-generate.
-        if (!state.isAdmin) return;
-        if (!(await appConfirm({ title: 'Reset bracket', message: 'Clear the bracket and go back to pools? Pool games and scores are kept — you can re-generate the bracket.', confirmText: 'Reset bracket', danger: true }))) return;
-        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
-        await tdbResetBracket(t);
-        delete _autoGenPrompted[t.id]; // re-arm the auto-generate prompt (pools are already final)
-        state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null;
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-seed-up' || role === 'tv2-seed-down') {
-        // #7 seed override (transient): nudge a team up/down one seed in the pre-generate seeding list.
-        if (!state.isAdmin) return;
-        const order = currentSeedOrder();
-        const i = order.indexOf(id);
-        const j = role === 'tv2-seed-up' ? i - 1 : i + 1;
-        if (i < 0 || j < 0 || j >= order.length) return;
-        const tmp = order[i]; order[i] = order[j]; order[j] = tmp;
-        state.seedOverride = { id: state.activeTournamentId, order };
-        render();
-      } else if (role === 'tv2-seed-reset') {
-        if (!state.isAdmin) return;
-        state.seedOverride = null; // back to the computed seeding
         render();
       } else if (role === 'tv2-generate-bracket') {
         const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
@@ -12376,7 +10500,7 @@ function bindTournamentTabV2() {
 
   // Selects fire 'change', not 'click' — handle team-move + team-pick here.
   document.addEventListener('change', async (e) => {
-    const el = e.target.closest('[data-role="tv2-move-team"], [data-role="tv2-pick-team"]');
+    const el = e.target.closest('[data-role="tv2-move-team"]');
     if (!el) return;
     const role = el.getAttribute('data-role');
     try {
@@ -12384,9 +10508,6 @@ function bindTournamentTabV2() {
       if (role === 'tv2-move-team') {
         await tdbMoveTeamToPool(el.getAttribute('data-id'), el.value);
         await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-pick-team') {
-        state.tournamentPickedTeamId = el.value || null;
         render();
       }
     } catch (err) {
@@ -12450,25 +10571,10 @@ function activateMainTab(tab) {
     else b.removeAttribute('aria-current');
   });
   window.dispatchEvent(new Event('as-tab-changed')); // C25 item 5: refresh back-to-top visibility for the new panel
-  // C32 #9: fit the bracket tree when switching into a tab that shows one — the public/admin Bracket tab,
-  // the tournament-mode Live tab, and the Manage > Bracket preview (the real tree, teamless, pre-pools).
-  if (tab === 'tournament' || tab === 'live' || (tab === 'manage' && state.manageView === 'bracket')) layoutBracketTree();
+  // C32 #9: fit the bracket tree when switching into the tab that shows one — the public/admin Tournament tab.
+  if (tab === 'tournament') layoutBracketTree();
 }
 
-// Tournament MODE enter/exit (Mike, 2026-06-27). Entering swaps the bottom nav (Home·Manage·Live·Co-pilot)
-// and lands on Manage; exiting (Home or the explicit "Exit tournament view") returns to the normal admin
-// shell + nav. render() rebuilds the shell with the right nav + panels, then re-activates the tab.
-function enterTournamentMode() {
-  state.tournamentMode = true;
-  state.manageView = 'hub';  // always land on the hub
-  render();                  // rebuild the shell first (creates the Manage/Live panels + swaps the nav)
-  activateMainTab('manage'); // then show Manage (render re-derives the tab from storage, so set it after)
-}
-function exitTournamentMode() {
-  state.tournamentMode = false;
-  render();
-  activateMainTab('dashboard');
-}
 
 // NF-13: count the "Won" results recorded in the current casual round. A re-roll (Generate / a team-size
 // button) rebuilds the teams + court order and clears liveMatchResults — so if any result is recorded we
@@ -12497,7 +10603,6 @@ function attachHandlers() {
       if (!btn) return;
       const tab = btn.dataset.navTab;
       if (copilotOpen) { copilotOpen = false; document.body.classList.remove('copilot-open'); } // Task 12: leaving via the nav closes the co-pilot chat (activateMainTab re-toggles the class off)
-      if (state.tournamentMode && tab === 'dashboard') { exitTournamentMode(); return; } // Home exits tournament mode
       activateMainTab(tab);
     });
   }
@@ -12549,17 +10654,6 @@ function attachHandlers() {
       // Tournament atom-up (spec 2026-07-10 §1): the signed-out gate's "Sign in" CTA + "Create an account"
       // link both open the existing auth page (its create toggle handles the new-account path).
       if (e.target.closest('[data-role="tn-signin"]')) { openAuthPage(); return; }
-      // C26 item 3b: Dashboard quick-actions wire to existing affordances (Tournament + Session
-      // left the nav but their panels remain, reachable here).
-      const qa = e.target.closest('[data-qa]');
-      if (qa) {
-        const a = qa.dataset.qa;
-        if (a === 'checkin') openQrModal();
-        else if (a === 'generate') activateMainTab('teams');
-        else if (a === 'tournament') enterTournamentMode();
-        else if (a === 'session') activateMainTab('session');
-        return;
-      }
       // Slice 1 (spec §13.2): tap-a-team peek — open on any tapped team name. Read-only, account-free;
       // opens on the Pools page AND the Home live board. Checked before nav so a tap on a team name never
       // falls through to navigation. (The peek's own X is bound in openTeamPeek — it lives on document.body.)
@@ -12802,17 +10896,6 @@ function attachHandlers() {
       if (navBtn) activateMainTab(navBtn.dataset.navTab);
     });
   }
-  // --- Admin Players panel handlers ---
-  // C48.3 (perf): the players-panel handlers (group filter, add-player form + save, the modal
-  // close/overlay handlers, Group Manager, filter chips/select, search, skill sub-tab, select-all,
-  // bulk bar) are extracted into bindPlayersPanelHandlers() so renderPlayersPanel() (a scoped
-  // re-render of just #tab-players) can re-bind exactly them — without re-calling attachHandlers()
-  // wholesale (which would DOUBLE-BIND the bottom nav, login/logout, kiosk, team-gen, etc., none of
-  // which are guarded against re-binding). attachHandlers() runs this once per full render against a
-  // fresh DOM; renderPlayersPanel() runs it against the freshly-rebuilt panel — neither double-binds,
-  // because the previous panel elements (and their listeners) are discarded by the innerHTML swap.
-  bindPlayersPanelHandlers();
-
   // C46 cleanup: the admin "Menu" dropdown (#admin-quick-open) was removed in C40 (Add = the + button,
 // Show QR = the Dashboard tile, Check-in = the roster search + tap toggle — all duplicated). Its change
 // handler is removed here as a dead orphan.
@@ -13313,779 +11396,6 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
   }
 }
 
-// C48.3 (perf): players-panel handlers extracted from attachHandlers() so the scoped
-// renderPlayersPanel() can re-bind EXACTLY these after rebuilding only #tab-players, instead of
-// re-running attachHandlers() (which would double-bind the bottom nav, login/logout, kiosk,
-// team-gen, session, QR-modal handlers — none of which are idempotent). Called once per full
-// render() by attachHandlers(), and once per scoped re-render by renderPlayersPanel(); each call
-// binds to freshly-built panel elements, so there is no double-bind (the prior panel nodes and
-// their listeners are discarded by the innerHTML swap). Every block below is MOVED VERBATIM from
-// attachHandlers() — same querySelectors, same closures, same behavior. The only call-site change
-// is sites 1-3 (group filter, filter chips, #player-tab-select) now invoke renderPlayersPanel()
-// instead of render(); the rendered output is byte-identical.
-function bindPlayersPanelHandlers() {
-  // --- Group controls (Admin Players) ---
-const groupSelect = document.getElementById('group-filter-select');
-if (groupSelect) {
-  groupSelect.addEventListener('change', () => {
-    state.activeGroup = normalizeActiveGroupSelection(groupSelect.value || 'All');
-    saveLocal();
-    renderPlayersPanel();
-  });
-}
-
-const adminNameInput = document.getElementById('admin-player-name');
-const adminGroupsInput = document.getElementById('admin-player-groups');
-const adminGroupsHelp = document.getElementById('admin-player-groups-help');
-const adminGroupsPreview = document.getElementById('admin-player-groups-preview');
-if (adminGroupsInput && adminGroupsPreview) {
-  const syncTopFormGroupContext = () => {
-    const mode = renderTopFormGroupsHelpAndPreview(adminNameInput?.value || '', adminGroupsInput.value || '');
-    adminGroupsPreview.innerHTML = mode.previewHTML;
-    if (adminGroupsHelp) adminGroupsHelp.textContent = mode.helpText;
-  };
-  adminGroupsInput.addEventListener('input', syncTopFormGroupContext);
-  if (adminNameInput) adminNameInput.addEventListener('input', syncTopFormGroupContext);
-  adminGroupsInput.addEventListener('blur', () => {
-    const normalized = parseAdminGroupsInput(adminGroupsInput.value || '');
-    adminGroupsInput.value = normalized.join(', ');
-    syncTopFormGroupContext();
-  });
-  syncTopFormGroupContext();
-}
-
-const openPopup = (popupId) => {
-  const popup = document.getElementById(popupId);
-  if (!popup) return;
-  popup.style.display = 'flex';
-  popup.setAttribute('aria-hidden', 'false');
-  document.body.style.overflow = 'hidden'; // lock background scroll so the page doesn't scroll under the modal on iOS
-};
-const closePopup = (popupId) => {
-  const popup = document.getElementById(popupId);
-  if (!popup) return;
-  popup.style.display = 'none';
-  popup.setAttribute('aria-hidden', 'true');
-  document.body.style.overflow = '';
-};
-void openPopup; // retained verbatim from attachHandlers (defined-but-unused there too; closePopup is the live one)
-
-document.querySelectorAll('[data-role="close-popup"]').forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const popupId = String(btn.getAttribute('data-target') || '').trim();
-    if (!popupId) return;
-    closePopup(popupId);
-  });
-});
-
-document.querySelectorAll('.popup-overlay').forEach((popup) => {
-  popup.addEventListener('click', (e) => {
-    if (e.target !== popup) return;
-    closePopup(popup.id);
-  });
-});
-
-// ----- Group Manager (master admin) -----
-const gmOpen  = document.getElementById('btn-open-group-manager');
-const gmRoot  = document.getElementById('groupManager');
-
-function gmPopulate() {
-  if (!gmRoot) return;
-
-  // Build a canonical group list (exclude "All")
-  const known = [
-    ...(state.groups || []).filter((groupName) => groupName && groupName !== 'All')
-  ];
-  // Include any groups that might exist on players but not in state.groups
-  state.players.forEach(p => {
-    known.push(...getPlayerGroups(p));
-  });
-  const list = normalizeGroupList(known).sort((a,b)=>a.localeCompare(b));
-
-  // Fill rows with counts + actions
-  const byGroup = computeCheckedInByGroup();
-  const totals = Object.fromEntries(byGroup.map(r => [r.groupKey, r.total]));
-  const ins    = Object.fromEntries(byGroup.map(r => [r.groupKey, r.in]));
-
-  const rowsEl = gmRoot.querySelector('#gm-rows');
-  if (rowsEl) {
-    rowsEl.innerHTML = list.map(g => `
-      <tr data-group="${g}">
-        <td style="overflow-wrap:anywhere;"><strong>${g}</strong></td>
-        <td style="text-align:center; white-space:nowrap;">${ins[g] || 0}</td>
-        <td style="text-align:center; white-space:nowrap;">${totals[g] || 0}</td>
-        <td>
-          <div class="row gm-actions-row" style="gap:6px; justify-content:flex-start; flex-wrap:wrap;">
-            <button class="gm-rename secondary" data-group="${g}">Rename</button>
-            <button class="gm-delete danger" data-group="${g}">Delete</button>
-          </div>
-        </td>
-      </tr>
-    `).join('');
-  }
-}
-
-if (gmOpen && gmRoot) {
-  const closeGroupManager = () => { gmRoot.style.display = 'none'; document.body.style.overflow = ''; };
-  gmOpen.addEventListener('click', () => {
-    gmPopulate();
-    gmRoot.style.display = 'block';
-    document.body.style.overflow = 'hidden'; // lock background scroll on iOS
-  });
-  const gmClose = gmRoot.querySelector('#btn-close-group-manager');
-  if (gmClose) gmClose.addEventListener('click', closeGroupManager);
-  // Tap the dark backdrop (the overlay itself) to close, matching the other modals
-  gmRoot.addEventListener('click', (e) => { if (e.target === gmRoot) closeGroupManager(); });
-
-  // Add
-  const gmAdd = gmRoot.querySelector('#gm-add');
-  if (gmAdd) gmAdd.addEventListener('click', () => {
-    const input = gmRoot.querySelector('#gm-new-name');
-    const name  = normalizeGroupName(input && input.value || '');
-    if (!name) return;
-    state.groups = ['All', ...normalizeGroupList([...(state.groups || []).filter((groupName) => groupName && groupName !== 'All'), name])];
-    state.activeGroup = name;
-    saveLocal();
-    render();
-    gmPopulate();
-    if (supabaseClient) {
-      (async () => {
-        try {
-          const synced = await ensureGroupCatalogEntrySupabase(name);
-          if (synced) queueSupabaseRefresh();
-          else await reconcileToSupabaseAuthority('group-add');
-        } catch (err) {
-          console.error('Supabase group add error', err);
-          await reconcileToSupabaseAuthority('group-add');
-        }
-      })();
-    }
-    if (input) input.value = '';
-  });
-
-  // Row actions (rename/delete)
-  gmRoot.addEventListener('click', async (e) => {
-    const renameBtn = e.target.closest('.gm-rename');
-    const deleteBtn = e.target.closest('.gm-delete');
-
-    // Rename
-    if (renameBtn) {
-      const oldName = normalizeGroupName(renameBtn.getAttribute('data-group'));
-      if (!oldName) return;
-      const requestedName = prompt(`Rename "${oldName}" to:`, oldName);
-      const newName = normalizeGroupName(requestedName);
-      if (!newName) return;
-      const oldKey = normalizeGroupKey(oldName);
-      if (normalizeGroupKey(newName) === oldKey && newName === oldName) return;
-
-      state.groups = ['All', ...normalizeGroupList(
-        (state.groups || [])
-          .filter((groupName) => groupName && groupName !== 'All')
-          .map((groupName) => (normalizeGroupKey(groupName) === oldKey ? newName : groupName))
-      )];
-      state.players = state.players.map((player) => {
-        const memberships = getPlayerGroups(player);
-        if (!memberships.some((group) => normalizeGroupKey(group) === oldKey)) return player;
-        const nextGroups = normalizeGroupList(memberships.map((group) => (normalizeGroupKey(group) === oldKey ? newName : group)));
-        return { ...player, group: nextGroups[0] || '', groups: nextGroups };
-      });
-      if (normalizeGroupKey(state.activeGroup || '') === oldKey) state.activeGroup = newName;
-
-      let renameRemoteFailed = false;
-      try {
-        await renameGroupCatalogEntrySupabase(oldName, newName);
-        const updates = state.players
-          .filter((player) => player.id && playerBelongsToGroup(player, newName))
-          .map((player) => ({
-            id: player.id,
-            group: getPlayerPrimaryGroup(player),
-            groups: getPlayerGroups(player)
-          }));
-        for (const update of updates) {
-          const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
-          if (!ok) renameRemoteFailed = true;
-        }
-        const synced = await syncFromSupabase();
-        if (!synced) renameRemoteFailed = true;
-      } catch (e) {
-        renameRemoteFailed = true;
-        console.error('Supabase rename error', e);
-      }
-      if (renameRemoteFailed) {
-        await reconcileToSupabaseAuthority('group-rename');
-        gmPopulate();
-        return;
-      }
-
-      saveLocal();
-      render();
-      gmPopulate();
-      return;
-    }
-
-    // Delete
-    if (deleteBtn) {
-      const name = normalizeGroupName(deleteBtn.getAttribute('data-group'));
-      if (!name) return;
-      const confirmed = confirmDangerousActionOrAbort({
-        title: `Delete group "${name}"?`,
-        detail: 'This removes the group from all players and cannot be auto-undone.',
-        confirmText: name
-      });
-      if (!confirmed) return;
-      const targetKey = normalizeGroupKey(name);
-
-      state.groups = ['All', ...normalizeGroupList(
-        (state.groups || []).filter((groupName) => groupName && groupName !== 'All' && normalizeGroupKey(groupName) !== targetKey)
-      )];
-      state.players = state.players.map((player) => {
-        const memberships = getPlayerGroups(player);
-        if (!memberships.some((group) => normalizeGroupKey(group) === targetKey)) return player;
-        const nextGroups = memberships.filter((group) => normalizeGroupKey(group) !== targetKey);
-        return { ...player, group: nextGroups[0] || '', groups: nextGroups };
-      });
-      if (normalizeGroupKey(state.activeGroup || '') === targetKey) state.activeGroup = 'All';
-      enforceCanonicalGroupState({
-        catalogGroups: (state.groups || []).filter((groupName) => groupName && groupName !== 'All'),
-        includeExistingGroupsWhenNoCatalog: false
-      });
-      persistCanonicalGroupCache();
-
-      let deleteRemoteFailed = false;
-      try {
-        await deleteGroupCatalogEntrySupabase(name);
-        const updates = state.players
-          .filter((player) => player.id)
-          .map((player) => ({
-            id: player.id,
-            group: getPlayerPrimaryGroup(player),
-            groups: getPlayerGroups(player)
-          }));
-        for (const update of updates) {
-          const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
-          if (!ok) deleteRemoteFailed = true;
-        }
-        const synced = await syncFromSupabase();
-        if (!synced) deleteRemoteFailed = true;
-      } catch (e) {
-        deleteRemoteFailed = true;
-        console.error('Supabase delete group error', e);
-      }
-      if (deleteRemoteFailed) {
-        await reconcileToSupabaseAuthority('group-delete');
-        recordOperatorAction({
-          scope: 'players',
-          action: 'delete-group-failed',
-          entityType: 'group',
-          entityId: targetKey,
-          title: `Delete failed for group "${name}".`,
-          detail: 'Supabase write failed. Latest shared state was restored.',
-          tone: 'error'
-        });
-        gmPopulate();
-        return;
-      }
-
-      saveLocal();
-      render();
-      gmPopulate();
-      recordOperatorAction({
-        scope: 'players',
-        action: 'delete-group',
-        entityType: 'group',
-        entityId: targetKey,
-        title: `Deleted group "${name}".`,
-        detail: 'Group membership was removed from affected players.',
-        tone: 'warning'
-      });
-    }
-  });
-}
-
-  // --- Admin: Save player (add/update) ---
-  const savePlayerBtn = document.getElementById('btn-save-player');
-  if (savePlayerBtn) {
-    savePlayerBtn.addEventListener('click', async () => {
-      const nameInput = document.getElementById('admin-player-name');
-      const skillInput = document.getElementById('admin-player-skill');
-      const groupsInput = document.getElementById('admin-player-groups');
-      const name = (nameInput && nameInput.value || '').trim();
-      let skill = parseFloat(skillInput && skillInput.value || '');
-      const requestedGroups = parseAdminGroupsInput(groupsInput && groupsInput.value || '');
-      const applyTopFormGroupRules = (groups, fallbackPrimary = '') => {
-        const fallback = normalizeGroupName(fallbackPrimary);
-        let next = normalizeGroupList(groups);
-        if (!next.length && fallback) next = [fallback];
-        return next;
-      };
-      if (Number.isNaN(skill)) skill = 0; // treat empty input as 0
-      if (!name || skill < 0) return;
-
-      const idx = state.players.findIndex((p) => normalize(p.name) === normalize(name));
-      const isNew = idx === -1;
-      // C47: a NEW player must have a real first AND last name (mix-up prevention). Updating an
-      // existing player is exempt, so a legacy single-name entry can still be fixed/renamed.
-      if (isNew && !isValidFullName(name)) {
-        const t = makeSaveToast('Enter a first and last name');
-        if (t) setTimeout(() => { try { t.remove(); } catch {} }, 1800);
-        if (nameInput) nameInput.focus();
-        return;
-      }
-
-      // Honest save status (created before the branch, settled when the write resolves).
-      const addOkText = isNew ? 'Player added' : 'Player updated';
-      const addToast = makeSaveToast(supabaseClient ? 'Saving…' : addOkText);
-      if (!supabaseClient && addToast) setTimeout(() => { try { addToast.remove(); } catch {} }, 1200);
-
-      if (idx !== -1) {
-        // update existing
-        const updated = state.players.slice();
-        const previous = updated[idx];
-        const nextGroups = applyTopFormGroupRules(
-          requestedGroups.length ? requestedGroups : getPlayerGroups(previous)
-        );
-        const nextPrimary = nextGroups[0] || '';
-        updated[idx] = { ...previous, name, skill, group: nextPrimary, groups: nextGroups };
-        state.players = updated;
-
-        if (supabaseClient) {
-          (async () => {
-            let ok = false;
-            try {
-              let remoteOK = false;
-              if (updated[idx].id) {
-                remoteOK = await updatePlayerFieldsSupabase(updated[idx].id, {
-                  name,
-                  skill,
-                  group: nextPrimary,
-                  groups: nextGroups
-                });
-              } else {
-                const encodedGroupsTag = serializePlayerGroupsTag(nextGroups, nextPrimary);
-                try {
-                  const insertRow = HAS_TAG
-                    ? { name, skill, group: nextPrimary, tag: encodedGroupsTag }
-                    : { name, skill, group: nextPrimary };
-                  const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
-                  if (error) throw error;
-                  if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
-                  remoteOK = true;
-                } catch {
-                  try {
-                    const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: nextPrimary }]).select();
-                    if (error) throw error;
-                    if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
-                    remoteOK = true;
-                  } catch {
-                    const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-                    if (error) throw error;
-                    if (Array.isArray(data) && data.length > 0) updated[idx].id = data[0].id;
-                    remoteOK = true;
-                  }
-                }
-              }
-              await ensureGroupCatalogEntriesSupabase(nextGroups);
-              if (remoteOK) { ok = true; queueSupabaseRefresh(); }
-              else await reconcileToSupabaseAuthority('admin-save-player-update');
-            } catch (err) {
-              console.error('Supabase update error', err);
-              await reconcileToSupabaseAuthority('admin-save-player-update');
-            }
-            settleSaveToast(addToast, ok, addOkText);
-          })();
-        }
-      } else {
-        // insert new
-        const activeGroupForInsert = normalizeActiveGroupSelection(state.activeGroup || 'All');
-        const defaultPrimary = (activeGroupForInsert && activeGroupForInsert !== 'All' && activeGroupForInsert !== UNGROUPED_FILTER_VALUE) ? activeGroupForInsert : '';
-        const groups = applyTopFormGroupRules(requestedGroups, defaultPrimary);
-        const group = groups[0] || '';
-        const newPlayer = { name, skill, group, groups };
-        // pending:true survives a racing sync until the insert lands (mergePlayersAfterSync).
-        const inserted = { ...newPlayer, pending: true };
-        state.players = [...state.players, inserted];
-
-        if (supabaseClient) {
-          (async () => {
-            let ok = false;
-            try {
-              let remoteOK = false;
-              const encodedGroupsTag = serializePlayerGroupsTag(groups, group);
-              try {
-                const insertRow = HAS_TAG
-                  ? { name, skill, group, tag: encodedGroupsTag }
-                  : { name, skill, group };
-                const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
-                if (error) throw error;
-                remoteOK = true;
-                if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
-              } catch {
-                try {
-                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-                  if (error) throw error;
-                  remoteOK = true;
-                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
-                } catch {
-                  // 3rd fallback: table has neither 'group' nor 'tag'
-                  const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-                  if (error) throw error;
-                  remoteOK = true;
-                  if (Array.isArray(data) && data.length > 0) inserted.id = data[0].id;
-                }
-              }
-              await ensureGroupCatalogEntriesSupabase(groups);
-              // Reliability (2026-06-24): only clear pending once an id exists, so a no-id insert isn't dropped by the merge.
-              if (inserted.id) inserted.pending = false;
-              if (remoteOK) { ok = true; queueSupabaseRefresh(); }
-              else await reconcileToSupabaseAuthority('admin-save-player-insert');
-            } catch (err) {
-              console.error('Supabase insert error', err);
-              // Reliability (2026-06-24): insert failed (no id) — keep pending=true so the admin's new player survives the merge.
-              if (inserted.id) inserted.pending = false;
-              await reconcileToSupabaseAuthority('admin-save-player-insert');
-            }
-            settleSaveToast(addToast, ok, 'Player added');
-          })();
-        } else {
-          // Offline: no client to clear pending in the async path — clear it here so the
-          // row isn't a permanent "pending" ghost. See reliability check 2026-06-18.
-          inserted.pending = false;
-        }
-      }
-
-      if (nameInput) nameInput.value = '';
-      if (skillInput) skillInput.value = '';
-      if (groupsInput) groupsInput.value = '';
-      saveLocal();
-      // Save-status toast is created before the insert/update branch (addToast) and
-      // settled honestly when the write resolves — no more premature "added/updated".
-      render();
-    });
-  }
-
-  // --- Filters & search ---
-  const tabSelect = document.getElementById('player-tab-select');
-  if (tabSelect) {
-    tabSelect.addEventListener('change', (ev) => {
-      state.playerTab = ev.target.value;
-      sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
-      state.skillSubTab = null;
-      renderPlayersPanel(); // C48.3 (perf): scoped re-render — only #tab-players changes; output identical to render()
-    });
-  }
-
-  // --- Filter chips (drive the SAME state.playerTab as #player-tab-select) ---
-  document.querySelectorAll('[data-chip-tab]').forEach((chipEl) => {
-    chipEl.addEventListener('click', () => {
-      const value = String(chipEl.getAttribute('data-chip-tab') || 'all');
-      if (state.playerTab === value) return;
-      state.playerTab = value;
-      sessionStorage.setItem(LS_TAB_KEY, state.playerTab);
-      state.skillSubTab = null;
-      renderPlayersPanel(); // C48.3 (perf): scoped re-render — only #tab-players changes; output identical to render()
-    });
-  });
-
-  // --- Groups chip: reveal/hide the group filter sub-control (no state change) ---
-  const groupsChip = document.querySelector('[data-chip-groups]');
-  if (groupsChip) {
-    groupsChip.addEventListener('click', () => {
-      const sub = document.getElementById('group-filter-sub');
-      const nextOpen = !groupsChip.classList.contains('on');
-      groupsChip.classList.toggle('on', nextOpen);
-      groupsChip.setAttribute('aria-pressed', String(nextOpen));
-      if (sub) sub.classList.toggle('is-open', nextOpen);
-    });
-  }
-
-  // --- Add (+) in the roster header: opens the Add/Update Player modal ---
-  const rosterAddBtn = document.getElementById('roster-add-player');
-  if (rosterAddBtn) {
-    rosterAddBtn.addEventListener('click', () => {
-      const modal = document.getElementById('admin-add-player-modal');
-      if (!modal) return;
-      modal.style.display = 'flex';
-      modal.setAttribute('aria-hidden', 'false');
-      document.body.style.overflow = 'hidden';
-    });
-  }
-
-  const searchInput = document.getElementById('player-search');
-  const clearBtn = document.getElementById('player-search-clear');
-  if (searchInput) {
-    const rerenderPlayersListPreservingTransientState = () => {
-      const snapshot = captureTransientInteractionState();
-      const container = document.querySelector('.players');
-      if (container) {
-        container.innerHTML = renderFilteredPlayers();
-        bindPlayerRowHandlers();
-        bindSelectionHandlers();
-      }
-      updateBulkBarVisibility();
-      restoreTransientInteractionState(snapshot);
-      refreshAzStripAvailability();
-    };
-
-    const toggleClear = () => {
-      if (clearBtn) clearBtn.style.display = searchInput.value.trim() ? 'inline' : 'none';
-    };
-    searchInput.addEventListener('input', () => {
-      state.searchTerm = searchInput.value;
-      rerenderPlayersListPreservingTransientState();
-      toggleClear();
-    });
-    toggleClear();
-  }
-  if (clearBtn) {
-    clearBtn.addEventListener('click', () => {
-      state.searchTerm = '';
-      const si = document.getElementById('player-search');
-      if (si) { si.value = ''; si.focus(); }
-      const snapshot = captureTransientInteractionState();
-      const container = document.querySelector('.players');
-      if (container) {
-        container.innerHTML = renderFilteredPlayers();
-        bindPlayerRowHandlers();
-        bindSelectionHandlers();
-      }
-      updateBulkBarVisibility();
-      restoreTransientInteractionState(snapshot);
-      refreshAzStripAvailability();
-      clearBtn.style.display = 'none';
-    });
-  }
-
-  const subtabSelect = document.getElementById('skill-subtab-select');
-  if (subtabSelect) {
-    subtabSelect.addEventListener('change', (ev) => {
-      state.skillSubTab = ev.target.value;
-      sessionStorage.setItem(LS_SUBTAB_KEY, state.skillSubTab);
-      renderPlayersPanel(); // C48.3 (perf): scoped re-render — same class of action as the filter chips/select; output identical to render()
-    });
-  }
-
-// --- Select all visible ---
-// --- Select all visible ---
-const selectAllBtn = document.getElementById('btn-select-all-visible');
-if (selectAllBtn) {
-  selectAllBtn.addEventListener('click', () => {
-    const visibleCards = document.querySelectorAll('.players .player-card');
-    const ids = Array.from(visibleCards).map(el => String(el.getAttribute('data-id')));
-
-    state.selectedIds = ids;
-
-    visibleCards.forEach(el => el.classList.add('is-selected'));
-    document.querySelectorAll('.player-select').forEach(cb => { cb.checked = true; });
-
-    updateBulkBarVisibility(); // ✅ show bulk bar with actions
-    document.getElementById('bulkBar')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); // ✅ bring it into view
-  });
-}
-
-// --- Clear selection ---
-const clearSelBtn = document.getElementById('btn-clear-selection');
-if (clearSelBtn) {
-  clearSelBtn.addEventListener('click', () => {
-    state.selectedIds = [];
-    document.querySelectorAll('.player-select').forEach(cb => cb.checked = false);
-    document.querySelectorAll('.player-card').forEach(el => el.classList.remove('is-selected'));
-    updateBulkBarVisibility(); // ✅ hide bar when nothing is selected
-  });
-}
-
-// --- Bulk check in/out ---
-const bulkCheckInBtn = document.getElementById('btn-bulk-checkin');
-const bulkCheckOutBtn = document.getElementById('btn-bulk-checkout');
-const runBulkAttendanceAction = (shouldCheckIn) => {
-  const sel = selectedSet();
-  if (!sel.size) return;
-
-  const idSet = new Set(Array.from(sel).map((id) => String(id)));
-  const targets = state.players.filter((player) => idSet.has(String(player.id)));
-  if (!targets.length) return;
-
-  // Check-OUT is destructive (this is the 44->0 footgun class): confirm with a count + snapshot
-  // the prior checked-in set so it can be undone. Check-IN is non-destructive — no confirm.
-  let priorCheckedIn = null;
-  if (!shouldCheckIn) {
-    if (!window.confirm(`Check out ${targets.length} selected player${targets.length === 1 ? '' : 's'}?`)) return;
-    priorCheckedIn = normalizeCheckedInEntries(state.checkedIn || []);
-  }
-
-  const remoteIds = new Set();
-  targets.forEach((player) => {
-    if (shouldCheckIn) checkInPlayer(player);
-    else checkOutPlayer(player);
-    if (player.id) remoteIds.add(player.id);
-  });
-
-  saveLocal();
-  if (!shouldCheckIn && priorCheckedIn) {
-    // Record an undo (same kind:'checkins' payload reset-checkins uses) then full render() so the
-    // Undo entry appears in the operator-actions log (partialRender doesn't re-render that log).
-    recordOperatorAction({
-      scope: 'players',
-      action: 'bulk-check-out',
-      entityType: 'checkins',
-      entityId: '',
-      title: `Checked out ${targets.length} player${targets.length === 1 ? '' : 's'}.`,
-      detail: 'Bulk check-out. Undo restores the prior checked-in set.',
-      tone: 'warning',
-      undo: { kind: 'checkins', checkedIn: priorCheckedIn }
-    });
-    render();
-  } else {
-    // Check-IN: non-destructive, no undo needed -> partialRender (no full 213-card rebuild).
-    partialRender();
-  }
-
-  if (supabaseClient && remoteIds.size) {
-    (async () => {
-      try {
-        for (const id of remoteIds) {
-          // C21 single-source contract (reliability fix 2026-06-20): route bulk attendance through the
-          // SECURITY DEFINER check_in/check_out RPCs — the ONLY code that also maintains the check_ins
-          // history table. A direct `.update({checked_in})` set the flag but never inserted/deleted the
-          // check_ins row, silently under-counting attendance and leaving orphan rows on bulk check-out.
-          const { error } = await supabaseClient.rpc(shouldCheckIn ? 'check_in' : 'check_out', { p_id: id });
-          if (error) throw error;
-        }
-        queueSupabaseRefresh();
-      } catch (err) {
-        console.error(shouldCheckIn ? 'Supabase bulk check-in error' : 'Supabase bulk check-out error', err);
-        await reconcileToSupabaseAuthority(shouldCheckIn ? 'bulk-check-in' : 'bulk-check-out');
-      }
-    })();
-  }
-};
-if (bulkCheckInBtn) {
-  bulkCheckInBtn.addEventListener('click', () => {
-    runBulkAttendanceAction(true);
-  });
-}
-if (bulkCheckOutBtn) {
-  bulkCheckOutBtn.addEventListener('click', () => {
-    runBulkAttendanceAction(false);
-  });
-}
-
-// --- Assign/move to group ---
-const assignBtn = document.getElementById('btn-assign-to-group');
-if (assignBtn) {
-  assignBtn.addEventListener('click', async () => {
-    const sel = selectedSet();
-    if (!sel.size) return;
-
-    const selEl = document.getElementById('bulk-dest-group');
-    const chosen = normalizeGroupName(selEl ? selEl.value : '');
-    const dest = chosen;
-
-    if (!dest || dest === 'All') return;
-
-    // Ensure group exists in dropdown
-    if (!state.groups.includes(dest)) {
-      state.groups = Array.from(new Set([...state.groups, dest]));
-    }
-
-    // Local update (multi-group aware): add membership and promote to primary.
-    const ids = Array.from(sel);
-    const idSet = new Set(ids.map((id) => String(id)));
-    const remoteUpdates = [];
-
-    state.players = state.players.map((player) => {
-      if (!idSet.has(String(player.id))) return player;
-      const currentGroups = getPlayerGroups(player);
-      const nextGroups = normalizeGroupList([dest, ...currentGroups.filter((group) => group !== dest)]);
-      const nextPrimary = nextGroups[0] || '';
-      const hasSameGroups = currentGroups.length === nextGroups.length &&
-        currentGroups.every((group, index) => group === nextGroups[index]);
-      if (hasSameGroups && getPlayerPrimaryGroup(player) === nextPrimary) return player;
-
-      const nextPlayer = { ...player, group: nextPrimary, groups: nextGroups };
-      if (nextPlayer.id) remoteUpdates.push({ id: nextPlayer.id, group: nextPrimary, groups: nextGroups });
-      return nextPlayer;
-    });
-
-    // Supabase updates (primary group only)
-    let remoteAssignFailed = false;
-    try {
-      const catalogTouched = await ensureGroupCatalogEntriesSupabase([dest]);
-      for (const update of remoteUpdates) {
-        const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
-        if (!ok) remoteAssignFailed = true;
-      }
-      if (remoteUpdates.length || catalogTouched) {
-        const synced = await syncFromSupabase();
-        if (!synced) remoteAssignFailed = true;
-      }
-    } catch (e) {
-      remoteAssignFailed = true;
-      console.error('Supabase bulk assign error', e);
-    }
-    if (remoteAssignFailed) {
-      await reconcileToSupabaseAuthority('bulk-assign-group');
-      return;
-    }
-
-    saveLocal();
-    render();
-  });
-}
-
-// --- Remove from group ---
-const removeBtn = document.getElementById('btn-remove-from-group');
-if (removeBtn) {
-  removeBtn.addEventListener('click', async () => {
-    const sel = selectedSet();
-    if (!sel.size) return;
-
-    const selEl = document.getElementById('bulk-dest-group');
-    const chosen = normalizeGroupName(selEl ? selEl.value : '');
-    const targetGroup = chosen;
-    if (!targetGroup || targetGroup === 'All' || targetGroup === UNGROUPED_FILTER_VALUE) return;
-
-    const ids = Array.from(sel);
-    const idSet = new Set(ids.map((id) => String(id)));
-    const remoteUpdates = [];
-
-    // Local update (multi-group aware): remove only the targeted membership.
-    state.players = state.players.map((player) => {
-      if (!idSet.has(String(player.id))) return player;
-      const currentGroups = getPlayerGroups(player);
-      if (!currentGroups.includes(targetGroup)) return player;
-
-      const nextGroups = currentGroups.filter((group) => group !== targetGroup);
-      const nextPrimary = nextGroups[0] || '';
-      const nextPlayer = { ...player, group: nextPrimary, groups: nextGroups };
-      if (nextPlayer.id) remoteUpdates.push({ id: nextPlayer.id, group: nextPrimary, groups: nextGroups });
-      return nextPlayer;
-    });
-
-    // Supabase updates (primary group only)
-    let remoteRemoveFailed = false;
-    try {
-      for (const update of remoteUpdates) {
-        const ok = await updatePlayerFieldsSupabase(update.id, { group: update.group, groups: update.groups });
-        if (!ok) remoteRemoveFailed = true;
-      }
-      if (remoteUpdates.length) {
-        const synced = await syncFromSupabase();
-        if (!synced) remoteRemoveFailed = true;
-      }
-    } catch (e) {
-      remoteRemoveFailed = true;
-      console.error('Supabase bulk remove group error', e);
-    }
-    if (remoteRemoveFailed) {
-      await reconcileToSupabaseAuthority('bulk-remove-group');
-      return;
-    }
-
-    saveLocal();
-    render();
-  });
-}
-}
 
 // Initialise the app. Called once on page load. It loads stored data,
 // optionally syncs with Supabase, registers the service worker and
