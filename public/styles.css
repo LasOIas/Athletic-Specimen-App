@@ -1931,6 +1931,10 @@ body.pd-public-active .pd-card { background: oklch(0.98 0.004 75 / 0.30); -webki
   opacity: var(--wm-opacity); filter: grayscale(1);
 }
 body.pd-public-active .pd-watermark{ display: block; }
+/* The admin Manage tab is a dense working console — the public branding watermark bleeds
+   through its forms and reads as broken (Mike 2026-07-12). Hide it while Manage is the
+   active tab; every public-facing tab keeps it. */
+body.pd-public-active:has(#tab-manage.active) .pd-watermark{ display: none; }
 .pd-wordmark { display: flex; flex-direction: column; gap: 2px; }
 .pd-wm-1 { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15px; letter-spacing: .13em; color: var(--ink); line-height: 1; }
 .pd-wm-2 { font-weight: 600; font-size: 9px; letter-spacing: .30em; color: var(--accent); line-height: 1; } /* Mike 2026-07-10: COLORADO in the app blue */
@@ -2311,8 +2315,10 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgt-stage { font-size: 12.5px; color: var(--muted); margin: -2px 0 6px 41px; }
 .mgt-stage + .mg-row { border-top: none; }
 .mgt-on { color: var(--live-ink); font-weight: 600; }
-.mgr-ann { display: block; width: 100%; margin-top: 6px; border: 1.5px solid var(--accent-bd); border-radius: 12px; background: var(--card); padding: 13px; font: 400 16px/1.5 'Inter', sans-serif; color: var(--ink); resize: vertical; min-height: 96px; }
-.mgr-ann:focus { outline: none; border-color: var(--accent); }
+/* §38 pick C (2026-07-12): the announcement is a clean read block (tap anywhere → the full-screen editor)
+   with a quiet Edit affordance, not an inline textarea. Plain text, line breaks preserved. */
+.mgr-annview { margin-top: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); padding: 13px 14px; font: 400 15px/1.5 'Inter', sans-serif; color: var(--ink); white-space: pre-wrap; cursor: text; }
+.mgr-annedit { display: block; margin: 8px 0 0 auto; background: transparent; border: none; color: var(--accent); font: 600 13.5px 'Inter', sans-serif; padding: 4px 2px; cursor: pointer; }
 .mgr-cta { display: block; width: 100%; margin-top: 10px; padding: 14px; border: none; border-radius: 11px; background: var(--accent); color: #fff; font: 700 15px 'Inter', sans-serif; text-align: center; cursor: pointer; }
 .mgr-status { font-size: 12.5px; color: var(--live-ink); text-align: center; margin-top: 6px; min-height: 1em; }
 .mgr-tog { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-top: 1px solid var(--border); }
@@ -2331,9 +2337,29 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mges-half > .pk-fld { flex: 1; min-width: 0; }
 .mges-swfield { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 2px 4px; }
 .mges-swfield .pk-fl { flex: 1; }
-.mgru-ta { display: block; width: 100%; margin-top: 6px; border: 1.5px solid var(--accent-bd); border-radius: 12px; background: var(--card); padding: 13px; font: 400 15px/1.6 'Inter', sans-serif; color: var(--ink); resize: vertical; min-height: 300px; }
-.mgru-ta:focus { outline: none; border-color: var(--accent); }
-.mgru-note { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; }
+/* §38 pick C (2026-07-12): the Rules sheet VIEW is the public render (rulesToHTML → .rl-body) flat on stone,
+   tappable anywhere to edit; the header Edit affordance mirrors the announcement's. */
+.pd-hdr-edit { margin-left: auto; flex: none; background: transparent; border: none; color: var(--accent); font: 600 14.5px 'Inter', sans-serif; padding: 6px 4px; cursor: pointer; }
+.mgru-view { cursor: text; }
+.mgru-empty { padding: 24px 4px; cursor: text; }
+.mgru-empty-h { font: 700 16px var(--font-display); color: var(--ink); }
+.mgru-empty-s { font-size: 13.5px; color: var(--muted); line-height: 1.5; margin-top: 5px; }
+
+/* The full-screen editor (§38 pick C) — body-appended, mirrors .auth-page. Distraction-free writing surface
+   with its own Cancel/Save bar; opaque stone covers the watermark + bottom nav. §51 matte, no glow. */
+.mged-page { position: fixed; inset: 0; z-index: 1000; background: var(--bg); color: var(--ink); display: flex; flex-direction: column; }
+.mged-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px; border-bottom: 1px solid var(--border); }
+.mged-title { font: 700 13px/1 var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.mged-cancel { background: transparent; border: none; color: var(--muted); font: 500 15px 'Inter', sans-serif; padding: 6px 4px; cursor: pointer; }
+.mged-save { background: transparent; border: none; color: var(--accent); font: 700 15px 'Inter', sans-serif; padding: 6px 4px; cursor: pointer; }
+.mged-save:disabled { color: var(--faint); }
+.mged-body { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 14px 18px calc(env(safe-area-inset-bottom, 0px) + 18px); overflow-y: auto; }
+/* Borderless writing surface — override the app-global input border/radius/focus-ring so it's "just the text". */
+.mged-ta, .mged-ta:focus { flex: 1; width: 100%; border: none; border-radius: 0; background: transparent; resize: none; outline: none; box-shadow: none; color: var(--ink); font: 400 16px/1.6 'Inter', sans-serif; padding: 0; min-height: 240px; }
+.mged-hint { font-size: 12px; color: var(--faint); margin-top: 10px; line-height: 1.45; }
+.mged-status { font-size: 13px; color: var(--danger); margin-top: 8px; min-height: 1em; }
+/* §41 desktop: match the admin console's centered column instead of sprawling the writer across the page. */
+@media (min-width: 1024px) { .mged-bar, .mged-body { width: 100%; max-width: 760px; margin-left: auto; margin-right: auto; } }
 
 /* ── Task 6 (session-10 pick R8): Teams & payment list + full-edit team sheet. Flat on stone, mg-row
    grammar; the sheet reuses the body-level .pd-reg-scrim/.pd-reg-sheet chrome (poll-clobber-immune, §41). */

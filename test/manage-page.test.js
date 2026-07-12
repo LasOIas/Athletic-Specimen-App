@@ -724,10 +724,13 @@ describe('buildManageTournamentHTML — the tournament sub-hub (pick R2, mockup 
 });
 
 describe('buildMgRegistrationHTML — the Registration view (pick R7, mockup r-b)', () => {
-  it('prefills the announcement textarea with the composed default when announcement is null', () => {
+  it('shows the announcement in a tap-to-edit read block with the composed default when announcement is null', () => {
     setTournamentState(setupOpen); // announcement absent
     const html = bridge.buildReg();
-    expect(html).toContain('id="mgr-ann"');
+    // §38 pick C (2026-07-12): the inline textarea is retired for a read block + full-screen editor.
+    expect(html).not.toContain('id="mgr-ann"');
+    expect(html).toContain('class="mgr-annview" data-mgr-edit');
+    expect(html).toContain('data-mgr-edit'); // tap the block (or the Edit link) → openManageEditor('announcement')
     expect(html).toContain('July 2026 — registration is open! $80, 4s co-ed. Register at athletic-specimen.com');
     expect(html).toContain('data-mgt-back');   // back returns to the sub-hub
     expect(html).not.toContain('pd-card');
@@ -1376,30 +1379,30 @@ describe('buildMgSettingsHTML — all-knobs-flat event settings (pick R11, mocku
 });
 
 describe('buildMgRulesHTML — one-sheet rules editor (pick R11b, mockup ru-d)', () => {
-  it('prefills the textarea from tournaments.rules and shows the players-see-it CTA + hint', () => {
+  it('renders rules as the public formatted page (rulesToHTML) with a tap-to-edit affordance, not a textarea', () => {
     setTournamentState({ ...fullKnobT, rules: '## Format\n- 4s co-ed — 1 guy + 1 girl' });
     const html = bridge.buildRules();
     expect(html).toContain('class="pd-htitle">Rules sheet<');
-    expect(html).toContain('id="mgru-ta"');
-    expect(html).toContain('## Format');
-    expect(html).toContain('- 4s co-ed — 1 guy + 1 girl');
-    expect(html).toContain('data-mgru-save');
-    expect(html).toContain('Save — players see it right away');
-    // the hint line teaches the markdown-lite grammar
-    expect(html).toContain('Same text players read on the Rules page');
-    expect(html).toContain('## makes a heading');
-    expect(html).toContain('- makes a bullet');
+    // §38 pick C (2026-07-12): view = the public render (rl-body), no inline textarea/Save CTA.
+    expect(html).not.toContain('id="mgru-ta"');
+    expect(html).not.toContain('data-mgru-save');
+    expect(html).toContain('rl-body mgru-view');    // the public formatter output, flat on stone
+    expect(html).toContain('rl-h');                 // "## Format" → a heading
+    expect(html).toContain('4s co-ed — 1 guy + 1 girl');
+    expect(html).toContain('data-mgru-edit');       // header Edit button AND the whole sheet tap → the editor
+    expect(html).toContain('class="pd-hdr-edit" data-mgru-edit>Edit');
     expect(html).toContain('data-mgt-back');
     expect(html).not.toContain('pd-card');
   });
 
-  it('renders an empty (never "undefined") textarea when rules is unset', () => {
+  it('shows an honest empty state (never "undefined") when rules is unset, still tappable to edit', () => {
     setTournamentState({ ...fullKnobT, rules: null });
     const html = bridge.buildRules();
-    expect(html).toContain('id="mgru-ta"');
+    expect(html).not.toContain('id="mgru-ta"');
     expect(html).not.toContain('undefined');
-    // the empty editor is still savable
-    expect(html).toContain('data-mgru-save');
+    expect(html).toContain('mgru-empty');           // honest admin prompt, not the public "coming soon" stub
+    expect(html).toContain('No rules yet');
+    expect(html).toContain('data-mgru-edit');        // the empty prompt opens the editor too
   });
 
   it('escapes rules content (never injects markup) in the textarea + dirty-guard attribute', () => {
@@ -1413,7 +1416,8 @@ describe('buildMgRulesHTML — one-sheet rules editor (pick R11b, mockup ru-d)',
     setTournamentState({ ...fullKnobT, rules: '## Format' });
     const view = bridge.mgtContainer('rules');
     expect(view).not.toContain('Coming in the next slices.');
-    expect(view).toContain('id="mgru-ta"');
+    expect(view).toContain('mgru-view');       // the real rendered view, not a placeholder
+    expect(view).toContain('data-mgru-edit');
     expect(view).toContain('data-mgt-back');
   });
 });

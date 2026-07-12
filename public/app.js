@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.12.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.12.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7749,9 +7749,11 @@ function buildMgRegistrationHTML() {
     : 'Venmo missing — the pay button says "coming soon"';
   return header
     + `<div class="pl-sect">The announcement</div>`
-    + `<textarea class="mgr-ann" id="mgr-ann" rows="4" data-mgr-initial="${escapeHTMLText(ann)}" aria-label="Registration announcement">${escapeHTML(ann)}</textarea>`
+    // §38 pick C (2026-07-12): a clean read block (tap anywhere to open the full-screen editor) + an explicit
+    // Edit affordance, replacing the inline textarea. Plain text — escape-first, line breaks preserved via CSS.
+    + `<div class="mgr-annview" data-mgr-edit>${escapeHTML(ann)}</div>`
+    + `<button type="button" class="mgr-annedit" data-mgr-edit>Edit</button>`
     + `<button type="button" class="mgr-cta" data-mgr-copy>Copy for GroupMe</button>`
-    + `<p class="mgr-status" id="mgr-ann-status" role="status" aria-live="polite"></p>`
     + `<div class="pl-sect">Controls</div>`
     + `<div class="mgr-tog"><div class="mg-rb"><div class="mg-rn">Registration open</div>`
       + `<div class="mg-rs">${nTeams} team${nTeams === 1 ? '' : 's'} in · ${paid} paid</div></div>`
@@ -7797,20 +7799,21 @@ function mgRegTournament() { return mgActiveTournament(); }
 // rendered/saved (its data-mgr-initial). Extends the Task 2/3 dirty-guard pattern for manageView==='tournament'
 // + mgtView==='registration'.
 function manageRegDirty() {
+  // The announcement now edits in a body-appended overlay (§38 pick C) — immune to partialRender — so this
+  // only guards the still-inline venmo/buy-in/team-size fields against a background repaint while focused.
   const panel = document.getElementById('tab-manage');
   if (!panel) return false;
   const ae = document.activeElement;
   if (ae && panel.contains(ae) && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT')) return true;
-  const ta = document.getElementById('mgr-ann');
-  if (ta && typeof ta.value === 'string' && ta.value !== (ta.getAttribute('data-mgr-initial') || '')) return true;
   return false;
 }
 
 // Copy the CURRENT announcement textarea value to the clipboard (mutating the CTA label as the confirm
 // affordance — the house copy pattern, cf. tv2-share-registration + showCheckinToast's timed restore).
 async function mgrCopyAnnouncement(btn) {
-  const ta = document.getElementById('mgr-ann');
-  const text = ta ? String(ta.value == null ? '' : ta.value) : '';
+  // The announcement is no longer an inline textarea (§38 pick C) — read the live value from the tournament.
+  const t = mgRegTournament();
+  const text = t ? mgAnnouncementValue(t) : '';
   try {
     await navigator.clipboard.writeText(text);
     if (btn) btn.textContent = 'Copied for GroupMe!';
@@ -7836,25 +7839,8 @@ async function mgrToggleRegistration() {
   } catch (err) { console.warn('mgrToggleRegistration', err); }
 }
 
-// Save the announcement on blur — writes tournaments.announcement (0047) only when it actually changed from
-// what we rendered. Tolerant of the column being absent pre-migration (the write throws → friendly status,
-// no crash). Does NOT repaint (blur already left the field; a repaint would rebuild the textarea).
-async function mgrSaveAnnouncement(ta) {
-  const t = mgRegTournament();
-  if (!t || !ta) return;
-  const val = String(ta.value == null ? '' : ta.value);
-  const status = document.getElementById('mgr-ann-status');
-  if (val === (ta.getAttribute('data-mgr-initial') || '')) return; // unchanged → no write
-  try {
-    await tdbSetTournamentFields(t.id, { announcement: val });
-    ta.setAttribute('data-mgr-initial', val);
-    await tdbRefreshTournaments();
-    if (status) status.textContent = 'Saved';
-  } catch (err) {
-    console.warn('mgrSaveAnnouncement', err);
-    if (status) status.textContent = 'Could not save — check the connection and try again.';
-  }
-}
+// (The announcement is saved from the full-screen editor's Save button now — mgEditorSave — not on blur;
+// its old blur-save helper was retired with the inline textarea in §38 pick C, 2026-07-12.)
 
 // Save a venmo/buy-in/team-size field on blur. venmo keeps the EXISTING behavior (store as-typed or null; the
 // public pay button already guards to http(s)-only at render — rf-venmo — so no stricter validation is added,
@@ -7928,23 +7914,29 @@ function buildMgSettingsHTML() {
     + `<p class="mgr-status" id="mges-status" role="status" aria-live="polite"></p>`;
 }
 
-// The Rules sheet editor (mockup ru-d): ONE textarea prefilled from tournaments.rules (the exact markdown-
-// lite text the public Rules page renders through rulesToHTML) + a Save CTA that writes it back so players
-// see it immediately + a quiet Saved status + the grammar hint. Escape-first: the raw text is HTML-escaped
-// into the textarea so it can never inject markup (mirrors mgr-ann). Saved on the explicit CTA (data-mgru-
-// save → mgSaveRules), not on blur — the copy promises the change is live "right away" on that tap.
+// The Rules sheet (§38 pick C, 2026-07-12): VIEW mode renders the rules EXACTLY as the public Rules page
+// (rulesToHTML — the same escape-first formatter), flat on the stone with an Edit affordance in the header;
+// tapping the header Edit OR anywhere on the rendered sheet opens the full-screen editor (openManageEditor).
+// Empty rules → an honest admin prompt (never the public "coming soon" stub). The old inline textarea/Save
+// CTA moved into the body-appended overlay (poll-clobber-immune); mgSaveRules is retired for mgEditorSave.
 function buildMgRulesHTML() {
   const t = mgSettingsTournament();
-  const header = `<div class="pd-pagehdr">`
-    + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
-    + `<div class="pd-htitle">Rules sheet</div></div>`;
-  if (!t) return header + `<div class="pd-empty">No tournament to edit rules for yet.</div>`;
-  const rules = (typeof t.rules === 'string') ? t.rules : '';
-  return header
-    + `<textarea class="mgru-ta" id="mgru-ta" data-mgru-initial="${escapeHTMLText(rules)}" placeholder="## Format&#10;- 4s co-ed — 1 guy + 1 girl on the court&#10;- Pool play to 15, cap 20" aria-label="Rules sheet">${escapeHTML(rules)}</textarea>`
-    + `<button type="button" class="mgr-cta" data-mgru-save>Save — players see it right away</button>`
-    + `<p class="mgr-status" id="mgru-status" role="status" aria-live="polite"></p>`
-    + `<p class="mgru-note">Same text players read on the Rules page · ## makes a heading · - makes a bullet</p>`;
+  const backBtn = `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`;
+  if (!t) {
+    return `<div class="pd-pagehdr">${backBtn}<div class="pd-htitle">Rules sheet</div></div>`
+      + `<div class="pd-empty">No tournament to edit rules for yet.</div>`;
+  }
+  const header = `<div class="pd-pagehdr">${backBtn}`
+    + `<div class="pd-htitle">Rules sheet</div>`
+    + `<button type="button" class="pd-hdr-edit" data-mgru-edit>Edit</button></div>`;
+  const body = rulesToHTML(typeof t.rules === 'string' ? t.rules : '');
+  if (!body) {
+    return header
+      + `<div class="mgru-empty" data-mgru-edit><div class="mgru-empty-h">No rules yet</div>`
+      + `<div class="mgru-empty-s">Tap Edit to write the house rules — players read them on the Rules page the moment you save.</div></div>`;
+  }
+  // The whole rendered sheet is tappable to edit (Mike: "click anywhere and edit it").
+  return header + `<div class="rl-body mgru-view" data-mgru-edit>${body}</div>`;
 }
 
 // True when the Event settings view has an in-progress edit (a focused input in #tab-manage) the background
@@ -7955,14 +7947,10 @@ function manageSettingsDirty() {
   const ae = document.activeElement;
   return !!(ae && panel.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA'));
 }
-// True when the Rules editor is focused OR has unsaved changes (value differs from data-mgru-initial).
+// The Rules view (§38 pick C) is now rendered content with no inline input — editing happens in the
+// body-appended overlay (poll-clobber-immune). Nothing on the panel needs protecting from a background
+// repaint, so this is always false (kept so the partialRender Task-9 guard call site stays intact).
 function manageRulesDirty() {
-  const panel = document.getElementById('tab-manage');
-  if (!panel) return false;
-  const ae = document.activeElement;
-  if (ae && panel.contains(ae) && ae.tagName === 'TEXTAREA') return true;
-  const ta = document.getElementById('mgru-ta');
-  if (ta && typeof ta.value === 'string' && ta.value !== (ta.getAttribute('data-mgru-initial') || '')) return true;
   return false;
 }
 
@@ -8055,20 +8043,74 @@ async function mgToggleSettingsField(field) {
 // Save the Rules sheet on the explicit CTA — writes tournaments.rules so the public Rules page updates
 // immediately, resets the dirty-guard baseline, and shows the quiet Saved status. No repaint (the textarea
 // keeps focus/scroll; a repaint would rebuild it).
-async function mgSaveRules() {
-  const t = mgSettingsTournament();
+// ── Manage full-screen editor (§38 pick C, 2026-07-12) ─────────────────────────────────────────────────
+// Mike: the Rules sheet + Registration announcement should "look like the public page, click anywhere to
+// edit, hit Save." Locked model = rendered VIEW → tap → a distraction-free FULL-SCREEN writing surface (nav
+// hidden) → Save → back to the view. Body-appended like .auth-page so a background sync (partialRender) can
+// never wipe an open editor, and its opaque stone bg covers the fixed watermark + nav. kind: 'rules' | 'ann'.
+let mgEditorKind = null;
+
+function closeManageEditor() {
+  mgEditorKind = null;
+  const el = document.getElementById('mged-page');
+  if (el) el.remove();
+}
+
+function openManageEditor(kind) {
+  const t = mgActiveTournament();
   if (!t || !state.isAdmin) return;
-  const ta = document.getElementById('mgru-ta');
-  if (!ta) return;
+  const isRules = kind === 'rules';
+  const initial = isRules ? ((typeof t.rules === 'string') ? t.rules : '') : mgAnnouncementValue(t);
+  closeManageEditor();               // clears any prior editor + resets mgEditorKind
+  mgEditorKind = isRules ? 'rules' : 'ann';
+  const el = document.createElement('div');
+  el.id = 'mged-page';
+  el.className = 'mged-page';
+  const placeholder = isRules
+    ? '## Format&#10;- 4s co-ed — 1 guy + 1 girl on the court&#10;- Pool play to 15, cap 20'
+    : 'July 2026 tournament is here! Registration is open. Register at athletic-specimen.com';
+  const hint = isRules
+    ? '## makes a heading · - makes a bullet · players see it the moment you Save'
+    : 'This is the text you Copy for GroupMe.';
+  el.innerHTML = `
+    <div class="mged-bar">
+      <button type="button" class="mged-cancel" id="mged-cancel">Cancel</button>
+      <div class="mged-title">${isRules ? 'Rules' : 'Announcement'}</div>
+      <button type="button" class="mged-save" id="mged-save">Save</button>
+    </div>
+    <div class="mged-body">
+      <textarea class="mged-ta" id="mged-ta" spellcheck="true" autocapitalize="sentences" aria-label="${isRules ? 'Rules sheet' : 'Registration announcement'}" placeholder="${placeholder}">${escapeHTML(initial)}</textarea>
+      <p class="mged-hint">${hint}</p>
+      <p class="mged-status" id="mged-status" role="status" aria-live="polite"></p>
+    </div>`;
+  document.body.appendChild(el);
+  el.querySelector('#mged-cancel').addEventListener('click', closeManageEditor);
+  el.querySelector('#mged-save').addEventListener('click', () => { void mgEditorSave(); });
+  const ta = el.querySelector('#mged-ta');
+  // Focus at the END (caret ready to type, not select-all).
+  setTimeout(() => { if (ta) { ta.focus(); const n = ta.value.length; try { ta.setSelectionRange(n, n); } catch (_) {} } }, 60);
+}
+
+// Persist the open editor → refresh → close → repaint the underlying Manage view (now showing the update).
+// On failure keep the overlay open with the typed text intact + a friendly inline status.
+async function mgEditorSave() {
+  const t = mgActiveTournament();
+  const ta = document.getElementById('mged-ta');
+  if (!t || !ta || !state.isAdmin) return;
   const val = String(ta.value == null ? '' : ta.value);
-  const status = document.getElementById('mgru-status');
+  const field = mgEditorKind === 'rules' ? { rules: val } : { announcement: val };
+  const status = document.getElementById('mged-status');
+  const saveBtn = document.getElementById('mged-save');
+  if (saveBtn) { saveBtn.textContent = 'Saving…'; saveBtn.disabled = true; }
+  if (status) status.textContent = '';
   try {
-    await tdbSetTournamentFields(t.id, { rules: val });
-    ta.setAttribute('data-mgru-initial', val);
+    await tdbSetTournamentFields(t.id, field);
     await tdbRefreshTournaments();
-    if (status) status.textContent = 'Saved — players see it now';
+    closeManageEditor();
+    repaintManage();
   } catch (err) {
-    console.warn('mgSaveRules', err);
+    console.warn('mgEditorSave', err);
+    if (saveBtn) { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }
     if (status) status.textContent = 'Could not save — check the connection and try again.';
   }
 }
@@ -9822,7 +9864,6 @@ function attachHandlers() {
     appContent.addEventListener('focusout', (e) => {
       const t = e.target;
       if (!t || !t.id) return;
-      if (t.id === 'mgr-ann') { void mgrSaveAnnouncement(t); return; }
       if (t.id === 'mgr-venmo' || t.id === 'mgr-buyin' || t.id === 'mgr-teamsize') { void mgrSaveField(t.id); return; }
       // Task 9: every Event-settings field (mges-*) saves on blur through tdbSetTournamentFields.
       if (t.id.indexOf('mges-') === 0) { void mgSaveSettingsField(t.id); return; }
@@ -10001,10 +10042,10 @@ function attachHandlers() {
           const mgesToggle = e.target.closest('[data-mges-toggle]');
           if (mgesToggle) { void mgToggleSettingsField(mgesToggle.getAttribute('data-mges-toggle')); return; }
         }
-        // Rules sheet (Task 9, pick R11b): the explicit Save CTA writes tournaments.rules (players see it
-        // right away). Checked before the generic hub rows so the Save tap never falls through.
+        // Rules sheet (§38 pick C, 2026-07-12): the header Edit button OR a tap anywhere on the rendered sheet
+        // opens the full-screen editor. Checked before the generic hub rows so the tap never falls through.
         if (mgtView === 'rules') {
-          if (e.target.closest('[data-mgru-save]')) { void mgSaveRules(); return; }
+          if (e.target.closest('[data-mgru-edit]')) { openManageEditor('rules'); return; }
         }
         // Close out (Task 10, pick R12, the June fix): CHANGE opens the body-level champion picker; End the
         // tournament (active) + Reopen (completed) run their confirm→RPC→refresh flows. Checked before the
@@ -10018,6 +10059,9 @@ function attachHandlers() {
         const mgtRow = e.target.closest('[data-mgt-view]');
         if (mgtRow) { mgtView = mgtRow.getAttribute('data-mgt-view') || null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
         if (e.target.closest('[data-mgr-regtoggle]')) { void mgrToggleRegistration(); return; }
+        // §38 pick C: the announcement read block (tap anywhere) + its Edit link open the full-screen editor.
+        // Checked before the copy CTA (a distinct button) so a tap on the block never falls through.
+        if (e.target.closest('[data-mgr-edit]')) { openManageEditor('announcement'); return; }
         const copyBtn = e.target.closest('[data-mgr-copy]');
         if (copyBtn) { void mgrCopyAnnouncement(copyBtn); return; }
       }
