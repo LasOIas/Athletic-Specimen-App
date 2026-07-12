@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.21'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.22'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2277,90 +2277,6 @@ async function tdbCreateTournament({ name, pool_count, net_count, preset }) {
   return data;
 }
 
-async function tdbDeleteTournament(id) {
-  if (!supabaseClient || !id) return;
-  const { error } = await supabaseClient.from('tournaments').delete().eq('id', id);
-  if (error) { console.error('tdbDeleteTournament', error); throw error; }
-}
-
-// NF-1 (Option C+): saveable scoring formats (admin-managed, persist until deleted; migration 0026).
-async function tdbListScoringPresets() {
-  if (!supabaseClient) return [];
-  const { data, error } = await supabaseClient
-    .from('scoring_presets').select('*').order('created_at', { ascending: true });
-  if (error) { console.error('tdbListScoringPresets', error); return []; }
-  return data || [];
-}
-
-async function tdbCreateScoringPreset(p) {
-  if (!supabaseClient) throw new Error('No database connection.');
-  const name = String((p && p.name) || '').trim();
-  const bt = Number(p && p.bracket_target);
-  if (!name) throw new Error('Name the format.');
-  if (!bt) throw new Error('Set the bracket target.');
-  const row = {
-    name,
-    pool_target: Number(p.pool_target) || 15,
-    pool_cap: (p.pool_cap == null || p.pool_cap === '') ? null : Number(p.pool_cap),
-    bracket_target: bt,
-    bracket_cap: (p.bracket_cap == null || p.bracket_cap === '') ? null : Number(p.bracket_cap),
-    win_by_2: p.win_by_2 == null ? true : !!p.win_by_2,
-    team_size: Number(p.team_size) || 4 // C68: players per team (registration enforces exactly this)
-  };
-  const { data, error } = await supabaseClient
-    .from('scoring_presets').insert([row]).select().single();
-  if (error) { console.error('tdbCreateScoringPreset', error); throw error; }
-  return data;
-}
-
-async function tdbDeleteScoringPreset(id) {
-  if (!supabaseClient || !id) return;
-  const { error } = await supabaseClient.from('scoring_presets').delete().eq('id', id);
-  if (error) { console.error('tdbDeleteScoringPreset', error); throw error; }
-}
-
-// The create-form "Game format" picker: saved formats (pick / delete) + an inline "new format" form.
-// Rendered into #tv2-format-picker; handlers update that container surgically (never a full render())
-// so the typed tournament name + any open new-format fields are never wiped.
-function buildFormatPickerHTML() {
-  const presets = state.scoringPresets || [];
-  const selId = state.selectedFormatId;
-  const desc = (p) => `Pool to ${p.pool_target}${p.pool_cap != null ? ' (cap ' + p.pool_cap + ')' : ''} · Bracket to ${p.bracket_target}${p.win_by_2 ? ' · win by 2' : ''}${p.team_size ? ' · ' + p.team_size + '/team' : ''}`;
-  const rows = presets.length
-    ? presets.map((p) => {
-        const sel = p.id === selId;
-        return `<div data-role="tv2-pick-format" data-id="${escapeHTML(p.id)}" style="display:flex;align-items:center;gap:8px;padding:12px 14px;border:${sel ? '2px solid var(--accent)' : '1px solid var(--border)'};border-radius:12px;background:${sel ? 'var(--accent-soft)' : 'var(--surface)'};cursor:pointer;">
-          <div style="flex:1;min-width:0;">
-            <div data-fmt-name style="font-weight:700;font-size:15px;color:${sel ? 'var(--accent)' : 'var(--text)'};">${escapeHTML(p.name || '')}</div>
-            <div style="font-size:12.5px;color:var(--muted);margin-top:2px;">${escapeHTML(desc(p))}</div>
-          </div>
-          <button type="button" data-role="tv2-delete-format" data-id="${escapeHTML(p.id)}" title="Delete format" aria-label="Delete format" style="border:none;background:transparent;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;padding:0 4px;">×</button>
-        </div>`;
-      }).join('')
-    : '<p class="small" style="color:var(--muted);margin:0;">No saved formats yet — add one below.</p>';
-  const form = state.newFormatOpen
-    ? `<div style="border:1px dashed var(--accent);border-radius:12px;padding:14px;background:var(--surface);">
-        <div style="font-weight:700;font-size:14px;color:var(--accent);margin-bottom:10px;">+ New saved format</div>
-        <input type="text" id="nf-name" placeholder="Format name (e.g. Summer Slam)" style="width:100%;margin-bottom:10px;" />
-        <div style="display:flex;gap:8px;margin-bottom:10px;">
-          <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);">Pool to<input type="number" id="nf-ptarget" value="15" min="1" inputmode="numeric" style="width:100%;" /></label>
-          <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);">Pool cap<input type="number" id="nf-pcap" value="20" min="1" inputmode="numeric" style="width:100%;" /></label>
-          <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);">Bracket to<input type="number" id="nf-btarget" placeholder="25" min="1" inputmode="numeric" style="width:100%;" /></label>
-          <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted);">Per team<input type="number" id="nf-teamsize" value="4" min="1" inputmode="numeric" style="width:100%;" /></label>
-        </div>
-        <div id="nf-winby" data-role="tv2-winby" data-on="1" role="switch" aria-checked="true" tabindex="0" style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer;margin-bottom:12px;user-select:none;">
-          <span style="width:38px;height:22px;border-radius:999px;background:var(--accent);position:relative;display:inline-block;flex:0 0 auto;"><span style="position:absolute;top:2px;left:18px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .12s;"></span></span>
-          Win by 2
-        </div>
-        <div id="nf-msg" class="small" style="color:var(--danger);margin-bottom:8px;display:none;"></div>
-        <button type="button" class="primary" data-role="tv2-save-format" style="width:100%;">Save format</button>
-        <div class="small" style="color:var(--muted);margin-top:6px;text-align:center;">Saved formats stay until you delete them</div>
-      </div>`
-    : `<button type="button" data-role="tv2-newformat-toggle" style="width:100%;padding:11px;border:1px dashed var(--accent);border-radius:12px;background:transparent;color:var(--accent);font-weight:600;font-size:14px;cursor:pointer;">+ New saved format</button>`;
-  return `<div style="font-size:13px;color:var(--muted);margin-bottom:8px;">Game format <span style="color:var(--danger);font-weight:600;">— pick a saved format</span></div>
-    <div style="display:flex;flex-direction:column;gap:8px;">${rows}${form}</div>`;
-}
-
 async function tdbListTeams(tournamentId) {
   if (!supabaseClient || !tournamentId) return [];
   const { data, error } = await supabaseClient
@@ -2763,23 +2679,11 @@ async function tdbEditMatchScore(match, scoreA, scoreB) {
   return Array.isArray(data) ? data[0] : data;
 }
 
-async function tdbClearResult(match) {
-  if (!supabaseClient || !match) return;
-  const { data, error } = await supabaseClient.from('matches')
-    .update({
-      score_a: null, score_b: null, winner_team_id: null, loser_team_id: null,
-      status: 'scheduled', version: (match.version || 0) + 1, updated_at: new Date().toISOString()
-    })
-    .eq('id', match.id).eq('version', match.version || 0).select();
-  if (error) throw error;
-  if (!data || data.length === 0) throw new Error('Another device just updated this match — refreshing.');
-  return data[0];
-}
 
 // C70 (Mike, "auto-split, then editable"): re-assign which nets a pool plays on. The pool's UNPLAYED games
 // are re-distributed across the new nets (round-robin, fresh per-net queue); finished games keep their net
 // (history). Net assignment is DERIVED from the matches, so this update is the source of truth — no schema
-// change. Each row uses the same version-CAS as tdbClearResult so a concurrent edit fails cleanly.
+// change. Each row uses a per-row version-CAS so a concurrent edit fails cleanly.
 async function tdbSetPoolNets(pool, newNets, matches) {
   if (!supabaseClient || !pool) throw new Error('No pool.');
   const nets = [...new Set((newNets || []).map(Number).filter((n) => Number.isInteger(n) && n >= 1))].sort((a, b) => a - b);
@@ -2966,27 +2870,9 @@ async function tdbSubmitBracketResult(match, winnerSide, scoreA, scoreB) {
   return Array.isArray(data) ? data[0] : data;
 }
 
-// Clear a finalized bracket result (admin), CASCADING: reset this match + every downstream
-// match that depended on it (recursively), pull the advanced teams back out of the next
-// slots, and re-open the tournament if it had completed. Handles deep mistakes, not just
-// the most recent tap.
-async function tdbClearBracketResult(match) {
-  if (!supabaseClient || !match) return;
-  // C22 item 7: atomic recursive clear — reset this match + its non-scheduled downstream chain,
-  // null the team slots they fed, and re-open the tournament — in ONE SECURITY DEFINER call, so a
-  // mid-sequence network blip can't strand the bracket half-cleared. (Faithful port of the prior
-  // N-separate-writes cascade; verified on a synthetic bracket.)
-  const { error } = await supabaseClient.rpc('clear_bracket_atomic', { p_match: match.id });
-  if (error) throw error;
-}
-
 // Reload tournament list (+ active tournament's teams/pools/matches) into state. No render.
 async function tdbRefreshTournaments() {
   state.tournaments = await tdbListTournaments();
-  state.scoringPresets = await tdbListScoringPresets();
-  if (!(state.scoringPresets || []).some((p) => p.id === state.selectedFormatId)) {
-    state.selectedFormatId = state.scoringPresets[0] ? state.scoringPresets[0].id : null;
-  }
   // Clear a STALE active tournament (deleted / no longer in the list) for EVERYONE, not just public
   // (2026-06-27): an admin whose active tournament was deleted kept a dead activeTournamentId, so the
   // tournament view rendered controls (Edit settings, etc.) pointing at a gone tournament and they
@@ -3226,71 +3112,6 @@ function ensureTournamentLiveSync() {
 // Top-level builders can't see render()'s local escapeHTML; alias to the global escaper.
 function escapeHTML(s) { return escapeHTMLText(s); }
 
-function tournamentStatusLabel(status) {
-  return ({ setup: 'Setup', pools: 'Pool play', bracket: 'Bracket', completed: 'Completed' })[status] || 'Setup';
-}
-
-// ---------------------------------------------------------------------------
-// Tournament pure logic (deterministic, no DOM/DB) — Phase 2+.
-// ---------------------------------------------------------------------------
-
-// Round-robin via the circle method: every unordered pair exactly once.
-// Odd team counts get a rotating bye (no match generated for it).
-
-// SC-2: buy-in reconciliation summary for the admin — "N of M paid · $X collected · K unpaid".
-// buy_in is free text (e.g. "$80 per team"); parse the first number for the $ total, omit it if none.
-function buildPaymentSummaryHTML(teams, tournament) {
-  const list = teams || [];
-  if (!list.length) return '';
-  const paid = list.filter((t) => t.paid).length;
-  const unpaid = list.length - paid;
-  const amt = parseFloat(String((tournament && tournament.buy_in) || '').replace(/[^0-9.]/g, ''));
-  const money = amt > 0 ? ` · $${(paid * amt).toLocaleString()} collected` : '';
-  return `<div class="small" style="margin:2px 0 6px;font-weight:600;color:${unpaid ? 'var(--danger)' : 'var(--live, #16a34a)'};">${paid} of ${list.length} paid${money}${unpaid ? ` · ${unpaid} unpaid` : ''}</div>`;
-}
-
-function buildTeamListHTML(teams, isAdmin) {
-  if (!teams || !teams.length) {
-    return '<p class="small" style="color:var(--muted);margin:0;">No teams yet.</p>';
-  }
-  // C69 (Mike): tap a team to see its players in a popup card.
-  return teams.map((tm, i) => `
-    <div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
-      <span class="tlist-name" data-role="tv2-team-card" data-id="${escapeHTML(tm.id)}" role="button" tabindex="0" style="flex:1;cursor:pointer;color:var(--accent);font-weight:600;">${escapeHTML(String(i + 1))}. ${escapeHTML(tm.name || '')}</span>
-      ${isAdmin ? `<button type="button" class="danger" data-role="tv2-delete-team" data-id="${escapeHTML(tm.id)}">Remove</button>` : ''}
-    </div>`).join('');
-}
-
-// C69 (Mike, 2026-06-26): initials for a roster avatar — first letters of the first two words.
-function nameInitials(name) {
-  return String(name || '').trim().split(/\s+/).slice(0, 2).map((p) => p.charAt(0).toUpperCase()).join('') || '?';
-}
-
-// C69 (§38 Option A — avatar list): public "tap a registered team -> see its players" popup card. Roster
-// names are already public on the register list; this just surfaces them in a clean card. Reuses the shared
-// .popup-overlay/.popup-card. Read-only, no writes.
-function openTeamRosterCard(teamId) {
-  const team = (state.tournamentTeams || []).find((t) => t.id === teamId);
-  if (!team) return;
-  const roster = (Array.isArray(team.roster) ? team.roster : []).filter((n) => String(n || '').trim());
-  const overlay = document.createElement('div');
-  overlay.className = 'popup-overlay';
-  overlay.style.display = 'flex';
-  const rows = roster.length
-    ? roster.map((n) => `<div class="pl-row"><span class="pl-av">${escapeHTML(nameInitials(n))}</span><span class="pl-name">${escapeHTML(String(n))}</span></div>`).join('')
-    : '<p class="small" style="color:var(--muted);margin:8px 0 0;">No players listed.</p>';
-  overlay.innerHTML = `<div class="popup-card card tc-card" role="dialog" aria-modal="true" aria-label="Team roster">
-    <div class="tc-h"><span class="tc-name">${escapeHTML(team.name || 'Team')}</span>${team.paid ? '<span class="tc-paid">paid</span>' : ''}</div>
-    <div class="tc-sub">${roster.length} ${roster.length === 1 ? 'player' : 'players'}</div>
-    <div class="tc-roster">${rows}</div>
-    <button type="button" class="tc-close" data-role="tc-close">Close</button>
-  </div>`;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  overlay.querySelector('[data-role="tc-close"]').onclick = close;
-}
-
 function teamNameById(teams, id) {
   const t = (teams || []).find((x) => x.id === id);
   return t ? (t.name || '') : '—';
@@ -3298,54 +3119,6 @@ function teamNameById(teams, id) {
 
 // SC-7: admin-only per-pool withdraw controls — offered only for teams that still have unplayed games
 // (a fully-played team has nothing to forfeit, so no flag/column is needed).
-function buildWithdrawControlsHTML(poolTeams, poolMatches) {
-  const withdrawable = (poolTeams || []).filter((tm) =>
-    (poolMatches || []).some((m) => m.status !== 'final' && m.team_a_id && m.team_b_id &&
-      (m.team_a_id === tm.id || m.team_b_id === tm.id)));
-  if (!withdrawable.length) return '';
-  return `<div class="small" style="margin:4px 0;color:var(--muted);">Withdraw (forfeits remaining games): ${
-    withdrawable.map((tm) => `<button type="button" class="secondary" data-role="tv2-withdraw-team" data-id="${escapeHTMLText(tm.id)}" data-name="${escapeHTMLText(tm.name || '')}" style="font-size:11px;padding:2px 6px;margin:2px;">${escapeHTMLText(tm.name || '')}</button>`).join('')
-  }</div>`;
-}
-
-function buildStandingsTableHTML(poolTeams, poolMatches) {
-  const rows = computeStandings(poolTeams, poolMatches);
-  if (!rows.length) return '';
-  return `<table class="table" style="margin:6px 0;font-size:14px;">
-    <thead><tr><th>#</th><th>Team</th><th>W-L</th><th>Diff</th></tr></thead>
-    <tbody>${rows.map((r) => `<tr>
-      <td>${r.rank}</td>
-      <td>${escapeHTML(r.name)}</td>
-      <td>${r.wins}-${r.losses}</td>
-      <td style="color:${r.pointDiff > 0 ? 'var(--live)' : r.pointDiff < 0 ? 'var(--danger)' : 'inherit'};">${r.pointDiff > 0 ? '+' : ''}${r.pointDiff}</td>
-    </tr>`).join('')}</tbody>
-  </table>`;
-}
-
-// Seeding list (Mike, 2026-06-27, §38 option B): the cross-pool seed order (computeSeeding — seed 1..N by
-// win% then point differential, the SAME ranking that sets the bracket). Shown on the public Bracket tab +
-// the admin tournament view once any pool game is final (provisional during pools, final once pools end).
-// Read-only; no skill shown. Returns '' when there are no finished pool games yet.
-function buildSeedingTableHTML(teams, matches) {
-  const poolMatches = (matches || []).filter((m) => m.phase === 'pool');
-  if (!poolMatches.some((m) => m.status === 'final')) return '';
-  const rows = computeSeeding(teams || [], poolMatches);
-  if (!rows.length) return '';
-  return `<div class="card sd-card">
-    <div class="sd-h">Seeding</div>
-    <div class="sd-sub">${rows.length} teams &middot; by win% then point differential</div>
-    <table class="sd-tbl">
-      <thead><tr><th>Seed</th><th>Team</th><th class="r">W-L</th><th class="r">Diff</th></tr></thead>
-      <tbody>${rows.map((r) => `<tr${r.seed === 1 ? ' class="top"' : ''}>
-        <td class="sd-seed">${r.seed}</td>
-        <td class="sd-nm">${escapeHTML(r.name)}</td>
-        <td class="r">${r.wins}-${r.losses}</td>
-        <td class="r ${r.pointDiff > 0 ? 'sd-pos' : r.pointDiff < 0 ? 'sd-neg' : ''}">${r.pointDiff > 0 ? '+' : ''}${r.pointDiff}</td>
-      </tr>`).join('')}</tbody>
-    </table>
-  </div>`;
-}
-
 // C70 (Mike, 2026-06-26): collapse a pool's nets into a readable label — "1-2" for a contiguous block,
 // "1, 3, 5" otherwise. Drives the "Pool A · Nets 1-2" line on the player board.
 function formatNetList(nets) {
@@ -3361,76 +3134,6 @@ function formatNetList(nets) {
   return parts.join(', ');
 }
 
-// C70 (Mike's spec, §38 Option A + "show every game with a play-order number"): the player-first pool board.
-// Every pool game is auto-generated, so the board shows the WHOLE schedule — per pool → per net → the full
-// NUMBERED list of that net's games in play order (1 plays first), the CURRENT game tagged "Now", finished
-// games showing their score. A player opens their phone, finds their pool + net, and sees every game they'll
-// play and the order. Tap any unplayed game to score it (anyone scores) — finishing one moves "Now" to the
-// next. Standings + admin withdraw sit behind a collapsed toggle. Shared by public AND admin (isAdmin adds
-// Edit/Clear on finished games).
-function buildPoolPlayHTML(tournament, pools, teams, matches, isAdmin, pickedTeamId) {
-  const poolCards = pools.map((pool) => {
-    const poolTeams = teams.filter((t) => t.pool_id === pool.id);
-    const poolMatches = matches.filter((m) => m.pool_id === pool.id);
-    const nets = [...new Set(poolMatches.map((m) => m.net).filter((n) => n != null))].sort((a, b) => a - b);
-    const played = poolMatches.filter((m) => m.status === 'final').length;
-    const total = poolMatches.length;
-    // C70 fix (2026-06-27): the pool's "Now" games are a DISJOINT set across its nets (pickPoolCurrentGames),
-    // so a team is never tagged current on two nets at once; if a net's lowest-queue game conflicts it skips
-    // to its next free game so both nets stay busy. Render-only — schedule / queue_order / DB are unchanged.
-    const netUnplayed = nets.map((net) => poolMatches
-      .filter((m) => m.net === net && m.status !== 'final' && m.team_a_id && m.team_b_id)
-      .sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0)));
-    const currentIds = new Set(pickPoolCurrentGames(netUnplayed).filter(Boolean));
-    const netGroups = nets.map((net) => {
-      const games = poolMatches.filter((m) => m.net === net).sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
-      const rows = games.map((g, i) => {
-        const order = g.queue_order || (i + 1); // play-order, rendered as a "game N" eyebrow label (Mike, 2026-06-27)
-        const aN = escapeHTML(teamNameById(teams, g.team_a_id));
-        const bN = escapeHTML(teamNameById(teams, g.team_b_id));
-        if (g.status === 'final') {
-          const aWin = g.winner_team_id === g.team_a_id;
-          return `<div class="ppg is-final">
-            <span class="ppg-m"><span class="ppg-kick">game ${order}</span><span class="ppg-mr"><span class="${aWin ? 'ppg-w' : ''}">${aN}</span> <span class="ppg-vs">vs</span> <span class="${!aWin ? 'ppg-w' : ''}">${bN}</span></span></span>
-            <span class="ppg-r"><span class="ppg-score">${escapeHTML(String(g.score_a))}-${escapeHTML(String(g.score_b))}</span>${isAdmin ? `<button type="button" class="ppg-btn" data-role="tv2-bracket-open" data-id="${escapeHTML(g.id)}">Edit</button><button type="button" class="ppg-btn" data-role="tv2-clear-result" data-id="${escapeHTML(g.id)}">Clear</button>` : ''}</span>
-          </div>`;
-        }
-        const isCur = currentIds.has(g.id);
-        const isLive = g.status === 'live'; // C72: a game being live-scored shows its running score + a LIVE pill
-        const rightSide = isLive
-          ? `<span class="ppg-livescore">${escapeHTML(String(g.score_a != null ? g.score_a : 0))}–${escapeHTML(String(g.score_b != null ? g.score_b : 0))}</span><span class="ppg-livetag">LIVE</span>`
-          : (isCur ? '<span class="ppg-now">Now</span>' : '<span class="ppg-cta" aria-hidden="true">Score &rsaquo;</span>');
-        return `<div class="ppg${isCur ? ' is-now' : ''}${isLive ? ' is-live' : ''}" data-role="tv2-bracket-open" data-id="${escapeHTML(g.id)}" role="button" tabindex="0">
-          <span class="ppg-m"><span class="ppg-kick">game ${order}</span><span class="ppg-mr">${aN} <span class="ppg-vs">vs</span> ${bN}</span></span>
-          <span class="ppg-r">${rightSide}</span>
-        </div>`;
-      }).join('');
-      return `<div class="ppl-ng"><div class="ppl-nglabel">Net ${net}</div>${rows}</div>`;
-    }).join('');
-    const teamsLine = poolTeams.map((t) => escapeHTML(t.name || '')).filter(Boolean).join(', ');
-    const netsLabel = nets.length ? ('Net' + (nets.length > 1 ? 's' : '') + ' ' + formatNetList(nets)) : '';
-    // Admin can re-assign a pool's nets (Mike's "auto-split, then editable") — tap to edit; it re-nets the
-    // pool's UNPLAYED games onto the chosen nets. The public sees a plain label.
-    const netsEl = isAdmin
-      ? `<button type="button" class="ppl-nets ppl-nets-edit" data-role="tv2-edit-pool-nets" data-id="${escapeHTML(pool.id)}">${escapeHTML(netsLabel || 'Set nets')} <span aria-hidden="true">&#9998;</span></button>`
-      : (netsLabel ? `<span class="ppl-nets">${escapeHTML(netsLabel)}</span>` : '');
-    const standings = `<details class="ppl-more">
-      <summary>Standings</summary>
-      <div class="ppl-more-body">
-        ${buildStandingsTableHTML(poolTeams, poolMatches)}
-        ${isAdmin ? buildWithdrawControlsHTML(poolTeams, poolMatches) : ''}
-      </div>
-    </details>`;
-    return `<div class="ppl-pool">
-      <div class="ppl-h"><span class="ppl-name">Pool ${escapeHTML(pool.label)}</span>${netsEl}</div>
-      ${teamsLine ? `<div class="ppl-teams">${teamsLine}</div>` : ''}
-      ${netGroups || '<p class="small" style="color:var(--muted);margin:0;">No games scheduled.</p>'}
-      <div class="ppl-foot"><span class="ppl-prog">${played} of ${total} games done</span></div>
-      ${standings}
-    </div>`;
-  }).join('');
-  return poolCards;
-}
 
 // ---- Bracket renderer: connected "March Madness" tree (C32 #9, Mike's §38 pick) ----
 // One pannable/zoomable tree for phone + desktop. The textual "Winner → next round" line the
@@ -3445,8 +3148,8 @@ function championPathIds(main, champ) {
     .map((m) => m.id));
 }
 
-// One bracket match = a node in the tree. A match you can score (admin, or your picked team) is a
-// TAP TARGET (tv2-bracket-open) that opens the result pop-up — no cramped inputs inside the box.
+// One bracket match = a node in the tree. Read-only everywhere since 2026-07-11 (admin scoring lives
+// in Manage's own sheets; the Tournament tab is the same public page for everyone — Mike's call).
 function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam, gn, opts = {}) {
   const seeds = seedByTeam || {};
   const ro = !!opts.readOnly; // Slice 2 (§13.3): public read-only bracket — no scoring; team names are peek targets.
@@ -3466,10 +3169,7 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam,
   const isLiveNode = ro && m.status === 'live' && aKnown && bKnown;
   const trophy = isChamp ? '<svg class="pd-bk-trophy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>' : '';
   const meta = `<div class="bt-meta">${trophy}${escapeHTML(gLbl)}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
-  // Any unplayed matchup is tappable for EVERYONE — the pop-up either lets you score it (admin /
-  // your picked team) or tells you how to (log in / pick your team). A silent dead tap was the bug.
-  // Read-only spectator nodes are NEVER openable (no scoring copy, no "Tap to enter score") — §13.3/§6.
-  const openable = !ro && aKnown && bKnown && m.status !== 'final';
+  // Every caller renders the tree read-only (readOnly:true) — no node is a scoring tap target.
 
   let body;
   if (m.status === 'final') {
@@ -3480,7 +3180,7 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam,
         <span class="bt-sc">${haveScores ? escapeHTML(String(id === m.team_a_id ? m.score_a : m.score_b)) : (win ? 'W' : '')}</span>
       </div>`;
     body = row(aName, m.team_a_id, aWin) + row(bName, m.team_b_id, !aWin)
-      + ((!ro && state.isAdmin) ? `<div class="bt-act"><button type="button" class="secondary" data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}">Edit score</button><button type="button" class="secondary" data-role="tv2-bracket-clear" data-id="${escapeHTML(m.id)}">Clear</button></div>` : '');
+
   } else if (aKnown && bKnown && m.status === 'live') {
     // C72: a live-scored bracket match shows its running score + a LIVE pill — mirrors the pool board so the
     // live scorer reads the same on every surface (was rendered identically to an unplayed match).
@@ -3489,98 +3189,23 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam,
     const lrow = (name, sc) => `<div class="bt-row"><span class="bt-name">${name}</span><span class="bt-sc bt-livesc">${escapeHTML(String(sc))}</span></div>`;
     body = lrow(aName, sa)
       + `<div class="bt-vs"><span class="bt-livetag">LIVE</span></div>`
-      + lrow(bName, sb)
-      + (openable ? '<div class="bt-enter">Tap to update score &rsaquo;</div>' : '');
+      + lrow(bName, sb);
   } else if (aKnown && bKnown) {
     // Both teams set: a matchup. If you can score it, the whole card opens the result pop-up.
     body = `<div class="bt-row"><span class="bt-name">${aName}</span></div>
       <div class="bt-vs">vs</div>
-      <div class="bt-row"><span class="bt-name">${bName}</span></div>`
-      + (openable ? '<div class="bt-enter">Tap to enter score &rsaquo;</div>' : '');
+      <div class="bt-row"><span class="bt-name">${bName}</span></div>`;
   } else {
     body = `<div class="bt-row"><span class="bt-name bt-tbd">${aName}</span></div>
       <div class="bt-row"><span class="bt-name bt-tbd">${bName}</span></div>`;
   }
-  const openAttrs = openable ? ` data-role="tv2-bracket-open" data-id="${escapeHTML(m.id)}" role="button" tabindex="0"` : '';
   // data-next = the match this winner advances to — layoutBracketTree reads it off the DOM to draw the
   // connector line, so it works for BOTH the live bracket and the teamless format preview.
   const nextAttr = m.winner_next_match_id ? ` data-next="${escapeHTML(String(m.winner_next_match_id))}"` : '';
   const roCls = (isChamp ? ' pd-bk-champ' : '') + (isLiveNode ? ' pd-bk-live' : '');
-  return `<div class="bt-node${pathIds.has(m.id) ? ' path' : ''}${openable ? ' tappable' : ''}${roCls}" data-mid="${escapeHTML(m.id)}"${nextAttr}${openAttrs}>${meta}${body}</div>`;
+  return `<div class="bt-node${pathIds.has(m.id) ? ' path' : ''}${roCls}" data-mid="${escapeHTML(m.id)}"${nextAttr}>${meta}${body}</div>`;
 }
 
-// The result pop-up: tap a match -> big teams + a score box each + Submit. Winner = higher score.
-// NF-10: edit a tournament's settings after create (name, nets, pool/bracket targets + cap, win-by-2) so
-// "created to 25, played to 21" no longer means delete+rebuild. Saves via the guarded tdbSetTournamentFields;
-// match_cap is kept = bracket_target (NF-1 back-compat). Shown in setup/pools (moot once the bracket runs).
-
-function openTournamentSettingsModal(tournamentId) {
-  const t = (state.tournaments || []).find((x) => x.id === tournamentId);
-  if (!t) return;
-  const num = (v, d) => (v == null || v === '' ? d : v);
-  const overlay = document.createElement('div');
-  overlay.className = 'popup-overlay brm-overlay';
-  overlay.innerHTML = `<div class="popup-card brm-card" role="dialog" aria-modal="true" aria-label="Edit tournament settings">
-    <div class="brm-title">Edit settings</div>
-    <label class="reg-label" for="ts-name">Name</label>
-    <input type="text" id="ts-name" class="reg-input" value="${escapeHTML(t.name || '')}" autocapitalize="words" />
-    <label class="reg-label" for="ts-nets">Nets / courts</label>
-    <input type="number" inputmode="numeric" min="1" id="ts-nets" class="reg-input" value="${escapeHTML(String(num(t.net_count, 10)))}" />
-    <label class="reg-label" for="ts-pt">Pool game to</label>
-    <input type="number" inputmode="numeric" min="1" id="ts-pt" class="reg-input" value="${escapeHTML(String(num(t.pool_target, 15)))}" />
-    <label class="reg-label" for="ts-pc">Pool cap (blank = none)</label>
-    <input type="number" inputmode="numeric" min="1" id="ts-pc" class="reg-input" value="${t.pool_cap != null ? escapeHTML(String(t.pool_cap)) : ''}" />
-    <label class="reg-label" for="ts-bt">Bracket game to</label>
-    <input type="number" inputmode="numeric" min="1" id="ts-bt" class="reg-input" value="${escapeHTML(String(num(t.bracket_target, num(t.match_cap, 25))))}" />
-    <label class="reg-check" style="margin-top:8px;"><input type="checkbox" id="ts-wb2" ${(t.win_by_2 == null || t.win_by_2) ? 'checked' : ''} /> Win by 2</label>
-    <div class="brm-err" id="ts-err" hidden></div>
-    <div class="brm-actions">
-      <button type="button" class="secondary" id="ts-cancel">Cancel</button>
-      <button type="button" class="primary" id="ts-save">Save settings</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  overlay.querySelector('#ts-cancel').onclick = close;
-  const err = overlay.querySelector('#ts-err');
-  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
-  let saving = false;
-  overlay.querySelector('#ts-save').onclick = async () => {
-    if (saving) return;
-    const name = (overlay.querySelector('#ts-name').value || '').trim();
-    const nets = parseInt(overlay.querySelector('#ts-nets').value, 10);
-    const pt = parseInt(overlay.querySelector('#ts-pt').value, 10);
-    const pcRaw = (overlay.querySelector('#ts-pc').value || '').trim();
-    const pc = pcRaw === '' ? null : parseInt(pcRaw, 10);
-    const bt = parseInt(overlay.querySelector('#ts-bt').value, 10);
-    const wb2 = overlay.querySelector('#ts-wb2').checked;
-    if (!name) return fail('Name is required.');
-    if (!(nets >= 1) || !(pt >= 1) || !(bt >= 1)) return fail('Nets, pool target, and bracket target must each be at least 1.');
-    if (pc != null && pc < pt) return fail('Pool cap cannot be less than the pool target.');
-    saving = true;
-    try {
-      // Data-integrity (2026-06-30): this MODAL is the second net_count save path. Same ATOMIC re-net as the
-      // page handler (migration 0031) — a net-count change during pools OR bracket re-nets every match in one
-      // transaction so matches.net never drifts from net_count (F7/F8).
-      const tBeforeM = (state.tournaments || []).find((x) => x.id === tournamentId);
-      const oldNetsM = tBeforeM ? Number(tBeforeM.net_count) : null;
-      if (tBeforeM && nets !== oldNetsM && (tBeforeM.status === 'pools' || tBeforeM.status === 'bracket')) {
-        const freshM = await tdbListMatches(tournamentId);
-        await tdbApplyNetCountChange(tournamentId, nets, computeNetAssignments(tBeforeM.status, state.tournamentPools, freshM, nets));
-        await tdbSetTournamentFields(tournamentId, { name, pool_target: pt, pool_cap: pc, bracket_target: bt, match_cap: bt, win_by_2: wb2 });
-      } else {
-        await tdbSetTournamentFields(tournamentId, { name, net_count: nets, pool_target: pt, pool_cap: pc, bracket_target: bt, match_cap: bt, win_by_2: wb2 });
-      }
-      await tdbRefreshTournaments();
-      close();
-      render();
-    } catch (e) { saving = false; fail((e && e.message) || 'Could not save settings.'); }
-  };
-}
-
-// C72 (Mike): tap a game -> choose how to score it. A final game goes straight to the edit modal; otherwise
-// a small chooser: "Score live" (the point-by-point live scorer) or "Enter final score" (the C71 modal).
 // Shared modal-title label for a match: bracket -> "G{n}" (continuous game number, Mike 2026-06-27),
 // pool -> the old round_label / "Match". Used by the chooser, live scorer, and result modal.
 function bracketLabelPart(m) {
@@ -3589,270 +3214,6 @@ function bracketLabelPart(m) {
     if (byId[m.id]) return 'G' + byId[m.id];
   }
   return ((m && m.round_label) || 'Match').replace(/ M\d+$/, '');
-}
-
-function openMatchActionChooser(matchId) {
-  const m = (state.tournamentMatches || []).find((x) => x.id === matchId);
-  if (!m || !m.team_a_id || !m.team_b_id) return;
-  if (m.status === 'final') return openBracketResultModal(matchId); // editing a final result -> straight in
-  const aName = teamNameById(state.tournamentTeams, m.team_a_id);
-  const bName = teamNameById(state.tournamentTeams, m.team_b_id);
-  const title = bracketLabelPart(m) + (m.net ? ' · Net ' + m.net : '');
-  const live = m.status === 'live';
-  const overlay = document.createElement('div');
-  overlay.className = 'popup-overlay';
-  overlay.style.display = 'flex';
-  overlay.innerHTML = `<div class="popup-card card mac-card" role="dialog" aria-modal="true" aria-label="Score this game">
-    <div class="mac-title">${escapeHTML(title)}</div>
-    <div class="mac-teams">${escapeHTML(aName)} <span class="mac-vs">vs</span> ${escapeHTML(bName)}</div>
-    <button type="button" class="mac-opt mac-live" data-role="mac-live">
-      <span class="mac-opt-t">${live ? 'Resume live score' : 'Score live'}</span>
-      <span class="mac-opt-s">Tap the score point-by-point as the game plays — everyone watching sees it</span>
-    </button>
-    <button type="button" class="mac-opt" data-role="mac-final">
-      <span class="mac-opt-t">Enter final score</span>
-      <span class="mac-opt-s">Already have the final? Enter it directly</span>
-    </button>
-    <button type="button" class="mac-cancel" data-role="mac-cancel">Cancel</button>
-  </div>`;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay || e.target.closest('[data-role="mac-cancel"]')) return close();
-    if (e.target.closest('[data-role="mac-live"]')) { close(); return openLiveScorer(matchId); }
-    if (e.target.closest('[data-role="mac-final"]')) { close(); return openBracketResultModal(matchId); }
-  });
-}
-
-// C72 (§38 Option A — "tap the team"): the live point-by-point scorer. A spectator taps a team's whole
-// panel for +1 (small −1 to fix); the running score writes via tdbSetLiveScore (optimistic + persisted,
-// broadcast to everyone) and the leader's panel glows. When gameScoreStatus says the game is won, a
-// confirm card appears ("X win a-b — finish?"); finishing finalizes through the existing submit path
-// (tdbSubmitResult for pool / tdbSubmitBracketResult for bracket) and advances. Leaving keeps it 'live'.
-function openLiveScorer(matchId) {
-  const m = (state.tournamentMatches || []).find((x) => x.id === matchId);
-  if (!m || !m.team_a_id || !m.team_b_id) return;
-  const aName = teamNameById(state.tournamentTeams, m.team_a_id);
-  const bName = teamNameById(state.tournamentTeams, m.team_b_id);
-  const tournOf = () => (state.tournaments || []).find((x) => x.id === m.tournament_id) || {};
-  const rules = scoringRulesFor(m.phase, tournOf());
-  const ruleText = 'First to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ' (cap ' + rules.cap + ')' : '');
-  const title = bracketLabelPart(m) + (m.net ? ' · Net ' + m.net : '');
-  let a = Math.max(0, Number(m.score_a) || 0);
-  let b = Math.max(0, Number(m.score_b) || 0);
-  let submitting = false, finished = false, confirmEl = null;
-  const overlay = document.createElement('div');
-  overlay.className = 'live-overlay';
-  overlay.innerHTML = `<div class="lsc">
-    <div class="lsc-h">
-      <button type="button" class="lsc-back" data-role="ls-back" aria-label="Back">&lsaquo;</button>
-      <div class="lsc-htext"><div class="lsc-title">${escapeHTML(title)}</div><div class="lsc-rule">${escapeHTML(ruleText)}</div></div>
-      <span class="lsc-livetag"><span class="lsc-dot" aria-hidden="true"></span>LIVE</span>
-    </div>
-    <div class="lsc-panels">
-      <button type="button" class="lsc-panel" data-role="ls-plus" data-team="a">
-        <span class="lsc-name">${escapeHTML(aName)}</span><span class="lsc-score" id="ls-a">${a}</span><span class="lsc-tap">TAP TO +1</span>
-      </button>
-      <button type="button" class="lsc-panel" data-role="ls-plus" data-team="b">
-        <span class="lsc-name">${escapeHTML(bName)}</span><span class="lsc-score" id="ls-b">${b}</span><span class="lsc-tap">TAP TO +1</span>
-      </button>
-    </div>
-    <div class="lsc-minus">
-      <button type="button" class="lsc-minusbtn" data-role="ls-minus" data-team="a">&minus;1 ${escapeHTML(aName)}</button>
-      <button type="button" class="lsc-minusbtn" data-role="ls-minus" data-team="b">&minus;1 ${escapeHTML(bName)}</button>
-    </div>
-    <div class="lsc-err" id="lsc-err" hidden></div>
-    <div class="lsc-f"><button type="button" class="lsc-final" data-role="ls-final">Enter the final score instead</button></div>
-  </div>`;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  const elA = overlay.querySelector('#ls-a'), elB = overlay.querySelector('#ls-b');
-  const panA = overlay.querySelector('.lsc-panel[data-team="a"]'), panB = overlay.querySelector('.lsc-panel[data-team="b"]');
-  const err = overlay.querySelector('#lsc-err');
-  const syncUI = () => { elA.textContent = a; elB.textContent = b; panA.classList.toggle('lead', a > b); panB.classList.toggle('lead', b > a); };
-  const persist = () => { tdbSetLiveScore(m, a, b).catch((e) => { err.textContent = (e && e.message) || 'Could not save the live score.'; err.hidden = false; }); };
-  const maybeGameOver = () => {
-    if (confirmEl) { confirmEl.remove(); confirmEl = null; }
-    const st = gameScoreStatus(a, b, rules);
-    if (!st.valid) return;
-    const winName = a > b ? aName : bName;
-    confirmEl = document.createElement('div');
-    confirmEl.className = 'lsc-confirm';
-    confirmEl.innerHTML = `<div class="lsc-confirm-card">
-      <div class="lsc-confirm-t">${escapeHTML(winName)} win ${a}–${b}</div>
-      <div class="lsc-confirm-s">Finish the game?</div>
-      <div class="lsc-confirm-btns">
-        <button type="button" class="secondary" data-role="lsc-keep">Keep scoring</button>
-        <button type="button" class="primary" data-role="lsc-finish">Finish game</button>
-      </div>
-    </div>`;
-    overlay.appendChild(confirmEl);
-    confirmEl.querySelector('[data-role="lsc-keep"]').onclick = () => { if (confirmEl) { confirmEl.remove(); confirmEl = null; } };
-    confirmEl.querySelector('[data-role="lsc-finish"]').onclick = async () => {
-      if (submitting) return;
-      submitting = true;
-      try {
-        if (!(await confirmBigMargin(String(a), String(b)))) { submitting = false; return; }
-        if (m.phase === 'pool') await tdbSubmitResult(m, String(a), String(b));
-        else await tdbSubmitBracketResult(m, a > b ? 'a' : 'b', String(a), String(b));
-        await tdbRefreshTournaments();
-        finished = true; close(); render();
-      } catch (e) { err.textContent = (e && e.message) || 'Could not finish the game.'; err.hidden = false; submitting = false; }
-    };
-  };
-  const bump = (team, d) => {
-    if (finished) return;
-    if (team === 'a') a = Math.max(0, a + d); else b = Math.max(0, b + d);
-    err.hidden = true; syncUI(); persist(); maybeGameOver();
-  };
-  overlay.addEventListener('click', (e) => {
-    if (e.target.closest('[data-role="ls-back"]')) return close();
-    if (e.target.closest('[data-role="ls-final"]')) { close(); return openBracketResultModal(matchId); }
-    const plus = e.target.closest('[data-role="ls-plus"]'); if (plus) return bump(plus.getAttribute('data-team'), 1);
-    const minus = e.target.closest('[data-role="ls-minus"]'); if (minus) return bump(minus.getAttribute('data-team'), -1);
-  });
-  syncUI();
-  maybeGameOver(); // re-opened at a game-over score -> show the confirm right away
-}
-
-function openBracketResultModal(matchId) {
-  const m = (state.tournamentMatches || []).find((x) => x.id === matchId);
-  if (!m || !m.team_a_id || !m.team_b_id) return;
-  const aName = teamNameById(state.tournamentTeams, m.team_a_id);
-  const bName = teamNameById(state.tournamentTeams, m.team_b_id);
-  const isFinal = m.status === 'final'; // NF-4: a final match opens in EDIT mode (fix the score, same winner only)
-  const title = (isFinal ? 'Edit · ' : '') + bracketLabelPart(m) + (m.net ? ' · Net ' + m.net : '');
-  const tournOf = () => (state.tournaments || []).find((x) => x.id === m.tournament_id) || {};
-  // C71 (Mike, 2026-06-26 — §38 Option C): the score-entry modal is two big number tiles, each a real
-  // input you can TAP TO TYPE (so a full game is one keystroke set, not 25 stepper taps) with +/- steppers
-  // for nudging. The WINNER is whichever score is strictly higher — no separate "tap the winner" step.
-  // A rule-hint pill shows the target. Everything below the surface (RPCs, NF-1 validation, NF-4 edit,
-  // C50 forfeit, the in-flight guard, C73 no-auto-fill) is preserved exactly.
-  const t0 = tournOf();
-  const newModel = (m.phase === 'main' ? t0.bracket_target : t0.pool_target) != null;
-  const r0 = scoringRulesFor(m.phase, t0);
-  const hintText = newModel ? ('First to ' + r0.target + (r0.winBy2 ? ', win by 2' : '') + (r0.cap != null ? ' (cap ' + r0.cap + ')' : '')) : '';
-  const valA = isFinal && m.score_a != null ? String(m.score_a) : '';
-  const valB = isFinal && m.score_b != null ? String(m.score_b) : '';
-  const overlay = document.createElement('div');
-  overlay.className = 'popup-overlay brm-overlay';
-  // Anyone can enter a result (Mike's "everyone scores on their own phone" model; the admin's Clear
-  // is the backstop). The write goes through the anon-allowed submit_match_score RPC.
-  const tile = (team, name, val) => `<div class="brm-tile" data-team="${team}">
-      <span class="brm-wpill" aria-hidden="true">WINNER</span>
-      <span class="brm-tname">${escapeHTML(name)}</span>
-      <input class="brm-num" id="brm-${team}" type="number" inputmode="numeric" min="0" value="${escapeHTML(val)}" placeholder="0" aria-label="${escapeHTML(name)} score" />
-      <div class="brm-steps">
-        <button type="button" class="brm-step" data-team="${team}" data-d="-1" aria-label="${escapeHTML(name)} minus one">&minus;</button>
-        <button type="button" class="brm-step" data-team="${team}" data-d="1" aria-label="${escapeHTML(name)} plus one">+</button>
-      </div>
-    </div>`;
-  overlay.innerHTML = `<div class="popup-card card brm-card" role="dialog" aria-modal="true" aria-label="Enter match result">
-    <div class="brm-title">${escapeHTML(title)}</div>
-    ${hintText ? `<div class="brm-hint"><span class="brm-hdot" aria-hidden="true"></span>${escapeHTML(hintText)}</div>` : ''}
-    ${isFinal ? '<p class="brm-sub">Fix the score (same winner). To change who won, use Clear instead.</p>' : ''}
-    <div class="brm-tiles">${tile('a', aName, valA)}${tile('b', bName, valB)}</div>
-    <p class="brm-typehint">Tap a number to type it</p>
-    <div class="brm-err" id="brm-err" hidden></div>
-    ${isFinal ? '' : `<button type="button" class="brm-forfeit" id="brm-forfeit">No-show? Record a forfeit</button>
-    <div class="brm-fchoice" id="brm-fchoice" hidden>
-      <span class="brm-fq">Who showed up? They win the forfeit.</span>
-      <div class="brm-frow">
-        <button type="button" class="brm-fbtn" data-team="a">${escapeHTML(aName)}</button>
-        <button type="button" class="brm-fbtn" data-team="b">${escapeHTML(bName)}</button>
-      </div>
-    </div>`}
-    <div class="brm-actions">
-      <button type="button" class="secondary" id="brm-cancel">Cancel</button>
-      <button type="button" class="primary" id="brm-save">Save result</button>
-    </div>
-  </div>`;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  overlay.querySelector('#brm-cancel').onclick = close;
-  const err = overlay.querySelector('#brm-err');
-  const fail = (msg) => { err.textContent = msg; err.hidden = false; };
-  const inA = overlay.querySelector('#brm-a'), inB = overlay.querySelector('#brm-b');
-  const tiles = { a: overlay.querySelector('.brm-tile[data-team="a"]'), b: overlay.querySelector('.brm-tile[data-team="b"]') };
-  // Live winner highlight = whichever score is strictly higher. No separate tap; ties/blanks => no winner.
-  // NF-4 edit mode just pre-fills the existing scores, so the current winner lights up automatically.
-  const syncWinner = () => {
-    const a = inA.value === '' ? null : Number(inA.value);
-    const b = inB.value === '' ? null : Number(inB.value);
-    const w = (a != null && b != null && a !== b) ? (a > b ? 'a' : 'b') : null;
-    tiles.a.classList.toggle('win', w === 'a');
-    tiles.b.classList.toggle('win', w === 'b');
-  };
-  [inA, inB].forEach((el) => el.addEventListener('input', () => { err.hidden = true; syncWinner(); }));
-  // Steppers nudge by 1 (clamp >= 0). The big number itself stays a normal input you can tap and type.
-  overlay.querySelectorAll('.brm-step').forEach((btn) => {
-    btn.onclick = () => {
-      const el = btn.getAttribute('data-team') === 'a' ? inA : inB;
-      el.value = String(Math.max(0, (el.value === '' ? 0 : Number(el.value)) + Number(btn.getAttribute('data-d'))));
-      err.hidden = true; syncWinner();
-    };
-  });
-  syncWinner();
-  // Wave 1e: in-flight guard — a double-tap on Save/Forfeit fired two submit_match_score calls (the 2nd
-  // failed cleanly via the server CAS but surfaced a spurious "another device updated" error). The flag
-  // blocks the 2nd tap; the finally re-arms it on every non-success exit so a real retry still works.
-  let submitting = false;
-  overlay.querySelector('#brm-save').onclick = async () => {
-    if (submitting) return;
-    const sa = inA.value, sb = inB.value;
-    if (sa === '' || sb === '') return fail('Enter both scores.'); // scores required (Mike); no auto-fill (C73)
-    if (Number(sa) === Number(sb)) return fail('A game can\'t end in a tie.');
-    const winner = Number(sa) > Number(sb) ? 'a' : 'b'; // winner = the higher score
-    // NF-1: client-side per-phase rule pre-check (gated to the new model; the RPC enforces server-side regardless).
-    const tRules = tournOf();
-    if ((m.phase === 'main' ? tRules.bracket_target : tRules.pool_target) != null) {
-      const st = gameScoreStatus(Number(sa), Number(sb), scoringRulesFor(m.phase, tRules));
-      if (!st.valid) return fail(st.reason);
-    }
-    submitting = true;
-    try {
-      if (!(await confirmBigMargin(sa, sb))) return; // restored: catch a fat-finger blowout before it saves
-      if (isFinal) {
-        await tdbEditMatchScore(m, sa, sb); // NF-4: edit in place; the RPC refuses a winner flip
-      } else if (m.phase === 'pool') {
-        await tdbSubmitResult(m, sa, sb); // C53: pools derive the winner from the scores server-side
-      } else await tdbSubmitBracketResult(m, winner, sa, sb);
-      await tdbRefreshTournaments();
-      close();
-      render();
-    } catch (e) { fail((e && e.message) || 'Could not save the result.'); }
-    finally { submitting = false; }
-  };
-  // C50 forfeit/no-show: pick the team that showed → a small valid win (phase target by 2) auto-filled +
-  // submitted, so a no-show doesn't stall the net queue or the bracket. (No winner tap in C71, so we ask
-  // who showed via a two-button mini choice instead of reading a prior tap.)
-  const forfeitBtn = overlay.querySelector('#brm-forfeit');
-  if (forfeitBtn) {
-    const fchoice = overlay.querySelector('#brm-fchoice');
-    forfeitBtn.onclick = () => { fchoice.hidden = !fchoice.hidden; err.hidden = true; };
-    overlay.querySelectorAll('.brm-fbtn').forEach((btn) => {
-      btn.onclick = async () => {
-        if (submitting) return;
-        const winner = btn.getAttribute('data-team');
-        const t = tournOf();
-        // NF-1: forfeit auto-score must stay VALID under the new enforcement → win at the phase target by 2.
-        const winS = scoringRulesFor(m.phase, t).target || (Number(t.match_cap) || 25);
-        const loseS = Math.max(0, winS - 2);
-        const sa = winner === 'a' ? winS : loseS, sb = winner === 'a' ? loseS : winS;
-        inA.value = String(sa); inB.value = String(sb); syncWinner();
-        submitting = true;
-        try {
-          if (m.phase === 'pool') await tdbSubmitResult(m, String(sa), String(sb)); // C53 pool forfeit
-          else await tdbSubmitBracketResult(m, winner, String(sa), String(sb));
-          await tdbRefreshTournaments();
-          close();
-          render();
-        } catch (e) { fail((e && e.message) || 'Could not save the forfeit.'); }
-        finally { submitting = false; }
-      };
-    });
-  }
 }
 
 function buildBracketHTML(tournament, matches, teams, opts = {}) {
@@ -4089,7 +3450,7 @@ function wireBracketGestures(pan, canvas) {
 }
 
 // (Legacy public team self-registration screen `buildPublicRegisterHTML` deleted 2026-07-10, v.26 —
-// it was only reached from the dead `!state.isAdmin` branch in buildTournamentTabHTML. The LIVE anon
+// it was only reached from the dead branch of the (now deleted) admin tournament tab. The LIVE anon
 // register flow is buildRegisterPageHTML (rf-* grammar), reached via pdTournamentView === 'register'.)
 
 // Round 2 (2026-07-09, spec §12.4 — Mike's locked §38 pick A "tile hub"): the public Tournament tab
@@ -4960,160 +4321,6 @@ function openTeamPeek(teamId, anchorEl) {
     content.addEventListener('scroll', _teamPeekOutside, true);
     window.addEventListener('resize', _teamPeekOutside, true);
   }, 0);
-}
-
-function buildTournamentTabHTML() {
-  const list = state.tournaments || [];
-  const active = state.activeTournamentId
-    ? list.find((x) => x.id === state.activeTournamentId)
-    : null;
-
-  // Admin-only: buildPublicTournamentRootHTML() (the sole caller) only invokes this under `if (state.isAdmin)`.
-  // The legacy public (!state.isAdmin) read-only branch here was dead code — removed 2026-07-10 (v.26).
-
-  const err = state.tournamentTabError
-    ? `<div class="card" style="border-left:4px solid var(--danger);color:var(--danger);">${escapeHTML(state.tournamentTabError)}</div>`
-    : '';
-
-  // Admin, no active tournament → create form + tournament list.
-  if (!active) {
-    const listHTML = list.length
-      ? list.map((x) => `
-        <div class="row" style="justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
-          <button type="button" data-role="tv2-select-tournament" data-id="${escapeHTML(x.id)}" style="background:none;border:none;text-align:left;flex:1;font-size:16px;color:var(--brand);cursor:pointer;padding:4px 0;">
-            ${escapeHTML(x.name || '')} <span class="small" style="color:var(--muted);">· ${escapeHTML(tournamentStatusLabel(x.status))}</span>
-          </button>
-          <button type="button" class="danger" data-role="tv2-delete-tournament" data-id="${escapeHTML(x.id)}">Delete</button>
-        </div>`).join('')
-      : '<p class="small" style="color:var(--muted);margin:0;">No tournaments yet — create your first one above.</p>';
-    return `${err}
-    <div class="card">
-      <h3 style="margin:0 0 8px;">New Tournament</h3>
-      <input type="text" id="tv2-name" placeholder="Tournament name (e.g. Summer Slam 6s)" />
-      <div id="tv2-format-picker" style="margin-top:12px;">${buildFormatPickerHTML()}</div>
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);">Pools
-          <input type="number" id="tv2-pools" value="4" min="1" inputmode="numeric" style="width:100%;flex:0 0 auto;" />
-        </label>
-        <label style="flex:1;display:flex;flex-direction:column;gap:2px;font-size:13px;color:var(--muted);">Nets
-          <input type="number" id="tv2-nets" value="10" min="1" inputmode="numeric" style="width:100%;flex:0 0 auto;" />
-        </label>
-      </div>
-      <button type="button" class="primary" data-role="tv2-create-tournament" style="margin-top:12px;width:100%;">Create Tournament</button>
-    </div>
-    <div class="card">
-      <h3 style="margin:0 0 8px;">Tournaments</h3>
-      ${listHTML}
-    </div>`;
-  }
-
-  // Admin, active tournament.
-  const teams = state.tournamentTeams || [];
-  const pools = state.tournamentPools || [];
-  const matches = state.tournamentMatches || [];
-  // Phase-aware target: pool play shows the POOL target (e.g. "to 15 (cap 20)"), bracket shows the bracket
-  // target ("to 25"). Was always match_cap (the bracket target), which misread "to 25" during pool play.
-  const targetLabel = (active.status === 'bracket' || active.status === 'completed')
-    ? 'to ' + escapeHTML(String(active.bracket_target != null ? active.bracket_target : active.match_cap))
-    : 'to ' + escapeHTML(String(active.pool_target != null ? active.pool_target : active.match_cap)) + (active.pool_cap != null ? ' (cap ' + escapeHTML(String(active.pool_cap)) + ')' : '');
-  const headerCard = `<div class="card">
-    <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
-      <div style="flex:1;min-width:0;">
-        <h3 style="margin:0;">${escapeHTML(active.name || '')}</h3>
-        <p class="small" style="color:var(--muted);margin:2px 0 0;">${escapeHTML(tournamentStatusLabel(active.status))} · ${teams.length} ${teams.length === 1 ? 'team' : 'teams'} · ${targetLabel} · ${escapeHTML(String(active.pool_count))} pools · ${escapeHTML(String(active.net_count))} nets</p>
-      </div>
-      ${(active.status === 'setup' || active.status === 'pools') ? `<button type="button" class="secondary" data-role="tv2-edit-settings" data-id="${escapeHTML(active.id)}">Edit</button>` : ''}
-      <button type="button" class="secondary" data-role="tv2-back">All</button>
-    </div>
-  </div>`;
-
-  // Bracket stage: single-round-focus renderer (mockup #1).
-  if (active.status === 'bracket' || active.status === 'completed') {
-    return `${err}${headerCard}${buildBracketHTML(active, matches, teams)}${buildSeedingTableHTML(teams, matches)}`;
-  }
-
-  // Pool-play stage: standings + matches + override + generate bracket when done.
-  if (active.status === 'pools') {
-    const poolMatches = matches.filter((m) => m.phase === 'pool');
-    const allDone = poolMatches.length > 0 && poolMatches.every((m) => m.status === 'final' || !m.team_a_id || !m.team_b_id);
-    return `${err}${headerCard}
-      ${buildPoolPlayHTML(active, pools, teams, matches, true, state.tournamentPickedTeamId)}
-      ${buildSeedingTableHTML(teams, matches)}
-      <div class="card">
-        ${allDone
-          ? '<button type="button" class="primary" data-role="tv2-generate-bracket" style="width:100%;margin-bottom:8px;">Generate Bracket</button>'
-          : '<p class="small" style="color:var(--muted);margin:0 0 8px;">Finish all pool games to generate the bracket.</p>'}
-        <button type="button" class="danger" data-role="tv2-reset-pools" style="width:100%;">Reset Pools (clear results)</button>
-      </div>`;
-  }
-
-  // Setup stage: add teams + draw/start pools.
-  let poolSetup = '';
-  if (teams.length >= 2) {
-    if (!pools.length) {
-      poolSetup = `<div class="card">
-        <h3 style="margin:0 0 8px;">Pools</h3>
-        <p class="small" style="color:var(--muted);margin:0 0 8px;">Randomly draw ${escapeHTML(String(active.pool_count))} pools from your ${teams.length} teams.</p>
-        <button type="button" class="primary" data-role="tv2-draw-pools" style="width:100%;">Draw Pools</button>
-      </div>`;
-    } else {
-      const poolBlocks = pools.map((p) => {
-        const pt = teams.filter((t) => t.pool_id === p.id);
-        const rows = pt.map((t) => `<div class="row" style="align-items:center;gap:8px;padding:4px 0;">
-          <span style="flex:1;min-width:0;">${escapeHTML(t.name)}</span>
-          <select data-role="tv2-move-team" data-id="${escapeHTML(t.id)}" style="width:auto;flex:0 0 auto;">
-            ${pools.map((pp) => `<option value="${escapeHTML(pp.id)}" ${pp.id === t.pool_id ? 'selected' : ''}>Pool ${escapeHTML(pp.label)}</option>`).join('')}
-          </select>
-        </div>`).join('');
-        return `<div style="margin-bottom:10px;"><strong>Pool ${escapeHTML(p.label)}</strong>${rows || '<p class="small" style="color:var(--muted);margin:0;">empty</p>'}</div>`;
-      }).join('');
-      const unassigned = teams.filter((t) => !t.pool_id).length;
-      poolSetup = `<div class="card">
-        <h3 style="margin:0 0 8px;">Pools (drawn)</h3>
-        ${poolBlocks}
-        ${unassigned ? `<p class="small" style="color:var(--danger);margin:0 0 8px;">${unassigned} team(s) unassigned</p>` : ''}
-        <button type="button" class="secondary" data-role="tv2-draw-pools" style="width:100%;margin-bottom:8px;">Re-draw randomly</button>
-        <button type="button" class="primary" data-role="tv2-start-pools" style="width:100%;">Start Pool Play</button>
-      </div>`;
-    }
-  }
-  return `${err}${headerCard}
-  <div class="card">
-    <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
-      <h3 style="margin:0;">Registration</h3>
-      <button type="button" class="${active.registration_open ? 'danger' : 'primary'}" data-role="tv2-toggle-registration">${active.registration_open ? 'Close' : 'Open'}</button>
-    </div>
-    <p class="small" style="color:var(--muted);margin:6px 0 10px;">${active.registration_open ? 'Teams can register now — share the link in GroupMe.' : 'Open registration so teams sign themselves up (replaces the Google Form).'}</p>
-    <label class="reg-label" for="tv2-venmo">Venmo payment link</label>
-    <input type="text" id="tv2-venmo" class="reg-input" placeholder="https://venmo.com/u/yourname" value="${escapeHTMLText(active.venmo_link || '')}" />
-    <label class="reg-label" for="tv2-buyin">Buy-in (shown to teams)</label>
-    <input type="text" id="tv2-buyin" class="reg-input" placeholder="$80 per team" value="${escapeHTMLText(active.buy_in || '')}" />
-    <button type="button" class="secondary" data-role="tv2-save-registration" style="width:100%;">Save</button>
-    ${active.registration_open ? '<button type="button" class="secondary" data-role="tv2-share-registration" style="width:100%;margin-top:8px;">Copy registration link</button>' : ''}
-    ${teams.length ? `<div style="margin-top:12px;"><div class="reg-label">Registered (${teams.length})</div>${buildPaymentSummaryHTML(teams, active)}${teams.map((tm) => {
-      const rost = Array.isArray(tm.roster) ? tm.roster : [];
-      return `<div style="padding:6px 0;border-bottom:1px solid var(--border);">
-        <div class="row" style="justify-content:space-between;align-items:center;gap:8px;">
-          <span style="flex:1;min-width:0;">${escapeHTMLText(tm.name || '')} ${tm.paid ? '<span class="reg-paidtag">paid</span>' : '<span class="reg-unpaidtag">unpaid</span>'}</span>
-          <button type="button" class="secondary" data-role="tv2-rename-team" data-id="${escapeHTMLText(tm.id)}" data-name="${escapeHTMLText(tm.name || '')}">Rename</button>
-          <button type="button" class="secondary" data-role="tv2-toggle-paid" data-id="${escapeHTMLText(tm.id)}">${tm.paid ? 'Unpaid' : 'Paid'}</button>
-        </div>
-        ${rost.length ? `<div class="small" style="color:var(--muted);">${rost.map((n) => escapeHTMLText(String(n))).join(', ')}</div>` : ''}
-      </div>`;
-    }).join('')}</div>` : ''}
-  </div>
-  <div class="card">
-    <h3 style="margin:0 0 8px;">Add Team</h3>
-    <div class="row" style="gap:8px;">
-      <input type="text" id="tv2-team-name" placeholder="Team name" style="flex:1;" />
-      <button type="button" class="primary" data-role="tv2-add-team">Add</button>
-    </div>
-  </div>
-  <div class="card">
-    <h3 style="margin:0 0 8px;">Teams (${teams.length})</h3>
-    ${buildTeamListHTML(teams, true)}
-  </div>
-  ${poolSetup}`;
 }
 
 // The current pre-generate seed order (array of teamIds): the admin's transient ▲/▼ override if set
@@ -8259,7 +7466,7 @@ function mgtApplySwap(toTeamIndex) {
 // Mockups r10-manage/t-b (sub-hub) + r-b (registration). The sub-hub reuses the mg-row grammar (extend,
 // don't duplicate) with a data-mgt-view delegate; the header + stage sub-line are the mgt-* additions. The
 // Registration view leads with an EDITABLE announcement textarea, a Copy-for-GroupMe CTA, the Registration-
-// open switch (mg-sw pill → the existing tv2-toggle-registration write path), and venmo/buy-in/team-size
+// open switch (mg-sw pill → the tdbSetTournamentFields write path), and venmo/buy-in/team-size
 // fields (pk-fld underline grammar, save-on-blur via tdbSetTournamentFields). The lead tournament is the T1
 // resolver (manageLeadTournament); the announcement TOLERATES tournaments.announcement not existing yet.
 
@@ -8425,7 +7632,7 @@ async function mgrCopyAnnouncement(btn) {
   }, 2200);
 }
 
-// Toggle registration open/closed — reuses the exact tv2-toggle-registration write (tdbSetTournamentFields +
+// Toggle registration open/closed — the tdbSetTournamentFields write (+
 // tdbRefreshTournaments), then a container-swap repaint (the switch is a button; no text input is focused).
 async function mgrToggleRegistration() {
   const t = mgRegTournament();
@@ -10288,236 +9495,11 @@ function bindTournamentTabV2() {
     const id = el.getAttribute('data-id') || '';
     try {
       state.tournamentTabError = '';
-      if (role === 'tv2-create-tournament') {
-        const val = (sel) => (document.getElementById(sel) || {}).value || '';
-        const preset = (state.scoringPresets || []).find((p) => p.id === state.selectedFormatId);
-        if (!preset) { state.tournamentTabError = 'Pick a saved format first.'; render(); return; }
-        const created = await tdbCreateTournament({
-          name: val('tv2-name'), pool_count: val('tv2-pools'), net_count: val('tv2-nets'), preset
-        });
-        state.activeTournamentId = created.id;
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-pick-format') {
-        // surgical: only restyle the rows so the typed tournament name + any open new-format form survive
-        state.selectedFormatId = id;
-        const picker = document.getElementById('tv2-format-picker');
-        if (picker) picker.querySelectorAll('[data-role="tv2-pick-format"]').forEach((row) => {
-          const sel = row.getAttribute('data-id') === id;
-          row.style.border = sel ? '2px solid var(--accent)' : '1px solid var(--border)';
-          row.style.background = sel ? 'var(--accent-soft)' : 'var(--surface)';
-          const nm = row.querySelector('[data-fmt-name]'); if (nm) nm.style.color = sel ? 'var(--accent)' : 'var(--text)';
-        });
-      } else if (role === 'tv2-newformat-toggle') {
-        state.newFormatOpen = !state.newFormatOpen;
-        const picker = document.getElementById('tv2-format-picker');
-        if (picker) picker.innerHTML = buildFormatPickerHTML();
-      } else if (role === 'tv2-winby') {
-        // surgical toggle (no re-render → the typed new-format fields survive); read at save time
-        const on = el.getAttribute('data-on') === '1';
-        el.setAttribute('data-on', on ? '0' : '1');
-        el.setAttribute('aria-checked', on ? 'false' : 'true');
-        const track = el.querySelector('span'); const knob = track && track.querySelector('span');
-        if (track) track.style.background = on ? 'var(--border)' : 'var(--accent)';
-        if (knob) knob.style.left = on ? '2px' : '18px';
-      } else if (role === 'tv2-save-format') {
-        const gv = (i) => ((document.getElementById(i) || {}).value || '').trim();
-        const msg = document.getElementById('nf-msg');
-        const fail = (t) => { if (msg) { msg.textContent = t; msg.style.display = 'block'; } };
-        const name = gv('nf-name'); const bt = Number(gv('nf-btarget'));
-        if (!name) { fail('Name the format.'); return; }
-        if (!bt) { fail('Set the bracket target.'); return; }
-        const winEl = document.getElementById('nf-winby');
-        const win_by_2 = !winEl || winEl.getAttribute('data-on') === '1';
-        el.setAttribute('disabled', 'true');
-        try {
-          const createdP = await tdbCreateScoringPreset({ name, pool_target: gv('nf-ptarget'), pool_cap: gv('nf-pcap'), bracket_target: bt, win_by_2, team_size: gv('nf-teamsize') });
-          state.scoringPresets = [...(state.scoringPresets || []), createdP];
-          state.selectedFormatId = createdP.id;
-          state.newFormatOpen = false;
-          const picker = document.getElementById('tv2-format-picker');
-          if (picker) picker.innerHTML = buildFormatPickerHTML();
-        } catch (err) {
-          el.removeAttribute('disabled');
-          fail((err && err.message) || 'Could not save the format.');
-        }
-      } else if (role === 'tv2-delete-format') {
-        const preset = (state.scoringPresets || []).find((p) => p.id === id);
-        if (!preset) return;
-        if (!(await appConfirm({ message: `Delete the "${preset.name}" format?`, confirmText: 'Delete', danger: true }))) return;
-        await tdbDeleteScoringPreset(id);
-        state.scoringPresets = (state.scoringPresets || []).filter((p) => p.id !== id);
-        if (state.selectedFormatId === id) state.selectedFormatId = state.scoringPresets[0] ? state.scoringPresets[0].id : null;
-        const picker = document.getElementById('tv2-format-picker');
-        if (picker) picker.innerHTML = buildFormatPickerHTML();
-      } else if (role === 'tv2-toggle-registration') {
-        if (!state.isAdmin) return;
-        const t = (state.tournaments || []).find((x) => x.id === state.activeTournamentId);
-        if (!t) return;
-        await tdbSetTournamentFields(t.id, { registration_open: !t.registration_open });
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-save-registration') {
-        if (!state.isAdmin) return;
-        const venmo = ((document.getElementById('tv2-venmo') || {}).value || '').trim();
-        const buyin = ((document.getElementById('tv2-buyin') || {}).value || '').trim();
-        await tdbSetTournamentFields(state.activeTournamentId, { venmo_link: venmo || null, buy_in: buyin || null });
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-share-registration') {
-        if (!state.isAdmin) return;
-        try { await navigator.clipboard.writeText(location.origin + '/'); el.textContent = 'Link copied!'; }
-        catch (_) { el.textContent = location.origin; }
-        return;
-      } else if (role === 'tv2-toggle-paid') {
-        if (!state.isAdmin) return;
-        const tm = (state.tournamentTeams || []).find((x) => x.id === id);
-        await tdbSetTeamPaid(id, !(tm && tm.paid));
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-rename-team') {
-        // NF-3b: fix a typo'd self-registered team name (no raw DB). Dup-name guarded, like registration.
-        if (!state.isAdmin) return;
-        const next = await appPrompt({ title: 'Rename team', value: el.getAttribute('data-name') || '', confirmText: 'Save', placeholder: 'Team name' });
-        if (next == null) return; // cancelled
-        const nm = String(next).trim();
-        if (!nm) throw new Error('Team name is required.');
-        if ((state.tournamentTeams || []).some((t) => t.id !== id && normalize(t.name) === normalize(nm))) {
-          throw new Error('A team named "' + nm + '" is already in this tournament.');
-        }
-        await tdbRenameTeam(id, nm);
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-withdraw-team') {
-        // SC-7: withdraw mid-pool — forfeit the team's remaining pool games so standings/seeding stay fair.
-        if (!state.isAdmin) return;
-        const nm = el.getAttribute('data-name') || 'this team';
-        if (!(await appConfirm({ title: 'Withdraw team', message: `Withdraw ${nm}? Their remaining pool games are forfeited (opponents win). This can't be undone.`, confirmText: 'Withdraw', danger: true }))) return;
-        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
-        await tdbWithdrawTeam(id, t);
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-select-tournament') {
-        state.activeTournamentId = id;
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-edit-settings') {
-        if (!state.isAdmin) return;
-        openTournamentSettingsModal(id); // NF-10: edit name/nets/scoring after create (no delete+rebuild)
-      } else if (role === 'tv2-back') {
-        state.activeTournamentId = null;
-        state.tournamentTeams = [];
-        render();
-      } else if (role === 'tv2-delete-tournament') {
-        if (!state.isAdmin) return; // defense-in-depth re-check (real server gate = C21)
-        if (!(await appConfirm({ title: 'Delete tournament', message: 'Delete this tournament and everything in it?', confirmText: 'Delete', danger: true }))) return;
-        await tdbDeleteTournament(id);
-        if (state.activeTournamentId === id) state.activeTournamentId = null;
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-add-team') {
-        const nameEl = document.getElementById('tv2-team-name');
-        const teamName = ((nameEl || {}).value || '').trim();
-        // C49a: block a duplicate team name (case-insensitive) — two same-named teams are unreadable in the bracket.
-        if (teamName && (state.tournamentTeams || []).some((t) => normalize(t.name) === normalize(teamName))) {
-          throw new Error('A team named "' + teamName + '" is already in this tournament.');
-        }
-        await tdbAddTeam(state.activeTournamentId, teamName);
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-delete-team') {
-        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
-        if (t && t.status !== 'setup') throw new Error('Teams are locked once pool play starts.');
-        await tdbDeleteTeam(id);
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-draw-pools') {
-        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
-        await tdbDrawPools(t);
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-start-pools') {
-        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
-        // SC-2: warn before locking teams in if any haven't paid the buy-in (the operator's #1 concern).
-        const unpaidCt = (state.tournamentTeams || []).filter((tm) => !tm.paid).length;
-        if (unpaidCt > 0 && !(await appConfirm({ title: 'Unpaid teams', message: `${unpaidCt} team${unpaidCt === 1 ? '' : 's'} not marked paid. Start pool play anyway?`, confirmText: 'Start anyway' }))) return;
-        await tdbStartPoolPlay(t);
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-reset-pools') {
-        if (!state.isAdmin) return; // defense-in-depth re-check (real server gate = C21)
-        if (!(await appConfirm({ title: 'Reset pools', message: 'Reset pools and clear all pool results?', confirmText: 'Reset', danger: true }))) return;
-        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
-        // C49 BUGFIX: drop to 'setup' BEFORE re-drawing. tdbDrawPools refuses to run while status==='pools'
-        // (its own guard), so the old order (draw → then set setup) ALWAYS threw "Pool play already started"
-        // — Reset Pools never worked. Set setup first, then re-draw (which clears pool results via cascade).
-        // NF-2 (2026-06-26): route the status write through the guarded tdbSetTournamentFields (adds
-        // updated_at + throws on {error}) instead of a bare, result-discarded update — a silent failure
-        // here used to cascade into the misleading "Pool play already started" from tdbDrawPools; now the
-        // real error surfaces via the outer catch (state.tournamentTabError).
-        await tdbSetTournamentFields(t.id, { status: 'setup' });
-        delete _autoGenPrompted[t.id]; // re-arm the auto-generate prompt for the re-played pools
-        await tdbDrawPools(t);
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-generate-bracket') {
-        const t = state.tournaments.find((x) => x.id === state.activeTournamentId);
-        const seedOrder = (state.seedOverride && state.seedOverride.id === t.id) ? state.seedOverride.order : null; // #7
-        await tdbGenerateBracket(t, seedOrder);
-        state.seedOverride = null; // clear the transient override after generating
-        state.tournamentPickedTeamId = null;
-        state.bracketSide = null; state.bracketRound = null;
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-bracket-side') {
+      if (role === 'tv2-bracket-side') { // the one surviving tv2 role: the PUBLIC bracket side tabs
         state.bracketSide = el.getAttribute('data-side');
         state.bracketRound = null;
         btResetView(); // C57: show the newly-selected side fit to screen
         partialRenderTournament();
-      } else if (role === 'tv2-team-card') {
-        openTeamRosterCard(id); // C69: tap a team -> popup card with its players
-      } else if (role === 'tv2-bracket-open') {
-        openMatchActionChooser(id); // C72: tap a game -> Score live / Enter final (a final goes straight to edit)
-      } else if (role === 'tv2-bracket-clear') {
-        const m = (state.tournamentMatches || []).find((x) => x.id === id);
-        await tdbClearBracketResult(m);
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-clear-result') {
-        const m = (state.tournamentMatches || []).find((x) => x.id === id);
-        await tdbClearResult(m);
-        await tdbRefreshTournaments();
-        render();
-      } else if (role === 'tv2-edit-pool-nets') {
-        // C70: admin re-assigns a pool's nets (auto-split is the default; this is the "editable" half).
-        if (!state.isAdmin) return; // defense-in-depth — the button only renders for admin
-        const pool = (state.tournamentPools || []).find((p) => p.id === id);
-        if (!pool) return;
-        const cur = [...new Set((state.tournamentMatches || []).filter((m) => m.pool_id === pool.id && m.net != null).map((m) => m.net))].sort((a, b) => a - b);
-        const input = await appPrompt({ title: 'Pool ' + pool.label + ' nets', message: 'Which nets does this pool play on? Separate with commas. Re-assigns its unplayed games.', value: cur.join(', '), placeholder: 'e.g. 1, 2', confirmText: 'Save' });
-        if (input == null) return; // cancelled
-        const nets = String(input).split(/[,\s]+/).map((s) => parseInt(s, 10)).filter((n) => !isNaN(n));
-        await tdbSetPoolNets(pool, nets, state.tournamentMatches || []);
-        await tdbRefreshTournaments();
-        render();
-      }
-    } catch (err) {
-      state.tournamentTabError = (err && err.message) ? err.message : 'Something went wrong.';
-      render();
-    }
-  });
-
-  // Selects fire 'change', not 'click' — handle team-move + team-pick here.
-  document.addEventListener('change', async (e) => {
-    const el = e.target.closest('[data-role="tv2-move-team"]');
-    if (!el) return;
-    const role = el.getAttribute('data-role');
-    try {
-      state.tournamentTabError = '';
-      if (role === 'tv2-move-team') {
-        await tdbMoveTeamToPool(el.getAttribute('data-id'), el.value);
-        await tdbRefreshTournaments();
-        render();
       }
     } catch (err) {
       state.tournamentTabError = (err && err.message) ? err.message : 'Something went wrong.';

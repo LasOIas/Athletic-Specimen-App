@@ -65,6 +65,9 @@ html, body {
   font-size: 16px !important;
   overscroll-behavior: none;
   height: 100%;
+  /* Safari polish (2026-07-11): the rubber-band overscroll shows the html element's background —
+     paint it the stone token so a bounce never flashes browser-default white. */
+  background: var(--bg);
 }
 /* Body needs 1px of scrollable height so iOS status-bar tap (clock tap)
    can dispatch a scroll-to-top event; we forward it to the active tab panel. */
@@ -1822,91 +1825,35 @@ body.copilot-open #cop-chat {
    are used by the admin settings + roster forms and the venmo/buy-in fields. The legacy public register SCREEN
    that first introduced them (reg-screen/reg-h1/reg-sub/reg-card/reg-remind/reg-pay/reg-venmo/reg-primary/
    reg-regrow/reg-regchev) was deleted 2026-07-10 (v.26) with buildPublicRegisterHTML — those orphaned rules removed. */
-.reg-label { font: 600 12px 'Inter',sans-serif; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 2px 0 6px; display: block; }
+
 .reg-input { width: 100%; box-sizing: border-box; min-height: 46px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; font-size: 16px; background: var(--bg); margin-bottom: 10px; }
 .reg-check { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600; }
 .reg-check input { width: 22px; height: 22px; }
-.reg-teamspill { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
 /* 2026-06-27: match the roster-popup .tc-paid (filled) so the "paid" pill looks identical on the register
    list and the team card — same label, same look, one tap apart. */
 .reg-paidtag { font-size: 11px; font-weight: 800; color: var(--live); background: var(--live-soft); border-radius: 999px; padding: 3px 10px; }
 .reg-unpaidtag { font-size: 11px; font-weight: 700; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; }
-.bt-enter { font-size: 11px; font-weight: 600; color: var(--accent); padding: 4px 9px 8px; }
 
 /* Result pop-up (openBracketResultModal) — sits on the shared .popup-overlay/.popup-card. */
-.brm-card { width: min(384px, 94vw); padding: 20px; text-align: left; }
-.brm-title { font-family: 'Sora','Inter',sans-serif; font-weight: 700; font-size: 19px; letter-spacing: -.01em; color: var(--ink); }
-.brm-sub { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+
 /* C71: rule-hint pill so the scorer knows the target at a glance */
-.brm-hint { display: inline-flex; align-items: center; gap: 6px; margin-top: 9px; padding: 4px 11px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12.5px; font-weight: 600; }
-.brm-hdot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+
 /* C71: two big number tiles — winner = the higher score, auto-highlighted green */
-.brm-tiles { display: flex; gap: 12px; margin-top: 18px; }
-.brm-tile { flex: 1; min-width: 0; position: relative; border: 2px solid var(--border); border-radius: var(--r-md); background: var(--card); padding: 14px 8px 12px; text-align: center; }
-.brm-tile.win { border-color: var(--live); background: var(--live-soft); }
-.brm-wpill { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); padding: 3px 9px; border-radius: 999px; background: var(--live); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: .05em; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .12s; }
-.brm-tile.win .brm-wpill { opacity: 1; }
-.brm-tname { display: block; font-size: 13.5px; font-weight: 700; color: var(--ink); line-height: 1.2; min-height: 33px; overflow: hidden; }
-.brm-num { width: 100%; height: auto; margin: 2px 0 8px; padding: 0; border: none; background: transparent; text-align: center; font-family: 'Sora','Inter',sans-serif; font-size: 42px; font-weight: 800; line-height: 1.05; color: var(--ink); -webkit-appearance: none; -moz-appearance: textfield; }
-.brm-num::-webkit-outer-spin-button, .brm-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.brm-num:focus { outline: none; box-shadow: none; }
-.brm-tile.win .brm-num { color: var(--live); }
-.brm-steps { display: flex; gap: 8px; justify-content: center; }
-.brm-step { width: 46px; height: 46px; padding: 0; border-radius: 50%; border: 1px solid var(--border); background: var(--card); color: var(--ink); font-size: 23px; font-weight: 700; line-height: 1; }
-@media (hover: hover) and (pointer: fine) { .brm-step:hover { background: var(--surface-3); } }
-.brm-step:active { transform: translateY(1px); }
-.brm-typehint { text-align: center; font-size: 12px; color: var(--faint); margin: 12px 0 0; }
-.brm-err { color: var(--danger); font-size: 13px; margin-top: 12px; }
-.brm-forfeit { display: block; width: 100%; margin-top: 14px; padding: 4px; background: transparent; border: none; color: var(--faint); font-size: 13px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; } .brm-forfeit:active { background: transparent; color: var(--muted); }
-@media (hover: hover) and (pointer: fine) { .brm-forfeit:hover { background: transparent; color: var(--muted); } }
+
+
+
 
 /* C71: forfeit -> "who showed up?" mini choice (no winner tap in this layout) */
-.brm-fchoice { margin-top: 10px; padding: 12px; border: 1px dashed var(--border); border-radius: var(--r-md); }
-.brm-fq { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); text-align: center; margin-bottom: 8px; }
-.brm-frow { display: flex; gap: 8px; }
-.brm-fbtn { flex: 1; min-height: 44px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--card); color: var(--ink); font-size: 14px; font-weight: 600; }
-@media (hover: hover) and (pointer: fine) { .brm-fbtn:hover { background: var(--surface-3); } }
-.brm-actions { display: flex; gap: 10px; margin-top: 18px; }
-.brm-actions button { flex: 1; min-height: 48px; font-size: 15px; border-radius: var(--r-md); }
+
+
 
 /* C70 — player-first pool board (buildPoolPlayHTML): per pool, per net, the full NUMBERED game schedule. */
-.ppl-pool { background: var(--card); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 16px; margin-bottom: 14px; }
-.ppl-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-.ppl-name { font-family: 'Sora','Inter',sans-serif; font-size: 21px; font-weight: 800; color: var(--ink); }
-.ppl-nets { font-size: 13px; font-weight: 800; color: var(--accent); white-space: nowrap; }
-.ppl-nets-edit { background: var(--accent-soft); color: var(--accent); border: none; border-radius: 999px; padding: 5px 11px; cursor: pointer; line-height: 1; } .ppl-nets-edit:active { background: var(--accent-soft); color: var(--accent); }
-@media (hover: hover) and (pointer: fine) { .ppl-nets-edit:hover { background: var(--accent-soft); color: var(--accent); } }
 
-.ppl-teams { font-size: 12px; color: var(--faint); margin: 5px 0 2px; line-height: 1.4; }
-.ppl-ng { margin-top: 14px; }
-.ppl-nglabel { font-family: 'Sora','Inter',sans-serif; font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
-.ppg { display: flex; align-items: center; gap: 11px; padding: 11px 0; border-top: 1px solid var(--border); width: 100%; text-align: left; background: none; }
-.ppg[role="button"] { cursor: pointer; } .ppg[role="button"]:active .ppg-m { color: var(--accent); }
-@media (hover: hover) and (pointer: fine) { .ppg[role="button"]:hover .ppg-m { color: var(--accent); } }
 
-.ppg-m { flex: 1; min-width: 0; font-size: 16px; font-weight: 700; color: var(--ink); line-height: 1.3; display: flex; flex-direction: column; gap: 2px; }
+
 /* "game N" eyebrow label above each matchup (Mike, 2026-06-27; §38 option C of 3). */
-.ppg-kick { font-family: 'Sora','Inter',sans-serif; font-size: 10px; font-weight: 800; letter-spacing: .05em; color: var(--faint); line-height: 1; }
-.ppg.is-now .ppg-kick, .ppg.is-live .ppg-kick { color: var(--live); }
-.ppg-vs { color: var(--faint); font-weight: 600; font-size: 12px; }
-.ppg-w { color: var(--live); }
-.ppg-r { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
-.ppg-cta { font-size: 12px; font-weight: 800; color: var(--accent); }
-.ppg-now { font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #fff; background: var(--live); border-radius: 999px; padding: 3px 9px; }
-.ppg-score { font-family: 'Sora','Inter',sans-serif; font-size: 15px; font-weight: 800; color: var(--ink); }
-.ppg-btn { min-height: 28px; padding: 3px 9px; font-size: 11px; background: var(--card); color: var(--muted); border: 1px solid var(--border); border-radius: var(--r-sm); }
-@media (hover: hover) and (pointer: fine) { .ppg-btn:hover { background: var(--surface-3); } }
-.ppg.is-now { background: var(--live-soft); border-radius: var(--r-md); border-top-color: transparent; padding: 11px 10px; margin: 3px 0; }
-.ppg.is-now + .ppg { border-top-color: transparent; }
-.ppg.is-final .ppg-m { color: var(--muted); font-weight: 600; }
-.ppl-foot { margin-top: 12px; }
-.ppl-prog { font-size: 12px; color: var(--muted); }
-.ppl-more { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 6px; }
-.ppl-more > summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--accent); list-style: none; padding: 4px 0; }
-.ppl-more > summary::-webkit-details-marker { display: none; }
-.ppl-more > summary::before { content: '\25B8  '; color: var(--faint); }
-.ppl-more[open] > summary::before { content: '\25BE  '; }
-.ppl-more-body { padding-top: 6px; }
+
+
 
 /* C69 — tap a registered team -> roster popup card (§38 Option A: avatar list). */
 .tc-card { width: min(360px, 94vw); padding: 20px; text-align: left; }
@@ -1924,70 +1871,21 @@ body.copilot-open #cop-chat {
 
 
 /* C72 — match-action chooser (Score live / Enter final). */
-.mac-card { width: min(360px, 94vw); padding: 20px; text-align: left; }
-.mac-title { font-family: 'Sora','Inter',sans-serif; font-size: 18px; font-weight: 800; color: var(--ink); }
-.mac-teams { font-size: 14px; color: var(--muted); margin: 4px 0 16px; }
-.mac-teams .mac-vs { color: var(--faint); }
-.mac-opt { display: block; width: 100%; text-align: left; white-space: normal; border: 1px solid var(--border); background: var(--card); border-radius: var(--r-md); padding: 14px; margin-bottom: 10px; cursor: pointer; }
-@media (hover: hover) and (pointer: fine) { .mac-opt:hover { background: var(--surface-3); } }
-.mac-live { border-color: var(--live); background: var(--live-soft); }
-@media (hover: hover) and (pointer: fine) { .mac-live:hover { background: var(--live-soft); } }
-.mac-opt-t { display: block; font-size: 16px; font-weight: 700; color: var(--ink); }
-.mac-opt-s { display: block; font-size: 12.5px; color: var(--muted); margin-top: 3px; line-height: 1.35; }
-.mac-cancel { display: block; width: 100%; min-height: 44px; margin-top: 4px; background: var(--card); color: var(--muted); border: 1px solid var(--border); border-radius: var(--r-md); font-size: 14px; font-weight: 600; }
-@media (hover: hover) and (pointer: fine) { .mac-cancel:hover { background: var(--surface-3); } }
+
+
+
+
 
 /* C72 — live scorer (full screen, §38 Option A "tap the team"). */
 .live-overlay { position: fixed; inset: 0; z-index: 13000; background: var(--surface-3); animation: as-overlay-in .16s ease-out; }
 .lsc { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
-.lsc-h { display: flex; align-items: center; gap: 10px; padding: 14px 14px 6px; padding-top: max(14px, env(safe-area-inset-top)); }
-.lsc-back { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: var(--card); color: var(--ink); font-size: 24px; font-weight: 700; line-height: 1; padding: 0; }
-.lsc-htext { flex: 1; min-width: 0; text-align: center; }
-.lsc-title { font-family: 'Sora','Inter',sans-serif; font-size: 16px; font-weight: 800; color: var(--ink); }
-.lsc-rule { font-size: 12px; color: var(--muted); margin-top: 1px; }
-.lsc-livetag { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 800; letter-spacing: .04em; color: var(--live); background: var(--live-soft); border-radius: 999px; padding: 4px 10px; }
-.lsc-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--live); animation: as-live-pulse 1.8s ease-in-out infinite; }
-.lsc-panels { flex: 1; display: flex; gap: 10px; padding: 6px 12px; min-height: 0; }
-.lsc-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: 2px solid var(--border); border-radius: var(--r-lg); background: var(--card); padding: 16px 8px; }
-.lsc-panel.lead { border-color: var(--live); background: var(--live-soft); }
-.lsc-panel:active { transform: scale(.99); }
-.lsc-name { font-size: 16px; font-weight: 700; color: var(--ink); text-align: center; line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.lsc-score { font-family: 'Sora','Inter',sans-serif; font-size: clamp(56px, 18vw, 88px); font-weight: 800; color: var(--ink); line-height: 1; }
-.lsc-panel.lead .lsc-score { color: var(--live); }
-.lsc-tap { font-size: 12px; font-weight: 800; color: var(--accent); letter-spacing: .03em; }
-.lsc-minus { display: flex; gap: 10px; padding: 0 12px; }
-.lsc-minusbtn { flex: 1; min-width: 0; min-height: 44px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--card); color: var(--muted); font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (hover: hover) and (pointer: fine) { .lsc-minusbtn:hover { background: var(--surface-3); } }
-.lsc-err { color: var(--danger); font-size: 13px; text-align: center; padding: 6px 12px 0; }
-.lsc-f { padding: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom)); text-align: center; }
-.lsc-final { background: none; border: none; color: var(--muted); font-size: 13px; font-weight: 700; text-decoration: underline; text-underline-offset: 2px; }
-.lsc-confirm { position: absolute; inset: 0; background: rgba(15,23,42,.5); display: flex; align-items: center; justify-content: center; padding: 16px; }
-.lsc-confirm-card { background: var(--card); border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 22px; width: min(340px, 92vw); text-align: center; }
-.lsc-confirm-t { font-family: 'Sora','Inter',sans-serif; font-size: 22px; font-weight: 800; color: var(--ink); }
-.lsc-confirm-s { font-size: 13px; color: var(--muted); margin: 4px 0 18px; }
-.lsc-confirm-btns { display: flex; gap: 10px; }
-.lsc-confirm-btns button { flex: 1; min-height: 48px; border-radius: var(--r-md); font-size: 15px; font-weight: 600; }
+
 
 /* C72 — live running score on the pool board (a game being live-scored). */
-.ppg.is-live { background: var(--live-soft); border-radius: var(--r-md); border-top-color: transparent; padding: 11px 10px; margin: 3px 0; }
-.ppg.is-live + .ppg { border-top-color: transparent; }
-.ppg-livescore { font-family: 'Sora','Inter',sans-serif; font-size: 16px; font-weight: 800; color: var(--live); }
-.ppg-livetag { font-size: 9px; font-weight: 800; letter-spacing: .05em; color: #fff; background: var(--live); border-radius: 999px; padding: 2px 7px; }
+
 
 /* Seeding list (Mike, 2026-06-27, §38 option B — table): cross-pool seed order on the bracket/tournament views. */
-.sd-card { margin-top: 12px; }
-.sd-h { font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 16px; margin: 0 0 2px; color: var(--ink); }
-.sd-sub { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
-.sd-tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
-.sd-tbl th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; padding: 6px 6px; border-bottom: 1px solid var(--border); }
-.sd-tbl th.r, .sd-tbl td.r { text-align: right; }
-.sd-tbl td { padding: 8px 6px; border-bottom: 1px solid var(--border); color: var(--ink); }
-.sd-tbl tr:last-child td { border-bottom: none; }
-.sd-tbl td.sd-seed { font-family: 'Sora','Inter',sans-serif; font-weight: 800; color: var(--muted); width: 1%; white-space: nowrap; }
-.sd-tbl td.sd-nm { font-weight: 700; }
-.sd-tbl tr.top td.sd-seed { color: var(--accent); }
-.sd-tbl td.sd-pos { color: var(--live); font-weight: 700; }
-.sd-tbl td.sd-neg { color: var(--danger); font-weight: 700; }
+
 
 
 
@@ -1999,8 +1897,7 @@ body.copilot-open #cop-chat {
 
 
 
-.bt-act { display: flex; justify-content: flex-end; padding: 4px 8px 8px; }
-.bt-act button { min-height: 28px; padding: 3px 10px; font-size: 12px; }
+
 
 /* ===================================================================
    PUBLIC DASHBOARD REMAKE (Slice 1, 2026-07-08) — pd-* component kit.

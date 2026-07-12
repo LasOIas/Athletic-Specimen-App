@@ -6,6 +6,10 @@
     name="viewport"
     content="width=device-width, initial-scale=1.0"
   />
+  <!-- Safari-browser polish (Mike 2026-07-11: "looks funky on safari, not everyone will download it"):
+       tint Safari's own top/bottom chrome to the app's stone so the page and the browser read as one
+       surface. #F8F7F5 = oklch(0.985 0.003 75), the locked background token. -->
+  <meta name="theme-color" content="#F8F7F5" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Perf (2026-07-11, Mike's phone-load report): open the CDN + Supabase sockets during HTML parse so the
