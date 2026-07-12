@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.26'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.12.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -910,7 +910,17 @@ function buildCheckinStatsHTML() {
 </div>`;
 }
 
+// One-clean-boot-paint flag (2026-07-12, Mike: "it loads funky… the logo shows first and then the
+// registration — load all at once"): false until render() first swaps the boot splash out of #root.
+// While the splash is up there is no app DOM to surgically update — partialRender's "no matching
+// surface" fallback is a full render(), so a background sync (realtime push, focus refresh) firing
+// mid-boot would swap the splash out EARLY with half-loaded state — the staggered boot back through
+// a side door. Callers have already written the fresh data into state; the single boot render()
+// paints it. The auth-path renders check it too. Post-first-paint behavior is unchanged.
+let bootPaintDone = false;
+
 function partialRender() {
+  if (!bootPaintDone) return; // pre-first-paint: the boot render() will paint the already-updated state
   dismissTeamPeek(); // §13.2: a background rebuild replaces the tapped anchor — never strand a floating peek
   const root = document.getElementById('root');
   if (!root || !root.hasChildNodes()) { render(); return; }
@@ -9640,6 +9650,7 @@ function render() {
 
   const shellHtml = renderPublicShell();
   root.innerHTML = shellHtml.replace(/\n?\]\s*$/, '');
+  bootPaintDone = true; // the boot splash (index.html) is gone — partial/auth renders may paint from here on
 
 
 
@@ -10175,7 +10186,10 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       state.account = { id: session.user.id, email };
       if (!isNewSignIn) return;
       closeAuthPage();
-      if (state.loaded) { try { render(); } catch {} }   // show signed-in immediately
+      // bootPaintDone gate (2026-07-12): during boot, INITIAL_SESSION restores can land while the
+      // splash is still up — state is set above, and the single boot render() paints it. Post-boot
+      // (a real sign-in from the auth page) this renders immediately, unchanged.
+      if (state.loaded && bootPaintDone) { try { render(); } catch {} }   // show signed-in immediately
       // Slice 3b: a signed-out "claim your team" tap routed through sign-in — finish the journey.
       // Deferred: openClaimPage does a .from() read, and supabase calls inline in this callback deadlock.
       if (claimIntent) {
@@ -10211,7 +10225,9 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
           // Identity (spec §2/§3): one-time name fill + auto-connect. Fire-and-forget here — same
           // deferred site as deriveRole, so its supabase calls never run inside the auth callback.
           void promptNameFillIfNeeded();
-          if (state.loaded) { try { render(); } catch {} }
+          // bootPaintDone gate (2026-07-12): mid-boot the role/admin state just set above is carried
+          // by the single boot render(); painting here would swap the splash for half-loaded content.
+          if (state.loaded && bootPaintDone) { try { render(); } catch {} }
         } catch (err) { console.error('Role derive error', err); }
       }, 0);
       return;
@@ -10631,12 +10647,22 @@ function init() {
           if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
         })();
       }
+      // One clean boot paint (2026-07-12, Mike: "it loads funky… the logo shows first and then the
+      // registration — i want the app to load all at once so its clean"). The old flow rendered HERE
+      // with players-only state — Home painted its quiet "Nothing on right now" lead, then flipped to
+      // the real registration/session state one network round-trip later when the tournament wave
+      // landed (a visible wrong-content flash; measured splash→quiet@1.86s→registration@2.12s on
+      // emulated Fast 4G). Extends the 2026-06-20 two-render coalesce to its conclusion: hold the
+      // branded splash (index.html) until the WHOLE boot gather settles, then paint ONCE.
+      // Safety valve: on a wedged connection (>5s) paint whatever loaded and let the late wave
+      // repaint — the degraded path is exactly the old two-paint behavior, never a hung splash.
+      const bootGather = Promise.allSettled([loadSession(), loadPickupDays(), tdbRefreshTournaments()]);
+      const bootWinner = await Promise.race([
+        bootGather.then(() => 'data'),
+        new Promise((resolve) => setTimeout(() => resolve('valve'), 5000)),
+      ]);
       render();
-      // Reliability fix (2026-06-20): coalesce the two post-boot async renders into ONE. loadSession
-      // (conditional) and tdbRefreshTournaments (unconditional) each fired their own render() within ~1s
-      // of boot, on top of this immediate paint — up to 3 full renders. Keep the immediate paint for
-      // first contentful render; render once more after both settle.
-      Promise.allSettled([loadSession(), loadPickupDays(), tdbRefreshTournaments()]).then(() => render());
+      if (bootWinner === 'valve') bootGather.then(() => render());
 
       if (!SyncManager.poll.interval) {
         // Keep multiple devices converged without requiring a full page refresh.
