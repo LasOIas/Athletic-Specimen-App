@@ -662,6 +662,18 @@ function isValidFullName(name) {
   return words[0].length >= 2 && words[words.length - 1].length >= 2;
 }
 
+// Tournament identity (spec 2026-07-11 §2) — sign-up / one-time name-fill validation. Trims each
+// part and collapses inner whitespace; both first AND last must be >= 2 chars (isValidFullName-grade,
+// per-part). Returns the cleaned parts on success so the caller can store + match "First Last".
+function splitFullNameParts(first, last) {
+  const f = String(first || '').trim().replace(/\s+/g, ' ');
+  const l = String(last || '').trim().replace(/\s+/g, ' ');
+  if (f.length < 2 || l.length < 2) {
+    return { ok: false, message: 'Enter your real first and last name.' };
+  }
+  return { ok: true, first: f, last: l };
+}
+
 // C28 Slice 1 — the admin AI co-pilot's READ context. PURE shaping + REDACTION (no DOM / no state global):
 // the caller assembles `input` from state + getPublicLiveData(); this returns the compact, skill-free
 // snapshot the edge function passes to Claude. Skill is admin-only and must NEVER reach the model (§AS-1),
@@ -1641,7 +1653,7 @@ if (typeof module !== "undefined" && module.exports) {
     countSharedTeammatePairs, pickMostDifferentTeams,
     generateRoundRobin, decideWinner, computeStandings, applyHeadToHeadGroups,
     nextPow2, seedOrder, computeSeeding, computeChampion, resolveHistoryChampion, generateDoubleElim,
-    disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName,
+    disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName, splitFullNameParts,
     copilotRosterNames, copilotUpNextByNet, buildCopilotContext,
     resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
     resolveTournamentMatch, publicHubStatus,

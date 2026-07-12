@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.23'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.24'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5971,7 +5971,11 @@ function renderAuthPageInner() {
       <form id="auth-form" novalidate autocomplete="on">
         <h2 class="auth-title">${signup ? 'Create account' : 'Welcome'}</h2>
         <p class="auth-sub">Sign in to claim your team and follow your games.</p>
-        <label class="auth-label" for="auth-email">Email</label>
+        ${signup ? `<label class="auth-label" for="auth-first">First name</label>
+        <input class="auth-input" id="auth-first" type="text" autocomplete="given-name" autocapitalize="words" spellcheck="false" placeholder="First" />
+        <label class="auth-label" for="auth-last">Last name</label>
+        <input class="auth-input" id="auth-last" type="text" autocomplete="family-name" autocapitalize="words" spellcheck="false" placeholder="Last" />
+        ` : ''}<label class="auth-label" for="auth-email">Email</label>
         <input class="auth-input" id="auth-email" type="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="you@email.com" />
         <label class="auth-label" for="auth-pass">Password</label>
         <input class="auth-input" id="auth-pass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="${signup ? 'At least 6 characters' : 'Your password'}" />
@@ -6211,12 +6215,22 @@ async function onAuthSubmit(e) {
   if (!email || !password) { showErr('Enter your email and password.'); return; }
   const signup = authMode === 'signup';
   if (signup && password.length < 6) { showErr('Password must be at least 6 characters.'); return; }
+  // Identity (spec §2): create-account captures the person. Validate first+last BEFORE we disable the
+  // button (same grammar as the password-length gate above); the cleaned parts ride the signUp metadata.
+  let nm = null;
+  if (signup) {
+    const firstEl = document.getElementById('auth-first');
+    const lastEl = document.getElementById('auth-last');
+    nm = splitFullNameParts(firstEl && firstEl.value, lastEl && lastEl.value);
+    if (!nm.ok) { showErr(nm.message); return; }
+  }
   if (!supabaseClient) { showErr('Sign-in is unavailable right now.'); return; }
   const orig = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = signup ? 'Creating…' : 'Signing in…'; }
   try {
     const res = signup
-      ? await supabaseClient.auth.signUp({ email, password })
+      ? await supabaseClient.auth.signUp({ email, password,
+          options: { data: { first_name: nm.first, last_name: nm.last, full_name: nm.first + ' ' + nm.last } } })
       : await supabaseClient.auth.signInWithPassword({ email, password });
     if (res.error) { showErr(friendlyAuthError(res.error, signup)); if (btn) { btn.disabled = false; btn.textContent = orig; } return; }
     if (signup && !(res.data && res.data.session)) {
@@ -6229,6 +6243,102 @@ async function onAuthSubmit(e) {
     closeAuthPage(); // success -> onAuthStateChange sets state + re-renders the header
   } catch (_) {
     showErr('Something went wrong. Try again.');
+    if (btn) { btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tournament identity (spec §2/§3, 2026-07-11) — one-time name fill + auto-connect.
+// Runs from the DEFERRED post-SIGNED_IN site (the same place deriveRole runs), NEVER inside
+// the onAuthStateChange callback: a supabase call there deadlocks supabase-js's auth lock.
+// Reads the caller's OWN profile names; if both are present it fires connect_profile_by_name
+// ONCE per session (module flag), else it opens a minimal, non-trapping name-fill overlay in
+// the locked auth-page grammar (reopens next session if the user reloads without saving).
+// ─────────────────────────────────────────────────────────────────────────────
+let identityConnectAttempted = false; // connect_profile_by_name fires at most once per session
+let accountName = null;               // { first, last } cache the account menu reads
+
+async function connectProfileByName(first, last) {
+  const res = await supabaseClient.rpc('connect_profile_by_name', { p_first: first, p_last: last });
+  if (res.error) throw res.error;
+  identityConnectAttempted = true;
+  // Task 4 consumes the collision flag (claim-page fallback); this slice only records it.
+  if (res.data && res.data.collision) state.identityCollision = true;
+  return res.data;
+}
+
+async function promptNameFillIfNeeded() {
+  if (!supabaseClient || !state.account) return;
+  const uid = state.account.id;
+  let first = '', last = '';
+  try {
+    const { data, error } = await supabaseClient
+      .from('profiles').select('first_name,last_name').eq('id', uid).maybeSingle();
+    if (error) throw error;
+    first = (data && data.first_name) || '';
+    last = (data && data.last_name) || '';
+  } catch (err) {
+    console.error('promptNameFillIfNeeded profile read', err);
+    return; // best-effort — a read failure never blocks the app or traps the user
+  }
+  if (first && last) {
+    accountName = { first, last };
+    if (!identityConnectAttempted) {
+      try { await connectProfileByName(first, last); }
+      catch (err) { console.error('connect_profile_by_name', err); }
+    }
+    return;
+  }
+  openNameFillOverlay(); // either name missing → ask once (reopens next session if skipped)
+}
+
+function openNameFillOverlay() {
+  if (document.getElementById('namefill-page')) return; // never stack
+  const el = document.createElement('div');
+  el.id = 'namefill-page';
+  el.className = 'auth-page';
+  document.body.appendChild(el);
+  // No back button, no outside-click handler: tapping outside does nothing (it must NOT trap, but it
+  // also can't be dismissed without saving — it simply stays, and reopens next session if reloaded).
+  el.innerHTML = `
+    <div class="auth-inner">
+      <form id="namefill-form" novalidate autocomplete="on">
+        <h2 class="auth-title">What's your name?</h2>
+        <p class="auth-sub">So the app can connect you to your teams.</p>
+        <label class="auth-label" for="namefill-first">First name</label>
+        <input class="auth-input" id="namefill-first" type="text" autocomplete="given-name" autocapitalize="words" spellcheck="false" placeholder="First" />
+        <label class="auth-label" for="namefill-last">Last name</label>
+        <input class="auth-input" id="namefill-last" type="text" autocomplete="family-name" autocapitalize="words" spellcheck="false" placeholder="Last" />
+        <div class="auth-err" id="namefill-err" role="alert" hidden></div>
+        <button type="submit" class="auth-submit" id="namefill-save">Save</button>
+      </form>
+    </div>`;
+  el.querySelector('#namefill-form').addEventListener('submit', onNameFillSave);
+  setTimeout(() => { const f = document.getElementById('namefill-first'); if (f) f.focus(); }, 50);
+}
+
+async function onNameFillSave(e) {
+  e.preventDefault();
+  const firstEl = document.getElementById('namefill-first');
+  const lastEl = document.getElementById('namefill-last');
+  const errEl = document.getElementById('namefill-err');
+  const btn = document.getElementById('namefill-save');
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
+  if (errEl) errEl.hidden = true;
+  const nm = splitFullNameParts(firstEl && firstEl.value, lastEl && lastEl.value);
+  if (!nm.ok) { showErr(nm.message); return; }
+  if (!supabaseClient) { showErr('Saving is unavailable right now.'); return; }
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    await connectProfileByName(nm.first, nm.last); // writes profile names + links matching rows
+    accountName = { first: nm.first, last: nm.last };
+    const el = document.getElementById('namefill-page');
+    if (el) el.remove();
+    try { render(); } catch (_) {}
+  } catch (err) {
+    console.error('connect_profile_by_name (name fill)', err);
+    showErr("Couldn't save your name — try again.");
     if (btn) { btn.disabled = false; btn.textContent = orig; }
   }
 }
@@ -6254,10 +6364,15 @@ function openAccountMenu() {
     const mine = myTeamInfo();
     roleLabel = mine ? ('Player · ' + mine.teamName) : (state.myClaimedPlayer ? 'Player' : 'Spectator');
   }
+  // Identity (spec §2): show "First Last" prominently when we have it (cached in promptNameFillIfNeeded);
+  // the email drops to a muted secondary line so the account stays identifiable. No name → email as before.
+  const fullName = (accountName && accountName.first && accountName.last)
+    ? (accountName.first + ' ' + accountName.last) : '';
   el.innerHTML =
     '<div class="popup-card card kc-card am-card" role="dialog" aria-modal="true">'
     + '<div class="am-avatar">' + escapeHTML(authInitial()) + '</div>'
-    + '<div class="kc-name">' + escapeHTML(email) + '</div>'
+    + '<div class="kc-name">' + escapeHTML(fullName || email) + '</div>'
+    + (fullName ? '<div class="am-role">' + escapeHTML(email) + '</div>' : '')
     + '<div class="am-role">' + escapeHTML(roleLabel) + '</div>'
     + '<button type="button" class="kc-confirm" id="am-signout">Sign out</button>'
     + '<button type="button" class="kc-cancel" id="am-close">Close</button>'
@@ -10033,6 +10148,9 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
           // ONLY inside the isNewSignIn-gated heavy block (genuine sign-in transition + initial
           // restore of a persisted real session), NEVER per auth event.
           void loadMyClaimedPlayer();
+          // Identity (spec §2/§3): one-time name fill + auto-connect. Fire-and-forget here — same
+          // deferred site as deriveRole, so its supabase calls never run inside the auth callback.
+          void promptNameFillIfNeeded();
           if (state.loaded) { try { render(); } catch {} }
         } catch (err) { console.error('Role derive error', err); }
       }, 0);
