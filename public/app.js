@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.22'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.23'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2001,7 +2001,14 @@ function hmRegistrationHTML(reg) {
     + hmDetailRowHTML(HM_IC_USERS, rm.teamSize + ' per team, co-ed — at least 1 guy + 1 girl')
     + hmDetailRowHTML(HM_IC_FORMAT, 'Pool play → double-elim bracket — win by 2');
 
-  return `<div class="hm">${cluster}<div class="hm-sect">Details</div>${rows}</div>`;
+  // Add-to-Home-Screen hint (Mike's pick from the Safari nav round, 2026-07-11): rendered always,
+  // but CSS shows it ONLY in browser display-mode on phone widths — installed users never see it.
+  const a2hs = `<div class="hm-a2hs" aria-hidden="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0 4 4m-4-4-4 4"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
+      <span>Get the full-screen app: tap share → <b>Add to Home Screen</b></span>
+    </div>`;
+
+  return `<div class="hm">${cluster}<div class="hm-sect">Details</div>${rows}${a2hs}</div>`;
 }
 
 // ── State 2d: quiet (nothing on). Muted lead + past tournaments + champions link. History is loaded lazily

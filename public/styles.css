@@ -2913,13 +2913,35 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
    relocates into the bottom margin calc. The >=1024 top tab strip (media block above) is untouched. */
 @media (max-width: 1023px){
   body.pd-public-active #bottom-nav{
-    margin: 0 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    /* Mike (2026-07-11, his call from the Safari screenshot): in BROWSER Safari the pill floated 12px
+       above Safari's own search bar — two stacked pills with a dead gap. Sit it right on top of the
+       browser bar instead (env() is 0 in-browser, so this is a 2px seat). The INSTALLED app keeps the
+       original 12px float exactly via the display-mode override below. */
+    margin: 0 12px calc(2px + env(safe-area-inset-bottom, 0px));
     width: auto; border-radius: 18px; border: 1px solid var(--border);
     background: oklch(1 0 0 / .82);
     -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
     box-shadow: 0 4px 14px oklch(0.18 0.005 75 / .10);
     padding-bottom: 0;
   }
+  @media (display-mode: standalone) {
+    body.pd-public-active #bottom-nav{
+      margin: 0 12px calc(12px + env(safe-area-inset-bottom, 0px));
+    }
+  }
+}
+
+/* Add-to-Home-Screen hint (Mike liked it from the Safari nav round, 2026-07-11): a quiet dashed row on
+   the Home lead, shown ONLY when running inside a browser on a phone — installed users never see it. */
+.hm-a2hs{ display: none; }
+@media (max-width: 1023px) and (display-mode: browser){
+  body.pd-public-active .hm-a2hs{
+    display: flex; gap: 10px; align-items: center; margin-top: 16px; padding: 10px 12px;
+    border: 1px dashed var(--border); border-radius: 10px;
+    font-size: 12.5px; color: var(--muted);
+  }
+  body.pd-public-active .hm-a2hs svg{ width: 14px; height: 14px; flex: none; }
+  body.pd-public-active .hm-a2hs b{ color: var(--accent); font-weight: 600; }
 }
 
 /* ── hm-* : atom-up public Home kit (2026-07-10 spec) — card-free ── */
