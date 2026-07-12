@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.24'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.25'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2928,12 +2928,28 @@ async function tdbRefreshTournaments() {
 async function tdbListTeamMembers(tournamentId) {
   if (!supabaseClient || !tournamentId) return null;
   try {
+    // Task 4 (identity): read the tournament-people join, not the frozen pickup player_id. July+ rows
+    // carry tournament_player_id; the tournament_players row IS the person for this team.
     const { data, error } = await supabaseClient
       .from('team_members')
-      .select('player_id, teams!inner(id,name,tournament_id), players!inner(id,name,claimed_by_profile)')
-      .eq('teams.tournament_id', tournamentId);
+      .select('tournament_player_id, teams!inner(id,name,tournament_id), tournament_players ( real_name, profile_id )')
+      .eq('teams.tournament_id', tournamentId)
+      .not('tournament_player_id', 'is', null);
     if (error) throw error;
-    return shapeClaimCandidates(data || []);
+    // Adapt the identity join into the LEGACY claim-candidate shape so shapeClaimCandidates (and
+    // resolveMyTeam, whose "claimedBy === profileId" contract is unchanged) stay byte-identical:
+    // tournament_players.profile_id maps onto the old claimed_by_profile field. pure.js is untouched.
+    const rows = (data || [])
+      .filter((r) => r && r.tournament_player_id && r.tournament_players)
+      .map((r) => ({
+        players: {
+          id: r.tournament_player_id,
+          name: r.tournament_players.real_name,
+          claimed_by_profile: r.tournament_players.profile_id,
+        },
+        teams: r.teams,
+      }));
+    return shapeClaimCandidates(rows);
   } catch (err) {
     console.error('tdbListTeamMembers', err);
     return null;
@@ -3584,6 +3600,10 @@ function buildTournamentHubHTML() {
       stat = peek.live ? (rec + ' · Playing now') : (nextNet ? (rec + ' · Net ' + nextNet + ' next') : rec);
     }
     rows.push(row('data-nav-tab="myteam"', '', ICON.team, 'My team', escapeHTML(nm) + poolPart, escapeHTML(stat)));
+  } else if (state.identityCollision === true) {
+    // Identity (spec §3): someone else already owns your name, so sign-up got no auto-link — one quiet
+    // affordance to disambiguate once. Same #pd-claim id → the existing handler opens the claim page.
+    rows.push(row('id="pd-claim"', '', ICON.team, 'Find yourself', 'Someone shares your name &mdash; tap to pick you', CHEV));
   } else if (publicLiveTournament()) {
     // Unclaimed + a live tournament to claim into: the claim entry (relocated from the old Home hero) lives
     // here in the My-team slot. Same #pd-claim id → the existing delegated handler opens the claim flow.
@@ -6032,17 +6052,40 @@ function openClaimPage() {
   fetchClaimCandidates();
 }
 
+function claimCandidateInitials(name) {
+  return String(name || '').trim().split(/\s+/).map((w) => (w[0] || '').toUpperCase()).slice(0, 2).join('');
+}
+
+// Task 4 (identity): shape UNCLAIMED rows from either list into claim-search candidates. `source`
+// routes the tap to the right RPC; `teamName` is reused by the confirm/success views as the group label.
+function shapeIdentityCandidates(rows, source, label) {
+  const out = [];
+  (Array.isArray(rows) ? rows : []).forEach((r) => {
+    if (!r || !r.id) return;
+    const name = String((source === 'tp' ? r.real_name : r.name) || '').trim();
+    if (!name) return;
+    out.push({ id: String(r.id), name, source, teamName: label, initials: claimCandidateInitials(name) });
+  });
+  return out;
+}
+
+// Task 4 (identity): the claim page is the collision fallback — search UNCLAIMED rows across BOTH lists
+// (tournament people + pickup roster), community-scoped, tap yourself once. Signed-in only (RLS + the
+// affordance both gate it). Tap → the matching claim RPC, then connect_profile_by_name links the rest.
 async function fetchClaimCandidates() {
-  const t = claimableTournament();
   claimFetchFailed = false;
-  if (!t || !supabaseClient) { claimCandidates = []; renderClaimSearch(); return; }
+  claimCandidates = null;
+  if (!supabaseClient) { claimCandidates = []; renderClaimSearch(); return; }
+  const cid = await fetchCommunityId();
   try {
-    const { data, error } = await supabaseClient
-      .from('team_members')
-      .select('player_id, teams!inner(id,name,tournament_id), players!inner(id,name,claimed_by_profile)')
-      .eq('teams.tournament_id', t.id);
-    if (error) throw error;
-    claimCandidates = shapeClaimCandidates(data || []);
+    let tpQ = supabaseClient.from('tournament_players').select('id, real_name').is('profile_id', null);
+    let pkQ = supabaseClient.from('players').select('id, name').is('claimed_by_profile', null);
+    if (cid) { tpQ = tpQ.eq('community_id', cid); pkQ = pkQ.eq('community_id', cid); }
+    const [tpRes, pkRes] = await Promise.all([tpQ, pkQ]);
+    if (tpRes.error) throw tpRes.error;
+    if (pkRes.error) throw pkRes.error;
+    claimCandidates = shapeIdentityCandidates(tpRes.data || [], 'tp', 'Tournament player')
+      .concat(shapeIdentityCandidates(pkRes.data || [], 'pickup', 'Pickup roster'));
   } catch (err) {
     console.error('fetchClaimCandidates', err);
     claimCandidates = [];
@@ -6101,33 +6144,41 @@ function renderClaimSearch() {
   results.addEventListener('click', (e) => {
     const btn = e.target.closest('[data-claim-id]');
     if (!btn) return;
-    const c = (claimCandidates || []).find((x) => x.id === btn.dataset.claimId && x.teamName === btn.dataset.claimTeam);
-    if (c && !c.claimedBy) renderClaimConfirm(c);
+    const c = (claimCandidates || []).find((x) => x.id === btn.dataset.claimId && x.source === btn.dataset.claimSrc);
+    if (c) renderClaimConfirm(c);
   });
   paint();
   setTimeout(() => { try { input.focus(); } catch (_) {} }, 50);
 }
 
 function buildClaimResultsHTML(query) {
-  if (claimCandidates === null) return '<div class="small claim-note">Loading players&hellip;</div>';
+  if (claimCandidates === null) return '<div class="small claim-note">Loading names&hellip;</div>';
   if (claimFetchFailed) {
-    return '<div class="small claim-note">Couldn&rsquo;t load the players &mdash; check your connection, then close this and try again.</div>';
+    return '<div class="small claim-note">Couldn&rsquo;t load the names &mdash; check your connection, then close this and try again.</div>';
   }
   if (!claimCandidates.length) {
-    return '<div class="small claim-note">No players to claim yet &mdash; names show up here once teams register for a tournament.</div>';
+    return '<div class="small claim-note">No names to claim yet &mdash; they show up here once teams register or pickup players are added.</div>';
   }
   const q = String(query || '').trim();
   if (!q) return '<div class="small claim-note">Type your name to find yourself.</div>';
-  const list = filterClaimCandidates(claimCandidates, q);
-  if (!list.length) return '<div class="small claim-note">No match &mdash; check the spelling, or ask your organizer.</div>';
-  return list.map((c) => {
-    const taken = !!c.claimedBy;
-    return `<button class="cik-btn claim-row${taken ? ' is-claimed' : ''}" type="button" ${taken ? 'disabled' : ''} data-claim-id="${escapeHTML(c.id)}" data-claim-team="${escapeHTML(c.teamName)}">`
-      + `<span class="av">${escapeHTML(c.initials)}</span>`
-      + `<span class="cik-info"><span class="cik-nm">${escapeHTML(c.name)}</span><span class="cik-gp">${escapeHTML(c.teamName)}</span></span>`
-      + (taken ? '<span class="cik-state">Claimed</span>' : '')
-      + '</button>';
-  }).join('');
+  // Two quiet sections in the SAME row grammar; each filters the query independently.
+  const sections = [{ source: 'tp', label: 'Tournament players' }, { source: 'pickup', label: 'Pickup roster' }];
+  let html = '';
+  sections.forEach((s) => {
+    const list = filterClaimCandidates(claimCandidates.filter((c) => c.source === s.source), q);
+    if (!list.length) return;
+    html += `<div class="small claim-note claim-section">${escapeHTML(s.label)}</div>`
+      + list.map(claimRowHTML).join('');
+  });
+  if (!html) return '<div class="small claim-note">No match &mdash; check the spelling, or ask your organizer.</div>';
+  return html;
+}
+
+function claimRowHTML(c) {
+  return `<button class="cik-btn claim-row" type="button" data-claim-id="${escapeHTML(c.id)}" data-claim-src="${escapeHTML(c.source)}">`
+    + `<span class="av">${escapeHTML(c.initials)}</span>`
+    + `<span class="cik-info"><span class="cik-nm">${escapeHTML(c.name)}</span></span>`
+    + '</button>';
 }
 
 function renderClaimConfirm(c) {
@@ -6154,20 +6205,29 @@ async function submitClaim(c) {
   const err = document.getElementById('claim-err');
   if (btn) { btn.disabled = true; btn.textContent = 'Claiming…'; }
   try {
-    const { error } = await supabaseClient.rpc('claim_player', { p_player: c.id });
+    const { error } = c.source === 'tp'
+      ? await supabaseClient.rpc('claim_tournament_player', { p_tp: c.id })
+      : await supabaseClient.rpc('claim_player', { p_player: c.id });
     if (error) throw error;
+    // Link any remaining same-name rows across BOTH worlds (server-side, idempotent), then stop
+    // nagging — the collision that surfaced this page is resolved the moment you pick yourself.
+    if (accountName && accountName.first && accountName.last) {
+      try { await connectProfileByName(accountName.first, accountName.last); }
+      catch (e3) { console.error('connect_profile_by_name (post-claim)', e3); }
+    }
+    state.identityCollision = false;
     if (state.account) {
       c.claimedBy = state.account.id; // reflect locally without a refetch
-      // Slice 3c: also patch the shared personal-layer slot so the Home hero / My Team light up
-      // the moment the page closes (the 15s sync would catch up anyway; this removes the lag).
-      const shared = (state.teamMembers || []).find((x) => x.id === c.id && x.teamName === c.teamName);
-      if (shared) shared.claimedBy = state.account.id;
+      // Patch the shared personal-layer slot(s) so the My-team hero lights up the moment the page
+      // closes (the 15s sync would catch up anyway; this removes the lag). Match on person id only —
+      // the tournament_player id is the shared key; teamName here is the group label, not a team.
+      (state.teamMembers || []).forEach((x) => { if (x.id === c.id) x.claimedBy = state.account.id; });
     }
     renderClaimSuccess(c);
   } catch (e2) {
-    console.error('claim_player', e2);
+    console.error('submitClaim', e2);
     const msg = /already claimed/i.test((e2 && e2.message) || '')
-      ? 'Someone already claimed this player — ask your organizer to fix it.'
+      ? 'Someone already claimed this — ask your organizer to fix it.'
       : "Couldn't claim right now — try again.";
     if (err) { err.textContent = msg; err.hidden = false; }
     if (btn) { btn.disabled = false; btn.textContent = 'Claim my spot'; }
