@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.25'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.26'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6077,20 +6077,20 @@ async function fetchClaimCandidates() {
   claimCandidates = null;
   if (!supabaseClient) { claimCandidates = []; renderClaimSearch(); return; }
   const cid = await fetchCommunityId();
-  try {
-    let tpQ = supabaseClient.from('tournament_players').select('id, real_name').is('profile_id', null);
-    let pkQ = supabaseClient.from('players').select('id, name').is('claimed_by_profile', null);
-    if (cid) { tpQ = tpQ.eq('community_id', cid); pkQ = pkQ.eq('community_id', cid); }
-    const [tpRes, pkRes] = await Promise.all([tpQ, pkQ]);
-    if (tpRes.error) throw tpRes.error;
-    if (pkRes.error) throw pkRes.error;
-    claimCandidates = shapeIdentityCandidates(tpRes.data || [], 'tp', 'Tournament player')
-      .concat(shapeIdentityCandidates(pkRes.data || [], 'pickup', 'Pickup roster'));
-  } catch (err) {
-    console.error('fetchClaimCandidates', err);
-    claimCandidates = [];
-    claimFetchFailed = true;
-  }
+  // Controller fix on T4 (2026-07-11): the two lists settle INDEPENDENTLY — one failing fetch
+  // (e.g. a column-grant difference on the pickup query) must never blank the list that loaded.
+  // claimFetchFailed only when BOTH lists fail.
+  let tpQ = supabaseClient.from('tournament_players').select('id, real_name').is('profile_id', null);
+  let pkQ = supabaseClient.from('players').select('id, name').is('claimed_by_profile', null);
+  if (cid) { tpQ = tpQ.eq('community_id', cid); pkQ = pkQ.eq('community_id', cid); }
+  const [tpRes, pkRes] = await Promise.allSettled([tpQ, pkQ]);
+  const tpOK = tpRes.status === 'fulfilled' && !tpRes.value.error;
+  const pkOK = pkRes.status === 'fulfilled' && !pkRes.value.error;
+  if (!tpOK) console.error('fetchClaimCandidates tournament_players', tpRes.status === 'fulfilled' ? tpRes.value.error : tpRes.reason);
+  if (!pkOK) console.error('fetchClaimCandidates players', pkRes.status === 'fulfilled' ? pkRes.value.error : pkRes.reason);
+  claimCandidates = (tpOK ? shapeIdentityCandidates(tpRes.value.data || [], 'tp', 'Tournament player') : [])
+    .concat(pkOK ? shapeIdentityCandidates(pkRes.value.data || [], 'pickup', 'Pickup roster') : []);
+  claimFetchFailed = !tpOK && !pkOK;
   renderClaimSearch();
 }
 
