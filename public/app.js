@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.17'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.18'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -11469,7 +11469,23 @@ function init() {
           queueTournamentRefresh(800);
           // Task 2: keep the pickup-day set fresh (day-of gate flips as a new day arrives / is added on
           // another device). Only repaint when the set actually changed, to avoid clobbering a half-typed form.
-          void loadPickupDays().then((changed) => { if (changed && !tournamentTabIsDirty()) partialRender(); });
+          // Live-sync fix (2026-07-11, task #10): a changed set must ALSO rebuild #bottom-nav — the Check In
+          // tab appears/disappears day-of, and partialRender never touches the nav, so a pickup day added on
+          // another device only showed up after a manual reload (same class as the Wave-1b tournament-nav
+          // flip in refreshTournamentLive; the nav's click handler is delegated, so an innerHTML swap is safe).
+          void loadPickupDays().then((changed) => {
+            if (!changed) return;
+            const nav = document.getElementById('bottom-nav');
+            if (nav) nav.innerHTML = buildPublicNavInnerHTML();
+            if (activeMainTab === 'players' && !checkinNavVisible()) {
+              // The viewer is ON Check In and the day just ended/was removed on another device — bounce
+              // home (mirrors render()'s saved-tab bounce; the tab's nav button is gone).
+              activateMainTab('home');
+              return;
+            }
+            if (nav) activateMainTab(activeMainTab); // restore the active-button state after the swap
+            if (!tournamentTabIsDirty()) partialRender();
+          });
         }, 15000);
       }
     })();
