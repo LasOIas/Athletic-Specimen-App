@@ -8,6 +8,14 @@
   />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Perf (2026-07-11, Mike's phone-load report): open the CDN + Supabase sockets during HTML parse so the
+       deferred scripts + first data fetch skip the connection handshake on a phone connection. -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+  <link rel="preconnect" href="https://mlzblkzflgylnjorgjcp.supabase.co" crossorigin>
+  <!-- The Home lead logo is the LCP image but was only discoverable after app.js rendered (852ms of the
+       975ms lab LCP was discovery delay) — preload it so it's in flight from the first bytes. -->
+  <link rel="preload" as="image" href="/logo-mark.png">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
   <link rel="manifest" href="/manifest.json" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -68,12 +76,16 @@
     }, true);
   </script>
 
+  <!-- Perf (2026-07-11): these three were SYNCHRONOUS — they blocked HTML parsing on two CDN round-trips
+       before the (deferred) app could even be parsed. All scripts below are now `defer`: defer scripts
+       execute in DOCUMENT ORDER after parse, so the dependency chain (supabase UMD -> config -> pure -> app)
+       is preserved exactly. QRCode is only used by the on-demand QR modal. -->
   <!-- QR Code -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
   <!-- Supabase -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.5/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.5/dist/umd/supabase.min.js" defer></script>
   <!-- Shared Supabase config (URL + anon key) — must load before app.js -->
-  <script src="/supabase-config.js"></script>
+  <script src="/supabase-config.js" defer></script>
   <!-- Pure logic (tournament/balancing/scoring) — shared with the vitest suite; MUST load before app.js -->
   <script src="/pure.js" defer></script>
   <!-- Main App (tournament UI: buildTournamentTabHTML + bindTournamentTabV2) -->

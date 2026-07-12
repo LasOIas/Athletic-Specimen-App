@@ -1720,6 +1720,18 @@ body.copilot-open #cop-chat {
 .chip { transition: background-color .15s ease, color .15s ease, border-color .15s ease, transform .08s ease; }
 .chip:active { transform: scale(.96); }
 
+/* Phone-feel pass (2026-07-11, Mike: "when I click certain buttons the transition needs to be quick and
+   smooth so users aren't wondering did it work") — the atom-up kit's main tap targets shipped without the
+   press feedback the old kit got above. Same recipe: a fast transition + a small, immediate :active
+   compression so every tap visibly lands the instant a finger touches it. Reduce-motion gate below applies. */
+.hm-cta, .rf-cta, .auth-submit, .pd-back, .pd-tile, .mgp-selbtn {
+  transition: background-color .15s ease, color .15s ease, border-color .15s ease,
+    opacity .15s ease, transform .08s ease;
+}
+.hm-cta:active, .rf-cta:active:not([disabled]), .auth-submit:active:not(:disabled) { transform: scale(.97); }
+.pd-back:active, .mgp-selbtn:active { transform: scale(.92); }
+.pd-tile:active { transform: scale(.985); }
+
 /* The player-edit / add-player / Group Manager cards use the shared .popup system, which
    had NO entry animation (only the QR modal faded). Give the shared system a gentle,
    consistent fade + scale-in so modals don't hard-pop. */

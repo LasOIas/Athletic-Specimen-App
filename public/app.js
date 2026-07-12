@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.11.18'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.11.19'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4528,11 +4528,15 @@ async function submitRegisterForm(btn) {
   const v = registerFormValidate(teamName, roster, teamSize); // team name + exactly N + first-and-last, trimmed
   if (!v.ok) { setMsg(v.message, false); return; }
   if (btn) btn.setAttribute('disabled', 'true'); // in-flight guard (double-tap) — re-enabled ONLY on a real failure
+  // Phone-feel (2026-07-11): the label IS the pending state — on a slow connection the frozen
+  // "Register team" read as "did it work?". Restore it only on a real failure (success swaps the page).
+  const btnIdleLabel = btn ? btn.textContent : '';
+  if (btn) btn.textContent = 'Registering…';
   try {
     // paid = TRUE now (pay-to-register). Roster is already trimmed by registerFormValidate → clean jsonb.
     await tdbRegisterTeam(show.id, v.teamName, v.roster, null, true);
   } catch (err) {
-    if (btn) btn.removeAttribute('disabled');
+    if (btn) { btn.removeAttribute('disabled'); btn.textContent = btnIdleLabel || 'Register team'; }
     const raw = (err && err.message) || '';
     const netlike = /fetch|network|failed to fetch/i.test(raw); // a connectivity blip, not a real reject
     setMsg(netlike ? 'Could not register — check your connection and try again.' : (raw || 'Could not register — try again.'), false);
@@ -4678,11 +4682,14 @@ async function submitJoinSheet(btn) {
   const v = joinSheetValidate(teamName, roster, teamSize); // same rules + inline copy as the proven path
   if (!v.ok) { setMsg(v.message, false); return; }
   if (btn) btn.setAttribute('disabled', 'true'); // in-flight guard (double-tap)
+  // Phone-feel (2026-07-11): pending label while the write is in flight (see submitRegisterForm).
+  const btnIdleLabel = btn ? btn.textContent : '';
+  if (btn) btn.textContent = 'Registering…';
   try {
     // The PROVEN write path, verbatim (tdbRegisterTeam). paid=false: payment moves to check-in (§13.5).
     await tdbRegisterTeam(state.activeTournamentId, v.teamName, v.roster, null, false);
   } catch (err) {
-    if (btn) btn.removeAttribute('disabled');
+    if (btn) { btn.removeAttribute('disabled'); btn.textContent = btnIdleLabel || 'Register'; }
     setMsg((err && err.message) || 'Could not register — try again.', false);
     return; // the INSERT failed → real error, stay on the form
   }

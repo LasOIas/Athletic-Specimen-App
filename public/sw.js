@@ -48,7 +48,11 @@ self.addEventListener('fetch', (event) => {
 
   // Prefer network for app shell assets so deploy updates are not hidden by stale cache.
   if (event.request.mode === 'navigate' || isShellAsset) {
-    const freshRequest = new Request(event.request, { cache: 'no-store' });
+    // Perf (2026-07-11, Mike's phone-load report): 'no-store' forced a FULL re-download of every shell
+    // asset (incl. app.js) on every open. 'no-cache' keeps the same freshness guarantee (always
+    // revalidates with the server, so a deploy is picked up immediately and the version pill stays
+    // truthful) but unchanged assets come back as cheap 304s instead of full bodies.
+    const freshRequest = new Request(event.request, { cache: 'no-cache' });
     event.respondWith(
       fetch(freshRequest)
         .then((response) => {
