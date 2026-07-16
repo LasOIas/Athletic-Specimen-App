@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.16.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.16.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -199,7 +199,7 @@ function openPlayerEditPopup(playerKey) {
       } catch (err) {
         // Review fix: a failed read must not read as an affirmative "Not linked".
         console.error('claim status read', err);
-        statusEl.textContent = "Couldn't check — reopen to retry";
+        statusEl.textContent = "Couldn't check. Reopen to retry";
       }
     })();
     unlinkBtn.addEventListener('click', async () => {
@@ -212,7 +212,7 @@ function openPlayerEditPopup(playerKey) {
         unlinkBtn.style.display = 'none';
       } catch (err) {
         console.error('unlink account', err);
-        statusEl.textContent = "Couldn't unlink — try again";
+        statusEl.textContent = "Couldn't unlink. Try again";
         unlinkBtn.disabled = false;
       }
     });
@@ -787,7 +787,7 @@ function resetGeneratedTeamDragState() {
     if (!input || !warn) return;
     const name = String(input.value || '').trim();
     warn.textContent = (name && teamNameTaken(name, registerTargetTeams()))
-      ? 'A team named "' + name + '" is already taken — pick another name.'
+      ? 'A team named "' + name + '" is already taken. Pick another name.'
       : '';
   };
   // Prefill-Venmo (2026-07-16): re-compose the pay link's href LIVE as the team name is typed so the note
@@ -1984,7 +1984,7 @@ function hmSessionLiveHTML(reg) {
 
   // Cross-state link only when registration is ACTUALLY open — reg can now be a CLOSED upcoming tournament.
   const regLink = (reg && reg.registration_open)
-    ? `<button type="button" class="hm-link" data-tn-view="register"><span>Registration open — ${escapeHTML(reg.name || 'Tournament')}</span>${HM_CHEV}</button>`
+    ? `<button type="button" class="hm-link" data-tn-view="register"><span>Registration open · ${escapeHTML(reg.name || 'Tournament')}</span>${HM_CHEV}</button>`
     : '';
 
   return `<div class="hm">${lead}${regLink}</div>`;
@@ -2024,8 +2024,8 @@ function hmRegistrationHTML(reg) {
     </div>`;
 
   const rows = hmDetailRowHTML(HM_IC_PIN, 'posted in GroupMe')
-    + hmDetailRowHTML(HM_IC_USERS, rm.teamSize + ' per team, co-ed — at least 1 guy + 1 girl')
-    + hmDetailRowHTML(HM_IC_FORMAT, 'Pool play → double-elim bracket — win by 2');
+    + hmDetailRowHTML(HM_IC_USERS, rm.teamSize + ' per team, co-ed · at least 1 guy + 1 girl')
+    + hmDetailRowHTML(HM_IC_FORMAT, 'Pool play → double-elim bracket · win by 2');
 
   // Add-to-Home-Screen hint (Mike's pick from the Safari nav round, 2026-07-11): rendered always,
   // but CSS shows it ONLY in browser display-mode on phone widths — installed users never see it.
@@ -2459,7 +2459,7 @@ async function tdbDrawPools(tournament) {
   _poolSetupInFlight = true;
   try {
   const cur = (await supabaseClient.from('tournaments').select('status').eq('id', tournament.id).single()).data;
-  if (cur && cur.status !== 'setup') throw new Error('Pool play already started — Reset Pools first.');
+  if (cur && cur.status !== 'setup') throw new Error('Pool play already started. Reset Pools first.');
   const teams = await tdbListTeams(tournament.id);
   if (teams.length < 2) throw new Error('Add at least 2 teams first.');
   // C25 item 9: one delete for ALL existing pools of this tournament (was a per-pool delete loop).
@@ -2505,7 +2505,7 @@ async function tdbStartPoolPlay(tournament) {
   _poolSetupInFlight = true;
   try {
   const cur = (await supabaseClient.from('tournaments').select('status').eq('id', tournament.id).single()).data;
-  if (cur && cur.status !== 'setup') throw new Error('Pool play already started — Reset Pools first.');
+  if (cur && cur.status !== 'setup') throw new Error('Pool play already started. Reset Pools first.');
   const pools = await tdbListPools(tournament.id);
   if (!pools.length) throw new Error('Draw pools first.');
   const teams = await tdbListTeams(tournament.id);
@@ -2532,7 +2532,7 @@ async function tdbStartPoolPlay(tournament) {
       });
     });
   });
-  if (!rows.length) throw new Error('No pool games to schedule — each pool needs at least 2 teams.');
+  if (!rows.length) throw new Error('No pool games to schedule. Each pool needs at least 2 teams.');
   const { error } = await supabaseClient.from('matches').insert(rows);
   if (error) throw error;
   // Reliability (2026-06-24): check the status update — if it failed silently, 200+ matches would be
@@ -2557,7 +2557,7 @@ function isFnMissingError(err) {
   const msg = String((err.message || '') + ' ' + (err.details || '') + ' ' + (err.hint || ''));
   return code === 'PGRST202' || code === '42883' || /could not find the function|function .* does not exist|schema cache/i.test(msg);
 }
-const RPC_NOT_READY_MSG = 'Pool setup isn\'t available yet — the server is still updating. Try again in a minute.';
+const RPC_NOT_READY_MSG = 'Pool setup isn\'t available yet. The server is still updating. Try again in a minute.';
 
 async function tdbDrawPoolsAtomic(tournament) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
@@ -2597,7 +2597,7 @@ async function tdbStartPoolPlayAtomic(tournament) {
       net: slots[gi].net, queue_order: slots[gi].queue_order,
     }));
   });
-  if (!rows.length) throw new Error('No pool games to schedule — each pool needs at least 2 teams.');
+  if (!rows.length) throw new Error('No pool games to schedule. Each pool needs at least 2 teams.');
   const { error } = await supabaseClient.rpc('start_pool_play_atomic', {
     p_tournament_id: tournament.id, p_matches: rows,
   });
@@ -2609,7 +2609,7 @@ async function tdbStartPoolPlayAtomic(tournament) {
 // 0050 the functions don't exist — surface a friendly "still updating" notice (isFnMissingError) and NEVER fall
 // back to a direct status write (a raw client update would bypass the guard/validation the RPC exists to
 // enforce, and re-introduce exactly the June drift this task fixes).
-const CLOSEOUT_RPC_NOT_READY = 'Close-out isn\'t available yet — the server is still updating. Try again in a minute.';
+const CLOSEOUT_RPC_NOT_READY = 'Close-out isn\'t available yet. The server is still updating. Try again in a minute.';
 // close: p_champion_team_id null = "no champion recorded" (allowed). The RPC validates the team belongs to the
 // tournament, refuses to close from 'setup', sets status='completed' + champion + registration_open=false.
 async function tdbCloseTournament(tournamentId, championTeamId) {
@@ -2633,7 +2633,7 @@ async function tdbReopenTournament(tournamentId) {
 // "still updating" notice (isFnMissingError) and NEVER fall back to a direct memberships/table write
 // (memberships has no client INSERT policy; the log tables are RLS-locked — a fallback would only fail less
 // honestly and would bypass the owner guard these functions enforce).
-const ADMIN_RPC_NOT_READY = 'Admins tools aren\'t available yet — the server is still updating. Try again in a minute.';
+const ADMIN_RPC_NOT_READY = 'Admins tools aren\'t available yet. The server is still updating. Try again in a minute.';
 // OWNER-ONLY. role = 'organizer' (promote to co-admin) | 'player' (remove admin). The server enforces the
 // owner guard, the "account must exist" check, and the no-mint-owner / no-touch-owner rails.
 async function tdbSetMemberRole(email, role) {
@@ -2731,7 +2731,7 @@ async function tdbSetPoolNets(pool, newNets, matches) {
       .update({ net: slots[i].net, queue_order: slots[i].queue_order, version: (m.version || 0) + 1, updated_at: new Date().toISOString() })
       .eq('id', m.id).eq('version', m.version || 0).select();
     if (error) throw error;
-    if (!data || data.length === 0) throw new Error('Another device just updated a game — refreshing.');
+    if (!data || data.length === 0) throw new Error('Another device just updated a game. Refreshing.');
   }
   return nets;
 }
@@ -3075,7 +3075,7 @@ async function maybeAutoGenerateBracket() {
     // maybeAutoGenerateBracket, which would immediately re-pop the appConfirm on top of the error
     // (a re-prompt loop on a flaky network). Leave it claimed; the manual "Generate Bracket" button is
     // the retry path, and Reset Pools re-arms the auto-prompt (delete _autoGenPrompted[t.id]).
-    state.tournamentTabError = (e && e.message) || 'Could not generate the bracket — use the Generate Bracket button to retry.';
+    state.tournamentTabError = (e && e.message) || 'Could not generate the bracket. Use the Generate Bracket button to retry.';
     render();
   }
 }
@@ -3300,7 +3300,7 @@ function buildBracketHTML(tournament, matches, teams, opts = {}) {
 
   // C57: map-style bracket — pinch to zoom, drag any direction to pan (gestures handle it, no zoom buttons).
   // Mike removed the [- Fit +] control; keep a one-line hint so scoring stays discoverable.
-  const zoomToggle = `<div class="bt-bar"><span class="bt-hint">${ro ? 'Tap a team for its record · pinch or drag to zoom' : (opts.preview ? 'Bracket format — teams seed in once pools finish' : 'tap a match to enter its score')}</span></div>`;
+  const zoomToggle = `<div class="bt-bar"><span class="bt-hint">${ro ? 'Tap a team for its record · pinch or drag to zoom' : (opts.preview ? 'Bracket format · teams seed in once pools finish' : 'tap a match to enter its score')}</span></div>`;
 
   // Columns left-to-right = rounds; connector lines between them are drawn post-render.
   const sideMatches = main.filter((m) => m.side === side);
@@ -3525,7 +3525,7 @@ function buildTournamentGateHTML() {
   return `<div class="tn-gate">
       <img class="tn-glogo" src="/logo-mark.png" alt="" aria-hidden="true" />
       <h1 class="tn-gate-h">This page is yours</h1>
-      <p class="tn-gate-p">The tournament page is personal — your team, your games, your bracket run. Sign in to see it.</p>
+      <p class="tn-gate-p">The tournament page is personal. Your team, your games, your bracket run. Sign in to see it.</p>
       <button type="button" class="tn-gate-cta" data-role="tn-signin">Sign in</button>
       <div class="tn-gate-alt" data-role="tn-signin">New here? Create an account</div>
     </div>`;
@@ -3763,7 +3763,7 @@ function buildBracketPageHTML() {
     const preH = isReg ? 'The bracket comes after pool play' : 'The bracket generates when pool play finishes';
     const preS = isReg
       ? (regOpen
-        ? 'Registration is open — the bracket comes after pool play. Once teams are in and pools wrap, it appears right here.'
+        ? 'Registration is open. The bracket comes after pool play. Once teams are in and pools wrap, it appears right here.'
         : 'The bracket comes after pool play. Once pools wrap, it appears right here.')
       : 'Teams are still battling through pools. The moment the last pool game goes final, seeds lock in and the bracket appears right here.';
     const seedChip = isReg ? '' : `<button type="button" class="pd-bk-chip" data-tn-view="pools" data-pools-tab="seeding">Current seeding
@@ -3784,7 +3784,7 @@ function buildBracketPageHTML() {
       + (outcome.runnerUpName ? ' · def. ' + escapeHTML(outcome.runnerUpName) + ' in the final' : '');
     const strip = `<div class="pd-bk-champbar">
         <span class="pd-bk-cbic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg></span>
-        <div><div class="pd-bk-cbh">Champions — ${escapeHTML(outcome.championName)}</div><div class="pd-bk-cbs">${recLine}</div></div>
+        <div><div class="pd-bk-cbh">Champions · ${escapeHTML(outcome.championName)}</div><div class="pd-bk-cbs">${recLine}</div></div>
       </div>`;
     const tree = buildBracketHTML(active, matches, teams, { readOnly: true, champMatchId: outcome.decidingMatchId, side: 'grand_final' });
     const persist = '<p class="pd-bk-persist">These results stay on this page until the next event is scheduled.</p>';
@@ -3893,8 +3893,8 @@ function buildRegisterPageHTML() {
   // Always-visible fallback instruction: taps from an in-app browser (GroupMe) sometimes don't hand off to
   // the app, so this line tells the player what to do by hand. @handle phrasing only when one was extracted.
   const venmoNote = venmoUser
-    ? `Pay ${escapeHTML(money)} to @${escapeHTML(venmoUser)} — put your team name in the note`
-    : `Pay ${escapeHTML(money)} on Venmo — put your team name in the note`;
+    ? `Pay ${escapeHTML(money)} to @${escapeHTML(venmoUser)}. Put your team name in the note`
+    : `Pay ${escapeHTML(money)} on Venmo. Put your team name in the note`;
   const venmoBlock = venmo
     ? `<a id="rf-venmo-link" class="rf-venmo" href="${escapeHTML(venmoHref)}" target="_blank" rel="noopener noreferrer" data-venmo-base="${escapeHTML(venmo)}" data-venmo-money="${escapeHTML(money)}">${RF_VENMO_SVG}Pay ${escapeHTML(money)} on Venmo</a>
        <div class="rf-venmo-note">${venmoNote}</div>`
@@ -3926,7 +3926,7 @@ function buildRegisterPageHTML() {
       <div class="rf-pllist">${rows}</div>
 
       <div class="rf-divlab"><span>Payment</span></div>
-      <div class="rf-payline">${amtHTML}<span class="rf-payd">Teams pay to register — your spot is held once it's sent.</span></div>
+      <div class="rf-payline">${amtHTML}<span class="rf-payd">Teams pay to register. Your spot is held once it's sent.</span></div>
       ${venmoBlock}
       <label class="rf-paid"><input type="checkbox" id="reg-paid" class="rf-paidbox" /><span class="rf-paidt">We sent the <b>${escapeHTML(money)}</b> on Venmo</span></label>
 
@@ -3967,7 +3967,7 @@ async function submitRegisterForm(btn) {
     if (btn) { btn.removeAttribute('disabled'); btn.textContent = btnIdleLabel || 'Register team'; }
     const raw = (err && err.message) || '';
     const netlike = /fetch|network|failed to fetch/i.test(raw); // a connectivity blip, not a real reject
-    setMsg(netlike ? 'Could not register — check your connection and try again.' : (raw || 'Could not register — try again.'), false);
+    setMsg(netlike ? 'Could not register. Check your connection and try again.' : (raw || 'Could not register. Try again.'), false);
     return; // the INSERT failed → real error, stay on the form (no outbox/queue)
   }
   // Registered for real — a refresh/render hiccup must NOT claim it failed (mirrors the proven path). Flip the
@@ -3992,7 +3992,7 @@ function buildRegisterSuccessHTML(teamName) {
       <div class="pd-reg-won">
         <div class="pd-reg-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
         <div class="pd-reg-wonh">You're in, ${nm}!</div>
-        <div class="pd-reg-wonsub">Your team is registered — see you at the tournament.</div>
+        <div class="pd-reg-wonsub">Your team is registered. See you at the tournament.</div>
         <span class="pd-reg-paychip">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/></svg>
           Payment: sent on Venmo
@@ -4048,7 +4048,7 @@ function buildJoinSheetFormHTML(show) {
     <button type="button" class="pd-reg-cta pd-reg-sheetcta" data-role="reg-sheet-submit">Register team</button>
     <div class="pd-reg-pay">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/></svg>
-      <span>Pay <b>$20 each</b> at check-in — cash or Venmo</span>
+      <span>Pay <b>$20 each</b> at check-in, cash or Venmo</span>
     </div>`;
 }
 
@@ -4118,7 +4118,7 @@ async function submitJoinSheet(btn) {
     await tdbRegisterTeam(state.activeTournamentId, v.teamName, v.roster, null, false);
   } catch (err) {
     if (btn) { btn.removeAttribute('disabled'); btn.textContent = btnIdleLabel || 'Register'; }
-    setMsg((err && err.message) || 'Could not register — try again.', false);
+    setMsg((err && err.message) || 'Could not register. Try again.', false);
     return; // the INSERT failed → real error, stay on the form
   }
   // Registered for real — a refresh/render hiccup must NOT claim it failed (mirrors the proven path). The
@@ -4140,7 +4140,7 @@ function renderJoinSheetSuccess(teamName) {
     <div class="pd-reg-won">
       <div class="pd-reg-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
       <div class="pd-reg-wonh">You're in, ${nm}!</div>
-      <div class="pd-reg-wonsub">Your team is registered — see you at the tournament.</div>
+      <div class="pd-reg-wonsub">Your team is registered. See you at the tournament.</div>
       <span class="pd-reg-paychip">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/></svg>
         Payment: at check-in
@@ -4234,7 +4234,7 @@ function buildPoolsSchedulePageHTML() {
       const badge = poolByTeam[r.teamId] ? `<span class="pl-pl">${escapeHTML(poolByTeam[r.teamId])}</span> ` : '';
       return srow(r.seed, r.teamId, r.name, r.wins, r.losses, r.pointDiff, badge);
     }).join('');
-    body = `<div class="pl-sect">Overall seeding</div>${colh}${rows}<p class="pl-foot">Seeded by win %, then point diff — this sets the bracket order.</p>`;
+    body = `<div class="pl-sect">Overall seeding</div>${colh}${rows}<p class="pl-foot">Seeded by win %, then point diff. This sets the bracket order.</p>`;
   } else {
     const pool = activePools.find((p) => (p.label || '') === selected) || activePools[0];
     const shaped = shapeStandingsByPool(pools, teams, matches).find((s) => s.poolLabel === (pool.label || ''));
@@ -4856,7 +4856,7 @@ function makeSaveToast(text) {
 function settleSaveToast(t, ok, okText) {
   if (!t) return;
   try {
-    t.textContent = ok ? (okText || 'Saved') : 'Could not save — check your connection';
+    t.textContent = ok ? (okText || 'Saved') : 'Could not save. Check your connection';
     const hold = ok ? 1200 : 2600;
     // Fade out (mirrors .cik-toast motion; neutralized for reduce-motion users) before removing.
     setTimeout(() => { try { t.classList.add('is-leaving'); } catch {} }, hold);
@@ -5317,7 +5317,7 @@ async function startNewSessionFlow() {
   // unreliable in standalone-PWA/iOS where the rest of the app already moved to appConfirm.
   const confirmed = await appConfirm({
     title: 'Start a new session?',
-    message: `${n} player${n === 1 ? ' is' : 's are'} checked in — they'll be checked out and tonight's attendance is saved as history.`,
+    message: `${n} player${n === 1 ? ' is' : 's are'} checked in. They'll be checked out and tonight's attendance is saved as history.`,
     confirmText: 'Start new session',
     danger: true
   });
@@ -6265,8 +6265,8 @@ async function submitClaim(c) {
   } catch (e2) {
     console.error('submitClaim', e2);
     const msg = /already claimed/i.test((e2 && e2.message) || '')
-      ? 'Someone already claimed this — ask your organizer to fix it.'
-      : "Couldn't claim right now — try again.";
+      ? 'Someone already claimed this. Ask your organizer to fix it.'
+      : "Couldn't claim right now. Try again.";
     if (err) { err.textContent = msg; err.hidden = false; }
     if (btn) { btn.disabled = false; btn.textContent = 'Claim my spot'; }
   }
@@ -6294,7 +6294,7 @@ function renderClaimSuccess(c) {
 function friendlyAuthError(error, signup) {
   const m = (error && error.message) || '';
   if (/invalid login credentials/i.test(m)) return "That email or password isn't right.";
-  if (/already registered|user already/i.test(m)) return 'That email already has an account — sign in instead.';
+  if (/already registered|user already/i.test(m)) return 'That email already has an account. Sign in instead.';
   if (/password/i.test(m) && /(6|characters|short)/i.test(m)) return 'Password must be at least 6 characters.';
   if (/email/i.test(m) && /valid/i.test(m)) return 'Enter a valid email address.';
   return m || (signup ? 'Could not create your account.' : 'Could not sign you in.');
@@ -6436,7 +6436,7 @@ async function onNameFillSave(e) {
     try { render(); } catch (_) {}
   } catch (err) {
     console.error('connect_profile_by_name (name fill)', err);
-    showErr("Couldn't save your name — try again.");
+    showErr("Couldn't save your name. Try again.");
     if (btn) { btn.disabled = false; btn.textContent = orig; }
   }
 }
@@ -6594,10 +6594,10 @@ function buildMyTeamPageHTML() {
   const header = pdPageHeaderHTML('My Team');
   const t = publicLiveTournament()
     || (state.tournaments || []).find((x) => x.registration_open && x.status === 'setup') || null;
-  if (!t) return `${header}<div class="pd-empty">No tournament right now — your team shows up here when one is on.</div>`;
+  if (!t) return `${header}<div class="pd-empty">No tournament right now. Your team shows up here when one is on.</div>`;
   if (!state.account) return `${header}<div class="pd-empty">Sign in and claim your name on Home to see your team here.</div>`;
   const mine = myTeamInfo();
-  if (!mine) return `${header}<div class="pd-empty">Claim your name to see your team here — tap &ldquo;Playing? Claim your team&rdquo; on Home.</div>`;
+  if (!mine) return `${header}<div class="pd-empty">Claim your name to see your team here. Tap &ldquo;Playing? Claim your team&rdquo; on Home.</div>`;
 
   const teams = state.tournamentTeams || [];
   const matches = state.tournamentMatches || [];
@@ -6618,7 +6618,7 @@ function buildMyTeamPageHTML() {
   const EN = '–'; // en dash — record + score separator (matches the pl-* pools kit)
   const nextStrip = tl.next ? `<div class="mt-next">
       <div class="mt-nettile"><span class="n1">NET</span><span class="n2">${tl.next.net ? escapeHTML(String(tl.next.net)) : '—'}</span></div>
-      <div><div class="mt-nl">${tl.next.isNow ? 'UP NEXT — HAPPENING NOW' : 'UP NEXT'}</div>
+      <div><div class="mt-nl">${tl.next.isNow ? 'UP NEXT · HAPPENING NOW' : 'UP NEXT'}</div>
         <div class="mt-nv">vs ${escapeHTML(tl.next.oppName || '—')}${tl.next.isNow ? '' : (tl.next.etaMin != null ? ' · ~' + tl.next.etaMin + ' min' : (tl.next.gamesAhead ? ' · ' + tl.next.gamesAhead + (tl.next.gamesAhead === 1 ? ' game ahead' : ' games ahead') : ''))}</div>
       </div>
     </div>` : '';
@@ -6635,7 +6635,7 @@ function buildMyTeamPageHTML() {
         const meta = [m.net != null ? ('Net ' + m.net) : '', (m.queue_order || m.round) ? ('R' + (m.queue_order || m.round)) : ''].filter(Boolean).join(' · ');
         return `<div class="mt-game${g.won ? '' : ' l'}"><span class="mt-wl ${g.won ? 'w' : 'l'}">${g.won ? 'W' : 'L'}</span><span class="mt-sc">${g.myScore}${EN}${g.oppScore}</span><span class="mt-vs">vs ${escapeHTML(g.oppName || '—')}</span>${meta ? `<span class="mt-meta">${escapeHTML(meta)}</span>` : ''}</div>`;
       }).join('')
-    : '<div class="mt-note">No games scored yet — results land here as they finish.</div>';
+    : '<div class="mt-note">No games scored yet. Results land here as they finish.</div>';
 
   const roster = (state.teamMembers || []).filter((c) => c.teamId === mine.teamId);
   const rosterRows = roster.length
@@ -6699,7 +6699,7 @@ function buildHistoryPageHTML() {
   const header = pdPageHeaderHTML('Past tournaments');
   const hist = state.tournamentHistory;
   if (typeof hist === 'undefined') return `${header}<div class="pd-empty">Loading&hellip;</div>`;
-  if (!hist.length) return `${header}<div class="pd-empty">No tournaments finished yet — the first one lands here.</div>`;
+  if (!hist.length) return `${header}<div class="pd-empty">No tournaments finished yet. The first one lands here.</div>`;
 
   const TROPHY = '<path d="M8 21h8"/><path d="M12 17v4"/><path d="M6 4h12v5a6 6 0 0 1-12 0z"/>';
   const CHEV = '<svg class="ht-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
@@ -6725,7 +6725,7 @@ function buildHistoryPageHTML() {
     const rows = byYear.get(yr).map((h) => {
       const teams = h.teamCount || 0;
       const champ = h.champion && h.champion.name
-        ? 'Champions — ' + escapeHTML(h.champion.name)
+        ? 'Champions · ' + escapeHTML(h.champion.name)
         : 'No champion recorded';
       const sub = `${teams} team${teams === 1 ? '' : 's'} · ${champ}`;
       return `<div class="ht-row"><span class="ht-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${TROPHY}</svg></span><div class="ht-body"><div class="ht-nm">${escapeHTML(h.name)}</div><div class="ht-sub">${sub}</div></div>${CHEV}</div>`;
@@ -6893,7 +6893,7 @@ function buildManagePageHTML() {
   const roster = (state.players || []).length;
   const inNow = (state.checkedIn || []).length;
   const playersSub = roster + ' on the roster · ' + inNow + ' checked in';
-  const teamsSub = inNow ? inNow + ' checked in — ready to make teams' : 'Quiet — no live session';
+  const teamsSub = inNow ? inNow + ' checked in, ready to make teams' : 'Quiet · no live session';
 
   const everythingHTML = `<div class="pl-sect">Everything</div>`
     + mgRowHTML('tournament', 'Tournament', escapeHTML(tourSub))
@@ -6966,7 +6966,7 @@ function buildPickupDaysHTML() {
           ${nextUp}
         </a>`;
       }).join('')
-    : `<div class="pd-empty">No pickup days scheduled — add one to open Check In.</div>`;
+    : `<div class="pd-empty">No pickup days scheduled. Add one to open Check In.</div>`;
   const add = `<button type="button" class="pk-add" data-pk-add>${PK_PLUS_SVG}Add a pickup day</button>
     <div class="pk-note">Each day opens its own Check In when it arrives</div>`;
   return header + body + add;
@@ -6996,7 +6996,7 @@ function buildPickupDayFormHTML() {
     <div class="pk-savenote">The Check In tab appears for everyone that day</div>
     <p class="pk-msg" id="pk-msg" role="status" aria-live="polite"></p>`;
   const onDay = editing ? `<div class="pl-sect">On the day</div>
-    <a class="pk-orow" data-pk-qr><div class="pk-ob"><div class="pk-on">Share the check-in QR</div><div class="pk-os">For the door — players scan and tap their name</div></div>${MG_CHEV}</a>
+    <a class="pk-orow" data-pk-qr><div class="pk-ob"><div class="pk-on">Share the check-in QR</div><div class="pk-os">For the door. Players scan and tap their name</div></div>${MG_CHEV}</a>
     <a class="pk-orow" data-pk-fresh><div class="pk-ob"><div class="pk-on">Start a fresh sheet</div><div class="pk-os">Rolls check-ins into history and starts clean</div></div>${MG_CHEV}</a>` : '';
   const remove = editing
     ? `<button type="button" class="pk-danger" data-pk-remove="${escapeHTML(String(editing.id))}">Remove this pickup day</button>`
@@ -7101,7 +7101,7 @@ function buildMgSeatsHTML() {
       // A WAITING (empty) seat. The FIRST empty seat carries the explainer; the rest just say "Waiting".
       // Owner taps it → the inline assign-by-email field.
       const seatTap = isOwner ? ' data-mgad-seat' : '';
-      const sub = firstEmptyDone ? 'Waiting' : 'Waiting — they create an account, you flip it on';
+      const sub = firstEmptyDone ? 'Waiting' : 'Waiting. They create an account, you flip it on';
       firstEmptyDone = true;
       rows.push(`<a class="mgad-row"${seatTap}><div class="mgad-rb"><div class="mgad-rn">Seat ${i + 1}</div>`
         + `<div class="mgad-rs">${sub}</div></div>${mgSeatPill('off')}</a>`);
@@ -7114,7 +7114,7 @@ function buildMgSeatsHTML() {
       + `<input class="pk-fv" id="mgad-email" type="email" inputmode="email" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="name@email.com" />`
       + `<button type="button" class="mgr-cta" data-mgad-make>Make them an admin</button>`
       + `<p class="mgad-msg" id="mgad-msg" role="status" aria-live="polite"></p>`
-      + `<div class="mgr-fnote">They must have created an account first — this flips their access on.</div>`
+      + `<div class="mgr-fnote">They must have created an account first. This flips their access on.</div>`
       + `</div>`
     : '';
   // The Activity log row → the log sub-view (NO undo this slice).
@@ -7181,7 +7181,7 @@ async function mgAdminMakeOrganizer() {
     mgAssignOpen = false;
     await loadAdminSeats(); // repaints the seats with the new admin
   } catch (err) {
-    if (msg) msg.textContent = (err && err.message) ? err.message : 'Could not add them — check the email and try again.';
+    if (msg) msg.textContent = (err && err.message) ? err.message : 'Could not add them. Check the email and try again.';
   }
 }
 
@@ -7204,7 +7204,7 @@ function openMgRemoveAdminSheet(email) {
     + `<div class="mgad-shn">${escapeHTML(name)}</div>`
     + `<div class="mgad-she">${escapeHTML(seat ? (seat.email || '') : '')}</div>`
     + `<button type="button" class="pk-danger" data-mgad="remove">Remove admin</button>`
-    + `<div class="mgr-fnote">They keep their account — this just turns off their admin access.</div>`
+    + `<div class="mgr-fnote">They keep their account. This just turns off their admin access.</div>`
     + `</div>`;
   document.body.appendChild(scrim);
   scrim.addEventListener('click', (ev) => {
@@ -7234,7 +7234,7 @@ async function savePickupDay() {
   const time_label = timeEl ? String(timeEl.value || '').trim() : '';
   const location = locEl ? String(locEl.value || '').trim() : '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) { if (msgEl) msgEl.textContent = 'Pick a date first.'; return; }
-  if (!supabaseClient) { if (msgEl) msgEl.textContent = 'No connection — try again in a moment.'; return; }
+  if (!supabaseClient) { if (msgEl) msgEl.textContent = 'No connection. Try again in a moment.'; return; }
   const payload = { day, time_label: time_label || null, location: location || null };
   try {
     const q = pickupEditId
@@ -7248,7 +7248,7 @@ async function savePickupDay() {
     repaintManage();
   } catch (err) {
     console.warn('savePickupDay error', err);
-    if (msgEl) msgEl.textContent = 'Could not save — check the connection and try again.';
+    if (msgEl) msgEl.textContent = 'Could not save. Check the connection and try again.';
   }
 }
 
@@ -7621,7 +7621,7 @@ function buildManageTeamsHTML() {
     teamsSect = `<div class="pl-sect">Today's teams</div>${rows}`
       + `<div class="mgt-note">Tap a name to swap players between teams · regenerate any time</div>`;
   } else {
-    teamsSect = `<div class="mgt-empty">No teams yet — pick a size and generate.</div>`;
+    teamsSect = `<div class="mgt-empty">No teams yet. Pick a size and generate.</div>`;
   }
 
   return header + makeSect + teamsSect + buildMgtSwapSheetHTML();
@@ -7647,7 +7647,7 @@ function buildMgtSwapSheetHTML() {
   return `<div class="mgt-sheet-backdrop" data-mgt-cancel></div>`
     + `<div class="mgt-sheet" role="dialog" aria-label="Swap player">`
     + `<div class="mgt-sheet-h">Move ${escapeHTML(name)}</div>`
-    + `<div class="mgt-sheet-sub">Pick a team — even sizes swap the closest player back.</div>`
+    + `<div class="mgt-sheet-sub">Pick a team. Even sizes swap the closest player back.</div>`
     + (dests || `<div class="mgt-empty">No other team to move to yet.</div>`)
     + `<button type="button" class="mgt-cancel" data-mgt-cancel>Cancel</button></div>`;
 }
@@ -7698,7 +7698,7 @@ function mgDefaultAnnouncement(t) {
   const size = Number(t && t.team_size) || 4;
   const buyIn = (t && t.buy_in != null && String(t.buy_in).trim()) ? String(t.buy_in).trim() : '';
   const mid = buyIn ? `${buyIn}, ${size}s co-ed` : `${size}s co-ed`;
-  return `${name} — registration is open! ${mid}. Register at athletic-specimen.com`;
+  return `${name}. Registration is open! ${mid}. Register at athletic-specimen.com`;
 }
 // The announcement to prefill: the persisted value when set (post-0047), else the composed default. Tolerant
 // of the column not existing yet (t.announcement === undefined → default; never renders the string "undefined").
@@ -7728,7 +7728,7 @@ function buildManageTournamentHTML() {
     + `<button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>`
     + `<div class="pd-htitle">${escapeHTML(t ? (t.name || 'Tournament') : 'Tournament')}</div></div>`;
   if (!t) {
-    return header + `<div class="pd-empty">No tournament yet — create one from <b>Open the old admin</b> on the Manage screen. A create-tournament screen lands in a later slice.</div>`;
+    return header + `<div class="pd-empty">No tournament yet. Create one from <b>Open the old admin</b> on the Manage screen. A create-tournament screen lands in a later slice.</div>`;
   }
   const teams = state.tournamentTeams || [];
   const nTeams = teams.length;
@@ -7774,7 +7774,7 @@ function buildMgRegistrationHTML() {
   const size = Number(t.team_size) || 4;
   const venmoNote = /^https?:\/\//i.test(venmo)
     ? 'Players pay on Venmo when they register'
-    : 'Venmo missing — the pay button says "coming soon"';
+    : 'Venmo missing. The pay button says "coming soon"';
   return header
     + `<div class="pl-sect">The announcement</div>`
     // §38 pick C (2026-07-12): a clean read block (tap anywhere to open the full-screen editor) + an explicit
@@ -7961,7 +7961,7 @@ function buildMgRulesHTML() {
   if (!body) {
     return header
       + `<div class="mgru-empty" data-mgru-edit><div class="mgru-empty-h">No rules yet</div>`
-      + `<div class="mgru-empty-s">Tap Edit to write the house rules — players read them on the Rules page the moment you save.</div></div>`;
+      + `<div class="mgru-empty-s">Tap Edit to write the house rules. Players read them on the Rules page the moment you save.</div></div>`;
   }
   // The whole rendered sheet is tappable to edit (Mike: "click anywhere and edit it").
   return header + `<div class="rl-body mgru-view" data-mgru-edit>${body}</div>`;
@@ -7999,16 +7999,16 @@ async function mgSaveSettingsField(id) {
   const intWrite = (col, curNum, nullable) => {
     if (raw === '') {
       if (nullable) return (curNum == null) ? false : { [col]: null };
-      el.value = (curNum == null ? '' : String(curNum)); note('That needs to be a number — left it unchanged.'); return null;
+      el.value = (curNum == null ? '' : String(curNum)); note('That needs to be a number. Left it unchanged.'); return null;
     }
     const n = parseInt(raw, 10);
-    if (!Number.isFinite(n) || n < 1) { el.value = (curNum == null ? '' : String(curNum)); note('That needs to be a number — left it unchanged.'); return null; }
+    if (!Number.isFinite(n) || n < 1) { el.value = (curNum == null ? '' : String(curNum)); note('That needs to be a number. Left it unchanged.'); return null; }
     return (n === curNum) ? false : { [col]: n };
   };
   try {
     let fields = null;
     if (id === 'mges-name') {
-      if (!raw) { el.value = String(t.name == null ? '' : t.name); note('Name is required — left it unchanged.'); return; }
+      if (!raw) { el.value = String(t.name == null ? '' : t.name); note('Name is required. Left it unchanged.'); return; }
       if (raw === String(t.name == null ? '' : t.name)) return;
       fields = { name: raw };
     } else if (id === 'mges-buyin') {
@@ -8020,7 +8020,7 @@ async function mgSaveSettingsField(id) {
     } else if (id === 'mges-nets') {
       const cur = Number(t.net_count);
       const n = parseInt(raw, 10);
-      if (raw === '' || !Number.isFinite(n) || n < 1) { el.value = (Number.isFinite(cur) ? String(cur) : ''); note('Nets needs to be a number — left it unchanged.'); return; }
+      if (raw === '' || !Number.isFinite(n) || n < 1) { el.value = (Number.isFinite(cur) ? String(cur) : ''); note('Nets needs to be a number. Left it unchanged.'); return; }
       if (n === cur) return;
       // ATOMIC re-net mid-play so matches.net can never drift from net_count (migration 0031 / F7-F8).
       if (t.status === 'pools' || t.status === 'bracket') {
@@ -8037,7 +8037,7 @@ async function mgSaveSettingsField(id) {
     } else if (id === 'mges-brackettarget') {
       const cur = (t.bracket_target != null ? Number(t.bracket_target) : (t.match_cap != null ? Number(t.match_cap) : null));
       const n = parseInt(raw, 10);
-      if (raw === '' || !Number.isFinite(n) || n < 1) { el.value = (cur == null ? '' : String(cur)); note('That needs to be a number — left it unchanged.'); return; }
+      if (raw === '' || !Number.isFinite(n) || n < 1) { el.value = (cur == null ? '' : String(cur)); note('That needs to be a number. Left it unchanged.'); return; }
       if (n === cur) return;
       fields = { bracket_target: n, match_cap: n }; // NF-1 back-compat: legacy readers use match_cap
     } else if (id === 'mges-bracketcap') {
@@ -8051,7 +8051,7 @@ async function mgSaveSettingsField(id) {
     note('Saved');
   } catch (err) {
     console.warn('mgSaveSettingsField', err);
-    note('Could not save — check the connection and try again.');
+    note('Could not save. Check the connection and try again.');
   }
 }
 
@@ -8095,7 +8095,7 @@ function openManageEditor(kind) {
   el.id = 'mged-page';
   el.className = 'mged-page';
   const placeholder = isRules
-    ? '## Format&#10;- 4s co-ed — 1 guy + 1 girl on the court&#10;- Pool play to 15, cap 20'
+    ? '## Format&#10;- 4s co-ed · 1 guy + 1 girl on the court&#10;- Pool play to 15, cap 20'
     : 'July 2026 tournament is here! Registration is open. Register at athletic-specimen.com';
   const hint = isRules
     ? '## makes a heading · - makes a bullet · players see it the moment you Save'
@@ -8139,7 +8139,7 @@ async function mgEditorSave() {
   } catch (err) {
     console.warn('mgEditorSave', err);
     if (saveBtn) { saveBtn.textContent = 'Save'; saveBtn.disabled = false; }
-    if (status) status.textContent = 'Could not save — check the connection and try again.';
+    if (status) status.textContent = 'Could not save. Check the connection and try again.';
   }
 }
 
@@ -8182,7 +8182,7 @@ function buildMgCloseoutHTML() {
   const status = t.status;
   // Setup — nothing has happened, so there is nothing to close (this is the June mistake, guarded honestly).
   if (status === 'setup') {
-    return header + `<div class="pd-empty">Nothing to close yet — the tournament hasn't started.</div>`;
+    return header + `<div class="pd-empty">Nothing to close yet. The tournament hasn't started.</div>`;
   }
   const teams = state.tournamentTeams || [];
   // Completed — show the recorded champion (stored champion_team_id) and offer a reopen.
@@ -8199,7 +8199,7 @@ function buildMgCloseoutHTML() {
       + `</div>`;
     const reopen = `<div class="pl-sect">Reopen</div>`
       + `<button type="button" class="mgco-reopen" data-mgco-reopen>Reopen the tournament</button>`
-      + `<div class="mgt-note">It's in Past tournaments now. Reopen to fix a score or re-crown — the recorded champion stays until you close again.</div>`;
+      + `<div class="mgt-note">It's in Past tournaments now. Reopen to fix a score or re-crown. The recorded champion stays until you close again.</div>`;
     return header + card + reopen;
   }
   // Active (pools / bracket) — the champion card (bracket suggestion, your pick, or "pick one") + End CTA.
@@ -8277,8 +8277,8 @@ async function mgCloseoutEnd() {
   const choice = mgCloseoutChampionChoice(teams, mgCloseoutMainMatches());
   const champName = choice.teamId ? choice.name : null;
   const msg = champName
-    ? `Crown ${champName} and end the tournament? It moves to Past tournaments — registration and scoring close. You can reopen it.`
-    : 'End the tournament with no champion recorded? It moves to Past tournaments — registration and scoring close. You can reopen it.';
+    ? `Crown ${champName} and end the tournament? It moves to Past tournaments. Registration and scoring close. You can reopen it.`
+    : 'End the tournament with no champion recorded? It moves to Past tournaments. Registration and scoring close. You can reopen it.';
   const ok = await appConfirm({ title: 'End the tournament', message: msg, confirmText: 'End the tournament' });
   if (!ok) return;
   try {
@@ -8350,7 +8350,7 @@ function buildMgTeamsHTML() {
     + `<div class="pd-htitle">${escapeHTML(MGT_SUB_TITLES.teams)}</div></div>`;
   const add = `<button type="button" class="pk-add" data-mgtp-add>${PK_PLUS_SVG}Add a team yourself</button>`;
   if (!teams.length) {
-    return header + `<div class="pd-empty">No teams yet — teams land here as they register.</div>` + add;
+    return header + `<div class="pd-empty">No teams yet. Teams land here as they register.</div>` + add;
   }
   const label = `<div class="pl-sect">${teams.length} in · ${paidCt} paid</div>`;
   const rows = teams.map((tm) => {
@@ -8360,7 +8360,7 @@ function buildMgTeamsHTML() {
     const idAttr = escapeHTMLText(String(tm.id));
     return `<div class="mgtp-row" data-mgtp-team="${idAttr}">
         <div class="mgtp-tn"><div class="mgtp-nm">${escapeHTML(tm.name || 'Team')}</div><div class="mgtp-rs">${preview}</div></div>
-        <button type="button" class="mgtp-tag ${paid ? 'paid' : 'unpaid'}" data-mgtp-paid="${idAttr}" aria-label="${paid ? 'Paid — tap to unmark' : 'Tap when this team has paid'}">${paid ? 'PAID' : 'TAP WHEN PAID'}</button>
+        <button type="button" class="mgtp-tag ${paid ? 'paid' : 'unpaid'}" data-mgtp-paid="${idAttr}" aria-label="${paid ? 'Paid. Tap to unmark' : 'Tap when this team has paid'}">${paid ? 'PAID' : 'TAP WHEN PAID'}</button>
         ${MG_CHEV}
       </div>`;
   }).join('');
@@ -8640,7 +8640,7 @@ function mgPoolsScheduleHTML(t, teams, pools, matches) {
       const badge = poolByTeam[r.teamId] ? `<span class="pl-pl">${escapeHTML(poolByTeam[r.teamId])}</span> ` : '';
       return poolStandRowHTML(r.seed, r.teamId, r.name, r.wins, r.losses, r.pointDiff, badge, null);
     }).join('');
-    body = `<div class="pl-sect">Overall seeding</div>${colh}${rows}<p class="pl-foot">Seeded by win %, then point diff — this sets the bracket order.</p>`;
+    body = `<div class="pl-sect">Overall seeding</div>${colh}${rows}<p class="pl-foot">Seeded by win %, then point diff. This sets the bracket order.</p>`;
   } else {
     const pool = activePools.find((p) => (p.label || '') === selected) || activePools[0];
     const shaped = shapeStandingsByPool(pools, teams, matches).find((s) => s.poolLabel === (pool.label || ''));
@@ -8693,7 +8693,7 @@ function mgPoolsControlsHTML(t, teams, pools, matches) {
     + `<button type="button" class="mgps-quiet" data-mgps-controls>Close controls</button>`
     + pools.map((p) => mgPoolTeamsBlockHTML(p, teams, matches, true)).join('')
     + `<button type="button" class="mgts-danger" data-mgps-reset>Reset pools</button>`
-    + `<div class="mgps-note">Clears every pool result and re-draws — type the tournament name to confirm.</div>`;
+    + `<div class="mgps-note">Clears every pool result and re-draws. Type the tournament name to confirm.</div>`;
 }
 
 // ── The shared body-level score sheet (Task 7 defines it; Task 8's bracket reuses openMgScoreSheet) ──────
@@ -8740,11 +8740,11 @@ function buildMgScoreSheetHTML(match) {
   const err = `<div class="mgss-err" id="mgss-err" hidden></div>`;
   const leader = a > b ? aName : (b > a ? bName : null);
   const finalLabel = leader
-    ? (isFinal ? 'Save — ' : 'Final — ') + escapeHTML(leader) + ' wins ' + Math.max(a, b) + '–' + Math.min(a, b)
-    : (isFinal ? 'Enter a winning score' : 'Final — set the score to pick a winner');
+    ? (isFinal ? 'Save · ' : 'Final · ') + escapeHTML(leader) + ' wins ' + Math.max(a, b) + '–' + Math.min(a, b)
+    : (isFinal ? 'Enter a winning score' : 'Final · set the score to pick a winner');
   const primary = `<button type="button" class="mgt-cta mgss-final" data-mgss="${isFinal ? 'edit' : 'final'}"${leader ? '' : ' disabled'}>${finalLabel}</button>`;
   const quiet = isFinal
-    ? `<p class="mgss-note">Fixing the score — same winner only. To change who won, clear the result first.</p>`
+    ? `<p class="mgss-note">Fixing the score. Same winner only. To change who won, clear the result first.</p>`
     : `<button type="button" class="mgss-quiet" data-mgss="live">Just update the live score</button>`;
   return head + title + metaLine + steppers + err + primary + quiet;
 }
@@ -8781,10 +8781,10 @@ function openMgScoreSheet(matchId) {
       const leader = a > b ? aName : (b > a ? bName : null);
       if (leader) {
         btn.removeAttribute('disabled');
-        btn.textContent = (isFinal ? 'Save — ' : 'Final — ') + leader + ' wins ' + Math.max(a, b) + '–' + Math.min(a, b);
+        btn.textContent = (isFinal ? 'Save · ' : 'Final · ') + leader + ' wins ' + Math.max(a, b) + '–' + Math.min(a, b);
       } else {
         btn.setAttribute('disabled', 'true');
-        btn.textContent = isFinal ? 'Enter a winning score' : 'Final — set the score to pick a winner';
+        btn.textContent = isFinal ? 'Enter a winning score' : 'Final · set the score to pick a winner';
       }
     }
   };
@@ -8954,12 +8954,12 @@ function mgBracketSeedingHTML(t) {
   const poolMatches = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).filter((m) => m.phase === 'pool');
   if (!poolMatches.length) {
     return `<div class="pl-sect">Seeding</div>`
-      + `<div class="pd-empty">Draw pools and play them out first — the bracket seeds from the pool results. Set that up in Pools &amp; schedule.</div>`;
+      + `<div class="pd-empty">Draw pools and play them out first. The bracket seeds from the pool results. Set that up in Pools &amp; schedule.</div>`;
   }
   let rows = computeSeeding(teams, poolMatches);
   if (!rows.length) {
     return `<div class="pl-sect">Seeding</div>`
-      + `<div class="pd-empty">Score a pool game to start the seeding — teams rank by win %, then point differential.</div>`;
+      + `<div class="pd-empty">Score a pool game to start the seeding. Teams rank by win %, then point differential.</div>`;
   }
   let custom = false;
   if (state.seedOverride && state.seedOverride.id === state.activeTournamentId) {
@@ -8980,8 +8980,8 @@ function mgBracketSeedingHTML(t) {
   const cta = `<button type="button" class="mgt-cta" data-mgbk-generate${allFinal ? '' : ' disabled'}>Generate the bracket</button>`;
   const note = allFinal
     ? `<div class="mgbk-note">Double elimination · seeding saves with the bracket · after this, score on the tree.</div>`
-    : `<div class="mgbk-note">Finish every pool game first — the seeding is provisional until then.</div>`;
-  return `<div class="pl-sect">Seeding — from pool results</div>${seedRows}${resetLink}${cta}${note}`;
+    : `<div class="mgbk-note">Finish every pool game first. The seeding is provisional until then.</div>`;
+  return `<div class="pl-sect">Seeding · from pool results</div>${seedRows}${resetLink}${cta}${note}`;
 }
 
 // Group the bracket's main matches by round (side + round) and order the groups ACTIVE-FIRST (mockup bk2-c
@@ -9066,14 +9066,14 @@ function mgBracketRowHTML(m, teams) {
 }
 
 function mgBracketControlsHTML(t, completed) {
-  const doneNote = completed ? `<div class="mgbk-done">Tournament completed — close-out lives in its own page.</div>` : '';
+  const doneNote = completed ? `<div class="mgbk-done">Tournament completed. Close-out lives in its own page.</div>` : '';
   return doneNote
     + `<div class="pl-sect">Bracket controls</div>`
     + `<button type="button" class="mgbk-players" data-mgbk-players>`
-      + `<div class="mg-rb"><div class="mg-rn">Full bracket tree — the players' view</div>`
+      + `<div class="mg-rb"><div class="mg-rn">Full bracket tree · the players' view</div>`
       + `<div class="mg-rs">Open the public bracket page</div></div>${MG_CHEV}</button>`
     + `<button type="button" class="mgts-danger" data-mgbk-reset>Reset the bracket</button>`
-    + `<div class="mgbk-note">Clears the bracket and returns to pools — pool games and scores are kept. Type the tournament name to confirm.</div>`;
+    + `<div class="mgbk-note">Clears the bracket and returns to pools. Pool games and scores are kept. Type the tournament name to confirm.</div>`;
 }
 
 // Nudge a team up (dir -1) / down (dir +1) one seed. Reuses the old shell's mutation exactly (currentSeedOrder
@@ -9126,7 +9126,7 @@ async function mgBracketReset() {
   const t = mgBracketTournament();
   if (!t) return;
   const nm = (t.name || '').trim() || 'this tournament';
-  const typed = await appPrompt({ title: 'Reset the bracket', message: 'This clears the bracket and returns to pools. Pool games and scores are kept — you can re-generate. Type the tournament name to confirm.', placeholder: nm, confirmText: 'Reset the bracket' });
+  const typed = await appPrompt({ title: 'Reset the bracket', message: 'This clears the bracket and returns to pools. Pool games and scores are kept. You can re-generate. Type the tournament name to confirm.', placeholder: nm, confirmText: 'Reset the bracket' });
   if (String(typed || '').trim() !== nm) return;
   try {
     await tdbResetBracket(t);
@@ -9350,7 +9350,7 @@ async function handleCopilotSend(question) {
     replaceCopilotMessage(loadingId, text);
     if (undos && undos.length) copilotAttachUndo(loadingId, undos);
   } catch (_e) {
-    replaceCopilotMessage(loadingId, "Couldn't reach the co-pilot — try again.", { isError: true });
+    replaceCopilotMessage(loadingId, "Couldn't reach the co-pilot. Try again.", { isError: true });
   }
 }
 
@@ -9564,7 +9564,7 @@ const copilotExecutors = {
     }
     state.activeTournamentId = t.id;
     await tdbRefreshTournaments(); render();
-    let result = `Created "${name}" — open for registration, ${teamSize} players/team.`;
+    let result = `Created "${name}". Open for registration, ${teamSize} players/team.`;
     if (done.length) result += ` Registered ${done.length} team${done.length === 1 ? '' : 's'}: ${done.join(', ')}.`;
     if (failed.length) result += ` Could not register: ${failed.join('; ')}.`;
     return { args: { name, team_size: teamSize, registered: done.length }, result };
@@ -9630,7 +9630,7 @@ async function executeCopilotTool(name, input, requestText) {
   if (!exec) return { result: `That action ("${name}") isn't available yet.`, is_error: true };
   if ((COPILOT_TOOL_POLICY[name] || 'confirm') === 'confirm') {
     const ok = await copilotConfirmCard(name, input);
-    if (!ok) return { result: 'Cancelled — nothing was changed.' };
+    if (!ok) return { result: 'Cancelled. Nothing was changed.' };
   }
   let out;
   try { out = await exec(input); } catch (e) { return { result: `That action failed: ${(e && e.message) || 'error'}`, is_error: true }; }
@@ -9666,7 +9666,7 @@ async function runCopilotTurn(userText) {
     }
     messages.push({ role: 'user', content: results });
   }
-  return { text: 'I stopped after several steps — please check what happened.', undos };
+  return { text: 'I stopped after several steps. Please check what happened.', undos };
 }
 
 // Minimal Undo affordance (instant actions): an Undo button on the co-pilot's final answer bubble.
@@ -10383,7 +10383,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
             }
           })();
         }
-        showCheckinToast(`${player.name} — you're checked in`);
+        showCheckinToast(`${player.name}, you're checked in`);
       } else {
         if (checkOutPlayer(player) && supabaseClient && player.id) {
           (async () => {
@@ -10397,7 +10397,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
             }
           })();
         }
-        showCheckinToast(`${player.name} — checked out`);
+        showCheckinToast(`${player.name}, checked out`);
       }
       saveLocal();
       // Refresh just the stats + the result buttons (so the tapped button flips state) — no full render.
@@ -10430,7 +10430,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
         if (!isValidFullName(name)) { showCheckinToast('Enter your full first and last name'); checkinSearch.focus(); return; }
         // NF-8: don't register before the roster has loaded — state.players is empty pre-sync, so the
         // "already in history?" check below would miss an existing person and create a DUPLICATE.
-        if (!state.loaded) { showCheckinToast('Still loading — one second, then tap again'); return; }
+        if (!state.loaded) { showCheckinToast('Still loading. One second, then tap again'); return; }
 
         // Already in history? Treat the kiosk "new" tap as a check-in for that existing player.
         const exists = state.players.find((p) => normalize(p.name) === normalize(name));
@@ -10447,7 +10447,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
               }
             })();
           }
-          showCheckinToast(`${exists.name} — you're checked in`);
+          showCheckinToast(`${exists.name}, you're checked in`);
           saveLocal();
           const statsEl = document.getElementById('js-checkin-stats');
           if (statsEl) statsEl.innerHTML = buildCheckinStatsHTML();
@@ -10467,7 +10467,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
         state.players = [...state.players, inserted];
         // kiosk intent: a "new" player is here and checking in now — check them in optimistically too.
         checkInPlayer(inserted);
-        showCheckinToast(`${name} — you're checked in`);
+        showCheckinToast(`${name}, you're checked in`);
         saveLocal();
         const statsEl0 = document.getElementById('js-checkin-stats');
         if (statsEl0) statsEl0.innerHTML = buildCheckinStatsHTML();
@@ -10494,7 +10494,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
             inserted.pending = true;
             // Wave 1d: carry the checked-in intent so the offline retry registers atomically too.
             outboxEnqueue({ key: 'reg:' + normalize(name) + ':' + (group || ''), kind: 'register', payload: { name, group, checked_in: true }, ts: Date.now() });
-            showCheckinToast('Saved on this device — will sync when online');
+            showCheckinToast('Saved on this device. Will sync when online');
           }
           saveLocal();
           const statsEl1 = document.getElementById('js-checkin-stats');
@@ -10620,7 +10620,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
         }
       } else {
         const msg = document.getElementById('session-save-msg');
-        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'Save failed — check connection'; msg.style.display = 'block'; }
+        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'Save failed. Check connection'; msg.style.display = 'block'; }
       }
     });
   }
@@ -10656,7 +10656,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
         }
       } else {
         const msg = document.getElementById('session-save-msg');
-        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'Clear failed — check connection'; msg.style.display = 'block'; }
+        if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'Clear failed. Check connection'; msg.style.display = 'block'; }
       }
     });
   }

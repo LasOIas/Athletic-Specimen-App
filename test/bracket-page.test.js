@@ -285,7 +285,7 @@ describe('buildBracketPageHTML — completed state (champions strip, de-carded)'
 
   it('renders the matte-gold champions strip + persist line, unchanged logic', () => {
     expect(html).toContain('class="pd-bk-champbar"');
-    expect(html).toContain('Champions — Ballin');
+    expect(html).toContain('Champions · Ballin');
     expect(html).toContain('2–0'); // champion record via computeTeamRecord (won w1 + gf1)
     expect(html).toContain('class="pd-bk-persist"');
   });

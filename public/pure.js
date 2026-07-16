@@ -1499,7 +1499,7 @@ function manageNeedsYouModel(t, teams, pickupDays) {
     items.push({
       id: 'unpaid', area: 'tournament',
       title: unpaid.length + ' team' + (unpaid.length === 1 ? ' hasn\'t' : 's haven\'t') + ' paid',
-      sub: names + ' — registered without the checkbox',
+      sub: names + ', registered without the checkbox',
     });
   }
 

@@ -112,7 +112,7 @@ describe('buildHistoryPageHTML — Past tournaments one-list (Mike pick Z)', () 
   it('enriches a row with the champion when one exists', () => {
     Object.assign(bridge.getState(), { tournamentHistory: HISTORY });
     const html = bridge.build();
-    expect(html).toContain('12 teams · Champions — Dink Responsibly');
+    expect(html).toContain('12 teams · Champions · Dink Responsibly');
   });
 
   it('uses the singular "team" for a one-team tournament', () => {
@@ -135,6 +135,6 @@ describe('buildHistoryPageHTML — Past tournaments one-list (Mike pick Z)', () 
   it('shows honest empty copy when no tournament has finished', () => {
     Object.assign(bridge.getState(), { tournamentHistory: [] });
     const html = bridge.build();
-    expect(html).toContain('No tournaments finished yet — the first one lands here.');
+    expect(html).toContain('No tournaments finished yet. The first one lands here.');
   });
 });

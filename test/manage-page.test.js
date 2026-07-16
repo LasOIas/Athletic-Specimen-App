@@ -332,7 +332,7 @@ describe('buildPickupDaysHTML — the multi-day list (mockup p-h1)', () => {
   it('shows the honest empty state (and still the Add) when no upcoming days', () => {
     setPickup([]);
     const html = bridge.buildPickup();
-    expect(html).toContain('No pickup days scheduled — add one to open Check In.');
+    expect(html).toContain('No pickup days scheduled. Add one to open Check In.');
     expect(html).toContain('data-pk-add');
     expect(count(html, 'NEXT UP')).toBe(0);
   });
@@ -731,7 +731,7 @@ describe('buildMgRegistrationHTML — the Registration view (pick R7, mockup r-b
     expect(html).not.toContain('id="mgr-ann"');
     expect(html).toContain('class="mgr-annview" data-mgr-edit');
     expect(html).toContain('data-mgr-edit'); // tap the block (or the Edit link) → openManageEditor('announcement')
-    expect(html).toContain('July 2026 — registration is open! $80, 4s co-ed. Register at athletic-specimen.com');
+    expect(html).toContain('July 2026. Registration is open! $80, 4s co-ed. Register at athletic-specimen.com');
     expect(html).toContain('data-mgt-back');   // back returns to the sub-hub
     expect(html).not.toContain('pd-card');
   });
@@ -740,16 +740,16 @@ describe('buildMgRegistrationHTML — the Registration view (pick R7, mockup r-b
     expect(bridge.annValue({ name: 'X', team_size: 4, announcement: 'Come play!' })).toBe('Come play!');
     // pre-migration: announcement === undefined → composed default (never a crash / never "undefined")
     const pre = bridge.annValue({ name: 'X', team_size: 4 });
-    expect(pre).toContain('registration is open!');
+    expect(pre).toContain('Registration is open!');
     expect(pre).not.toContain('undefined');
   });
 
   it('composes the default gracefully when buy_in is missing', () => {
     expect(bridge.defaultAnnouncement({ name: 'July 2026', team_size: 4 }))
-      .toBe('July 2026 — registration is open! 4s co-ed. Register at athletic-specimen.com');
+      .toBe('July 2026. Registration is open! 4s co-ed. Register at athletic-specimen.com');
     // with buy-in present it is folded in
     expect(bridge.defaultAnnouncement({ name: 'July 2026', team_size: 3, buy_in: '$60' }))
-      .toBe('July 2026 — registration is open! $60, 3s co-ed. Register at athletic-specimen.com');
+      .toBe('July 2026. Registration is open! $60, 3s co-ed. Register at athletic-specimen.com');
   });
 
   it('renders the Copy for GroupMe CTA', () => {
@@ -1100,7 +1100,7 @@ describe('buildMgScoreSheetHTML — the shared score sheet (T7 defines, T8 reuse
     setPoolsFixture();
     const html = bridge.buildScoreSheet(bridge.getState().tournamentMatches.find((m) => m.id === 'gA1'));
     expect(html).toContain('data-mgss="edit"');
-    expect(html).toContain('same winner');
+    expect(html).toContain('Same winner');
     expect(html).not.toContain('Just update the live score');
   });
 
@@ -1211,7 +1211,7 @@ describe('buildMgBracketHTML — live by-round rows (pick R10-C, mockup bk2-c)',
   it('offers the reset control + the players-view link + never uses pd-card', () => {
     expect(html).toContain('data-mgbk-reset');
     expect(html).toContain('data-mgbk-players');
-    expect(html).toContain("Full bracket tree — the players' view");
+    expect(html).toContain("Full bracket tree · the players' view");
   });
 });
 
@@ -1225,7 +1225,7 @@ describe('buildMgBracketHTML — completed (mockup bk2-c, quiet close-out pointe
       ],
     });
     const html = bridge.buildBracket();
-    expect(html).toContain('Tournament completed — close-out lives in its own page.');
+    expect(html).toContain('Tournament completed. Close-out lives in its own page.');
     expect(html).toContain('def.');            // the final rows still render
     expect(html).toContain('data-mgbk-reset');  // reset still available
     expect(html).toContain('>Grand Final<');
@@ -1258,7 +1258,7 @@ describe('buildMgBracketHTML — pre-bracket seeding (pick R10-C, mockup bk-c)',
   it('renders the seeding list with rank + ▲/▼ reorder hooks and the Generate CTA', () => {
     setBracketSeedingFixture();
     const html = bridge.buildBracket();
-    expect(html).toContain('Seeding — from pool results');
+    expect(html).toContain('Seeding · from pool results');
     expect(html).toContain('class="mgbk-seed"');
     expect(html).toContain('data-mgbk-seedup="t1"');
     expect(html).toContain('data-mgbk-seeddown="t1"');
@@ -1582,7 +1582,7 @@ describe('buildMgAdminsHTML — the 4-seat roster (pick R6, mockup m-c)', () => 
     expect(html).toContain('>Seat 3<');
     expect(html).toContain('>Seat 4<');
     // the FIRST empty seat carries the explainer; the rest just say "Waiting"
-    expect(html).toContain('Waiting — they create an account, you flip it on');
+    expect(html).toContain('Waiting. They create an account, you flip it on');
     expect(html).not.toMatch(/•/); // labeled pills, never bare dots
   });
 

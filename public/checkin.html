@@ -246,7 +246,7 @@
       <div id="checkinError" class="error" hidden></div>
       <div id="noMatch" class="no-match" hidden>
         <p>Don't see your name?</p>
-        <button id="newPlayerBtn" class="btn btn-secondary">I'm new — register me</button>
+        <button id="newPlayerBtn" class="btn btn-secondary">I'm new, register me</button>
       </div>
       <div id="loadingState" class="loading">Loading roster…</div>
       <div id="loadError" class="error" hidden>
@@ -402,7 +402,7 @@
         if (typeof sessionIsUpcoming === 'function' && !sessionIsUpcoming(data.date)) {
           banner.innerHTML =
             '<div style="font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-dim); font-weight:600; margin-bottom:8px;">Next Session</div>'
-            + '<div style="font-size:15px; color:var(--text-dim);">No session scheduled yet — check back soon.</div>';
+            + '<div style="font-size:15px; color:var(--text-dim);">No session scheduled yet. Check back soon.</div>';
           banner.hidden = false;
           return;
         }
@@ -527,7 +527,7 @@
       if (existing) {
         // C47: styled confirm instead of native confirm() — "already on the list, is that you?"
         closeRegister(); // C62: close the register popup so the confirm dialog isn't stacked under it
-        openConfirm(existing.name, () => { checkInExisting(existing); }, 'Already on the list — check them in?');
+        openConfirm(existing.name, () => { checkInExisting(existing); }, 'Already on the list. Check them in?');
         return;
       }
       const errEl = $('registerError');

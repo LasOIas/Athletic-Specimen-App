@@ -130,7 +130,7 @@ describe('buildMyTeamPageHTML — signed-in + claimed (single scroll)', () => {
     expect(html).toContain('class="mt-next"');
     expect(html).toContain('class="mt-nettile"');
     expect(html).toContain('>NET<');
-    expect(html).toContain('UP NEXT — HAPPENING NOW'); // gA3 is live, no games ahead
+    expect(html).toContain('UP NEXT · HAPPENING NOW'); // gA3 is live, no games ahead
     expect(html).toContain('vs Dinks');
   });
 
