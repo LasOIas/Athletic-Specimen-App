@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.12.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.16.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -790,13 +790,29 @@ function resetGeneratedTeamDragState() {
       ? 'A team named "' + name + '" is already taken — pick another name.'
       : '';
   };
+  // Prefill-Venmo (2026-07-16): re-compose the pay link's href LIVE as the team name is typed so the note
+  // param always carries the CURRENT team name before a tap. Runs SYNCHRONOUSLY on every keystroke (not
+  // debounced like the dup check) — a stale href could open Venmo without the note if the player types then
+  // instantly taps Pay. No-op when the link isn't a Venmo profile URL (composeVenmoPayURL null -> leave the
+  // raw stored link untouched) or the anchor isn't on-page (disabled "coming soon" state).
+  const updateVenmoHref = () => {
+    const link = document.getElementById('rf-venmo-link');
+    if (!link) return;
+    const base = link.getAttribute('data-venmo-base') || '';
+    const money = link.getAttribute('data-venmo-money') || '';
+    const team = String((document.getElementById('reg-team') || {}).value || '').trim();
+    const composed = composeVenmoPayURL(base, money, team);
+    if (composed) link.setAttribute('href', composed);
+  };
   document.addEventListener('input', (e) => {
     if (!e.target || e.target.id !== 'reg-team') return;
+    updateVenmoHref();
     clearTimeout(timer);
     timer = setTimeout(runCheck, 300);
   });
   document.addEventListener('focusout', (e) => {
     if (!e.target || e.target.id !== 'reg-team') return;
+    updateVenmoHref();
     clearTimeout(timer);
     runCheck();
   });
@@ -3868,8 +3884,20 @@ function buildRegisterPageHTML() {
   // lights up (no dead javascript: link ever reaches the DOM).
   const venmoRaw = show.venmo_link ? String(show.venmo_link).trim() : '';
   const venmo = /^https?:\/\//i.test(venmoRaw) ? venmoRaw : '';
+  // Prefill (Mike, 2026-07-16): when the stored link is a Venmo profile URL, the button opens the app's PAY
+  // screen with recipient + amount + team-name note filled in. composeVenmoPayURL null (non-Venmo link) ->
+  // fall back to the raw stored link, byte-identical to before. data-* carry the base link + money so the
+  // delegated #reg-team input handler can re-compose the href LIVE as the team name is typed (note tracks it).
+  const venmoUser = venmo ? extractVenmoUsername(venmo) : null;
+  const venmoHref = venmo ? (composeVenmoPayURL(venmo, money, '') || venmo) : '';
+  // Always-visible fallback instruction: taps from an in-app browser (GroupMe) sometimes don't hand off to
+  // the app, so this line tells the player what to do by hand. @handle phrasing only when one was extracted.
+  const venmoNote = venmoUser
+    ? `Pay ${escapeHTML(money)} to @${escapeHTML(venmoUser)} — put your team name in the note`
+    : `Pay ${escapeHTML(money)} on Venmo — put your team name in the note`;
   const venmoBlock = venmo
-    ? `<a class="rf-venmo" href="${escapeHTML(venmo)}" target="_blank" rel="noopener noreferrer">${RF_VENMO_SVG}Pay ${escapeHTML(money)} on Venmo</a>`
+    ? `<a id="rf-venmo-link" class="rf-venmo" href="${escapeHTML(venmoHref)}" target="_blank" rel="noopener noreferrer" data-venmo-base="${escapeHTML(venmo)}" data-venmo-money="${escapeHTML(money)}">${RF_VENMO_SVG}Pay ${escapeHTML(money)} on Venmo</a>
+       <div class="rf-venmo-note">${venmoNote}</div>`
     : `<button type="button" class="rf-venmo is-disabled" disabled aria-disabled="true">${RF_VENMO_SVG}Pay ${escapeHTML(money)} on Venmo</button>
        <div class="rf-venmo-soon">Venmo link coming soon</div>`;
 

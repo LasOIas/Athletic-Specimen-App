@@ -1338,6 +1338,48 @@ function teamNameTaken(name, teams) {
   );
 }
 
+// 2026-07-16 (Mike, AskUserQuestion pick): prefilled Venmo pay link. extractVenmoUsername pulls the bare
+// @handle from a stored profile URL — host venmo.com / account.venmo.com (www. tolerated), path /u/<name>
+// OR the bare /<name>; query + trailing slash ignored; a stored leading @ stripped. Returns the bare
+// username (no @, no slash) or null when the link isn't a Venmo profile URL. PURE (no DOM / no state).
+function extractVenmoUsername(storedLink) {
+  const raw = String(storedLink == null ? '' : storedLink).trim();
+  if (!raw) return null;
+  let url;
+  try { url = new URL(raw); } catch (_) { return null; }
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  if (host !== 'venmo.com' && host !== 'account.venmo.com') return null;
+  const parts = url.pathname.split('/').filter(Boolean); // drops empties -> trailing slash tolerated
+  let name = null;
+  if (parts.length === 1) name = parts[0];                                  // /<name>
+  else if (parts.length === 2 && parts[0].toLowerCase() === 'u') name = parts[1]; // /u/<name>
+  else return null;                                                         // '' or a deeper path
+  try { name = decodeURIComponent(name); } catch (_) { /* keep raw */ }
+  name = String(name || '').replace(/^@/, '').trim();
+  return name || null;
+}
+
+// Compose a PREFILLED Venmo pay deep link from the stored profile URL + the SAME money text the button
+// shows + the team name. Venmo's server 302->307-redirects the BARE-path form
+// (venmo.com/<name>?txn=pay&amount=<bareNumber>&note=<urlencoded>) into the app carrying every param — the
+// /u/<name> form IGNORES them (verified live 2026-07-16), so this ALWAYS emits the bare path. amount is a
+// bare decimal, no $ (an unparseable money text omits amount but still returns a txn=pay link). A blank
+// team name omits the note. Returns null when storedLink isn't a Venmo profile URL, so the caller falls
+// back to the raw stored link byte-for-byte. PURE (no DOM / no state).
+function composeVenmoPayURL(storedLink, moneyText, teamName) {
+  const username = extractVenmoUsername(storedLink);
+  if (!username) return null;
+  const params = ['txn=pay'];
+  const amtMatch = String(moneyText == null ? '' : moneyText).match(/\d[\d,]*(?:\.\d+)?/);
+  if (amtMatch) {
+    const amount = amtMatch[0].replace(/,/g, '');
+    if (amount) params.push('amount=' + amount);
+  }
+  const note = String(teamName == null ? '' : teamName).trim();
+  if (note) params.push('note=' + encodeURIComponent(note));
+  return 'https://venmo.com/' + username + '?' + params.join('&');
+}
+
 // Finish-line Slice 4 (spec §13.4): the ELIMINATED terminal timeline node. Has this team's double-elim
 // bracket run ENDED (been eliminated), and — only when the bracket structure makes it CERTAIN — what single
 // finishing place is derivable? A team is eliminated when it LOST a losers-bracket game or the grand final
@@ -1667,6 +1709,7 @@ if (typeof module !== "undefined" && module.exports) {
     teamPeekModel, checkinHeroModel,
     bracketOutcome, bracketRoundLabel, bracketStatusLine,
     registerEventModel, joinSheetValidate, registerFormValidate, teamNameTaken,
+    extractVenmoUsername, composeVenmoPayURL,
     computeTeamRunEnded, sessionIsUpcoming, sessionIsToday, manageNeedsYouModel,
     publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel,
     tournamentStageModel, rulesToHTML

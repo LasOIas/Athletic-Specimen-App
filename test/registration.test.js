@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { registerEventModel, joinSheetValidate, registerFormValidate, teamNameTaken } = require('../public/pure.js');
+const { registerEventModel, joinSheetValidate, registerFormValidate, teamNameTaken, extractVenmoUsername, composeVenmoPayURL } = require('../public/pure.js');
 
 describe('registerEventModel', () => {
   it('marks registration OPEN only for a setup tournament with registration_open', () => {
@@ -139,5 +139,76 @@ describe('teamNameTaken', () => {
     expect(teamNameTaken('', teams)).toBe(false);
     expect(teamNameTaken('   ', teams)).toBe(false);
     expect(teamNameTaken('Sand Sharks', null)).toBe(false);
+  });
+});
+
+// 2026-07-16 (Mike, AskUserQuestion pick): the Venmo pay button becomes a PREFILLED link that opens the
+// app's pay screen with recipient + amount + team-name note filled in. extractVenmoUsername pulls the
+// @handle from a stored profile URL; composeVenmoPayURL builds the deep link. Venmo facts verified live
+// (2026-07-16): the BARE path (venmo.com/<name>?txn=pay&amount&note) redirects into the app carrying the
+// params — the /u/<name> form IGNORES them, so the composed URL always emits the bare path.
+describe('extractVenmoUsername', () => {
+  it('reads the handle from the /u/<name> profile form', () => {
+    expect(extractVenmoUsername('https://venmo.com/u/athleticspecimen')).toBe('athleticspecimen');
+  });
+  it('reads the handle from the bare /<name> form', () => {
+    expect(extractVenmoUsername('https://venmo.com/athleticspecimen')).toBe('athleticspecimen');
+  });
+  it('accepts the account.venmo.com host and a www. prefix', () => {
+    expect(extractVenmoUsername('https://account.venmo.com/u/athleticspecimen')).toBe('athleticspecimen');
+    expect(extractVenmoUsername('https://www.venmo.com/athleticspecimen')).toBe('athleticspecimen');
+  });
+  it('ignores a trailing slash and any query string', () => {
+    expect(extractVenmoUsername('https://venmo.com/u/athleticspecimen/?ref=x')).toBe('athleticspecimen');
+    expect(extractVenmoUsername('https://venmo.com/athleticspecimen/')).toBe('athleticspecimen');
+  });
+  it('strips a leading @ if one was stored in the path', () => {
+    expect(extractVenmoUsername('https://venmo.com/@athleticspecimen')).toBe('athleticspecimen');
+  });
+  it('returns null for a non-Venmo host, a deep path, or garbage', () => {
+    expect(extractVenmoUsername('https://paypal.me/athleticspecimen')).toBeNull();
+    expect(extractVenmoUsername('https://venmo.com/u/a/b/c')).toBeNull();
+    expect(extractVenmoUsername('https://venmo.com/')).toBeNull();
+    expect(extractVenmoUsername('not a url')).toBeNull();
+    expect(extractVenmoUsername('')).toBeNull();
+    expect(extractVenmoUsername(null)).toBeNull();
+  });
+});
+
+describe('composeVenmoPayURL', () => {
+  it('composes the bare-path pay link with amount + url-encoded note', () => {
+    expect(composeVenmoPayURL('https://venmo.com/u/athleticspecimen', '$80', 'Sand Sharks'))
+      .toBe('https://venmo.com/athleticspecimen?txn=pay&amount=80&note=Sand%20Sharks');
+  });
+  it('always emits the BARE path even from a /u/ stored link (the /u/ form ignores the params)', () => {
+    const url = composeVenmoPayURL('https://venmo.com/u/athleticspecimen', '$80', 'Test Team!');
+    expect(url).toBe('https://venmo.com/athleticspecimen?txn=pay&amount=80&note=Test%20Team!');
+    expect(url.includes('/u/')).toBe(false);
+  });
+  it('omits the note param when the team name is empty or whitespace', () => {
+    expect(composeVenmoPayURL('https://venmo.com/u/athleticspecimen', '$80', ''))
+      .toBe('https://venmo.com/athleticspecimen?txn=pay&amount=80');
+    expect(composeVenmoPayURL('https://venmo.com/u/athleticspecimen', '$80', '   '))
+      .toBe('https://venmo.com/athleticspecimen?txn=pay&amount=80');
+  });
+  it('trims the team name before encoding it into the note', () => {
+    expect(composeVenmoPayURL('https://venmo.com/u/athleticspecimen', '$80', '  Sand Sharks  '))
+      .toBe('https://venmo.com/athleticspecimen?txn=pay&amount=80&note=Sand%20Sharks');
+  });
+  it('parses a bare number, decimals, and commas from the money text', () => {
+    expect(composeVenmoPayURL('https://venmo.com/u/x', '$100', '')).toBe('https://venmo.com/x?txn=pay&amount=100');
+    expect(composeVenmoPayURL('https://venmo.com/u/x', '$80.50', '')).toBe('https://venmo.com/x?txn=pay&amount=80.50');
+    expect(composeVenmoPayURL('https://venmo.com/u/x', '$1,200', '')).toBe('https://venmo.com/x?txn=pay&amount=1200');
+  });
+  it('omits the amount param (but still returns a txn=pay link) when the money text has no number', () => {
+    expect(composeVenmoPayURL('https://venmo.com/u/athleticspecimen', 'free', 'Sand Sharks'))
+      .toBe('https://venmo.com/athleticspecimen?txn=pay&note=Sand%20Sharks');
+    expect(composeVenmoPayURL('https://venmo.com/u/athleticspecimen', '', ''))
+      .toBe('https://venmo.com/athleticspecimen?txn=pay');
+  });
+  it('returns null for a non-Venmo profile URL so the caller falls back to the raw stored link', () => {
+    expect(composeVenmoPayURL('https://paypal.me/athleticspecimen', '$80', 'Sand Sharks')).toBeNull();
+    expect(composeVenmoPayURL('https://example.com/pay', '$80', 'Sand Sharks')).toBeNull();
+    expect(composeVenmoPayURL('', '$80', 'Sand Sharks')).toBeNull();
   });
 });

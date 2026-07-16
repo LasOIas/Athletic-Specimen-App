@@ -2752,6 +2752,8 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 .rf-venmo svg { width: 18px; height: 18px; flex: none; }
 .rf-venmo.is-disabled { opacity: .55; color: var(--muted); border-color: var(--border); cursor: not-allowed; }
 .rf-venmo-soon { text-align: center; font-size: 12px; font-weight: 500; color: var(--muted); margin-top: 7px; }
+/* Prefill-Venmo fallback instruction (2026-07-16) — mirrors .rf-venmo-soon (muted, 12px, centered); line-height + side padding so the longer sentence wraps cleanly at 390. */
+.rf-venmo-note { text-align: center; font-size: 12px; font-weight: 500; line-height: 1.4; color: var(--muted); margin-top: 8px; padding: 0 8px; }
 .rf-paid { display: flex; align-items: center; gap: 10px; margin-top: 14px; font-size: 14.5px; color: var(--text); cursor: pointer; }
 .rf-paidbox { width: 22px; height: 22px; flex: none; accent-color: var(--accent); margin: 0; }
 .rf-paidt b { color: var(--text-2); font-weight: 700; }
