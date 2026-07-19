@@ -1262,6 +1262,31 @@ function checkinHeroModel(rows) {
   return { id: p.id, name: String(p.name) };
 }
 
+// Manage -> Check-in view model (2026-07-19 spec). rows: [{key,id,name,group,checkedIn}].
+// filter: 'all'|'in'|'out'. Sorting + substring narrowing live HERE; counts are always
+// global (the UI labels read "Still out · counts.out" even mid-search). showAdd checks the
+// FULL roster (not the filtered slice) so an exact name never re-registers.
+function checkinConsoleModel(rows, filter, query) {
+  const list = Array.isArray(rows) ? rows.filter((r) => r && typeof r.name === 'string') : [];
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const q = norm(query);
+  const inRows = list.filter((r) => r.checkedIn);
+  const outRows = list.filter((r) => !r.checkedIn);
+  const counts = { in: inRows.length, out: outRows.length, total: list.length };
+  const byName = (a, b) => norm(a.name).localeCompare(norm(b.name));
+  const narrowed = (rs) => rs.filter((r) => !q || norm(r.name).includes(q)).sort(byName);
+  const sections = filter === 'in'
+    ? [{ id: 'in', label: null, rows: narrowed(inRows) }]
+    : filter === 'out'
+      ? [{ id: 'out', label: null, rows: narrowed(outRows) }]
+      : [
+        { id: 'out', label: 'Still out', rows: narrowed(outRows) },
+        { id: 'in', label: 'Checked in', rows: narrowed(inRows) },
+      ];
+  const showAdd = !!q && !list.some((r) => norm(r.name) === q);
+  return { counts, sections, showAdd };
+}
+
 // Finish-line Slice 3 (spec §13.5): the registration EVENT view-model. Pure shape for the event card —
 // the REGISTRATION OPEN / closed pill, the chips row, and the honest live-spots line. HARD RULE (spec +
 // §27): a date chip renders ONLY when the tournament actually carries a date (there is no date column
@@ -1706,7 +1731,7 @@ if (typeof module !== "undefined" && module.exports) {
     shapeStandingsByPool, computeAllTimeLeaderboard,
     shapeClaimCandidates, filterClaimCandidates,
     resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
-    teamPeekModel, checkinHeroModel,
+    teamPeekModel, checkinHeroModel, checkinConsoleModel,
     bracketOutcome, bracketRoundLabel, bracketStatusLine,
     registerEventModel, joinSheetValidate, registerFormValidate, teamNameTaken,
     extractVenmoUsername, composeVenmoPayURL,
