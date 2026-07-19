@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.16.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.19.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1010,6 +1010,17 @@ function partialRender() {
       const searchEl = document.getElementById('mg-player-search');
       const searching = searchEl && (document.activeElement === searchEl || ((searchEl.value || '').trim() !== ''));
       if (mgSelectMode || searching) {
+        if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+        return;
+      }
+    }
+    // Check-in page EXCEPTION (2026-07-19): live search input. Never clobber a half-typed query or
+    // the caret on a background sync — bail (sync notice only) while the box is focused or non-empty.
+    // Idle: the plain container repaint below is safe and keeps tags/counts live (the UNDO strip
+    // survives via the mgckLast module var).
+    if (manageView === 'checkin') {
+      const ckSearch = document.getElementById('mgck-search');
+      if (ckSearch && (document.activeElement === ckSearch || (String(ckSearch.value || '').trim() !== ''))) {
         if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
         return;
       }
@@ -6743,6 +6754,11 @@ function buildHistoryPageHTML() {
 // `manageView` ('lead' | area) is a MODULE var (the legacy tournament-mode state.manageView is deleted);
 // it survives partialRender so a background sync repaints the current Manage surface, never a full render().
 let manageView = 'lead';  // 'lead' = the needs-you lead; 'pickup'/'pickup-form' (Task 2); 'players' (Task 3); else an area id (placeholder)
+// Manage -> Check-in (2026-07-19 spec): chip filter, live search text, last toggle for UNDO.
+// mgckLast survives background container repaints (module scope); all three reset on page entry.
+let mgckFilter = 'all';
+let mgckQ = '';
+let mgckLast = null; // { key, name, dir: 'in'|'out' }
 let pickupEditId = null;  // Task 2: the pickup_days row id being edited in 'pickup-form' (null = adding a new day)
 // Task 3 (Players directory, pick R4): the live-search value + Select(bulk) state. All survive the container-
 // swap repaint AND guard the poll-clobber (a background sync must never wipe a half-typed query or a selection).
@@ -6898,6 +6914,7 @@ function buildManagePageHTML() {
   const everythingHTML = `<div class="pl-sect">Everything</div>`
     + mgRowHTML('tournament', 'Tournament', escapeHTML(tourSub))
     + mgRowHTML('pickup', 'Pickup days', escapeHTML(pickupSub))
+    + mgRowHTML('checkin', 'Check-in', 'Tap names as people arrive')
     + mgRowHTML('players', 'Players', escapeHTML(playersSub))
     + mgRowHTML('teams', 'Teams', escapeHTML(teamsSub))
     + mgRowHTML('admins', 'Admins', 'Seats &amp; activity log');
@@ -7011,6 +7028,7 @@ function manageContainerHTML() {
   if (manageView === 'lead') return buildManagePageHTML();
   if (manageView === 'pickup') return buildPickupDaysHTML();
   if (manageView === 'pickup-form') return buildPickupDayFormHTML();
+  if (manageView === 'checkin') return buildManageCheckinHTML();
   if (manageView === 'players') return buildManagePlayersHTML();
   if (manageView === 'teams') return buildManageTeamsHTML();
   if (manageView === 'tournament') return buildManageTournamentContainerHTML();
@@ -7400,6 +7418,174 @@ function buildManagePlayersHTML() {
   }
 
   return header + search + meta + groupsSection + listSection + bar;
+}
+
+// Manage -> Check-in (2026-07-19 spec, Mike-approved d73f26e): tap a name to toggle attendance,
+// All/In/Out chips, UNDO strip, search + add-and-check-in. NO day gate — works whether or not a
+// pickup day exists. Rows reuse the ckx kiosk kit; writes reuse the kiosk RPC+outbox path (C21).
+// Skill NEVER renders here.
+function mgckRows() {
+  const inSet = new Set(state.checkedIn || []);
+  return (state.players || []).map((p) => ({
+    key: playerIdentityKey(p),
+    id: p.id,
+    name: p.name,
+    group: getPlayerPrimaryGroup(p), // mirrors buildMgpListHTML's grp derivation (:7324) so the two Manage lists read identically
+    checkedIn: inSet.has(playerIdentityKey(p)),
+  }));
+}
+
+function mgckMetaHTML(model) {
+  return `<span class="mgck-m"><b>${model.counts.in}</b> checked in</span>`
+    + `<span class="mgck-m"><b>${model.counts.total}</b> ${model.counts.total === 1 ? 'player' : 'players'}</span>`;
+}
+
+function mgckStripHTML() {
+  if (!mgckLast) return '';
+  const verb = mgckLast.dir === 'in' ? 'checked in' : 'checked out';
+  return `<span class="mgck-st">${escapeHTML(mgckLast.name)} ${verb}</span>`
+    + `<button type="button" data-mgck-undo>UNDO</button>`;
+}
+
+function mgckListHTML(model) {
+  if (!state.loaded) return '<div class="mgck-empty">Loading roster&hellip;</div>';
+  if (!model.counts.total && !(mgckQ || '').trim()) {
+    return '<div class="mgck-empty">No players on the roster yet.</div>';
+  }
+  const row = (r) => {
+    const gp = r.group ? `<span class="ckx-gp">${escapeHTML(r.group)}</span>` : '';
+    const tag = r.checkedIn ? 'IN' : 'CHECK IN';
+    return `<button class="ckx-row${r.checkedIn ? ' is-in' : ''}" type="button" data-mgck-id="${escapeHTMLText(r.key)}">`
+      + `<span class="ckx-nm">${highlightMatch(r.name, mgckQ)}${gp}</span>`
+      + `<span class="ckx-go">${tag}</span></button>`;
+  };
+  const emptyLine = (id) => id === 'in'
+    ? '<div class="mgck-empty">Nobody is checked in yet.</div>'
+    : '<div class="mgck-empty">Everyone is in.</div>';
+  const sect = (s) => {
+    const head = s.label ? `<div class="mgck-sect">${s.label} &middot; ${s.id === 'in' ? model.counts.in : model.counts.out}</div>` : '';
+    const body = s.rows.length ? s.rows.map(row).join('')
+      : ((mgckQ || '').trim() ? '' : emptyLine(s.id));
+    return head + body;
+  };
+  const add = (model.showAdd && state.loaded)
+    ? `<button type="button" class="mgp-add" data-mgck-add="${escapeHTMLText((mgckQ || '').trim())}">`
+      + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`
+      + `Add &ldquo;${escapeHTML((mgckQ || '').trim())}&rdquo; to the roster</button>`
+      + `<p class="mgck-msg" id="mgck-msg" role="status" aria-live="polite"></p>`
+    : '';
+  return model.sections.map(sect).join('') + add;
+}
+
+function buildManageCheckinHTML() {
+  const model = checkinConsoleModel(mgckRows(), mgckFilter, mgckQ);
+  const chip = (val, label) =>
+    `<button type="button" class="pl-tab${mgckFilter === val ? ' pl-on' : ''}" data-mgck-filter="${val}"${mgckFilter === val ? ' aria-current="true"' : ''}>${label}</button>`;
+  return `<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>
+      <div class="pd-htitle">Check-in</div>
+    </div>
+    <div class="mgck-meta" id="mgck-meta">${mgckMetaHTML(model)}</div>
+    <div class="pl-tabs">${chip('all', 'All')}${chip('in', 'In')}${chip('out', 'Out')}</div>
+    <div class="cik-search mgck-srch">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="mgck-search" type="text" placeholder="Search the roster" autocapitalize="words" autocomplete="off" spellcheck="false" aria-label="Search the roster" value="${escapeHTMLText(mgckQ)}" />
+    </div>
+    <div class="mgck-strip" id="mgck-strip"${mgckLast ? '' : ' hidden'}>${mgckStripHTML()}</div>
+    <div id="mgck-list">${mgckListHTML(model)}</div>`;
+}
+
+// Targeted swaps only (list/meta/strip) with scroll preservation — a toggle mid-scroll must not
+// jump the list (F6 pattern). Falls back to a full Manage container swap if the page is not mounted.
+function mgckRepaint() {
+  const listEl = document.getElementById('mgck-list');
+  if (!listEl || manageView !== 'checkin') { repaintManage(); return; }
+  const panel = document.getElementById('tab-manage');
+  const saved = panel ? panel.scrollTop : 0;
+  const model = checkinConsoleModel(mgckRows(), mgckFilter, mgckQ);
+  listEl.innerHTML = mgckListHTML(model);
+  const metaEl = document.getElementById('mgck-meta');
+  if (metaEl) metaEl.innerHTML = mgckMetaHTML(model);
+  const stripEl = document.getElementById('mgck-strip');
+  if (stripEl) { stripEl.innerHTML = mgckStripHTML(); stripEl.hidden = !mgckLast; }
+  if (panel) panel.scrollTop = saved;
+}
+
+// The kiosk's optimistic + RPC + outbox contract, addressed by identity key (C21 single-source).
+function mgckToggleByKey(key, dir, opts) {
+  const player = (state.players || []).find((p) => playerIdentityKey(p) === key);
+  if (!player) return;
+  if (dir === 'in') {
+    if (checkInPlayer(player) && supabaseClient && player.id) {
+      (async () => {
+        try {
+          const { error } = await supabaseClient.rpc('check_in', { p_id: player.id });
+          if (error) throw error;
+          queueSupabaseRefresh();
+        } catch (err) {
+          console.error('mgck check_in error', err);
+          outboxEnqueue({ key: 'att:' + player.id, kind: 'check_in', payload: { p_id: player.id }, ts: Date.now() });
+        }
+      })();
+    }
+  } else {
+    if (checkOutPlayer(player) && supabaseClient && player.id) {
+      (async () => {
+        try {
+          const { error } = await supabaseClient.rpc('check_out', { p_id: player.id });
+          if (error) throw error;
+          queueSupabaseRefresh();
+        } catch (err) {
+          console.error('mgck check_out error', err);
+          outboxEnqueue({ key: 'att:' + player.id, kind: 'check_out', payload: { p_id: player.id }, ts: Date.now() });
+        }
+      })();
+    }
+  }
+  mgckLast = (opts && opts.silent) ? null : { key, name: player.name, dir };
+  saveLocal();
+  mgckRepaint();
+}
+
+function mgckToggleRow(key) {
+  const inSet = new Set(state.checkedIn || []);
+  mgckToggleByKey(key, inSet.has(key) ? 'out' : 'in');
+}
+
+// Add-and-check-in: the kiosk Wave-1d atomic register path, admin voice. Mirrors app.js:10424-10503.
+async function mgckAddAndCheckIn(name) {
+  const msg = (t) => { const el = document.getElementById('mgck-msg'); if (el) el.textContent = t; };
+  const trimmed = String(name || '').trim();
+  if (!trimmed) return;
+  if (!state.loaded) { msg('Still loading. One second, then tap again.'); return; }
+  if (!isValidFullName(trimmed)) { msg('Enter a first and last name'); return; }
+  const exists = state.players.find((p) => normalize(p.name) === normalize(trimmed));
+  if (exists) { mgckToggleByKey(playerIdentityKey(exists), 'in'); return; }
+  const inserted = { name: trimmed, skill: 0.0, group: CLUB_GROUP, groups: [CLUB_GROUP], pending: true };
+  state.players = [...state.players, inserted];
+  checkInPlayer(inserted);
+  mgckLast = { key: playerIdentityKey(inserted), name: trimmed, dir: 'in' };
+  mgckQ = '';
+  const searchEl = document.getElementById('mgck-search');
+  if (searchEl) searchEl.value = '';
+  saveLocal();
+  mgckRepaint();
+  if (supabaseClient) {
+    try {
+      const { data, error } = await supabaseClient.rpc('register_player', { p_name: trimmed, p_group: CLUB_GROUP, p_checked_in: true });
+      if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (row && row.id) inserted.id = row.id;
+      if (inserted.id) inserted.pending = false;
+      queueSupabaseRefresh();
+    } catch (err) {
+      console.error('mgck register error', err);
+      inserted.pending = true;
+      outboxEnqueue({ key: 'reg:' + normalize(trimmed) + ':' + CLUB_GROUP, kind: 'register', payload: { name: trimmed, group: CLUB_GROUP, checked_in: true }, ts: Date.now() });
+    }
+    saveLocal();
+    mgckRepaint();
+  }
 }
 
 // Bulk check-in / check-out over the Select-mode selection. Optimistic locally, then the per-id
@@ -9881,6 +10067,14 @@ function attachHandlers() {
     // it survives the container-swap repaints (the input element is re-created on each swap). Re-renders ONLY
     // the #mgp-list sub-container — the input itself (and its focus/caret) is never touched.
     appContent.addEventListener('input', (e) => {
+      // Check-in page live search: swap ONLY #mgck-list (the input element itself is never replaced), the
+      // same mechanism as #mg-player-search below. Counts are global — the meta line does not change on query.
+      if (e.target && e.target.id === 'mgck-search') {
+        mgckQ = e.target.value || '';
+        const listEl = document.getElementById('mgck-list');
+        if (listEl) listEl.innerHTML = mgckListHTML(checkinConsoleModel(mgckRows(), mgckFilter, mgckQ));
+        return;
+      }
       if (!e.target || e.target.id !== 'mg-player-search') return;
       mgPlayerQuery = e.target.value || '';
       const listEl = document.getElementById('mgp-list');
@@ -9987,6 +10181,22 @@ function attachHandlers() {
           }
           return;
         }
+      }
+      // Check-in page (2026-07-19 spec): chip switch is a full container repaint (focus moves with the
+      // tap anyway); row toggles / UNDO / add are targeted mgckRepaint swaps. Checked BEFORE the generic
+      // data-mg-area so a row tap never falls through; the page's back button carries data-mg-area="lead".
+      if (manageView === 'checkin') {
+        const chip = e.target.closest('[data-mgck-filter]');
+        if (chip) { mgckFilter = chip.getAttribute('data-mgck-filter') || 'all'; repaintManage(); return; }
+        if (e.target.closest('[data-mgck-undo]')) {
+          const last = mgckLast;
+          if (last) mgckToggleByKey(last.key, last.dir === 'in' ? 'out' : 'in', { silent: true });
+          return;
+        }
+        const addBtn = e.target.closest('[data-mgck-add]');
+        if (addBtn) { void mgckAddAndCheckIn(addBtn.getAttribute('data-mgck-add')); return; }
+        const ckRow = e.target.closest('[data-mgck-id]');
+        if (ckRow) { mgckToggleRow(ckRow.getAttribute('data-mgck-id') || ''); return; }
       }
       // Teams page (Task 4, pick R5): size chips select the size, Generate builds teams, tapping a name opens
       // the swap sheet, a destination tap moves the player. All container-swap partial repaints (the mgt*
@@ -10127,6 +10337,8 @@ function attachHandlers() {
       if (mgArea) {
         const nextArea = mgArea.getAttribute('data-mg-area') || 'lead';
         mgSyncActiveTournament(); // keep the loaded tournament data glued to the resolved tournament
+        // Entering the Check-in page fresh: All filter, empty query, no stale UNDO strip.
+        if (nextArea === 'checkin') { mgckFilter = 'all'; mgckQ = ''; mgckLast = null; }
         // Entering the Players directory fresh: reset the search + Select state so a re-open starts clean.
         if (nextArea === 'players' && manageView !== 'players') {
           mgPlayerQuery = ''; mgSelectMode = false; mgSelected = new Set(); mgGroupsOpen = false; mgMoveOpen = false; mgRenameGroup = null;
