@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.19.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.19.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3640,7 +3640,7 @@ function buildTournamentHubHTML() {
   } else if (state.identityCollision === true) {
     // Identity (spec §3): someone else already owns your name, so sign-up got no auto-link — one quiet
     // affordance to disambiguate once. Same #pd-claim id → the existing handler opens the claim page.
-    rows.push(row('id="pd-claim"', '', ICON.team, 'Find yourself', 'Someone shares your name &mdash; tap to pick you', CHEV));
+    rows.push(row('id="pd-claim"', '', ICON.team, 'Find yourself', 'Someone shares your name. Tap to pick you', CHEV));
   } else if (publicLiveTournament()) {
     // Unclaimed + a live tournament to claim into: the claim entry (relocated from the old Home hero) lives
     // here in the My-team slot. Same #pd-claim id → the existing delegated handler opens the claim flow.
@@ -5831,7 +5831,7 @@ function buildKioskResultsHTML(query) {
   if (!state.loaded && (query || '').trim()) return '<p class="cik-none">Loading roster&hellip;</p>'; // C1: don't flash "No match" pre-sync
   return list.length
     ? list.map((r) => renderCheckinButton(r, query)).join('')
-    : ((query || '').trim() ? '<p class="cik-none">No match &mdash; tap &ldquo;I&rsquo;m new&rdquo; to add yourself.</p>' : '');
+    : ((query || '').trim() ? '<p class="cik-none">No match. Tap &ldquo;I&rsquo;m new&rdquo; to add yourself.</p>' : '');
 }
 
 // C48.6 (Option A): the kiosk defaults to a vertically-centered idle layout (.is-idle). The moment
@@ -6203,10 +6203,10 @@ function renderClaimSearch() {
 function buildClaimResultsHTML(query) {
   if (claimCandidates === null) return '<div class="small claim-note">Loading names&hellip;</div>';
   if (claimFetchFailed) {
-    return '<div class="small claim-note">Couldn&rsquo;t load the names &mdash; check your connection, then close this and try again.</div>';
+    return '<div class="small claim-note">Couldn&rsquo;t load the names. Check your connection, then close this and try again.</div>';
   }
   if (!claimCandidates.length) {
-    return '<div class="small claim-note">No names to claim yet &mdash; they show up here once teams register or pickup players are added.</div>';
+    return '<div class="small claim-note">No names to claim yet. They show up here once teams register or pickup players are added.</div>';
   }
   const q = String(query || '').trim();
   if (!q) return '<div class="small claim-note">Type your name to find yourself.</div>';
@@ -6219,7 +6219,7 @@ function buildClaimResultsHTML(query) {
     html += `<div class="small claim-note claim-section">${escapeHTML(s.label)}</div>`
       + list.map(claimRowHTML).join('');
   });
-  if (!html) return '<div class="small claim-note">No match &mdash; check the spelling, or ask your organizer.</div>';
+  if (!html) return '<div class="small claim-note">No match. Check the spelling, or ask your organizer.</div>';
   return html;
 }
 
@@ -6240,7 +6240,7 @@ function renderClaimConfirm(c) {
         <div class="claim-team">${escapeHTML(c.teamName)}</div>
         <div class="auth-err" id="claim-err" role="alert" hidden></div>
         <button type="button" class="auth-submit" id="claim-confirm">Claim my spot</button>
-        <button type="button" class="auth-alt" id="claim-notme">Not me &mdash; back to search</button>
+        <button type="button" class="auth-alt" id="claim-notme">Not me &middot; back to search</button>
       </div>
     </div>`;
   el.querySelector('#claim-back').addEventListener('click', closeClaimPage);
@@ -6291,7 +6291,7 @@ function renderClaimSuccess(c) {
         <span class="av claim-bigav">${escapeHTML(c.initials)}</span>
         <div class="claim-nm">${escapeHTML(c.name)}</div>
         <div class="claim-team">${escapeHTML(c.teamName)}</div>
-        <p class="auth-sub">Done &mdash; this is you now. Your games and your record are on the way.</p>
+        <p class="auth-sub">Done. This is you now. Your games and your record are on the way.</p>
         <button type="button" class="auth-submit" id="claim-done">Done</button>
       </div>
     </div>`;
@@ -6517,7 +6517,7 @@ function publicCheckinHTML() {
     <div id="checkin-results"></div>
     <button class="cik-new" id="btn-checkin-new" type="button">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
-      I'm new &mdash; add me
+      I'm new &middot; add me
     </button>`;
   return `
   <div class="ci-kiosk is-idle">
