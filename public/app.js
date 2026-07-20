@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.19.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.19.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7423,13 +7423,14 @@ function buildManagePlayersHTML() {
 // Manage -> Check-in (2026-07-19 spec, Mike-approved d73f26e): tap a name to toggle attendance,
 // All/In/Out chips, UNDO strip, search + add-and-check-in. NO day gate — works whether or not a
 // pickup day exists. Rows reuse the ckx kiosk kit; writes reuse the kiosk RPC+outbox path (C21).
-// Skill NEVER renders here.
+// Skill renders here for admins (Mike, 2026-07-19); public surfaces stay skill-free (§AS-1).
 function mgckRows() {
   const inSet = new Set(state.checkedIn || []);
   return (state.players || []).map((p) => ({
     key: playerIdentityKey(p),
     id: p.id,
     name: p.name,
+    skill: p.skill,
     group: getPlayerPrimaryGroup(p), // mirrors buildMgpListHTML's grp derivation (:7324) so the two Manage lists read identically
     checkedIn: inSet.has(playerIdentityKey(p)),
   }));
@@ -7455,8 +7456,11 @@ function mgckListHTML(model) {
   const row = (r) => {
     const gp = r.group ? `<span class="ckx-gp">${escapeHTML(r.group)}</span>` : '';
     const tag = r.checkedIn ? 'IN' : 'CHECK IN';
+    const n = Number(r && r.skill);
+    const skPos = Number.isFinite(n) && n > 0;
     return `<button class="ckx-row${r.checkedIn ? ' is-in' : ''}" type="button" data-mgck-id="${escapeHTMLText(r.key)}">`
       + `<span class="ckx-nm">${highlightMatch(r.name, mgckQ)}${gp}</span>`
+      + `<span class="mgck-sk${skPos ? '' : ' n'}">${mgpSkillText(r.skill)}</span>`
       + `<span class="ckx-go">${tag}</span></button>`;
   };
   const emptyLine = (id) => id === 'in'
@@ -7800,9 +7804,13 @@ function buildManageTeamsHTML() {
     const rows = teams.map((team, idx) => {
       const names = (Array.isArray(team) ? team : []).map((p) => {
         const key = playerIdentityKey(p);
-        return `<div class="mgt-nm" data-mgt-swap="${escapeHTMLText(key)}" data-mgt-from="${idx}">${escapeHTML(String((p && p.name) || 'Player'))}</div>`;
+        const n = Number(p && p.skill);
+        const skPos = Number.isFinite(n) && n > 0;
+        return `<div class="mgt-nm" data-mgt-swap="${escapeHTMLText(key)}" data-mgt-from="${idx}">`
+          + `<span class="mgt-nmn">${escapeHTML(String((p && p.name) || 'Player'))}</span>`
+          + `<span class="mgt-nsk${skPos ? '' : ' n'}">${mgpSkillText(p && p.skill)}</span></div>`;
       }).join('');
-      return `<div class="mgt-trow"><span class="mgt-tt">TEAM ${idx + 1}</span><div class="mgt-names">${names}</div></div>`;
+      return `<div class="mgt-trow"><span class="mgt-tt">TEAM ${idx + 1}<b class="mgt-tsk">${teamSkillTotal(team)}</b></span><div class="mgt-names">${names}</div></div>`;
     }).join('');
     teamsSect = `<div class="pl-sect">Today's teams</div>${rows}`
       + `<div class="mgt-note">Tap a name to swap players between teams · regenerate any time</div>`;
@@ -7828,11 +7836,11 @@ function buildMgtSwapSheetHTML() {
     .map((x) => {
       const preview = (Array.isArray(x.team) ? x.team : [])
         .map((p) => escapeHTML(String((p && p.name) || ''))).filter(Boolean).join(', ');
-      return `<button type="button" class="mgt-to" data-mgt-to="${x.idx}"><span class="mgt-to-t">TEAM ${x.idx + 1}</span><span class="mgt-to-r">${preview}</span></button>`;
+      return `<button type="button" class="mgt-to" data-mgt-to="${x.idx}"><span class="mgt-to-t">TEAM ${x.idx + 1}<b class="mgt-tsk">${teamSkillTotal(x.team)}</b></span><span class="mgt-to-r">${preview}</span></button>`;
     }).join('');
   return `<div class="mgt-sheet-backdrop" data-mgt-cancel></div>`
     + `<div class="mgt-sheet" role="dialog" aria-label="Swap player">`
-    + `<div class="mgt-sheet-h">Move ${escapeHTML(name)}</div>`
+    + `<div class="mgt-sheet-h">Move ${escapeHTML(name)} <b class="mgt-hsk">&middot; ${mgpSkillText(player && player.skill)}</b></div>`
     + `<div class="mgt-sheet-sub">Pick a team. Even sizes swap the closest player back.</div>`
     + (dests || `<div class="mgt-empty">No other team to move to yet.</div>`)
     + `<button type="button" class="mgt-cancel" data-mgt-cancel>Cancel</button></div>`;

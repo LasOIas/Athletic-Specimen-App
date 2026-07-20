@@ -85,3 +85,7 @@ The public Check In tab's admin stats card restyle (old kit, separate surface) �
 ## 11. Version + deploy hygiene
 
 APP_VERSION bump (`YYYY.MM.DD.N`, app.js ~:22) in the build commit; commit AND push per fix (declared §4 override); builder commits, controller reviews + pushes (§21/§29).
+
+## Addendum (2026-07-19, Mike): skill renders on this page
+
+Mike: "Admins should still be able to see the skill for players…" — supersedes §2.6's "Skill NEVER renders here" and §8's row spec. Each row shows the player's skill (mgpSkillText grammar, right-aligned before the state tag). Public surfaces remain skill-free (§AS-1).

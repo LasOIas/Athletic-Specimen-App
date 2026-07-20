@@ -1287,6 +1287,17 @@ function checkinConsoleModel(rows, filter, query) {
   return { counts, sections, showAdd };
 }
 
+// Manage Teams (2026-07-19): a generated team's skill total for the ADMIN surface. Sums positive
+// finite skills (unrated 0/blank contribute 0); one-decimal string to match mgpSkillText's grammar.
+function teamSkillTotal(team) {
+  const list = Array.isArray(team) ? team : [];
+  const sum = list.reduce((acc, p) => {
+    const n = Number(p && p.skill);
+    return acc + ((Number.isFinite(n) && n > 0) ? n : 0);
+  }, 0);
+  return sum.toFixed(1);
+}
+
 // Finish-line Slice 3 (spec §13.5): the registration EVENT view-model. Pure shape for the event card —
 // the REGISTRATION OPEN / closed pill, the chips row, and the honest live-spots line. HARD RULE (spec +
 // §27): a date chip renders ONLY when the tournament actually carries a date (there is no date column
@@ -1731,7 +1742,7 @@ if (typeof module !== "undefined" && module.exports) {
     shapeStandingsByPool, computeAllTimeLeaderboard,
     shapeClaimCandidates, filterClaimCandidates,
     resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
-    teamPeekModel, checkinHeroModel, checkinConsoleModel,
+    teamPeekModel, checkinHeroModel, checkinConsoleModel, teamSkillTotal,
     bracketOutcome, bracketRoundLabel, bracketStatusLine,
     registerEventModel, joinSheetValidate, registerFormValidate, teamNameTaken,
     extractVenmoUsername, composeVenmoPayURL,

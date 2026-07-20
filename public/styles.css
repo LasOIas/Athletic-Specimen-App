@@ -2280,6 +2280,8 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgck-empty { padding: 14px 2px 6px; color: var(--muted); font-size: 13px; }
 .mgck-msg { font-size: 12.5px; color: var(--danger); margin: 6px 2px 0; }
 .mgck-msg:empty { display: none; }
+.mgck-sk { flex: none; font: 800 13px var(--font-display); color: var(--accent); min-width: 26px; text-align: right; }
+.mgck-sk.n { color: var(--faint); }
 
 /* ── Manage → Teams (Task 4, session-10 pick R5 TRIMMED) — chips + generate + stacked teams. mgt-* kit from
    the r10-manage k-h1 mockup. Size chips reuse the pl-tab grammar; the casual courts board is CUT (no net
@@ -2289,15 +2291,20 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgt-trow { display: flex; align-items: flex-start; gap: 10px; padding: 11px 2px; border-top: 1px solid var(--border); }
 .pl-sect + .mgt-trow { border-top: none; }
 .mgt-tt { flex: none; font: 800 12px var(--font-display); color: var(--muted); width: 52px; padding-top: 2px; }
+.mgt-tt b.mgt-tsk { display: block; font-size: 13px; color: var(--accent); margin-top: 1px; }
 .mgt-names { flex: 1; min-width: 0; font-size: 14.5px; color: var(--ink); font-weight: 500; line-height: 1.75; }
-.mgt-nm { border-bottom: 1px solid var(--border); padding: 2px 0; cursor: pointer; }
+.mgt-nm { border-bottom: 1px solid var(--border); padding: 2px 0; cursor: pointer; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
 .mgt-nm:last-child { border-bottom: none; }
+.mgt-nmn { min-width: 0; overflow-wrap: anywhere; }
+.mgt-nsk { flex: none; font: 800 13px var(--font-display); color: var(--accent); }
+.mgt-nsk.n { color: var(--faint); }
 .mgt-note { font-size: 12px; color: var(--muted); text-align: center; margin-top: 10px; }
 .mgt-empty { padding: 26px 16px; text-align: center; color: var(--muted); font-size: 13px; }
 /* swap sheet (fixed above the floating nav; backdrop dims the page) */
 .mgt-sheet-backdrop { position: fixed; inset: 0; z-index: 45; background: oklch(0.18 0.005 75 / .35); }
 .mgt-sheet { position: fixed; left: 12px; right: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 46; padding: 12px; border-radius: 16px; border: 1px solid var(--border); background: var(--card); box-shadow: 0 6px 20px oklch(0.18 0.005 75 / .16); }
 .mgt-sheet-h { font: 700 15px var(--font-display); color: var(--ink); margin-bottom: 2px; }
+.mgt-hsk { color: var(--accent); font-weight: 800; }
 .mgt-sheet-sub { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
 .mgt-to { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 6px; border: none; border-top: 1px solid var(--border); background: none; cursor: pointer; }
 .mgt-to:first-of-type { border-top: none; }
