@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.19.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.26.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2798,6 +2798,30 @@ async function tdbResetBracket(tournament) {
   const { error: delErr } = await supabaseClient.from('matches').delete().eq('tournament_id', tournament.id).eq('phase', 'main');
   if (delErr) { console.error('tdbResetBracket delete', delErr); throw delErr; }
   await tdbSetTournamentFields(tournament.id, { status: 'pools' });
+}
+
+// Full reset (Mike, 2026-07-26: "admins need a reset full tournament ability"). The escape hatch from ANY
+// status back to a clean 'setup' — the gap the other two resets leave open: tdbResetBracket only drops to
+// 'pools', and mgPoolsResetPools sets 'setup' then IMMEDIATELY re-draws (tdbDrawPoolsAtomic), so there was
+// no way back to zero pools + zero matches once a draw had happened.
+// Clears PROGRESS ONLY. Every match (both phases), every pool, the seeds, the persisted seed order and the
+// champion go. Registered teams and their rosters, teams.paid, team_members, tournament_players, the rules
+// sheet, the announcement and registration_open all SURVIVE (Mike's call: a reset that silently marks teams
+// unpaid would wreck his $80 reconciliation).
+// Every statement is scoped by tournament_id, so a second tournament is never touched — the June 2026 event
+// (18 teams / 71 hand-authored matches) lives in the same tables and is irreplaceable.
+// Idempotent: deleting nothing succeeds, so a re-tap after a partial failure completes the reset.
+// Order matters — matches first (they FK pool_id + both team ids), then pools (FK pools<-teams is
+// ON DELETE SET NULL, which also nulls teams.pool_id), then the seeds, then the tournament row itself.
+async function tdbResetTournamentFull(tournament) {
+  if (!supabaseClient || !tournament) throw new Error('No tournament.');
+  const { error: mErr } = await supabaseClient.from('matches').delete().eq('tournament_id', tournament.id);
+  if (mErr) { console.error('tdbResetTournamentFull matches', mErr); throw mErr; }
+  const { error: pErr } = await supabaseClient.from('pools').delete().eq('tournament_id', tournament.id);
+  if (pErr) { console.error('tdbResetTournamentFull pools', pErr); throw pErr; }
+  const { error: tErr } = await supabaseClient.from('teams').update({ pool_id: null, seed: null }).eq('tournament_id', tournament.id);
+  if (tErr) { console.error('tdbResetTournamentFull teams', tErr); throw tErr; }
+  await tdbSetTournamentFields(tournament.id, { status: 'setup', seed_override: null, champion_team_id: null });
 }
 async function tdbGenerateBracket(tournament, seedOrder) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
@@ -7944,7 +7968,12 @@ function buildManageTournamentHTML() {
     + mgtRowHTML('settings', 'Event settings', settingsSub)
     + mgtRowHTML('rules', 'Rules sheet', 'Edit what players read on the Rules page')
     + mgtRowHTML('closeout', 'Close out', 'End the tournament · crown the champion');
-  return header + `<div class="mgt-stage">${escapeHTML(stage)}</div>` + rows;
+  // Full reset (2026-07-26). Lives HERE, on the sub-hub, rather than inside Pools or Bracket, because the
+  // whole point is escaping a bad state — it has to be reachable at every status, including 'completed'.
+  // Same locked danger grammar as Reset pools / Reset the bracket (mgts-danger + note + type-name confirm).
+  const danger = `<button type="button" class="mgts-danger" data-mgt-fullreset>Reset the whole tournament</button>`
+    + `<div class="mgps-note">Clears the pools, the schedule, every score and the bracket, and puts this back to setup. Your registered teams and their payments are kept. Type the tournament name to confirm.</div>`;
+  return header + `<div class="mgt-stage">${escapeHTML(stage)}</div>` + rows + danger;
 }
 
 // The Registration view (mockup r-b): THE ANNOUNCEMENT (editable textarea prefilled from the persisted value
@@ -9331,6 +9360,29 @@ async function mgBracketReset() {
   } catch (err) { appNotice({ title: 'Could not reset the bracket', message: (err && err.message) || 'Try again.' }); }
 }
 
+// Full reset (2026-07-26) — the sub-hub danger control. Type-name unlock, same as the other two resets.
+// Resolves via mgActiveTournament (not manageLeadTournament, which excludes 'completed') so a finished
+// tournament can be reset too. Clears the client-side progress caches that survive a container repaint,
+// then refreshes from the server so the sub-hub cannot lie about the new stage.
+async function mgTournamentFullReset() {
+  if (!state.isAdmin) return;
+  const t = mgActiveTournament();
+  if (!t) return;
+  const nm = (t.name || '').trim() || 'this tournament';
+  const typed = await appPrompt({ title: 'Reset the whole tournament', message: 'This clears the pools, the schedule, every score and the bracket, and puts the tournament back to setup. Your registered teams and their payments are kept. Type the tournament name to confirm.', placeholder: nm, confirmText: 'Reset everything' });
+  if (String(typed || '').trim() !== nm) return;
+  try {
+    await tdbResetTournamentFull(t);
+    if (typeof _autoGenPrompted !== 'undefined' && _autoGenPrompted) delete _autoGenPrompted[t.id];
+    state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null; state.seedOverride = null;
+    mgpControlsOpen = false;
+    mgpPoolFilter = null;
+    await tdbRefreshTournaments();
+    repaintManage();
+    appNotice({ title: 'Tournament reset', message: 'Back to setup. No pools, no schedule, no scores. Your registered teams are still here.' });
+  } catch (err) { appNotice({ title: 'Could not reset the tournament', message: (err && err.message) || 'Try again.' }); }
+}
+
 
 function renderPublicShell() {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
@@ -10301,6 +10353,9 @@ function attachHandlers() {
           if (e.target.closest('[data-mgco-end]')) { void mgCloseoutEnd(); return; }
           if (e.target.closest('[data-mgco-reopen]')) { void mgCloseoutReopen(); return; }
         }
+        // Full reset (2026-07-26): the sub-hub danger button. Checked before the generic hub rows so the
+        // tap never falls through to a sub-view; it carries no data-mgt-view so it cannot match one anyway.
+        if (e.target.closest('[data-mgt-fullreset]')) { void mgTournamentFullReset(); return; }
         if (e.target.closest('[data-mgt-back]')) { mgtView = null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
         const mgtRow = e.target.closest('[data-mgt-view]');
         if (mgtRow) { mgtView = mgtRow.getAttribute('data-mgt-view') || null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
