@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.26.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.26.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2533,13 +2533,13 @@ async function tdbStartPoolPlay(tournament) {
   const rows = [];
   pools.forEach((pool, pi) => {
     const ids = teams.filter((t) => t.pool_id === pool.id).map((t) => t.id);
-    const pairs = generateRoundRobin(ids);
-    const slots = distributeGamesOnNets(pairs.length, netBlocks[pi] || [pi + 1]);
-    pairs.forEach((pair, gi) => {
+    // 2026-07-26: round-aware slotting (see pure.js assignPoolGameSlots). The old raw-index layout put a
+    // team on two nets at the same queue slot at most team counts. Same fix as the atomic path below.
+    assignPoolGameSlots(ids, netBlocks[pi] || [pi + 1]).forEach((g) => {
       rows.push({
         tournament_id: tournament.id, phase: 'pool', pool_id: pool.id,
-        team_a_id: pair[0], team_b_id: pair[1], status: 'scheduled',
-        net: slots[gi].net, queue_order: slots[gi].queue_order, version: 0
+        team_a_id: g.team_a_id, team_b_id: g.team_b_id, status: 'scheduled',
+        net: g.net, queue_order: g.queue_order, version: 0
       });
     });
   });
@@ -2601,11 +2601,13 @@ async function tdbStartPoolPlayAtomic(tournament) {
   const rows = [];
   pools.forEach((pool, pi) => {
     const ids = teams.filter((tm) => tm.pool_id === pool.id).map((tm) => tm.id);
-    const pairs = generateRoundRobin(ids);
-    const slots = distributeGamesOnNets(pairs.length, netBlocks[pi] || [pi + 1]);
-    pairs.forEach((pair, gi) => rows.push({
-      pool_id: pool.id, team_a_id: pair[0], team_b_id: pair[1],
-      net: slots[gi].net, queue_order: slots[gi].queue_order,
+    // 2026-07-26: assignPoolGameSlots owns the round-robin + net layout together. The old
+    // generateRoundRobin + distributeGamesOnNets pair laid games out by RAW INDEX, which double-booked
+    // teams onto two nets at the same queue slot at every team count from 7 to 17 (and 3, 5) under the
+    // live 3-pool / 9-net config. See pure.js for the round-disjointness rule.
+    assignPoolGameSlots(ids, netBlocks[pi] || [pi + 1]).forEach((g) => rows.push({
+      pool_id: pool.id, team_a_id: g.team_a_id, team_b_id: g.team_b_id,
+      net: g.net, queue_order: g.queue_order,
     }));
   });
   if (!rows.length) throw new Error('No pool games to schedule. Each pool needs at least 2 teams.');
@@ -2735,7 +2737,9 @@ async function tdbSetPoolNets(pool, newNets, matches) {
   const unplayed = (matches || [])
     .filter((m) => m.pool_id === pool.id && m.phase === 'pool' && m.status !== 'final')
     .sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
-  const slots = distributeGamesOnNets(unplayed.length, nets);
+  // 2026-07-26: re-lay round-aware, so repairing nets mid-event cannot re-introduce the double-booking
+  // the initial draw avoids. Games that already shared a queue_order were simultaneous, so they regroup.
+  const slots = relayoutPoolGamesOnNets(unplayed, nets);
   for (let i = 0; i < unplayed.length; i++) {
     const m = unplayed[i];
     const { data, error } = await supabaseClient.from('matches')
@@ -2764,7 +2768,8 @@ function computeNetAssignments(status, pools, matches, newNets) {
     ordered.forEach((pool, pi) => {
       const unplayed = ms.filter((m) => m.pool_id === pool.id && m.phase === 'pool' && m.status !== 'final')
         .sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
-      const slots = distributeGamesOnNets(unplayed.length, blocks[pi] || [pi + 1]);
+      // 2026-07-26: round-aware re-lay (see tdbSetPoolNets) so the Manage net editor cannot double-book.
+      const slots = relayoutPoolGamesOnNets(unplayed, blocks[pi] || [pi + 1]);
       unplayed.forEach((m, i) => out.push({ match_id: m.id, version: m.version || 0, net: slots[i].net, queue_order: slots[i].queue_order }));
     });
   } else if (status === 'bracket') {

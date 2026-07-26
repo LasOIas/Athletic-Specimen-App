@@ -872,6 +872,81 @@ function distributeGamesOnNets(gameCount, nets) {
   return out;
 }
 
+// The whole per-pool schedule slotting, in ONE place (2026-07-26 — the net double-booking fix).
+//
+// THE BUG IT REPLACES: app.js composed generateRoundRobin(ids) with distributeGamesOnNets(pairs.length,
+// nets). generateRoundRobin emits games ROUND BY ROUND (byes dropped, so exactly floor(P/2) real games per
+// round, every game in a round team-disjoint), but distributeGamesOnNets lays them out by RAW INDEX with a
+// per-net counter. Those only line up when a pool's net count equals its games-per-round. At the live
+// config (3 pools / 9 nets) each pool got 3 nets, correct only for pools of 6 — at 8 teams all three of
+// pool A's round-1 games landed at queue_order 1 on nets 1, 2 and 3, telling every team in the pool to
+// play on two nets at once. Broken at 3, 5, and every team count from 7 to 17.
+//
+// THE RULE: two games may share a queue_order (run at the same time) ONLY if they come from the same
+// round, because a round is disjoint by construction and different rounds share teams. So games are laid
+// out round by round: within a round, games take distinct nets at the same slot; a round with more games
+// than nets rolls its overflow to the next slot; a new round always starts a new slot. Correct for ANY
+// net count, over- or under-provisioned. The block is also capped at floor(P/2) nets, since a pool can
+// never honestly fill more than that at once.
+// The shared primitive. `rounds` is an array of arrays; the CALLER guarantees every game inside one round
+// is team-disjoint, so a round may run simultaneously. Lanes are capped at the widest round, because a pool
+// can never honestly fill more nets than that at once. Within a round, games take distinct lanes at the same
+// slot; a round wider than the lane count rolls its overflow to the next slot; a new round ALWAYS starts a
+// new slot, so games from different rounds can never collide. Returns [{net, queue_order}] flat, aligned to
+// the flattened rounds.
+function layoutRoundsOnNets(rounds, nets) {
+  const rs = (rounds || []).filter((r) => r && r.length);
+  if (!rs.length) return [];
+  const block = (nets && nets.length) ? nets.slice() : [1];
+  const widest = rs.reduce((m, r) => Math.max(m, r.length), 0);
+  const lanes = block.slice(0, Math.max(1, Math.min(block.length, widest)));
+  const out = [];
+  let slot = 0;
+  rs.forEach((round) => {
+    for (let i = 0; i < round.length; i++) {
+      out.push({ net: lanes[i % lanes.length], queue_order: slot + Math.floor(i / lanes.length) + 1 });
+    }
+    slot += Math.ceil(round.length / lanes.length);
+  });
+  return out;
+}
+
+// Fresh pool schedule: round-robin the pool, then lay it out round by round.
+// generateRoundRobin emits exactly floor(P/2) real games per round (byes dropped), and every game inside a
+// round is disjoint by construction, so chunking by floor(P/2) recovers the rounds.
+function assignPoolGameSlots(teamIds, nets) {
+  const ids = (teamIds || []).filter((x) => x != null);
+  const pairs = generateRoundRobin(ids);
+  if (!pairs.length) return [];
+  const perRound = Math.max(1, Math.floor(ids.length / 2));
+  const rounds = [];
+  for (let i = 0; i < pairs.length; i += perRound) rounds.push(pairs.slice(i, i + perRound));
+  const slots = layoutRoundsOnNets(rounds, nets);
+  return pairs.map((pair, i) => ({
+    team_a_id: pair[0], team_b_id: pair[1],
+    net: slots[i].net, queue_order: slots[i].queue_order,
+  }));
+}
+
+// Re-lay EXISTING games onto a new net block (the "Edit nets" repair path). Games that already shared a
+// queue_order were simultaneous, so they were disjoint — regrouping by the current queue_order recovers the
+// rounds and keeps that guarantee. Without this, re-netting mid-event re-introduces the double-booking the
+// initial draw just avoided. `games` must be in queue order; returns a copy of each with net/queue_order set.
+function relayoutPoolGamesOnNets(games, nets) {
+  const list = (games || []).filter(Boolean);
+  if (!list.length) return [];
+  const rounds = [];
+  let cur = [], curKey = null;
+  list.forEach((g) => {
+    const k = g.queue_order == null ? '' : String(g.queue_order);
+    if (curKey !== null && k !== curKey) { rounds.push(cur); cur = []; }
+    curKey = k; cur.push(g);
+  });
+  if (cur.length) rounds.push(cur);
+  const slots = layoutRoundsOnNets(rounds, nets);
+  return list.map((g, i) => Object.assign({}, g, { net: slots[i].net, queue_order: slots[i].queue_order }));
+}
+
 // C70 fix (2026-06-27): pick the games that are actually playable RIGHT NOW for one pool — a DISJOINT set
 // across the pool's nets, so a team is never shown "Now" on two nets at once (the net-split puts a team's
 // games on one net, and independent per-net advance could otherwise surface the same team as current on two
@@ -1737,6 +1812,7 @@ if (typeof module !== "undefined" && module.exports) {
     resolveTournamentMatch, publicHubStatus,
     scoringRulesFor, gameScoreStatus,
     splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
+    layoutRoundsOnNets, assignPoolGameSlots, relayoutPoolGamesOnNets,
     bracketGameNumbers, bracketSourceLabel,
     shouldAutoPromptBracket, assignBracketNets,
     shapeStandingsByPool, computeAllTimeLeaderboard,
