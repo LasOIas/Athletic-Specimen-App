@@ -708,6 +708,51 @@ describe('buildManageTournamentHTML — the tournament sub-hub (pick R2, mockup 
     expect(html).toContain('No tournament yet');
   });
 
+  // C80 (2026-07-26): scoring the grand final auto-completes the tournament server-side without recording a
+  // champion, and close_tournament then refuses to run. The completed screen must still offer the crown.
+  it('a completed tournament with NO stored champion offers to record the one the bracket picked', () => {
+    setTournamentState(
+      { id: 'T', name: 'July 2026', status: 'completed', registration_open: false, champion_team_id: null },
+      {
+        tournamentTeams: [{ id: 't1', name: 'Sets & Reps' }, { id: 't2', name: 'Dig It' }],
+        tournamentMatches: [
+          { phase: 'main', side: 'grand_final', round: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1' },
+        ],
+      },
+    );
+    const html = bridge.buildCloseout();
+    expect(html).toContain('data-mgco-record');
+    expect(html).toContain('Record Sets &amp; Reps as champion');
+    expect(html).toContain('WON THE BRACKET, NOT RECORDED');
+    expect(html).toContain('data-mgco-change');   // can override the pick
+    expect(html).toContain('data-mgco-reopen');   // reopen still available
+    expect(html).not.toContain('No champion recorded');
+  });
+
+  it('a completed tournament with a STORED champion just shows it, no record CTA', () => {
+    setTournamentState(
+      { id: 'T', name: 'July 2026', status: 'completed', registration_open: false, champion_team_id: 't2' },
+      { tournamentTeams: [{ id: 't1', name: 'Sets & Reps' }, { id: 't2', name: 'Dig It' }], tournamentMatches: [] },
+    );
+    const html = bridge.buildCloseout();
+    expect(html).toContain('Dig It');
+    expect(html).not.toContain('data-mgco-record');
+    expect(html).not.toContain('data-mgco-change');
+    expect(html).toContain('data-mgco-reopen');
+  });
+
+  it('a completed tournament with no champion and no bracket answer still lets you pick one', () => {
+    setTournamentState(
+      { id: 'T', name: 'July 2026', status: 'completed', registration_open: false, champion_team_id: null },
+      { tournamentTeams: [{ id: 't1', name: 'Sets & Reps' }], tournamentMatches: [] },
+    );
+    const html = bridge.buildCloseout();
+    expect(html).toContain('NO CHAMPION RECORDED');
+    expect(html).toContain('Pick the winning team');
+    expect(html).toContain('data-mgco-record');
+    expect(html).toContain('data-mgco-change');
+  });
+
   it('the container dispatch shows the hub for null mgtView and a placeholder for the still-unbuilt sub-views', () => {
     setTournamentState(setupOpen);
     expect(bridge.mgtContainer()).toContain('data-mgt-view="registration"'); // hub
@@ -1483,10 +1528,18 @@ describe('buildMgCloseoutHTML — deliberate close-out (pick R12)', () => {
     expect(html).not.toContain('data-mgco-change');
   });
 
-  it('completed with no champion recorded: honest card + still reopenable', () => {
-    setTournamentState({ id: 'T', name: 'July 2026', status: 'completed', registration_open: false, champion_team_id: null });
+  // Rewritten 2026-07-26 (C80). This used to assert a dead end: "No champion recorded" and nothing but a
+  // Reopen button. Scoring the grand final auto-completes the tournament without writing a champion
+  // (0005_c21_rpc_submit_match_score.sql:65), so that state is reachable by simply FINISHING the event —
+  // the screen now has to offer a way out of it, not just describe it.
+  it('completed with no champion recorded: offers the crown, still reopenable', () => {
+    setTournamentState(
+      { id: 'T', name: 'July 2026', status: 'completed', registration_open: false, champion_team_id: null },
+      { tournamentMatches: [] }, // explicit: no bracket to derive from
+    );
     const html = bridge.buildCloseout();
-    expect(html).toContain('No champion recorded');
+    expect(html).toContain('NO CHAMPION RECORDED');
+    expect(html).toContain('data-mgco-record');   // the way out
     expect(html).toContain('data-mgco-reopen');
   });
 

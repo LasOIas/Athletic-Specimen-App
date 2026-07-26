@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.26.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.26.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -8432,16 +8432,31 @@ function buildMgCloseoutHTML() {
       ? teams.find((x) => x && String(x.id) === String(t.champion_team_id))
       : null;
     const champName = stored ? (stored.name || '') : '';
+    // 2026-07-26: scoring the grand final auto-completes the tournament server-side
+    // (0005_c21_rpc_submit_match_score.sql:65) WITHOUT recording a champion, and close_tournament then
+    // refuses to run because the status is no longer pools/bracket (0050_closeout.sql:53). That left the
+    // organizer staring at "No champion recorded" with only a Reopen button, unable to crown the team the
+    // bracket already knew had won. When nothing is stored, offer the derived champion (or the picker) and
+    // a one-tap record that reopens and re-closes properly.
+    const choice = stored ? null : mgCloseoutChampionChoice(teams, mgCloseoutMainMatches());
+    const eyebrow = stored ? 'Champion' : (choice.teamId ? 'WON THE BRACKET, NOT RECORDED' : 'NO CHAMPION RECORDED');
+    const value = stored
+      ? escapeHTML(champName)
+      : (choice.teamId ? escapeHTML(choice.name) : 'Pick the winning team');
     const card = `<div class="pl-sect">Champion</div>`
       + `<div class="mgco-card">`
         + `<span class="mgco-ic">${MGCO_TROPHY}</span>`
-        + `<div class="mgco-cn"><div class="mgco-eyebrow">Champion</div>`
-          + `<div class="mgco-name">${champName ? escapeHTML(champName) : 'No champion recorded'}</div></div>`
+        + `<div class="mgco-cn"><div class="mgco-eyebrow">${eyebrow}</div>`
+          + `<div class="mgco-name">${value}</div></div>`
+        + (stored ? '' : `<button type="button" class="mgco-change" data-mgco-change>CHANGE</button>`)
       + `</div>`;
+    const record = stored ? '' : (`<button type="button" class="mgt-cta" data-mgco-record>`
+        + `${choice.teamId ? 'Record ' + escapeHTML(choice.name) + ' as champion' : 'Record the champion'}</button>`
+      + `<div class="mgt-note">The tournament finished without a champion being written down. This records it and closes the tournament back up.</div>`);
     const reopen = `<div class="pl-sect">Reopen</div>`
       + `<button type="button" class="mgco-reopen" data-mgco-reopen>Reopen the tournament</button>`
       + `<div class="mgt-note">It's in Past tournaments now. Reopen to fix a score or re-crown. The recorded champion stays until you close again.</div>`;
-    return header + card + reopen;
+    return header + card + record + reopen;
   }
   // Active (pools / bracket) — the champion card (bracket suggestion, your pick, or "pick one") + End CTA.
   const choice = mgCloseoutChampionChoice(teams, mgCloseoutMainMatches());
@@ -8534,6 +8549,45 @@ async function mgCloseoutEnd() {
 
 // Reopen a completed tournament: confirm → reopen_tournament RPC (restores bracket/pools, KEEPS the champion)
 // → refresh + repaint.
+// 2026-07-26 (C80): record a champion on a tournament that auto-completed without one. close_tournament
+// only accepts a tournament in pools/bracket (0050_closeout.sql:53), so this reopens first, then closes with
+// the champion. If the close leg fails the tournament is left REOPENED, which is visible and recoverable
+// (the normal End CTA comes back) rather than silently wrong — and the error says so.
+async function mgCloseoutRecordChampion() {
+  if (!state.isAdmin) return;
+  const t = mgActiveTournament();
+  if (!t) return;
+  const teams = state.tournamentTeams || [];
+  const choice = mgCloseoutChampionChoice(teams, mgCloseoutMainMatches());
+  if (!choice.teamId) {
+    appNotice({ title: 'Pick a champion first', message: 'Tap CHANGE and choose the winning team, then record it.' });
+    return;
+  }
+  const ok = await appConfirm({
+    title: 'Record the champion',
+    message: `Record ${choice.name} as the champion of ${t.name || 'this tournament'}? It stays in Past tournaments.`,
+    confirmText: 'Record champion',
+  });
+  if (!ok) return;
+  let reopened = false;
+  try {
+    await tdbReopenTournament(t.id);
+    reopened = true;
+    await tdbCloseTournament(t.id, choice.teamId);
+    mgCloseoutChampId = undefined;
+    await tdbRefreshTournaments();
+    repaintManage();
+    appNotice({ title: 'Champion recorded', message: `${choice.name} is on the books.` });
+  } catch (err) {
+    await tdbRefreshTournaments();
+    repaintManage();
+    appNotice({
+      title: 'Could not record the champion',
+      message: ((err && err.message) || 'Try again.') + (reopened ? ' The tournament is open again, so you can end it with the champion from here.' : ''),
+    });
+  }
+}
+
 async function mgCloseoutReopen() {
   if (!state.isAdmin) return;
   const t = mgActiveTournament();
@@ -8950,7 +9004,8 @@ function buildMgScoreSheetHTML(match) {
   const b = Math.max(0, Number(match.score_b) || 0);
   const isFinal = match.status === 'final';
   const t = (Array.isArray(state.tournaments) ? state.tournaments : []).find((x) => x.id === match.tournament_id) || mgActiveTournament() || {};
-  const rules = scoringRulesFor(match.phase, t);
+  // Pass the match so the championship (grand final set 1) gets its published no-cap rule.
+  const rules = scoringRulesFor(match.phase, t, match);
   const ruleText = 'First to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ' (cap ' + rules.cap + ')' : '');
   const bits = [];
   if (match.phase === 'main') {
@@ -10369,6 +10424,7 @@ function attachHandlers() {
         if (mgtView === 'closeout') {
           if (e.target.closest('[data-mgco-change]')) { openMgChampionPicker(); return; }
           if (e.target.closest('[data-mgco-end]')) { void mgCloseoutEnd(); return; }
+          if (e.target.closest('[data-mgco-record]')) { void mgCloseoutRecordChampion(); return; }
           if (e.target.closest('[data-mgco-reopen]')) { void mgCloseoutReopen(); return; }
         }
         // Full reset (2026-07-26): the sub-hub danger button. Checked before the generic hub rows so the

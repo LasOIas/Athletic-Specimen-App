@@ -207,12 +207,21 @@ function validateScores(scoreA, scoreB) {
 // NF-1: per-phase scoring rule (pool target + hard cap, bracket target + no cap, win-by-2).
 // Win-by-2 applies UNTIL the cap; AT the cap a 1-point win is allowed (the cap overrides win-by-2).
 // Legacy rows (only match_cap) fall back to it as the target with no cap.
-function scoringRulesFor(phase, tournament) {
+// `match` is OPTIONAL and only matters in the bracket: the CHAMPIONSHIP (grand final, set 1) is played with
+// NO CAP, per the rules sheet Mike publishes to players — "One match to 21 pts. Win by 2, no cap." The reset
+// match (set 2) keeps the cap: "one match to 21 pts. Win by 2, cap at 25." Every other bracket game keeps it.
+// Before 2026-07-26 the single tournaments.bracket_cap applied to every main-phase game, so a legitimate
+// 26-24 championship was refused client-side with "Above the cap of 25" and could not be entered at all.
+// (The server never enforced a cap — 0005_c21_rpc_submit_match_score.sql checks only >=0 / no ties / winner
+// agrees with the scores — so this refusal was purely ours.) Callers that pass no match keep the old rules.
+function scoringRulesFor(phase, tournament, match) {
   const t = tournament || {};
   const legacy = Number(t.match_cap) || 25;
   const winBy2 = t.win_by_2 == null ? true : !!t.win_by_2;
   if (phase === 'main') {
-    return { target: Number(t.bracket_target) || legacy, cap: (t.bracket_cap == null ? null : Number(t.bracket_cap)), winBy2 };
+    const isChampionship = !!match && match.side === 'grand_final' && Number(match.round) === 1;
+    const cap = (t.bracket_cap == null ? null : Number(t.bracket_cap));
+    return { target: Number(t.bracket_target) || legacy, cap: isChampionship ? null : cap, winBy2 };
   }
   return { target: Number(t.pool_target) || legacy, cap: (t.pool_cap == null ? null : Number(t.pool_cap)), winBy2 };
 }
