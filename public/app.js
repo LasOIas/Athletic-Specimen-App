@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.26.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.07.26.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2822,6 +2822,19 @@ async function tdbResetTournamentFull(tournament) {
   const { error: tErr } = await supabaseClient.from('teams').update({ pool_id: null, seed: null }).eq('tournament_id', tournament.id);
   if (tErr) { console.error('tdbResetTournamentFull teams', tErr); throw tErr; }
   await tdbSetTournamentFields(tournament.id, { status: 'setup', seed_override: null, champion_team_id: null });
+  // READ-BACK, and it is not paranoia. The RLS policies in 0052 are USING row FILTERS, not RAISE guards:
+  // a caller whose session has drifted to anon or lost its organizer membership gets a DELETE that matches
+  // ZERO rows and returns `error: null`. Every check above would pass and the button would report a
+  // confident success while the tournament sat untouched — the single failure Mike rates worst ("being
+  // told it's fixed when it isn't"), and the one he would discover at 12:30 with a crowd waiting.
+  // pools/matches are anon-readable, so a non-zero count here is true ground truth, not a permission echo.
+  const [poolsLeft, matchesLeft] = await Promise.all([
+    supabaseClient.from('pools').select('id', { count: 'exact', head: true }).eq('tournament_id', tournament.id),
+    supabaseClient.from('matches').select('id', { count: 'exact', head: true }).eq('tournament_id', tournament.id),
+  ]);
+  if ((poolsLeft && poolsLeft.count) || (matchesLeft && matchesLeft.count)) {
+    throw new Error('The reset did not go through. Check you are signed in as an admin, then try again.');
+  }
 }
 async function tdbGenerateBracket(tournament, seedOrder) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');

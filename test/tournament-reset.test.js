@@ -25,7 +25,7 @@ const JUNE = 'cee5b605-587c-449b-87a6-3e7e3a0c557a';
 
 // A chainable Supabase stub that records mutating calls. `failOn(rec)` returns true to make that one
 // statement resolve with an error (used for the partial-failure tests).
-function makeRecorder(failOn) {
+function makeRecorder(failOn, leftovers) {
   const noop = () => {};
   const calls = [];
   const client = {
@@ -39,12 +39,16 @@ function makeRecorder(failOn) {
     rpc: async () => ({ data: null, error: null }),
     from(table) {
       const rec = { table, op: 'select', payload: null, filters: [] };
+      let pushed = false;
+      const push = () => { if (!pushed) { pushed = true; calls.push(rec); } };
       const chain = {
-        delete() { rec.op = 'delete'; calls.push(rec); return chain; },
-        update(payload) { rec.op = 'update'; rec.payload = payload; calls.push(rec); return chain; },
-        insert(payload) { rec.op = 'insert'; rec.payload = payload; calls.push(rec); return chain; },
-        upsert(payload) { rec.op = 'upsert'; rec.payload = payload; calls.push(rec); return chain; },
-        select() { return chain; },
+        delete() { rec.op = 'delete'; push(); return chain; },
+        update(payload) { rec.op = 'update'; rec.payload = payload; push(); return chain; },
+        insert(payload) { rec.op = 'insert'; rec.payload = payload; push(); return chain; },
+        upsert(payload) { rec.op = 'upsert'; rec.payload = payload; push(); return chain; },
+        // Recorded too (the read-back is a select), but push() keeps whatever op was already set so a
+        // chain like .insert(rows).select() stays recorded as an insert, not a select.
+        select() { push(); return chain; },
         eq(col, val) { rec.filters.push([col, val]); return chain; },
         in(col, val) { rec.filters.push([col, val]); return chain; },
         order() { return chain; },
@@ -52,7 +56,10 @@ function makeRecorder(failOn) {
         single() { return chain; },
         then(resolve) {
           const error = failOn && failOn(rec) ? { message: 'simulated ' + rec.table + ' failure' } : null;
-          return Promise.resolve({ data: [], error }).then(resolve);
+          // `leftovers` simulates the silent-RLS-denial case: the deletes "succeed" (error null) but the
+          // rows are still there, so the read-back count comes back non-zero.
+          const count = (rec.op === 'select' && leftovers && leftovers[rec.table] != null) ? leftovers[rec.table] : 0;
+          return Promise.resolve({ data: [], error, count }).then(resolve);
         },
       };
       return chain;
@@ -61,7 +68,7 @@ function makeRecorder(failOn) {
   return { client, calls };
 }
 
-function loadApp(failOn) {
+function loadApp(failOn, leftovers) {
   const pureSrc = readFileSync(new URL('../public/pure.js', import.meta.url), 'utf8');
   const appSrc = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
   const noop = () => {};
@@ -83,7 +90,7 @@ function loadApp(failOn) {
     addEventListener: noop, removeEventListener: noop,
     head: makeEl(), body: makeEl(), documentElement: makeEl(),
   };
-  const { client, calls } = makeRecorder(failOn);
+  const { client, calls } = makeRecorder(failOn, leftovers);
   const windowStub = {
     supabase: { createClient: () => client },
     addEventListener: noop, removeEventListener: noop,
@@ -206,6 +213,30 @@ describe('tdbResetTournamentFull — the escape hatch back to a clean setup', ()
     await bridge.resetFull(t);
     const second = mutations(calls).map((c) => c.table + ':' + c.op).slice(first.length);
     expect(second).toEqual(first);
+  });
+
+  // The silent-denial case. RLS in 0052 is a USING row FILTER, not a RAISE: a session that has drifted off
+  // its organizer membership gets deletes that match zero rows and return `error: null`. Without the
+  // read-back the button would report success over a completely untouched tournament.
+  it('refuses to report success when the deletes were silently filtered to zero rows', async () => {
+    const { bridge } = loadApp(null, { pools: 1, matches: 1 });
+    await expect(bridge.resetFull({ id: JULY, name: 'July 26 2026 tournament' }))
+      .rejects.toThrow('The reset did not go through');
+  });
+
+  it('catches a silent denial even when only ONE table survived', async () => {
+    const onlyMatches = loadApp(null, { pools: 0, matches: 1 });
+    await expect(onlyMatches.bridge.resetFull({ id: JULY, name: 'x' })).rejects.toThrow('did not go through');
+    const onlyPools = loadApp(null, { pools: 2, matches: 0 });
+    await expect(onlyPools.bridge.resetFull({ id: JULY, name: 'x' })).rejects.toThrow('did not go through');
+  });
+
+  it('reads the leftover counts back scoped to the same tournament, never community-wide', async () => {
+    const { bridge, calls } = loadApp();
+    await bridge.resetFull({ id: JULY, name: 'July 26 2026 tournament' });
+    const readBacks = calls.filter((c) => c.op === 'select' && (c.table === 'pools' || c.table === 'matches'));
+    expect(readBacks.length).toBe(2);
+    readBacks.forEach((c) => expect(scopeOf(c)).toBe('tournament_id=' + JULY));
   });
 
   it('refuses without a tournament', async () => {
