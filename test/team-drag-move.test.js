@@ -16,6 +16,17 @@
 // WHAT THIS DOES NOT PROVE (§17): that a real finger on a real phone lands on the right row. The pointer
 // plumbing (setPointerCapture, elementFromPoint hit-testing, touch-action) is DOM-only and is verified by
 // hand on a device. Everything a browser is not required to decide is tested here.
+//
+// ⚠ AND ONE THING THIS FILE STRUCTURALLY CANNOT CATCH — read before trusting a green run here.
+// These tests invoke the mutation directly (`undo: () => mgtUndoLastMove()`); they never travel the CLICK
+// DELEGATE. On 2026-08-03 all 37 of them passed while Undo was DEAD in a real browser: the delegate checked
+// `mgtDragSuppressClick` (armed by the drop that had just happened) and returned BEFORE reaching the
+// `[data-mgv-undo]` branch, so the first tap on Undo — the only tap anyone makes — did nothing. Caught by
+// driving real PointerEvents in Chrome, not here. Fixed at the delegate (app.js, manageView === 'teams'
+// branch) by letting a deliberate Undo tap through the suppressor.
+// A unit test asserting that ordering could only restate the implementation, so the evidence deliberately
+// lives in the browser pass + that code comment. If you touch the suppressor, re-drive it in a browser:
+// drop a player, then TAP Undo as the very next action, and confirm the rosters revert.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';

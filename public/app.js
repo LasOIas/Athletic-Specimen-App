@@ -11208,8 +11208,14 @@ function attachHandlers() {
       if (manageView === 'teams') {
         // A completed drag (round 2026-08-03 §6) swallows the click it trails, or releasing the grip over a
         // name would ALSO open that name's swap sheet on top of the move that just landed.
-        if (mgtDragSuppressClick) { mgtDragSuppressClick = false; return; }
-        if (e.target.closest('[data-mgv-undo]')) { mgtUndoLastMove(); return; }
+        // ...but ONLY the click the drag actually trails. That click lands wherever the finger was
+        // released, which is a team row. A tap on the Undo strip is a fresh, deliberate gesture, and
+        // the strip only exists straight after a drop — so the suppressor was eating the one tap
+        // Undo is for. Browser-verified: before this, the first Undo tap did nothing (the drop had
+        // already set the flag), while calling mgtUndoLastMove() directly restored correctly.
+        const undoTap = e.target.closest('[data-mgv-undo]');
+        if (mgtDragSuppressClick) { mgtDragSuppressClick = false; if (!undoTap) return; }
+        if (undoTap) { mgtUndoLastMove(); return; }
         const sizeBtn = e.target.closest('[data-mgt-size]');
         if (sizeBtn) { mgtSize = Number(sizeBtn.getAttribute('data-mgt-size')) || 4; repaintManage(); return; }
         if (e.target.closest('[data-mgt-generate]')) { mgtGenerateTeams(); return; }
