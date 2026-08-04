@@ -2203,6 +2203,10 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .pk-fv { width: 100%; border: none; border-bottom: 1.5px solid var(--accent-bd); border-radius: 0; padding: 7px 2px; font-size: 16px; color: var(--ink); font-weight: 500; background: transparent; }
 .pk-fv:focus { outline: none; border-bottom-color: var(--accent); }
 .pk-cta { display: block; width: 100%; margin-top: 18px; padding: 14px; border: none; border-radius: 11px; background: var(--accent); color: #fff; font: 700 15px 'Inter', sans-serif; text-align: center; cursor: pointer; }
+/* 2026-08-04: the tournament-edit Save is quiet until something has actually changed. It RECEDES rather than
+   warns — nothing is wrong, there is simply nothing to save yet — so it overrides the global
+   `button:disabled { cursor: not-allowed }`. Specificity (0,2,0) beats that rule's (0,1,1). */
+.pk-cta:disabled { opacity: .38; cursor: default; }
 .pk-savenote { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; }
 .pk-msg { font-size: 12.5px; color: var(--danger); text-align: center; margin-top: 6px; min-height: 1em; }
 .pk-orow { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-top: 1px solid var(--border); text-decoration: none; color: inherit; cursor: pointer; }
@@ -2344,6 +2348,9 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgr-annedit { display: block; margin: 8px 0 0 auto; background: transparent; border: none; color: var(--accent); font: 600 13.5px 'Inter', sans-serif; padding: 4px 2px; cursor: pointer; }
 .mgr-cta { display: block; width: 100%; margin-top: 10px; padding: 14px; border: none; border-radius: 11px; background: var(--accent); color: #fff; font: 700 15px 'Inter', sans-serif; text-align: center; cursor: pointer; }
 .mgr-status { font-size: 12.5px; color: var(--live-ink); text-align: center; margin-top: 6px; min-height: 1em; }
+/* A save that did NOT land must not read in the positive green (--live-ink is reserved for live/positive by
+   the design round). 2026-08-04, with the read-back that made honest failure reporting possible. */
+.mgr-status.is-bad { color: var(--danger); font-weight: 600; }
 .mgr-tog { display: flex; align-items: center; gap: 12px; padding: 12px 2px; border-top: 1px solid var(--border); }
 .pl-sect + .mgr-tog { border-top: none; }
 /* min-height:0 is REQUIRED — the global `button` rule sets min-height:38px (iOS tap target), which

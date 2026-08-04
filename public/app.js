@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.04.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.04.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -8896,11 +8896,15 @@ function buildMgRegistrationHTML() {
       + `<button type="button" class="mg-sw${open ? ' on' : ''}" data-mgr-regtoggle role="switch" aria-checked="${open ? 'true' : 'false'}" aria-label="Registration open"></button></div>`
     + `<div class="pk-fld"><label class="pk-fl" for="mgr-venmo">Venmo link</label>`
       + `<input class="pk-fv" id="mgr-venmo" type="text" inputmode="url" autocomplete="off" placeholder="https://venmo.com/u/yourname" value="${escapeHTMLText(venmo)}" /></div>`
-    + `<div class="mgr-fnote">${escapeHTML(venmoNote)}</div>`
+    + `<div class="mgr-fnote" id="mgr-fnote">${escapeHTML(venmoNote)}</div>`
     + `<div class="pk-fld"><label class="pk-fl" for="mgr-buyin">Buy-in</label>`
       + `<input class="pk-fv" id="mgr-buyin" type="text" autocomplete="off" placeholder="$80 per team" value="${escapeHTMLText(buyin)}" /></div>`
     + `<div class="pk-fld"><label class="pk-fl" for="mgr-teamsize">Team size</label>`
-      + `<input class="pk-fv" id="mgr-teamsize" type="number" min="1" inputmode="numeric" value="${escapeHTMLText(String(size))}" /></div>`;
+      + `<input class="pk-fv" id="mgr-teamsize" type="number" min="1" inputmode="numeric" value="${escapeHTMLText(String(size))}" /></div>`
+    // 2026-08-04: the explicit Save these three fields never had. Blur still saves (the phone safety net), so
+    // this is the affordance that says the edit IS applied, plus the status line that proves it landed.
+    + mgSaveBtnHTML('registration')
+    + `<p class="mgr-status" id="mgr-status" role="status" aria-live="polite"></p>`;
 }
 
 // A tournament sub-view placeholder (Tasks 6-10 fill these). Its back button returns to the SUB-HUB
@@ -8978,6 +8982,235 @@ function mgPickTournament(id) {
 // The tournament the Registration view reads/writes (same resolver as the sub-hub header).
 function mgRegTournament() { return mgActiveTournament(); }
 
+// ── Explicit Save on the tournament-edit screens (2026-08-04) ─────────────────────────────────────────
+// Mike: "with everything that edits the tournament there needs to be a save button that instantly applies
+// the changes." Registration and Event settings had NO Save at all — every field wrote on FOCUSOUT, and
+// mgrSaveField swallowed its error entirely (`catch { console.warn }`), so a refused Venmo write looked
+// exactly like a successful one. Both screens now carry one Save that writes every dirty field in ONE
+// tdbSetTournamentFields call and PROVES the write landed; focusout stays as the safety net (a phone user
+// navigates away without tapping Save, and removing it would newly lose edits) but runs the same honest
+// engine, so a blur-save can no longer report differently from a button-save.
+//
+// One table per screen is the single source for (a) which fields are dirty, (b) what one Save call sends,
+// (c) what the background poll must not clobber — so the three can never drift apart.
+const MGR_FIELD_IDS = ['mgr-venmo', 'mgr-buyin', 'mgr-teamsize'];
+const MGES_FIELD_IDS = ['mges-name', 'mges-teamsize', 'mges-nets', 'mges-pooltarget', 'mges-poolcap',
+  'mges-brackettarget', 'mges-bracketcap', 'mges-buyin'];
+const MG_SAVE_FAILED = 'That did not save. Check you are signed in as an admin, then try again.';
+const MG_SAVE_OFFLINE = 'Could not save. Check the connection and try again.';
+const MG_SAVE_NEEDS_NUMBER = 'That needs to be a number. Left it unchanged.';
+
+// The string a field RENDERS with, straight off the loaded tournament. Dirtiness is measured against this —
+// the tournament itself, never a snapshot taken on first keystroke, which would call a field clean again the
+// moment a background refresh landed under it.
+function mgFieldCurrentText(id, t) {
+  if (!t) return '';
+  const s = (v) => (v == null ? '' : String(v)).trim();
+  if (id === 'mgr-venmo') return s(t.venmo_link);
+  if (id === 'mgr-buyin') return s(t.buy_in);
+  if (id === 'mgr-teamsize') return String(Number(t.team_size) || 4); // the Registration field defaults to 4
+  if (id === 'mges-name') return s(t.name);
+  if (id === 'mges-buyin') return s(t.buy_in);
+  if (id === 'mges-teamsize') return s(t.team_size);
+  if (id === 'mges-nets') return s(t.net_count);
+  if (id === 'mges-pooltarget') return s(t.pool_target);
+  if (id === 'mges-poolcap') return s(t.pool_cap);
+  if (id === 'mges-brackettarget') return s(t.bracket_target != null ? t.bracket_target : t.match_cap);
+  if (id === 'mges-bracketcap') return s(t.bracket_cap);
+  return '';
+}
+
+// Which of a screen's fields differ from the loaded tournament RIGHT NOW (read straight off the DOM).
+function mgDirtyFieldIds(ids, t) {
+  if (!t) return [];
+  return (ids || []).filter((id) => {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    return String(el.value == null ? '' : el.value).trim() !== mgFieldCurrentText(id, t);
+  });
+}
+
+// One field's intent. null = nothing to write; { invalid, revert, msg } = a bad entry (the caller reverts
+// that input and says why); { fields } = the column(s) to write; atomicNets flags the ONE field that cannot
+// ride a plain batch mid-play (see mgSaveScreenFields).
+function mgFieldWrite(id, raw, t) {
+  const txt = String(raw == null ? '' : raw).trim();
+  const cur = mgFieldCurrentText(id, t);
+  if (txt === cur) return null;
+  // A positive-integer column. `nullable` lets a blank clear it; otherwise a blank/NaN is a bad entry.
+  const intWrite = (col, nullable, msg) => {
+    if (txt === '') return nullable ? { fields: { [col]: null } } : { invalid: true, revert: cur, msg: msg || MG_SAVE_NEEDS_NUMBER };
+    const n = parseInt(txt, 10);
+    if (!Number.isFinite(n) || n < 1) return { invalid: true, revert: cur, msg: msg || MG_SAVE_NEEDS_NUMBER };
+    if (String(n) === cur) return null; // "4.0" over a stored 4 is not a change
+    return { fields: { [col]: n } };
+  };
+  if (id === 'mgr-venmo') return { fields: { venmo_link: txt || null } };   // stored as typed; the public pay button guards to http(s) at render
+  if (id === 'mgr-buyin' || id === 'mges-buyin') return { fields: { buy_in: txt || null } }; // free text
+  if (id === 'mgr-teamsize') return intWrite('team_size', false);
+  if (id === 'mges-name') {
+    if (!txt) return { invalid: true, revert: cur, msg: 'Name is required. Left it unchanged.' };
+    return { fields: { name: txt } };
+  }
+  if (id === 'mges-teamsize') return intWrite('team_size', false);
+  if (id === 'mges-nets') {
+    const w = intWrite('net_count', false, 'Nets needs to be a number. Left it unchanged.');
+    if (w && w.fields) w.atomicNets = w.fields.net_count;
+    return w;
+  }
+  if (id === 'mges-pooltarget') return intWrite('pool_target', false);
+  if (id === 'mges-poolcap') return intWrite('pool_cap', true);
+  if (id === 'mges-brackettarget') {
+    const w = intWrite('bracket_target', false);
+    if (w && w.fields) w.fields.match_cap = w.fields.bracket_target; // NF-1 back-compat: legacy readers use match_cap
+    return w;
+  }
+  if (id === 'mges-bracketcap') return intWrite('bracket_cap', true);
+  return null;
+}
+
+// Type-tolerant equality for a READ-BACK. The column comes back through PostgREST as JSON, so a number can
+// arrive as a number or a numeric string, and null/undefined both mean "empty".
+function mgSameSavedValue(sent, got) {
+  if (sent == null) return got == null;
+  if (got == null) return false;
+  if (typeof sent === 'boolean') return !!got === sent;
+  if (typeof sent === 'number') return Number(got) === sent;
+  return String(got) === String(sent);
+}
+
+// PROVE the write. The RLS policies on `tournaments` are USING row FILTERS, not RAISE guards: a session that
+// has drifted to anon or off its organizer membership gets an UPDATE matching ZERO rows and `error: null`.
+// "No error" is therefore NOT "saved" — the exact failure Mike rates worst ("being told it's fixed when it
+// isn't"), and here the cost is a dead Venmo link discovered at a live event. tdbRefreshTournaments() already
+// re-reads the row from the server, so the proof is free: compare every column we just sent against the
+// refreshed row. Returns the columns that did NOT take (empty = proven saved). Same guard as
+// tdbResetTournamentFull / tdbDeleteTournament / tdbEndTournamentUnplayed.
+async function mgVerifyTournamentFields(tournamentId, fields) {
+  await tdbRefreshTournaments();
+  const cols = Object.keys(fields || {});
+  const row = (state.tournaments || []).find((x) => x && String(x.id) === String(tournamentId));
+  if (!row) return cols; // the row is gone from the refreshed list — nothing we sent is proven
+  return cols.filter((col) => !mgSameSavedValue(fields[col], row[col]));
+}
+
+// Write a status line on one of the edit screens. `bad` colors it danger; success keeps the muted green
+// (--live-ink), which the design round reserves for live/positive.
+function mgNoteStatus(id, msg, bad) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  if (el.classList) { if (bad) el.classList.add('is-bad'); else el.classList.remove('is-bad'); }
+}
+
+// The Save control, in the screens' existing grammar (.pk-cta — accent, the same button the pickup-day form
+// and Create tournament use). It renders DISABLED because a fresh build reads its inputs straight off the
+// tournament, so nothing is dirty yet; the first keystroke that differs wakes it (mgSyncSaveButton, off the
+// input delegate, which touches ONLY the button so no caret is ever disturbed).
+function mgSaveBtnHTML(screen) {
+  return `<button type="button" class="pk-cta" data-mg-save="${escapeHTML(screen)}" disabled>Save</button>`;
+}
+
+function mgSyncSaveButton() {
+  const btn = document.querySelector('[data-mg-save]');
+  if (!btn) return;
+  const screen = btn.getAttribute('data-mg-save');
+  const ids = screen === 'settings' ? MGES_FIELD_IDS : MGR_FIELD_IDS;
+  btn.disabled = mgDirtyFieldIds(ids, mgActiveTournament()).length === 0;
+}
+
+// A tap on Save blurs the focused field FIRST (focusout fires before click), which would fire the per-field
+// safety net and split one batch into two writes. Arming on pointerdown (which lands before the blur) lets
+// the focusout delegate stand down. If the tap is abandoned the flag times out and the field is still dirty
+// with Save lit, so the edit is never lost either way.
+let mgSaveTapArmed = false;
+function mgArmSaveTap() {
+  mgSaveTapArmed = true;
+  clearTimeout(mgArmSaveTap._t);
+  mgArmSaveTap._t = setTimeout(() => { mgSaveTapArmed = false; mgSyncSaveButton(); }, 900);
+}
+
+// THE ENGINE. screen: 'registration' | 'settings'. onlyId restricts it to a single input (the focusout
+// safety net); without it every dirty field on the screen goes in ONE tdbSetTournamentFields call.
+// Never repaints: a repaint would rebuild the inputs the organizer is working in, and on a FAILURE the typed
+// value must stay on screen so nothing is silently lost.
+async function mgSaveScreenFields(screen, onlyId) {
+  const t = mgActiveTournament();
+  if (!t) return false;
+  const all = screen === 'settings' ? MGES_FIELD_IDS : MGR_FIELD_IDS;
+  const ids = onlyId ? all.filter((x) => x === onlyId) : all;
+  const statusId = screen === 'settings' ? 'mges-status' : 'mgr-status';
+  const dirty = mgDirtyFieldIds(ids, t);
+  if (!state.isAdmin) {
+    // NOT a silent no-op. The USING-filter RLS would refuse this write anyway, and being told nothing is
+    // precisely the failure this path exists to kill.
+    if (dirty.length) mgNoteStatus(statusId, MG_SAVE_FAILED, true);
+    return false;
+  }
+  // Parse every dirty field BEFORE writing. A bad entry reverts its own input and stops the whole save, so a
+  // batch never half-writes on the strength of a value the organizer has to retype anyway.
+  let fields = null;
+  let atomicNets = null;
+  for (let i = 0; i < dirty.length; i++) {
+    const id = dirty[i];
+    const el = document.getElementById(id);
+    const w = mgFieldWrite(id, el ? el.value : '', t);
+    if (!w) continue;
+    if (w.invalid) {
+      if (el) el.value = w.revert;
+      mgNoteStatus(statusId, w.msg, true);
+      mgSyncSaveButton();
+      return false;
+    }
+    if (w.atomicNets != null) atomicNets = w.atomicNets;
+    fields = Object.assign(fields || {}, w.fields);
+  }
+  if (!fields) { mgSyncSaveButton(); return false; } // nothing changed — the button stays quiet
+  const btn = document.querySelector('[data-mg-save="' + screen + '"]');
+  if (btn) btn.disabled = true;                      // no double-tap while the write is in flight
+  mgNoteStatus(statusId, 'Saving…');
+  const sent = Object.assign({}, fields);            // everything we will PROVE, atomic net_count included
+  try {
+    // net_count is the ONE column that cannot ride the batch mid-play: a plain write would drift matches.net
+    // from net_count (the closed F7/F8 bug class), so it goes through the ATOMIC re-net (migration 0031 /
+    // apply_net_count_change) and drops out of the UPDATE. Everything else is a single statement.
+    if (atomicNets != null && (t.status === 'pools' || t.status === 'bracket')) {
+      const freshM = await tdbListMatches(t.id);
+      await tdbApplyNetCountChange(t.id, atomicNets, computeNetAssignments(t.status, state.tournamentPools, freshM, atomicNets));
+      delete fields.net_count;
+    }
+    if (Object.keys(fields).length) await tdbSetTournamentFields(t.id, fields);
+    const unsaved = await mgVerifyTournamentFields(t.id, sent);
+    if (unsaved.length) {
+      mgNoteStatus(statusId, MG_SAVE_FAILED, true);
+      mgSyncSaveButton();                            // still dirty → Save stays lit, the typed text stays put
+      return false;
+    }
+    mgNoteStatus(statusId, 'Saved');
+    if (screen === 'registration') mgrSyncVenmoNote(); // the note under the field derives from the value just saved
+    mgSyncSaveButton();
+    return true;
+  } catch (err) {
+    console.warn('mgSaveScreenFields', screen, err);
+    mgNoteStatus(statusId, MG_SAVE_OFFLINE, true);
+    mgSyncSaveButton();
+    return false;
+  }
+}
+
+// The line under the Venmo field states whether the public pay button works. It is derived from the value we
+// just saved, so it must be re-stated in place after a proven save — leaving "Venmo missing" over a link that
+// just saved would be a lie on screen. Text only; the input is never touched.
+function mgrSyncVenmoNote() {
+  const el = document.getElementById('mgr-fnote');
+  if (!el) return;
+  const t = mgActiveTournament();
+  const venmo = (t && t.venmo_link != null) ? String(t.venmo_link) : '';
+  el.textContent = /^https?:\/\//i.test(venmo)
+    ? 'Players pay on Venmo when they register'
+    : 'Venmo missing. The pay button says "coming soon"';
+}
+
 // True when the Registration view has an in-progress edit the background poll must not clobber: a focused
 // input/textarea inside #tab-manage, or an announcement textarea whose value differs from what was last
 // rendered/saved (its data-mgr-initial). Extends the Task 2/3 dirty-guard pattern for manageView==='tournament'
@@ -8989,7 +9222,11 @@ function manageRegDirty() {
   if (!panel) return false;
   const ae = document.activeElement;
   if (ae && panel.contains(ae) && (ae.tagName === 'TEXTAREA' || ae.tagName === 'INPUT')) return true;
-  return false;
+  // 2026-08-04: FOCUS is no longer the whole story. With an explicit Save, a typed-but-unsaved value can sit
+  // in an UNFOCUSED field (tapping Save blurs it first, and an abandoned tap leaves it that way), and a
+  // background repaint there would throw the edit away seconds before it is written. Unsaved work blocks the
+  // poll whether or not the caret is still in it.
+  return mgDirtyFieldIds(MGR_FIELD_IDS, mgActiveTournament()).length > 0;
 }
 
 // Copy the CURRENT announcement textarea value to the clipboard (mutating the CTA label as the confirm
@@ -9013,50 +9250,36 @@ async function mgrCopyAnnouncement(btn) {
 
 // Toggle registration open/closed — the tdbSetTournamentFields write (+
 // tdbRefreshTournaments), then a container-swap repaint (the switch is a button; no text input is focused).
+// The switch IS the instruction, so it stays instant-apply (it is not behind the Save button) — but it is
+// PROVEN like every other write on these screens. It used to swallow its error whole: a refused flip left the
+// switch springing back with no explanation, which reads as a broken app rather than a denied write. The
+// repaint runs on every path so the switch always shows the SERVER's state, then the status says why.
 async function mgrToggleRegistration() {
   const t = mgRegTournament();
   if (!t || !state.isAdmin) return;
+  const want = !t.registration_open;
   try {
-    await tdbSetTournamentFields(t.id, { registration_open: !t.registration_open });
-    await tdbRefreshTournaments();
+    await tdbSetTournamentFields(t.id, { registration_open: want });
+    const unsaved = await mgVerifyTournamentFields(t.id, { registration_open: want });
     repaintManage();
-  } catch (err) { console.warn('mgrToggleRegistration', err); }
+    if (unsaved.length) mgNoteStatus('mgr-status', MG_SAVE_FAILED, true);
+  } catch (err) {
+    console.warn('mgrToggleRegistration', err);
+    repaintManage();
+    mgNoteStatus('mgr-status', MG_SAVE_OFFLINE, true);
+  }
 }
 
 // (The announcement is saved from the full-screen editor's Save button now — mgEditorSave — not on blur;
 // its old blur-save helper was retired with the inline textarea in §38 pick C, 2026-07-12.)
 
-// Save a venmo/buy-in/team-size field on blur. venmo keeps the EXISTING behavior (store as-typed or null; the
-// public pay button already guards to http(s)-only at render — rf-venmo — so no stricter validation is added,
-// matching tv2-save-registration). team-size must be a positive integer or the field reverts (no write). No
-// repaint (blur already left the field; the counts/switch don't depend on these values).
-async function mgrSaveField(id) {
-  const t = mgRegTournament();
-  if (!t) return;
-  const el = document.getElementById(id);
-  if (!el) return;
-  const raw = String(el.value == null ? '' : el.value).trim();
-  let fields = null;
-  if (id === 'mgr-venmo') {
-    const cur = t.venmo_link == null ? '' : String(t.venmo_link);
-    if (raw === cur) return;
-    fields = { venmo_link: raw || null };
-  } else if (id === 'mgr-buyin') {
-    const cur = t.buy_in == null ? '' : String(t.buy_in);
-    if (raw === cur) return;
-    fields = { buy_in: raw || null };
-  } else if (id === 'mgr-teamsize') {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 1) { el.value = String(Number(t.team_size) || 4); return; } // invalid → revert
-    if (n === (Number(t.team_size) || 4)) return;
-    fields = { team_size: n };
-  }
-  if (!fields) return;
-  try {
-    await tdbSetTournamentFields(t.id, fields);
-    await tdbRefreshTournaments();
-  } catch (err) { console.warn('mgrSaveField', err); }
-}
+// Save a venmo/buy-in/team-size field on blur — the SAFETY NET behind the explicit Save (a phone user
+// navigates away mid-edit and expects the value to stick). It used to swallow its error entirely
+// (`catch { console.warn }`) with no success feedback and NO failure feedback, so a refused Venmo write was
+// indistinguishable from a saved one; it now runs the same proven engine as the button, restricted to the one
+// blurred field, so a blur-save and a button-save can never report differently. Venmo keeps the existing
+// behavior (stored as typed or null; the public pay button already guards to http(s)-only at render).
+async function mgrSaveField(id) { return mgSaveScreenFields('registration', id); }
 
 // ── Task 9: Event settings (session-10 pick R11) + Rules sheet (pick R11b) ───────────────────────────
 // Mockups r10-manage/es-b (all-knobs-flat, two-across pairs) + ru-d (one-sheet rules editor). EVERY knob is
@@ -9095,6 +9318,9 @@ function buildMgSettingsHTML() {
     + `<div class="mges-half">${swFld('win_by_2', 'Win by 2', winBy2)}${swFld('grand_final_reset', 'Grand final reset', !!t.grand_final_reset)}</div>`
     + `<div class="pk-fld"><label class="pk-fl" for="mges-buyin">Buy-in</label>`
       + `<input class="pk-fv" id="mges-buyin" type="text" autocomplete="off" placeholder="$80 a team" value="${escapeHTMLText(t.buy_in == null ? '' : String(t.buy_in))}" /></div>`
+    // 2026-08-04: one Save for the whole sheet — every dirty knob in ONE write. The two switches above are
+    // deliberately NOT behind it (flipping one is already the instruction); they apply and prove on tap.
+    + mgSaveBtnHTML('settings')
     + `<p class="mgr-status" id="mges-status" role="status" aria-live="polite"></p>`;
 }
 
@@ -9129,7 +9355,10 @@ function manageSettingsDirty() {
   const panel = document.getElementById('tab-manage');
   if (!panel) return false;
   const ae = document.activeElement;
-  return !!(ae && panel.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA'));
+  if (ae && panel.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return true;
+  // 2026-08-04: same widening as manageRegDirty — a typed-but-unsaved settings field is protected whether or
+  // not it still holds focus, because tapping Save blurs it a beat before the write goes out.
+  return mgDirtyFieldIds(MGES_FIELD_IDS, mgActiveTournament()).length > 0;
 }
 // The Rules view (§38 pick C) is now rendered content with no inline input — editing happens in the
 // body-appended overlay (poll-clobber-immune). Nothing on the panel needs protecting from a background
@@ -9138,90 +9367,33 @@ function manageRulesDirty() {
   return false;
 }
 
-// Save one Event-settings field on blur. Numeric fields parse defensively (blank/NaN → revert the input +
-// quiet note, no write); name must be non-empty; pool_cap/bracket_cap accept blank → null; buy_in is free
-// text (as-typed or null); bracket_target keeps match_cap in lockstep. net_count routes through the atomic
-// re-net during pools/bracket. Never repaints (blur already left the field).
-async function mgSaveSettingsField(id) {
-  const t = mgSettingsTournament();
-  if (!t || !state.isAdmin) return;
-  const el = document.getElementById(id);
-  if (!el) return;
-  const status = document.getElementById('mges-status');
-  const note = (msg) => { if (status) status.textContent = msg; };
-  const raw = String(el.value == null ? '' : el.value).trim();
-  // Parse a positive-integer field. Returns null (= revert + note done) on a bad entry; { fields } to write,
-  // or false when unchanged. `nullable` lets a blank clear the column.
-  const intWrite = (col, curNum, nullable) => {
-    if (raw === '') {
-      if (nullable) return (curNum == null) ? false : { [col]: null };
-      el.value = (curNum == null ? '' : String(curNum)); note('That needs to be a number. Left it unchanged.'); return null;
-    }
-    const n = parseInt(raw, 10);
-    if (!Number.isFinite(n) || n < 1) { el.value = (curNum == null ? '' : String(curNum)); note('That needs to be a number. Left it unchanged.'); return null; }
-    return (n === curNum) ? false : { [col]: n };
-  };
-  try {
-    let fields = null;
-    if (id === 'mges-name') {
-      if (!raw) { el.value = String(t.name == null ? '' : t.name); note('Name is required. Left it unchanged.'); return; }
-      if (raw === String(t.name == null ? '' : t.name)) return;
-      fields = { name: raw };
-    } else if (id === 'mges-buyin') {
-      const cur = t.buy_in == null ? '' : String(t.buy_in);
-      if (raw === cur) return;
-      fields = { buy_in: raw || null };
-    } else if (id === 'mges-teamsize') {
-      const w = intWrite('team_size', (t.team_size == null ? null : Number(t.team_size)), false); if (!w) return; fields = w;
-    } else if (id === 'mges-nets') {
-      const cur = Number(t.net_count);
-      const n = parseInt(raw, 10);
-      if (raw === '' || !Number.isFinite(n) || n < 1) { el.value = (Number.isFinite(cur) ? String(cur) : ''); note('Nets needs to be a number. Left it unchanged.'); return; }
-      if (n === cur) return;
-      // ATOMIC re-net mid-play so matches.net can never drift from net_count (migration 0031 / F7-F8).
-      if (t.status === 'pools' || t.status === 'bracket') {
-        const freshM = await tdbListMatches(t.id);
-        await tdbApplyNetCountChange(t.id, n, computeNetAssignments(t.status, state.tournamentPools, freshM, n));
-      } else {
-        await tdbSetTournamentFields(t.id, { net_count: n });
-      }
-      await tdbRefreshTournaments(); note('Saved'); return;
-    } else if (id === 'mges-pooltarget') {
-      const w = intWrite('pool_target', (t.pool_target == null ? null : Number(t.pool_target)), false); if (!w) return; fields = w;
-    } else if (id === 'mges-poolcap') {
-      const w = intWrite('pool_cap', (t.pool_cap == null ? null : Number(t.pool_cap)), true); if (!w) return; fields = w;
-    } else if (id === 'mges-brackettarget') {
-      const cur = (t.bracket_target != null ? Number(t.bracket_target) : (t.match_cap != null ? Number(t.match_cap) : null));
-      const n = parseInt(raw, 10);
-      if (raw === '' || !Number.isFinite(n) || n < 1) { el.value = (cur == null ? '' : String(cur)); note('That needs to be a number. Left it unchanged.'); return; }
-      if (n === cur) return;
-      fields = { bracket_target: n, match_cap: n }; // NF-1 back-compat: legacy readers use match_cap
-    } else if (id === 'mges-bracketcap') {
-      const w = intWrite('bracket_cap', (t.bracket_cap == null ? null : Number(t.bracket_cap)), true); if (!w) return; fields = w;
-    } else {
-      return;
-    }
-    if (!fields) return;
-    await tdbSetTournamentFields(t.id, fields);
-    await tdbRefreshTournaments();
-    note('Saved');
-  } catch (err) {
-    console.warn('mgSaveSettingsField', err);
-    note('Could not save. Check the connection and try again.');
-  }
-}
+// Save one Event-settings field on blur — the SAFETY NET behind this screen's explicit Save, running the same
+// proven engine restricted to the one blurred field. It already noted 'Saved' on success and a friendly line
+// on a thrown error, but it never READ THE ROW BACK, so a silently-refused UPDATE (error:null over zero rows)
+// still printed "Saved". The per-field parse rules are unchanged and now live in mgFieldWrite: numeric fields
+// revert the input + say why on a blank/NaN, name must be non-empty, pool_cap/bracket_cap accept blank → null,
+// buy_in is free text, bracket_target keeps match_cap in lockstep, and net_count still routes through the
+// atomic re-net during pools/bracket. Never repaints (blur already left the field).
+async function mgSaveSettingsField(id) { return mgSaveScreenFields('settings', id); }
 
 // Toggle a boolean setting (win_by_2 / grand_final_reset). The switch is a button (no text field focused) so
-// a repaint is safe and reflects the new state.
+// a repaint is safe and reflects the new state. Flipping one IS the instruction, so it keeps applying on tap
+// rather than waiting behind Save — but like mgrToggleRegistration it no longer swallows the failure: the
+// write is read back, the repaint shows the server's state, and the status line says why it sprang back.
 async function mgToggleSettingsField(field) {
   const t = mgSettingsTournament();
   if (!t || !state.isAdmin || (field !== 'win_by_2' && field !== 'grand_final_reset')) return;
   const cur = (field === 'win_by_2') ? (t.win_by_2 == null || !!t.win_by_2) : !!t.grand_final_reset;
   try {
     await tdbSetTournamentFields(t.id, { [field]: !cur });
-    await tdbRefreshTournaments();
+    const unsaved = await mgVerifyTournamentFields(t.id, { [field]: !cur });
     repaintManage();
-  } catch (err) { console.warn('mgToggleSettingsField', err); }
+    if (unsaved.length) mgNoteStatus('mges-status', MG_SAVE_FAILED, true);
+  } catch (err) {
+    console.warn('mgToggleSettingsField', err);
+    repaintManage();
+    mgNoteStatus('mges-status', MG_SAVE_OFFLINE, true);
+  }
 }
 
 // Save the Rules sheet on the explicit CTA — writes tournaments.rules so the public Rules page updates
@@ -11745,7 +11917,12 @@ function attachHandlers() {
     // Every fresh gesture starts with a clean suppress flag. A drop repaints the list, which can detach the
     // node the trailing click was aimed at — that click then never reaches this delegate, so the flag would
     // otherwise stay armed and swallow the NEXT real tap.
-    appContent.addEventListener('pointerdown', (e) => { mgtDragSuppressClick = false; mgtDragPointerDown(e); });
+    appContent.addEventListener('pointerdown', (e) => {
+      mgtDragSuppressClick = false; mgtDragPointerDown(e);
+      // 2026-08-04: arm the tournament-edit Save BEFORE the focused field blurs (pointerdown lands first), so
+      // the focusout safety net stands down and the batch stays ONE write. See mgArmSaveTap.
+      if (e.target && typeof e.target.closest === 'function' && e.target.closest('[data-mg-save]')) mgArmSaveTap();
+    });
     appContent.addEventListener('pointermove', (e) => { mgtDragPointerMove(e); });
     appContent.addEventListener('pointerup', (e) => { mgtDragPointerUp(e, false); });
     appContent.addEventListener('pointercancel', (e) => { mgtDragPointerUp(e, true); });
@@ -11764,6 +11941,10 @@ function attachHandlers() {
       // Draw setup: typing straight into a count input re-states the hint line under the box. Text only —
       // the input itself is never touched, so focus and caret survive.
       if (e.target && (e.target.id === 'mgps-poolcount' || e.target.id === 'mgps-nets')) { mgpSyncDrawHint(); return; }
+      // Registration / Event settings: typing wakes the Save button the moment a value differs from the
+      // loaded tournament (and quiets it again if the value is typed back). Touches ONLY the button — the
+      // input and its caret are never rebuilt.
+      if (e.target && e.target.id && (e.target.id.indexOf('mgr-') === 0 || e.target.id.indexOf('mges-') === 0)) { mgSyncSaveButton(); return; }
       if (!e.target || e.target.id !== 'mg-player-search') return;
       mgPlayerQuery = e.target.value || '';
       const listEl = document.getElementById('mgp-list');
@@ -11775,6 +11956,9 @@ function attachHandlers() {
     appContent.addEventListener('focusout', (e) => {
       const t = e.target;
       if (!t || !t.id) return;
+      // 2026-08-04: a tap on Save blurs the field a beat before its click lands. Standing down here keeps the
+      // batch to ONE write; the button is about to save this field along with every other dirty one.
+      if (mgSaveTapArmed) return;
       if (t.id === 'mgr-venmo' || t.id === 'mgr-buyin' || t.id === 'mgr-teamsize') { void mgrSaveField(t.id); return; }
       // Task 9: every Event-settings field (mges-*) saves on blur through tdbSetTournamentFields.
       if (t.id.indexOf('mges-') === 0) { void mgSaveSettingsField(t.id); return; }
@@ -11916,6 +12100,14 @@ function attachHandlers() {
       // (data-mgr-copy) act inline. All container-swap repaints (mgtView survives). Checked BEFORE the generic
       // data-mg-area so these never fall through to nav; the hub's own back carries data-mg-area="lead".
       if (manageView === 'tournament') {
+        // The explicit Save on Registration + Event settings (2026-08-04). Checked FIRST inside this block so
+        // the tap can never fall through to a sub-view row; it consumes the pointerdown arm either way.
+        const mgSaveBtn = e.target.closest('[data-mg-save]');
+        if (mgSaveBtn) {
+          mgSaveTapArmed = false;
+          void mgSaveScreenFields(mgSaveBtn.getAttribute('data-mg-save'));
+          return;
+        }
         // Teams & payment (Task 6, pick R8; re-cut by the 2026-08-03 round): the row-level PAID toggle is
         // gone — the row only reports state — and tapping a team opens the body-level #team-pay-modal, which
         // binds its own listeners (poll-clobber-immune). The dashed row still adds a team by name. The
