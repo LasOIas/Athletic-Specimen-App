@@ -227,11 +227,17 @@ describe('buildManagePageHTML — the Manage lead (flat, needs-you first)', () =
     });
   });
 
+  // UPDATED by the 2026-08-04 switcher round. The tournament's name and its registration state used to be
+  // the Tournament ROW's subtitle ("July 2026 · Registration open · 2 teams in"). They moved up onto the
+  // switcher card, which states them ONCE for the whole screen, and the row now says what it leads into
+  // plus where that work stands. Both facts are still on the page; they are just no longer on that row.
+  // (The card itself is covered in full by tournament-switcher.test.js.)
   it('shows real one-line status subs pulled from state', () => {
     setManageState();
     const html = bridge.buildManage();
-    expect(html).toContain('July 2026');           // tournament row sub
-    expect(html).toContain('Registration open');
+    expect(html).toContain('class="mgv-tswn">July 2026<');            // the card names it
+    expect(html).toContain('registration open');                      // the card's meta clause
+    expect(html).toContain('Registration, teams, pools, bracket');    // the row leads into these
     expect(html).toContain('233 on the roster');   // players row sub
     expect(html).toContain('19 checked in');
   });

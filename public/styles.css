@@ -4175,4 +4175,109 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
    row, the static close button, the gap/min-width values — is the layout work
    from README §3 and is ported in full. */
 
+/* Round 2026-08-04 — "on the manage page i need to be able to choose between all
+   the tournaments, one to choose which one is active … then the active tournament
+   is whats edited from the manage page". Manage now opens by naming the
+   tournament it is pointed at, so every row under it reads as scoped to that one.
+   The list itself is its own screen (Manage · Tournaments) because it carries
+   drafts and finished events, and New tournament belongs at the top of that list
+   rather than as a seventh row on the hub.
+   PORT NOTE: the round's `.mg-row:has(.mgv-rmeta)` + `.mgv-rmeta` rules are NOT
+   repeated here — they shipped with the 2026-08-03 sub-hub block above, and the
+   chooser rows reuse them as-is for the three-column dot/body/state layout. */
+.mgv-tsw {
+  display: grid;
+  /* production ships button { justify-content:center }, which centres the whole
+     single-column track — this card is a left-aligned block, so undo both axes */
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  justify-items: stretch;
+  gap: 3px;
+  width: 100%;
+  margin: 2px 0 7px;
+  padding: 12px 14px 13px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.mgv-tswtop { display: flex; align-items: center; gap: 10px; width: 100%; }
+.mgv-tswlab {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mgv-tswact {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.mgv-tswact svg { width: 15px; height: 15px; }
+.mgv-tswn {
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+.mgv-tswm { font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.mgv-tswf { margin: 0 2px; font-size: 12px; color: var(--muted); }
+
+/* the chooser */
+.mgv-tcap { margin: -2px 0 12px; font-size: 13px; line-height: 1.5; color: var(--muted); text-wrap: pretty; }
+.mgv-tnew {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start; /* production centres button content */
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.mgv-tnewic {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+}
+.mgv-tnewic svg { width: 19px; height: 19px; }
+.mgv-tnewb { display: grid; gap: 2px; min-width: 0; }
+.mgv-tnewn { font-size: 15px; font-weight: 700; color: var(--ink); }
+.mgv-tnews { font-size: 12px; line-height: 1.4; color: var(--muted); text-wrap: pretty; }
+/* selection, not navigation: a radio dot in the lead column and no chevron. The
+   :has() rule above already re-packs .mg-row to flex-start for the state word. */
+.mgv-trow { align-items: center; }
+.mgv-tdot {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-right: 12px;
+  border: 1px solid oklch(0.84 0.006 75);
+  border-radius: 999px;
+  background: #fff;
+}
+.mgv-trow.is-active .mgv-tdot {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 4px #fff;
+}
+.mgv-trow.is-active .mg-rn { font-weight: 700; }
+.mgv-trow.is-active .mgv-rmeta { color: var(--accent); }
+.mgv-tnote { margin-top: 15px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+
 /* ============ end TOURNAMENT + MANAGE DESIGN ROUND ============ */

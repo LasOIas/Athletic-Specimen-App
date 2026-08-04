@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.04.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.04.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -1023,6 +1023,13 @@ function partialRender() {
   // ALSO wipe the form).
   if (!playersEl && activeMainTab === 'manage') {
     if (manageView === 'pickup-form') {
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      return;
+    }
+    // Round 2026-08-04 EXCEPTION, same rule as the pickup form: the New tournament screen is ALL live
+    // inputs and nothing on it is derived from synced state, so there is no version of this repaint worth
+    // doing and every version of it costs a half-typed tournament. Bail outright (sync notice only).
+    if (manageView === 'tournament-new') {
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
       return;
     }
@@ -2321,6 +2328,27 @@ async function tdbListTournaments() {
   return data || [];
 }
 
+// ── Round 2026-08-04: two columns the switcher's copy wants that the schema may not carry yet ──────────
+// The switcher card's meta line ("Sat Aug 22 · registration open · 6 of 12 teams") and the New tournament
+// form's Date + Team cap fields need `event_date` and `team_cap`, which land in migration 0057 and are NOT
+// applied yet (applying is Mike's call — it needs his DB access).
+//
+// READS are already safe: tdbListTournaments does select('*'), so a column that does not exist simply reads
+// undefined and every meta clause behind it is dropped. WRITES are NOT: PostgREST rejects an update naming
+// an unknown column with 42703 and the WHOLE update fails, taking the fields beside it down with it.
+//
+// So availability is DETECTED from the rows that actually came back, the same shape of schema adaptation
+// detectPlayersSchema() does for the players table. select('*') returns every column the table has on every
+// row, so a key present on ANY loaded row proves the column exists — and a key missing from all of them
+// proves it does not. No rows loaded at all → false, which is the safe answer: the field is hidden and the
+// key is never sent.
+function tournamentColumnLoaded(key) {
+  return (state.tournaments || []).some((t) => t && typeof t === 'object'
+    && Object.prototype.hasOwnProperty.call(t, key));
+}
+function tournamentHasEventDate() { return tournamentColumnLoaded('event_date'); }
+function tournamentHasTeamCap() { return tournamentColumnLoaded('team_cap'); }
+
 async function tdbCreateTournament({ name, pool_count, net_count, preset }) {
   if (!supabaseClient) throw new Error('No database connection.');
   const p = preset || {};
@@ -3063,6 +3091,9 @@ async function tdbRefreshTournaments() {
   if (state.activeTournamentId && !state.tournaments.some((t) => t.id === state.activeTournamentId)) {
     state.activeTournamentId = null;
     state.tournamentPickedTeamId = null;
+    // Round 2026-08-04: a pinned pick that no longer exists is not a pick. Releasing the pin here hands the
+    // resolver back its job, so Manage lands on a real tournament instead of holding a dead pointer.
+    mgTournamentPinned = false;
   }
   // Public viewers also auto-follow the LIVE/finished tournament (never a fresh 'setup' draft).
   if (!state.isAdmin) {
@@ -6972,16 +7003,27 @@ let mgtDragSuppressClick = false; // a completed drag must not also fire the nam
 // now); 'teams'|'pools'|'bracket'|'settings'|'rules'|'closeout' render honest placeholders until Tasks 6-10
 // fill them. Survives the container-swap repaint (a background sync never resets which sub-view is open).
 let mgtView = null;
-// Round 2026-08-04 (Mike: "there needs to be a way where I can pick between tournaments and edit them
-// individually as I would now normally but instead, I would pick which tournament I went at and then the
-// full tournament settings come up"). Manage -> Tournament used to jump straight into ONE tournament — the
-// one at state.activeTournamentId — with no list and no way to reach a different one, which is why he ended
-// up RENAMING an old tournament instead of managing two. It now opens a PICKER over every loaded
-// tournament; tapping a row repoints state.activeTournamentId and opens the SAME sub-hub, unchanged.
-// Both flags are module vars for the same reason as mgtView: they survive the container-swap repaint, so
-// the 15s background poll can never bounce him out of a sub-hub back to the list.
-let mgtPickerOpen = false;  // true = the picker LIST is the open screen (only meaningful while mgtView is null)
-let mgtFromPicker = false;  // the sub-hub was opened FROM the list, so its back button returns there
+// Round 2026-08-04, design round "Tournament switcher on Manage" (Mike: "on the manage page i need to be
+// able to choose between all the tournaments, one to choose which one is active … then the active
+// tournament is whats edited from the manage page"). Manage -> Tournament used to jump straight into ONE
+// tournament — the one at state.activeTournamentId — with no list and no way to reach a different one,
+// which is why he ended up RENAMING an old tournament instead of managing two.
+//
+// This SUPERSEDES the interim picker that shipped earlier the same day at Manage -> Tournament. The choice
+// does not belong INSIDE the tournament area at all: the Manage HUB now opens with a card naming the
+// tournament every row below it edits, and the list is its own screen behind that card
+// (manageView === 'tournaments'), with New tournament at the top of it. Deleted with the interim version:
+// mgtPickerOpen / mgtFromPicker, buildMgTournamentPickerHTML, mgtPickRowHTML, mgOpenTournamentPicker,
+// mgtHubBackToList and the data-mgt-pick / data-mgt-tolist hooks. The sub-hub's back button goes back to
+// the Manage hub again, unconditionally, because the hub is now where the switch lives.
+//
+// mgTournamentPinned is why the switch STICKS. mgSyncActiveTournament() exists to glue the loaded
+// collections to manageLeadTournament() on every area entry, which is correct while "which tournament"
+// is inferred — and is exactly wrong once it is CHOSEN: without this flag, picking a tournament and then
+// tapping any Manage row would silently repoint him back at the resolver's pick, and the switcher would
+// look broken in the one way that is hardest to see. Module var for the same reason as mgtView: it
+// survives the container-swap repaint, so the 15s background poll can never unpin him.
+let mgTournamentPinned = false; // true = the organizer picked this tournament explicitly; the resolver stops overriding it
 // Task 7 (Pools & schedule admin, pick R9): the active pool tab in the post-draw schedule
 // ('A'|'B'|…|'seeding'; null → the first pool) + whether the Pool-controls section is expanded. Both
 // survive the container-swap repaint (a background score sync must not reset the tab or collapse the panel).
@@ -7069,9 +7111,118 @@ function manageUpcomingPickupDays() {
   return pickupDaySet().filter((d) => d && sessionIsUpcoming(d.day));
 }
 
-// Thin caller over the pure attention model (pure.js).
+// Thin caller over the pure attention model (pure.js). Round 2026-08-04: reads mgActiveTournament(), not
+// manageLeadTournament(). The hub's switcher card names the tournament Manage is pointed at and its caption
+// states the rule out loud — "Every row below edits this one" — and Needs you is one of those rows. It also
+// closes a real mismatch: state.tournamentTeams belongs to state.activeTournamentId, so pairing it with the
+// LEAD tournament reported one tournament's unpaid teams under another tournament's name, which is the
+// failure the 2026-07-11 resolver note describes. With nothing explicitly picked mgActiveTournament()
+// returns the lead, so this is identical to the shipped behaviour until the organizer switches.
 function manageNeedsYou() {
-  return manageNeedsYouModel(manageLeadTournament(), state.tournamentTeams || [], manageUpcomingPickupDays());
+  return manageNeedsYouModel(mgActiveTournament(), state.tournamentTeams || [], manageUpcomingPickupDays());
+}
+
+// ── Round 2026-08-04 switcher: the phase vocabulary, derived only from columns that EXIST ──────────────
+// The design's state model names six phases (draft | scheduled | registration | pools | bracket |
+// finished). `tournaments` carries `status` ('setup'|'pools'|'bracket'|'completed') plus the
+// `registration_open` boolean and nothing that separates a draft from a scheduled event. So a setup
+// tournament reads Registration when registration is open and Setup when it is closed — the two words the
+// data can actually back. Draft and Scheduled are NOT printed: they would be a guess wearing the clothes of
+// a state. An unrecognised status returns '' so the row prints no state word at all.
+function mgTournamentPhase(t) {
+  if (!t) return '';
+  if (t.status === 'completed') return 'finished';
+  if (t.status === 'bracket') return 'bracket';
+  if (t.status === 'pools') return 'pools';
+  if (t.status === 'setup') return t.registration_open ? 'registration' : 'setup';
+  return '';
+}
+// The right-hand state word on a chooser row (caps via .mgv-rmeta) …
+const MGT_PHASE_WORD = { registration: 'Registration', setup: 'Setup', pools: 'Pool play', bracket: 'Bracket', finished: 'Finished' };
+// … and the same fact as a lower-case clause inside the card's meta sentence.
+const MGT_PHASE_SENTENCE = { registration: 'registration open', setup: 'registration closed', pools: 'pool play', bracket: 'bracket', finished: 'finished' };
+
+// "Sat Aug 22" from an `event_date` date column ('2026-08-22'). Split and rebuilt as LOCAL midnight the way
+// formatSessionDate does, because new Date('2026-08-22') is UTC midnight and prints as Aug 21 anywhere west
+// of Greenwich — a Saturday event reading Friday is the exact off-by-one this project already fixed once.
+// '' on anything missing or unparseable, so the caller drops the clause instead of printing "Invalid Date".
+function mgEventDateLabel(value) {
+  if (!value) return '';
+  const s = String(value).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  if (isNaN(dt.getTime())) return '';
+  // Round-trip guard: new Date(2026, 12, 45) does not throw, it ROLLS OVER to Feb 2027. A real `date`
+  // column can never hand us that, but a junk value passed through the shape check would then print a
+  // confident wrong day, which is worse than printing nothing.
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return '';
+  try {
+    return dt.toLocaleDateString('en-US', { weekday: 'short' }) + ' '
+      + dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } catch (_) { return ''; }
+}
+
+// How many teams are in a tournament, or null when this app cannot honestly say. state.tournamentTeams is
+// loaded for state.activeTournamentId and for nothing else, so every other tournament returns null and its
+// clause is dropped rather than borrowing the selected one's number.
+function mgManagedTeamCount(t) {
+  return (t && state.activeTournamentId === t.id && Array.isArray(state.tournamentTeams))
+    ? state.tournamentTeams.length : null;
+}
+// "6 of 12 teams" once 0057 lands and a cap is set; "6 teams" when the column or the value is absent; ''
+// when the count itself is not loaded. The cap half is column-guarded because a pre-0057 row reads
+// undefined for team_cap and "6 of undefined teams" is worse than no cap at all.
+function mgTeamsClause(t) {
+  const n = mgManagedTeamCount(t);
+  if (n === null) return '';
+  const cap = (tournamentHasTeamCap() && Number(t.team_cap) > 0) ? Number(t.team_cap) : null;
+  return cap ? `${n} of ${cap} teams` : `${n} team${n === 1 ? '' : 's'}`;
+}
+
+// The card's meta sentence: date · phase · teams. EVERY clause is dropped when the value behind it is not
+// there — no placeholder, no em dash, no invented figure (Mike's standing ruling, 2026-08-03 round). Before
+// migration 0057 is applied the date clause never appears and the teams clause carries no cap, so the line
+// reads "registration open · 6 teams" and states only what is true.
+function mgSwitcherMetaText(t) {
+  const phase = mgTournamentPhase(t);
+  return [
+    tournamentHasEventDate() ? mgEventDateLabel(t.event_date) : '',
+    phase ? MGT_PHASE_SENTENCE[phase] : '',
+    mgTeamsClause(t),
+  ].filter(Boolean).join(' · ');
+}
+
+const MGV_CHEVDOWN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+const MGV_PLUS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>';
+
+// The switcher card itself — first child of the Manage container, under the heading and above Needs you.
+// It is a BUTTON routing to data-mg-area="tournaments" (the chooser screen). Omitted entirely when there is
+// no tournament to name: a card reading "Managing / nothing" is noise, and the sub-hub's empty state is
+// already the place that offers a create.
+function mgSwitcherCardHTML(t) {
+  if (!t) return '';
+  const meta = mgSwitcherMetaText(t);
+  return `<button type="button" class="mgv-tsw" data-mg-area="tournaments">`
+    + `<span class="mgv-tswtop"><span class="mgv-tswlab">Managing</span>`
+    + `<span class="mgv-tswact">Switch${MGV_CHEVDOWN_SVG}</span></span>`
+    + `<span class="mgv-tswn">${escapeHTML(t.name || 'Tournament')}</span>`
+    + (meta ? `<span class="mgv-tswm">${escapeHTML(meta)}</span>` : '')
+    + `</button>`
+    + `<p class="mgv-tswf">Every row below edits this one.</p>`;
+}
+
+// The Tournament row's trailing status clause. Round 2026-08-04 took the tournament NAME out of this
+// subtitle — the card above states it once — so what is left is what the row leads into plus where that
+// work stands. The setup branch drops its clause entirely when the pools collection does not belong to this
+// tournament, rather than reporting another tournament's draw.
+function mgTournamentRowStage(t) {
+  if (t.status === 'completed') return 'finished';
+  if (t.status === 'bracket') return 'bracket running';
+  if (t.status === 'pools') return 'pool play running';
+  const poolsLoaded = state.activeTournamentId === t.id && Array.isArray(state.tournamentPools);
+  if (!poolsLoaded) return '';
+  return state.tournamentPools.length ? 'pools drawn' : 'pools not drawn';
 }
 
 // Manage data-sync (e2e catch, 2026-07-11): the Manage surface renders manageLeadTournament(), but the
@@ -7093,6 +7244,10 @@ function mgActiveTournament() {
 
 let mgSyncingTournament = false;
 function mgSyncActiveTournament() {
+  // Round 2026-08-04: an EXPLICIT pick outranks the resolver. Re-gluing active to manageLeadTournament()
+  // is right while "which tournament" is inferred; once the organizer chose one from the switcher, doing
+  // it again on the next row tap would quietly undo the switch.
+  if (mgTournamentPinned) return;
   const t = manageLeadTournament();
   if (!t || state.activeTournamentId === t.id || mgSyncingTournament) return;
   mgSyncingTournament = true;
@@ -7112,8 +7267,11 @@ function mgRowHTML(area, name, subHTML) {
 }
 
 function buildManagePageHTML() {
-  const t = manageLeadTournament();
-  const teams = state.tournamentTeams || [];
+  // Round 2026-08-04: the hub reports on the tournament Manage is POINTED at, not on the one the resolver
+  // would infer. With nothing explicitly picked the two are the same tournament (mgActiveTournament falls
+  // back to manageLeadTournament), so this only diverges once the organizer has used the switcher — which
+  // is precisely when the card's caption promises it will.
+  const t = mgActiveTournament();
   const needs = manageNeedsYou();
 
   // NEEDS YOU — omitted entirely when empty (R1). Titles are model-controlled (no user input) so they emit
@@ -7123,11 +7281,12 @@ function buildManagePageHTML() {
       + needs.map((it) => mgRowHTML(it.area, it.title, escapeHTML(it.sub))).join('')
     : '';
 
-  // EVERYTHING — five flat rows with honest one-line status subs derived from state.
-  const stageWord = ({ setup: 'Setup', pools: 'Pools & schedule', bracket: 'Bracket', completed: 'Completed' });
+  // EVERYTHING — five flat rows with honest one-line status subs derived from state. The Tournament row no
+  // longer repeats the tournament's name or its registration state: the switcher card owns both, one line
+  // above. What it says instead is what the row leads INTO and where that work stands.
+  const tourStage = t ? mgTournamentRowStage(t) : '';
   const tourSub = t
-    ? [t.name || 'Tournament', t.registration_open ? 'Registration open' : (stageWord[t.status] || 'Setup'),
-       teams.length + ' team' + (teams.length === 1 ? '' : 's') + ' in'].filter(Boolean).join(' · ')
+    ? ['Registration, teams, pools, bracket', tourStage].filter(Boolean).join(' · ')
     : 'No tournament yet';
   const days = manageUpcomingPickupDays();
   const pickupSub = days.length
@@ -7147,6 +7306,7 @@ function buildManagePageHTML() {
     + mgRowHTML('admins', 'Admins', 'Seats &amp; activity log');
 
   return `<div class="mg-h1">Manage</div>
+    ${mgSwitcherCardHTML(t)}
     ${needsHTML}
     ${everythingHTML}`;
 }
@@ -7259,6 +7419,11 @@ function manageContainerHTML() {
   if (manageView === 'players') return buildManagePlayersHTML();
   if (manageView === 'teams') return buildManageTeamsHTML();
   if (manageView === 'tournament') return buildManageTournamentContainerHTML();
+  // Round 2026-08-04: the switcher's two screens. 'tournaments' (plural) is the chooser behind the hub card;
+  // 'tournament' (singular) is still the one tournament's sub-hub. Deliberately distinct area ids so the
+  // shipped data-mg-area navigation carries both without a special case.
+  if (manageView === 'tournaments') return buildMgTournamentListHTML();
+  if (manageView === 'tournament-new') return buildMgTournamentNewHTML();
   if (manageView === 'admins') return buildMgAdminsHTML();
   return manageAreaPlaceholderHTML(manageView);
 }
@@ -8422,13 +8587,11 @@ function mgShortDate(ts) {
   try { return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch (_) { return ''; }
 }
 
-// ── Round 2026-08-04: the tournament PICKER — Manage → Tournament's new front door ─────────────────────
-// Stage words for the picker rows. Deliberately NOT MGT_STAGE_SUBLINE: that map's setup entry reads
-// "Setup · registration phase", which is a page sub-line, not a row's state word. An unknown or missing
-// status returns '' so the clause is DROPPED — a row must never claim a stage its own data does not carry
-// (the sub-hub's `|| MGT_STAGE_SUBLINE.setup` default is safe there because that page has already resolved
-// a real tournament; a LIST is exactly where a defaulted value would read as fact).
-const MGT_PICK_STAGE = { setup: 'Setup', pools: 'Pool play', bracket: 'Bracket', completed: 'Completed' };
+// ── Round 2026-08-04: CHOOSE A TOURNAMENT (manageView === 'tournaments') ───────────────────────────────
+// The screen behind the hub's switcher card. A radio list, not a drill-in: the row you tap becomes the one
+// every Manage row edits, so the rows carry a filled dot and NO chevron. New tournament sits at the top of
+// it, because setting up the next event is something you do from the SET of tournaments rather than from
+// inside one of them.
 
 // Every loaded tournament, newest first. tdbListTournaments already reads created_at DESC, so this re-sort
 // is belt-and-braces against a caller that seeded state.tournaments another way (mgTournamentCreate
@@ -8441,85 +8604,167 @@ function mgTournamentPickerList() {
     .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
 }
 
-// One picker row on the shipped .mg-row grammar. EVERY subtitle clause is dropped when the value behind it
-// is not loaded — no placeholders, no invented numbers (Mike's standing ruling from the 2026-08-03 round):
-//   stage   — the row's own status, via MGT_PICK_STAGE (unknown status → no clause).
-//   teams   — ONLY for the tournament whose collections are actually loaded. state.tournamentTeams belongs
-//             to state.activeTournamentId and to nothing else (tdbRefreshTournaments loads it for that id),
-//             so every OTHER row prints no count at all rather than borrowing this one's.
-//   created — mgShortDate returns '' on a missing/unparseable timestamp, which drops the clause.
-// isLive marks the tournament publicLiveTournament() resolves to. That marker is live-ink text INSIDE the
-// sub-line (the .mgt-on grammar the Registration row already uses for "Open") rather than a fourth flex
-// child on the row: .mg-row is a flex line and at 390px a name block plus a chip plus the state word plus
-// the chevron crowd each other, while a sub-line clause carries no layout risk. The right-hand state word
-// is the same .mgv-rmeta the sub-hub rows use.
-function mgtPickRowHTML(t, isLive) {
-  const stage = MGT_PICK_STAGE[t.status] || '';
-  const teamsLoaded = !!state.activeTournamentId && t.id === state.activeTournamentId && Array.isArray(state.tournamentTeams);
-  const n = teamsLoaded ? state.tournamentTeams.length : null;
-  const created = mgShortDate(t.created_at);
-  const sub = [
-    isLive ? `<span class="mgt-on">Players see this</span>` : '',
-    stage ? escapeHTML(stage) : '',
-    n === null ? '' : `${n} team${n === 1 ? '' : 's'}`,
-    created ? `Created ${escapeHTML(created)}` : '',
+// A This-season row's subtitle, as PLAIN TEXT (the row builder escapes once). Both clauses are dropped when
+// the value behind them is not there: the date needs migration 0057's event_date column, and the team count
+// exists only for the tournament whose collections are loaded. The design's third clause — "$480 collected"
+// — is not built at all: buy_in is free display TEXT in this app ("$80 a team"), never a number, so there
+// is nothing to multiply and a total would be invented.
+function mgtlSeasonSub(t) {
+  return [
+    tournamentHasEventDate() ? mgEventDateLabel(t.event_date) : '',
+    mgTeamsClause(t),
   ].filter(Boolean).join(' · ');
-  const meta = stage ? `<span class="mgv-rmeta">${escapeHTML(stage)}</span>` : '';
-  return `<a class="mg-row" data-mgt-pick="${escapeHTML(String(t.id))}">
-      <div class="mg-rb"><div class="mg-rn">${escapeHTML(t.name || 'Tournament')}</div><div class="mg-rs">${sub}</div></div>
-      ${meta}${MG_CHEV}
+}
+
+// A Finished row's subtitle, from the SAME source the public Past-tournaments screen reads
+// (loadTournamentHistory → state.tournamentHistory, shaped as { teamCount, champion }). Deriving it here a
+// second way is how the two lists start disagreeing about who won. Returns '' until history has loaded, so
+// the row shows its name and its state word and claims nothing else.
+function mgtlFinishedSub(t) {
+  const hist = Array.isArray(state.tournamentHistory)
+    ? state.tournamentHistory.find((h) => h && String(h.id) === String(t.id))
+    : null;
+  if (!hist) return '';
+  const n = hist.teamCount;
+  return [
+    typeof n === 'number' ? `${n} team${n === 1 ? '' : 's'}` : '',
+    (hist.champion && hist.champion.name) ? `${hist.champion.name} won` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+// One chooser row: the dot, the name block, the state word. No chevron — this is a selection.
+function mgtlRowHTML(t, isActive) {
+  const phase = mgTournamentPhase(t);
+  const word = phase ? MGT_PHASE_WORD[phase] : '';
+  const sub = phase === 'finished' ? mgtlFinishedSub(t) : mgtlSeasonSub(t);
+  const meta = word ? `<span class="mgv-rmeta">${escapeHTML(word)}</span>` : '';
+  return `<a class="mg-row mgv-trow${isActive ? ' is-active' : ''}" data-mgtl-pick="${escapeHTML(String(t.id))}">
+      <span class="mgv-tdot" aria-hidden="true"></span>
+      <div class="mg-rb"><div class="mg-rn">${escapeHTML(t.name || 'Tournament')}</div><div class="mg-rs">${escapeHTML(sub)}</div></div>
+      ${meta}
     </a>`;
 }
 
-// The picker page. Rows newest-first, one label for the tournament players are actually being shown, and
-// the create control. Tapping a row (data-mgt-pick) repoints state.activeTournamentId and opens the
-// EXISTING sub-hub for it, unchanged.
-function buildMgTournamentPickerHTML() {
+const MGTL_NEW_ROW_HTML = `<button type="button" class="mgv-tnew" data-mgtl-new>`
+  + `<span class="mgv-tnewic">${MGV_PLUS_SVG}</span>`
+  + `<span class="mgv-tnewb"><span class="mgv-tnewn">New tournament</span>`
+  + `<span class="mgv-tnews">Starts as a draft, nothing public until you open registration</span></span>`
+  + `</button>`;
+
+// The chooser page. Grouping is by PHASE, exactly as the design specifies: finished → Finished, everything
+// else → This season. Each section is omitted when it holds no rows rather than printing an empty heading,
+// and the closing note only appears when there is actually a finished tournament to pick.
+function buildMgTournamentListHTML() {
   const header = `<div class="pd-pagehdr">`
-    + `<button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>`
+    + `<button type="button" class="pd-back" data-mgtl-back aria-label="Back to Manage">${PK_BACK_SVG}</button>`
     + `<div class="pd-htitle">Tournaments</div></div>`;
+  const cap = `<p class="mgv-tcap">Manage edits whichever one is filled in below.</p>`;
   const list = mgTournamentPickerList();
   if (!list.length) {
-    // The area normally skips the picker below one tournament, so this is a defensive state (the list
-    // emptied under him), not a screen he routes to. Same copy + control as the sub-hub's empty state.
-    return header
-      + `<div class="pd-empty">No tournament yet. Create one and it opens for registration right away.</div>`
-      + `<button type="button" class="pk-add" data-mgt-create>${PK_PLUS_SVG}Create a tournament</button>`;
+    return header + cap + MGTL_NEW_ROW_HTML
+      + `<div class="pd-empty">No tournament yet. The one you create becomes the one Manage edits.</div>`;
   }
-  // publicLiveTournament() IS the resolver every public surface follows, so which row gets labelled is
-  // DERIVED by calling it rather than by re-deriving its rule here (re-deriving is how a label starts
-  // claiming a tournament the resolver would not pick). It returns null when nothing is at pools/bracket,
-  // and then no row is labelled at all and the list says so once, in plain copy, above the rows.
-  // NOTE what this deliberately is NOT: a control. There is no featured/is_public column on `tournaments`
-  // — the resolver reads STATUS only — so "choose which one the public sees" cannot be shipped as a
-  // setting without a migration. Labelling is the honest half that needs no schema.
-  const live = publicLiveTournament();
-  const liveNote = live ? '' : `<div class="mgt-stage">Players are not being shown any tournament right now.</div>`;
-  const rows = list.map((t) => mgtPickRowHTML(t, !!live && t.id === live.id)).join('');
-  // Create lives HERE, with the list, because setting up the next event is something you do from the SET of
-  // tournaments and not from inside one of them. It stays on the sub-hub as well: below two tournaments the
-  // picker is skipped entirely, so dropping it from the sub-hub would strand the single-tournament admin
-  // exactly the way the missing create path stranded Mike on 2026-08-03.
-  const create = `<button type="button" class="pk-add" data-mgt-create>${PK_PLUS_SVG}Create another tournament</button>`;
-  return header + liveNote + `<div class="pl-sect">All tournaments</div>` + rows + create;
+  // The filled dot follows mgActiveTournament(), which is the same resolver the hub's card names — so the
+  // row that is marked and the tournament the card claims to be managing can never disagree.
+  const active = mgActiveTournament();
+  const activeId = active ? String(active.id) : '';
+  const finished = list.filter((t) => mgTournamentPhase(t) === 'finished');
+  const season = list.filter((t) => mgTournamentPhase(t) !== 'finished');
+  const section = (label, rows) => (rows.length
+    ? `<div class="pl-sect">${label}</div>` + rows.map((t) => mgtlRowHTML(t, String(t.id) === activeId)).join('')
+    : '');
+  return header + cap + MGTL_NEW_ROW_HTML
+    + section('This season', season)
+    + section('Finished', finished)
+    + (finished.length ? `<p class="mgv-tnote">Pick a finished one to fix a score after the fact.</p>` : '');
 }
 
-// Where the SUB-HUB's back button goes. Back to the list when he arrived from it, and also whenever a list
-// exists to go back to at all — that second half is what keeps the picker reachable after a create made a
-// second tournament from inside the first one's sub-hub. With exactly one tournament there is nothing to
-// pick between, so back keeps its shipped destination (the Manage lead) and the sub-hub's own create
-// control remains the way to make another.
-function mgtHubBackToList() {
-  return mgtFromPicker || mgTournamentPickerList().length > 1;
+// ── Round 2026-08-04: NEW TOURNAMENT (manageView === 'tournament-new') ─────────────────────────────────
+// The full screen that replaces the create POPUP that shipped 2026-08-03. Same one write path underneath
+// (tdbCreateTournament + tdbSetTournamentFields); what changed is that it is a screen with the fields the
+// design asks for, on the existing .pk-fld / .pk-fl / .pk-fv kit and the .mges-half two-up grid. No new CSS.
+//
+// "Manage it right away" is local form state, so it lives in a module var rather than in the DOM: it has to
+// survive the builder running again, and it is read once when Create is tapped. Default ON, per the design.
+let mgntMakeActive = true;
+
+// Which scoring rules the new tournament inherits, copied off the tournament Manage is currently pointed at.
+// This is what makes the design's save-note ("Copies the scoring rules from …") a statement of fact rather
+// than decoration — every value here is a real column on the row being copied, and an absent one simply
+// falls through to tdbCreateTournament's own default rather than being invented.
+function mgntPresetFrom(t) {
+  const p = {};
+  if (!t) return p;
+  if (t.pool_target != null) p.pool_target = Number(t.pool_target);
+  if (t.pool_cap !== undefined) p.pool_cap = t.pool_cap;
+  if (t.bracket_target != null) p.bracket_target = Number(t.bracket_target);
+  else if (t.match_cap != null) p.bracket_target = Number(t.match_cap);
+  if (t.bracket_cap !== undefined) p.bracket_cap = t.bracket_cap;
+  if (t.win_by_2 != null) p.win_by_2 = !!t.win_by_2;
+  return p;
+}
+
+function buildMgTournamentNewHTML() {
+  const src = mgActiveTournament();
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mg-area="tournaments" aria-label="Back to tournaments">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">New tournament</div></div>`;
+  const txtFld = (id, label, placeholder, extra) =>
+    `<div class="pk-fld"><label class="pk-fl" for="${id}">${label}</label>`
+    + `<input class="pk-fv" id="${id}" type="text" autocomplete="off"${extra || ''} placeholder="${escapeHTMLText(placeholder)}" /></div>`;
+  const numFld = (id, label, min, value) =>
+    `<div class="pk-fld"><label class="pk-fl" for="${id}">${label}</label>`
+    + `<input class="pk-fv" id="${id}" type="number" min="${min}" inputmode="numeric" value="${escapeHTMLText(value == null ? '' : String(value))}" /></div>`;
+
+  // Team size and Nets are prefilled off the tournament being copied, so the common case (next month, same
+  // format) is one field of typing. Falling back to tdbCreateTournament's own defaults keeps the two places
+  // agreeing about what a blank means.
+  const teamSize = (src && Number(src.team_size) > 0) ? Number(src.team_size) : 4;
+  const nets = (src && Number(src.net_count) > 0) ? Number(src.net_count) : 10;
+
+  // COLUMN-GUARDED FIELDS. event_date and team_cap arrive with migration 0057. Until it is applied these two
+  // fields are not rendered at all — an input that cannot save is worse than an absent one, because it looks
+  // like it worked. The create path is guarded the same way, so nothing can be sent for a column that is not
+  // there (a PostgREST 42703 would fail the WHOLE update, taking buy_in down with it).
+  const dateFld = tournamentHasEventDate()
+    ? `<div class="pk-fld"><label class="pk-fl" for="mgnt-date">Date</label>`
+      + `<input class="pk-fv" id="mgnt-date" type="date" /></div>`
+    : '';
+  const capFld = tournamentHasTeamCap() ? numFld('mgnt-cap', 'Team cap', 2, '') : '';
+  const buyinFld = txtFld('mgnt-buyin', 'Buy-in', '$80 a team');
+  const capRow = capFld ? `<div class="mges-half">${capFld}${buyinFld}</div>` : buyinFld;
+
+  const sw = `<div class="pk-fld mges-swfield"><span class="pk-fl">Manage it right away</span>`
+    + `<button type="button" class="mg-sw${mgntMakeActive ? ' on' : ''}" data-mgnt-active role="switch"`
+    + ` aria-checked="${mgntMakeActive ? 'true' : 'false'}" aria-label="Manage it right away"></button></div>`;
+
+  // The save-note states only what is true. The copy half is dropped when there is no tournament to copy
+  // from; the registration half is always true because this screen writes registration_open:false (see
+  // mgTournamentCreate) so the copy and the database agree.
+  const note = [
+    src ? `Copies the scoring rules from ${src.name || 'the current tournament'}.` : '',
+    'Registration stays closed until you open it.',
+  ].filter(Boolean).join(' ');
+
+  return header
+    + txtFld('mgnt-name', 'Name', 'September 2026 Tournament', ' autocapitalize="words"')
+    + dateFld
+    + `<div class="mges-half">${numFld('mgnt-teamsize', 'Team size', 1, teamSize)}${numFld('mgnt-nets', 'Nets', 1, nets)}</div>`
+    + capRow
+    + sw
+    + `<button type="button" class="pk-cta" data-mgtl-create>Create tournament</button>`
+    + `<div class="pk-savenote">${escapeHTML(note)}</div>`
+    + `<p class="pk-msg" id="mgnt-msg" role="alert"></p>`;
 }
 
 // The plain sub-hub (mockup t-b): header (back + the active tournament name, Barlow 22 via
 // pd-htitle) + a muted stage sub-line + SEVEN status-inline rows. No cards, no inline controls at this level.
 function buildManageTournamentHTML() {
   const t = mgActiveTournament();
-  const back = mgtHubBackToList()
-    ? `<button type="button" class="pd-back" data-mgt-tolist aria-label="Back to tournaments">${PK_BACK_SVG}</button>`
-    : `<button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>`;
+  // Round 2026-08-04: back is the Manage hub again, unconditionally. The interim picker sat INSIDE this
+  // area, so the sub-hub's back button had to branch between the list and the hub; the switcher moved the
+  // choice up onto the hub itself, which means there is exactly one place back can mean.
+  const back = `<button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>`;
   const header = `<div class="pd-pagehdr">` + back
     + `<div class="pd-htitle">${escapeHTML(t ? (t.name || 'Tournament') : 'Tournament')}</div></div>`;
   if (!t) {
@@ -8529,8 +8774,8 @@ function buildManageTournamentHTML() {
     // empty state now carries the create control itself, because this is the exact screen an admin lands on
     // after deleting their last tournament and it was the only thing standing between them and a new event.
     return header
-      + `<div class="pd-empty">No tournament yet. Create one and it opens for registration right away.</div>`
-      + `<button type="button" class="pk-add" data-mgt-create>${PK_PLUS_SVG}Create a tournament</button>`;
+      + `<div class="pd-empty">No tournament yet. The one you create becomes the one Manage edits.</div>`
+      + `<button type="button" class="pk-add" data-mgtl-new>${PK_PLUS_SVG}Create a tournament</button>`;
   }
   const teams = state.tournamentTeams || [];
   const nTeams = teams.length;
@@ -8593,7 +8838,9 @@ function buildManageTournamentHTML() {
   // the quiet dashed affordance the Teams screen already uses for "Add a team yourself" (.pk-add), sat under
   // the rows and above the separator, so it reads as the last ordinary thing you can do here. Mike runs
   // monthly events, so setting next month up while this one is still live is a normal act, not an escape.
-  const create = `<button type="button" class="pk-add" data-mgt-create>${PK_PLUS_SVG}Create another tournament</button>`;
+  // (2026-08-04) It now carries data-mgtl-new and opens the same full New tournament SCREEN the chooser's
+  // top row does — one create path, reachable from both, rather than a popup here and a screen there.
+  const create = `<button type="button" class="pk-add" data-mgtl-new>${PK_PLUS_SVG}Create another tournament</button>`;
   // Danger zone (round 2026-08-03) — replaces the loose reset button. Full reset lives HERE, on the sub-hub,
   // rather than inside Pools or Bracket, because the whole point is escaping a bad state: it has to be
   // reachable at every status, including 'completed'. Delete sits beside it with what each one takes with
@@ -8666,11 +8913,10 @@ function mgtSubPlaceholderHTML(view) {
     + `<div class="pd-empty">Coming in the next slices.</div>`;
 }
 
-// manageView==='tournament' dispatch: the PICKER when it is open (2026-08-04) → null mgtView → the sub-hub;
-// 'registration' → the built view; any other sub-view id → an honest placeholder. An open sub-view always
-// wins over the picker flag, so a background repaint can never replace a sub-view with the list.
+// manageView==='tournament' dispatch: null mgtView → the sub-hub; 'registration' → the built view; any
+// other sub-view id → an honest placeholder. (The 2026-08-04 switcher moved the tournament LIST out of this
+// area entirely — it is manageView==='tournaments' now — so there is no picker branch here any more.)
 function buildManageTournamentContainerHTML() {
-  if (mgtPickerOpen && !mgtView) return buildMgTournamentPickerHTML();
   if (mgtView === 'registration') return buildMgRegistrationHTML();
   if (mgtView === 'teams') return buildMgTeamsHTML();
   if (mgtView === 'pools') return buildMgPoolsHTML();
@@ -8682,42 +8928,48 @@ function buildManageTournamentContainerHTML() {
   return buildManageTournamentHTML();
 }
 
-// Open the picker (2026-08-04). Reached from the sub-hub's back button when there is a list to go back to.
-function mgOpenTournamentPicker() {
-  mgtPickerOpen = true;
-  mgtFromPicker = false;
-  mgtView = null;
-  repaintManage();
-  const p = document.getElementById('tab-manage');
-  if (p) p.scrollTop = 0;
+// Point the whole Manage tab at ONE tournament. Shared by the chooser's rows and by a create that carries
+// "Manage it right away", so there is a single place that decides what switching means.
+// state.activeTournamentId is the organizer's selection, and repointing it is already how this app swaps
+// which tournament the Manage screens operate on (mgSyncActiveTournament / mgTournamentCreate both do it).
+// The loaded collections belong to the PREVIOUS tournament, so they are cleared first: rendering one
+// tournament's teams under another tournament's name is the exact failure the 2026-07-11 resolver note
+// describes, and an empty count is honest where a stale one is not. The refresh then loads the real ones.
+// Every per-tournament view flag is reset with them — a pool tab or a champion override carried across a
+// switch would be pointing at a tournament that is no longer on screen.
+function mgAdoptTournament(id) {
+  if (state.activeTournamentId === id) return false;
+  state.activeTournamentId = id;
+  state.tournamentTeams = []; state.tournamentPools = []; state.tournamentMatches = []; state.teamMembers = null;
+  state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null; state.seedOverride = null;
+  mgpControlsOpen = false; mgpPoolFilter = null; mgCloseoutChampId = undefined; mgBracketShowDone = false;
+  return true;
 }
 
-// Tap a picker row: point the whole Manage tournament area at THAT tournament and open its sub-hub.
-// state.activeTournamentId is the admin's local selection, and repointing it is already how this app swaps
-// which tournament the Manage screens operate on (mgSyncActiveTournament / mgTournamentCreate both do it).
-// The loaded collections belong to the PREVIOUS tournament, so they are cleared before the repaint:
-// rendering one tournament's teams under another tournament's name is the exact failure the 2026-07-11
-// resolver note describes, and an empty count is honest where a stale one is not. The refresh then loads
-// the real ones and repaints again (its own stale-id guard nulls the selection if the row is gone).
+// Tap a chooser row (data-mgtl-pick): that tournament becomes the one Manage edits, and the organizer lands
+// back on the HUB — whose card now names it. Back to the hub rather than into the tournament's sub-hub
+// because the card's caption is the promise being kept ("Every row below edits this one"), and seeing the
+// card change is what confirms the switch actually happened.
+//
+// STILL OPEN, deliberately NOT built (README "Not yet designed", questions 1 and 2): there is no confirm
+// step when switching away from a tournament that is mid-scoring, and finished tournaments ARE selectable
+// (the design allows it, so a score can be fixed after the fact). Both need Mike's call, not a guess here.
 function mgPickTournament(id) {
   const t = (state.tournaments || []).find((x) => x && String(x.id) === String(id));
-  // The row went away under him (a background sync saw it deleted). Repaint the list rather than open a
-  // sub-hub over a tournament that is not there.
+  // The row went away under him (a background sync saw it deleted). Repaint the list rather than point the
+  // whole Manage tab at a tournament that is not there.
   if (!t) { repaintManage(); return; }
-  mgtPickerOpen = false;
-  mgtFromPicker = true;
+  const changed = mgAdoptTournament(t.id);
+  // An explicit pick outranks the lead resolver from here on — without this, the very next row tap would
+  // run mgSyncActiveTournament() and quietly switch him back.
+  mgTournamentPinned = true;
   mgtView = null;
-  if (state.activeTournamentId !== t.id) {
-    state.activeTournamentId = t.id;
-    state.tournamentTeams = []; state.tournamentPools = []; state.tournamentMatches = []; state.teamMembers = null;
-    state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null; state.seedOverride = null;
-    mgpControlsOpen = false; mgpPoolFilter = null; mgCloseoutChampId = undefined; mgBracketShowDone = false;
-    repaintManage();
+  manageView = 'lead';
+  repaintManage();
+  if (changed) {
     Promise.resolve(tdbRefreshTournaments())
-      .then(() => { if (manageView === 'tournament') repaintManage(); })
+      .then(() => { if (activeMainTab === 'manage') repaintManage(); })
       .catch(() => {});
-  } else {
-    repaintManage();
   }
   const p = document.getElementById('tab-manage');
   if (p) p.scrollTop = 0;
@@ -10578,124 +10830,49 @@ async function mgTournamentDelete() {
   appNotice({ title: 'Tournament deleted', message: `${nm} is gone, along with its teams, payments and results.` });
 }
 
-// ── Create a tournament (2026-08-03) — the other half of the Danger zone ──────────────────────────────
+// ── Create a tournament — the full SCREEN (round 2026-08-04) ──────────────────────────────────────────
 // Delete shipped in the 2026-08-03 round with NO create path anywhere in Manage. The sub-hub's empty state
 // pointed at "Open the old admin", a shell that was removed back in session 10/14, so the one instruction
 // the app gave a stranded admin was impossible to follow. Mike hit exactly that: he deleted his July event,
-// found no way to make a new one, and renamed the old JUNE row to "August 2026 tournament" as a workaround —
-// which is why that row carries a null venmo_link and a null buy_in, and why his registration page shows the
-// disabled "Venmo link coming soon" button. Both of those fields are in this dialog for that reason.
+// found no way to make a new one, and renamed the old JUNE row to "August 2026 tournament" as a workaround.
+// A create POPUP (name / buy-in / Venmo) closed that hole the same day.
 //
-// NOTHING HERE IS A NEW WRITE. tdbCreateTournament already inserts the row with sane counts and
-// registration_open:true, and it is shared with two co-pilot actions (setup_tournament / create_tournament),
-// so its signature is left alone: buy_in and venmo_link go through the EXISTING tdbSetTournamentFields right
-// after the insert — the same door Registration and Event settings already save them through.
+// This round replaces that popup with a SCREEN carrying the fields the design asks for. ONE create path,
+// not two: the popup and everything that served it (mgCreateTournamentDialogHTML, openMgCreateTournamentPopup,
+// closeMgCreateTournamentPopup, mgcSubmitCreate) are deleted, and both entry points — the chooser's top row
+// and the sub-hub's dashed control — carry data-mgtl-new and open buildMgTournamentNewHTML.
 //
-// Counts (pool_count / net_count / team size / scoring) deliberately keep tdbCreateTournament's defaults.
-// They are already editable in Event settings and in the Pools draw steppers, and a second place to set a
-// number is a second place for it to disagree with the first.
+// Deleted with it: mgCreateLiveWarning. It told the admin "players will see this new one instead as soon as
+// you create it", which was true of a popup that left registration OPEN. This screen writes
+// registration_open:false, so that sentence would now warn about something that does not happen, and a
+// false warning is worse than none.
+//
+// NOTHING HERE IS A NEW WRITE. tdbCreateTournament inserts the row and is shared with two co-pilot actions
+// (setup_tournament / create_tournament), so its signature is left alone: every extra field goes through
+// the EXISTING tdbSetTournamentFields right after the insert — the same door Registration and Event
+// settings already save them through.
 
-// The one-sentence heads-up shown in the dialog when another tournament is not closed out yet. It never
-// BLOCKS the create — Mike runs monthly events and setting next month up early is a normal thing to do —
-// it just states the part that is not obvious, which is what the PUBLIC ends up looking at. Two truths,
-// because the public resolver in tdbRefreshTournaments prefers a pools/bracket tournament over a fresh
-// setup one: a RUNNING event keeps the public, a setup one loses them to the newer draft. '' when every
-// tournament is completed (nothing to warn about) and '' when there are none at all.
-function mgCreateLiveWarning() {
-  const list = Array.isArray(state.tournaments) ? state.tournaments : [];
-  const nameOf = (t) => (String((t && t.name) || '').trim() || 'the current one');
-  const running = list.find((t) => t && (t.status === 'pools' || t.status === 'bracket'));
-  if (running) {
-    return `Your other tournament, ${nameOf(running)}, is still running, so players keep seeing that one until you close it out.`;
-  }
-  const open = list.find((t) => t && t.status !== 'completed');
-  if (open) {
-    return `Your other tournament, ${nameOf(open)}, has not finished yet, and players will see this new one instead as soon as you create it.`;
-  }
-  return '';
-}
-
-// The dialog's inner markup. Built on the SHARED popup kit and carrying the same class grammar as the
-// Edit-player dialog the 2026-08-03 round rebuilt: header, a scrolling body, then a footer action bar.
-// NOTE for whoever owns styles.css: that round's polish is written as `#player-edit-modal .pe-*`, so the
-// .pe-* classes below are inert here and this dialog renders on the shared kit's own .popup-card / .card /
-// .popup-header / .popup-body / .edit-actions / .popup-edit-* rules. Widening those selectors is a CSS-side
-// change, not one this builder can make; the grammar is here so it inherits the round the moment it happens.
-function mgCreateTournamentDialogHTML() {
-  const warn = mgCreateLiveWarning();
-  return `
-    <div class="popup-header pe-head">
-      <span class="pe-who"><h3 id="mgc-title">New tournament</h3></span>
-      <button type="button" class="pe-x secondary" data-mgc-close aria-label="Close">&times;</button>
-    </div>
-    <div class="popup-body pe-body">
-      ${warn ? `<div class="pk-note">${escapeHTML(warn)}</div>` : ''}
-      <div class="pe-f">
-        <label class="popup-edit-label" for="mgc-name">Name</label>
-        <input id="mgc-name" type="text" class="popup-edit-input" placeholder="August 2026 tournament" autocapitalize="words" autocomplete="off" />
-      </div>
-      <div class="pe-f">
-        <label class="popup-edit-label" for="mgc-buyin">Buy-in</label>
-        <input id="mgc-buyin" type="text" class="popup-edit-input" placeholder="$80 a team" autocomplete="off" />
-      </div>
-      <div class="pe-f">
-        <label class="popup-edit-label" for="mgc-venmo">Venmo link</label>
-        <input id="mgc-venmo" type="text" class="popup-edit-input" inputmode="url" placeholder="https://venmo.com/u/athleticspecimen" autocomplete="off" spellcheck="false" />
-      </div>
-      <div class="pk-note">Buy-in and the Venmo link are optional, and both are editable later in Registration.</div>
-      <div class="pk-msg" id="mgc-msg" role="alert"></div>
-    </div>
-    <div class="edit-actions pe-actions">
-      <button type="button" class="btn-save-edit pe-save" data-mgc-save>Create tournament</button>
-      <button type="button" class="btn-cancel-edit secondary pe-cancel" data-mgc-close>Cancel</button>
-    </div>
-  `;
-}
-
-function closeMgCreateTournamentPopup() {
-  const el = document.getElementById('tournament-create-modal');
-  if (el) el.remove();
-  document.body.style.overflow = '';
-}
-
-// Body-level overlay → outside #app-content's delegated listeners AND immune to the background sync's
-// container swap, so a half-typed name survives a poll (the same reason the team-pay modal is body-level).
-function openMgCreateTournamentPopup() {
-  if (!state.isAdmin) return;
-  closeMgCreateTournamentPopup();
-  const el = document.createElement('div');
-  el.id = 'tournament-create-modal';
-  el.className = 'popup-overlay';
-  el.style.display = 'flex';
-  el.innerHTML = `<div class="popup-card card pe-card" role="dialog" aria-modal="true" aria-labelledby="mgc-title">${mgCreateTournamentDialogHTML()}</div>`;
-  document.body.appendChild(el);
-  document.body.style.overflow = 'hidden'; // lock background scroll on iOS, as the player dialog does
-  el.addEventListener('click', (ev) => {
-    if (ev.target === el || (ev.target.closest && ev.target.closest('[data-mgc-close]'))) { closeMgCreateTournamentPopup(); return; }
-    const save = ev.target.closest && ev.target.closest('[data-mgc-save]');
-    if (save) { void mgcSubmitCreate(save); return; }
-  });
-  const first = el.querySelector('#mgc-name');
-  if (first && first.focus) { try { first.focus(); } catch (_) {} }
-}
-
-// The dialog's Create button. Reads the three fields, locks the button for the round trip (two taps must
-// never insert two tournaments), and hands off to mgTournamentCreate. THE DIALOG IS THE FAILURE SURFACE:
-// on a refusal it stays open with the typing intact and states why inline, rather than closing and firing a
-// modal over a form the admin then has to retype.
-async function mgcSubmitCreate(btn) {
-  const el = document.getElementById('tournament-create-modal');
-  if (!el) return;
-  const readVal = (id) => { const n = el.querySelector('#' + id); return n ? String(n.value || '') : ''; };
-  const say = (text) => { const m = el.querySelector('#mgc-msg'); if (m) m.textContent = text; };
+// The screen's Create button. Reads the fields, locks the button for the round trip (two taps must never
+// insert two tournaments), and hands off to mgTournamentCreate. THE SCREEN IS THE FAILURE SURFACE: on a
+// refusal it stays put with the typing intact and states why inline, rather than navigating away from a
+// form the admin would then have to retype.
+async function mgntSubmitCreate(btn) {
+  const readVal = (id) => { const n = document.getElementById(id); return n ? String(n.value || '') : ''; };
+  const say = (text) => { const m = document.getElementById('mgnt-msg'); if (m) m.textContent = text; };
   say('');
   if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
   const res = await mgTournamentCreate({
-    name: readVal('mgc-name'),
-    buyIn: readVal('mgc-buyin'),
-    venmoLink: readVal('mgc-venmo'),
+    name: readVal('mgnt-name'),
+    // Date and Team cap read '' when their field was not rendered, which is exactly what a missing column
+    // has to produce: mgTournamentCreate then sends no key for it at all.
+    eventDate: readVal('mgnt-date'),
+    teamCap: readVal('mgnt-cap'),
+    teamSize: readVal('mgnt-teamsize'),
+    nets: readVal('mgnt-nets'),
+    buyIn: readVal('mgnt-buyin'),
+    makeActive: mgntMakeActive,
   });
-  if (res && res.ok) { closeMgCreateTournamentPopup(); return; }
+  if (res && res.ok) return;   // mgTournamentCreate already navigated and repainted
   if (btn) { btn.disabled = false; btn.textContent = 'Create tournament'; }
   say((res && res.error) || 'Could not create the tournament. Try again.');
 }
@@ -10703,17 +10880,29 @@ async function mgcSubmitCreate(btn) {
 // The flow. Returns { ok, id } / { ok:false, error } so the dialog can report inline and any other caller
 // still gets the outcome. On ANY failure of the insert, no state moves at all — the app keeps managing
 // whatever it was managing before, because a half-applied create is how you end up pointing at a ghost.
-async function mgTournamentCreate({ name, buyIn, venmoLink } = {}) {
+async function mgTournamentCreate({ name, eventDate, teamCap, teamSize, nets, buyIn, venmoLink, makeActive } = {}) {
   if (!state.isAdmin) return { ok: false, error: 'Only an admin can create a tournament.' };
   const nm = String(name == null ? '' : name).trim();
   if (!nm) return { ok: false, error: 'Give the tournament a name.' };
   const buy = String(buyIn == null ? '' : buyIn).trim();
   const venmo = String(venmoLink == null ? '' : venmoLink).trim();
+  // A positive integer or nothing. A blank / NaN / zero entry falls through to tdbCreateTournament's own
+  // default rather than writing a count that would break the pools draw — the same defensive parse the
+  // Event settings fields use.
+  const posInt = (v) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n > 0 ? n : null; };
+  const size = posInt(teamSize);
+  const netCount = posInt(nets);
+  const cap = posInt(teamCap);
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(eventDate || '')) ? String(eventDate) : null;
+  // The scoring rules the save-note promises to copy, read off the tournament Manage is pointed at.
+  const preset = mgntPresetFrom(mgActiveTournament());
+  if (size) preset.team_size = size;
 
   let created;
   try {
-    // Counts + preset omitted on purpose: tdbCreateTournament's own defaults, editable afterwards.
-    created = await tdbCreateTournament({ name: nm });
+    // Counts ride the EXISTING signature (net_count + the preset); pool_count and everything the form does
+    // not ask for keep tdbCreateTournament's own defaults, editable afterwards in Event settings.
+    created = await tdbCreateTournament({ name: nm, net_count: netCount || undefined, preset });
   } catch (err) {
     const why = (err && err.message) ? String(err.message) : 'Try again.';
     return { ok: false, error: why + ' Nothing here changed.' };
@@ -10730,15 +10919,30 @@ async function mgTournamentCreate({ name, buyIn, venmoLink } = {}) {
   const fields = {};
   if (buy) fields.buy_in = buy;
   if (venmo) fields.venmo_link = venmo;
+  // registration_open:false is the ONE value this screen overrides on the shared insert. tdbCreateTournament
+  // opens registration on every new row (its co-pilot callers depend on that), but this screen's own copy
+  // promises the opposite twice — "nothing public until you open registration" on the create row and
+  // "Registration stays closed until you open it." under the button. Flipping it here keeps the screen and
+  // the database saying the same thing, without changing a helper two other callers share.
+  fields.registration_open = false;
+  // COLUMN-GUARDED. event_date and team_cap only exist after migration 0057. Sending a key for a column that
+  // is not there is a PostgREST 42703 that fails the WHOLE update, so buy_in and registration_open would go
+  // down with it. The guard is the loaded rows themselves, and the fields were not even rendered when it is
+  // false, so there is nothing to lose by omitting them.
+  if (day && tournamentHasEventDate()) fields.event_date = day;
+  if (cap && tournamentHasTeamCap()) fields.team_cap = cap;
   let fieldsErr = '';
-  if (Object.keys(fields).length) {
-    try {
-      await tdbSetTournamentFields(created.id, fields);
-    } catch (err) {
-      // The tournament EXISTS at this point, so this is not a failed create and must not be reported as one.
-      // Say which part did not land and where to fix it, then carry on selecting the new row.
-      fieldsErr = [buy ? 'buy-in' : '', venmo ? 'Venmo link' : ''].filter(Boolean).join(' and ');
-    }
+  let regStillOpen = false;
+  try {
+    await tdbSetTournamentFields(created.id, fields);
+  } catch (err) {
+    // The tournament EXISTS at this point, so this is not a failed create and must not be reported as one.
+    // Say which part did not land and where to fix it, then carry on selecting the new row. registration
+    // is called out separately because its failure has a consequence the others do not: the row keeps
+    // tdbCreateTournament's registration_open:true, so it IS public, and the screen just promised it was not.
+    fieldsErr = [buy ? 'buy-in' : '', venmo ? 'Venmo link' : '',
+      fields.event_date ? 'date' : '', fields.team_cap ? 'team cap' : ''].filter(Boolean).join(' and ');
+    regStillOpen = true;
   }
 
   // ORDER MATTERS HERE, and not for an obvious reason. tdbRefreshTournaments re-reads the list and then
@@ -10748,23 +10952,49 @@ async function mgTournamentCreate({ name, buyIn, venmoLink } = {}) {
   // the empty state having just been told the tournament was created. So the refresh runs with the id
   // cleared (which also stops it reloading the OLD tournament's teams/pools/matches over the caches cleared
   // just below), and the selection is made after it, off the row the insert actually returned.
+  const prevActiveId = state.activeTournamentId;
   state.activeTournamentId = null;
   state.tournamentTeams = []; state.tournamentPools = []; state.tournamentMatches = []; state.teamMembers = null;
   state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null; state.seedOverride = null;
-  manageView = 'tournament';
-  mgtView = null;                 // land on the new tournament's sub-hub, not a sub-view of the old one
-  mgpControlsOpen = false; mgpPoolFilter = null; mgCloseoutChampId = undefined;
+  // Round 2026-08-04: land on the Manage HUB, per the design's interaction table, because the hub's card is
+  // what reports which tournament Manage is now pointed at. mgtView is cleared regardless so a later trip
+  // into the Tournament area never opens a sub-view belonging to the tournament that was open before.
+  manageView = 'lead';
+  mgtView = null;
+  mgpControlsOpen = false; mgpPoolFilter = null; mgCloseoutChampId = undefined; mgBracketShowDone = false;
   await tdbRefreshTournaments();
-  state.activeTournamentId = created.id;
+  // "Manage it right away" (default ON) is what decides whether the new row becomes the managed one. With it
+  // OFF the created tournament is a draft on the chooser list and Manage keeps editing whatever it was
+  // editing — so the previous selection is restored rather than left null, which would hand the pointer back
+  // to the lead resolver and silently switch him anyway.
+  const adopt = (makeActive === undefined) ? true : !!makeActive;
+  state.activeTournamentId = adopt ? created.id : prevActiveId;
+  if (adopt) mgTournamentPinned = true;
   // The insert returned this row, so it exists whether or not the list read has caught up with it. A brand
   // new tournament has no teams, pools or matches, so the caches cleared above are already correct for it.
   if (!(state.tournaments || []).some((x) => x && x.id === created.id)) {
     state.tournaments = [created, ...(state.tournaments || [])];
   }
+  mgntMakeActive = true;   // the form's switch goes back to its default for the next create
   repaintManage();
-  appNotice(fieldsErr
-    ? { title: 'Tournament created', message: `${nm} is open for registration, but the ${fieldsErr} did not save. Add it in Registration.` }
-    : { title: 'Tournament created', message: `${nm} is open for registration. Teams can sign up now.` });
+  // A create with the switch OFF leaves Manage pointed at the tournament it was already editing, whose
+  // teams/pools/matches were cleared above so the refresh could not reload the wrong ones. Load them back,
+  // or the hub would report zero teams for a tournament that has them.
+  if (!adopt && prevActiveId) {
+    Promise.resolve(tdbRefreshTournaments())
+      .then(() => { if (activeMainTab === 'manage') repaintManage(); })
+      .catch(() => {});
+  }
+  // The notice states what is actually true of the row that now exists. fieldsErr is only ever set from the
+  // one follow-up update's catch, so it always arrives together with regStillOpen: either that write landed
+  // whole or none of it did.
+  const where = adopt ? `${nm} is the tournament Manage edits now.` : `${nm} is saved as a draft.`;
+  const after = regStillOpen
+    ? (fieldsErr
+      ? `Nothing after the insert saved: registration is still OPEN and the ${fieldsErr} is not set. Fix both in Registration.`
+      : 'Registration is still OPEN on it, because that setting did not save. Close it in Registration.')
+    : 'Registration stays closed until you open it.';
+  appNotice({ title: 'Tournament created', message: `${where} ${after}` });
   return { ok: true, id: created.id };
 }
 
@@ -11779,18 +12009,9 @@ function attachHandlers() {
         // Delete the whole tournament (round 2026-08-03 §7) — the irreversible sibling. Same placement rule:
         // checked before the generic hub rows, and it carries no data-mgt-view so it cannot open a sub-view.
         if (e.target.closest('[data-mgt-delete]')) { void mgTournamentDelete(); return; }
-        // Create a tournament (2026-08-03) — the constructive counterweight to the two above. It is reached
-        // from BOTH the sub-hub's dashed row AND the empty state (the screen a stranded admin actually lands
-        // on after deleting their last event), and both live in this same manageView === 'tournament' block.
-        // Checked before the generic hub rows for the same reason as its siblings.
-        if (e.target.closest('[data-mgt-create]')) { openMgCreateTournamentPopup(); return; }
-        // The picker (2026-08-04). A row tap repoints the active tournament and opens its sub-hub;
-        // data-mgt-tolist is the sub-hub's back button coming back to the list. Both are checked BEFORE the
-        // generic [data-mgt-view] rows so a tap can never fall through into a sub-view of another
-        // tournament, and neither carries data-mgt-view so it could not match one anyway.
-        const mgtPick = e.target.closest('[data-mgt-pick]');
-        if (mgtPick) { mgPickTournament(mgtPick.getAttribute('data-mgt-pick') || ''); return; }
-        if (e.target.closest('[data-mgt-tolist]')) { mgOpenTournamentPicker(); return; }
+        // (The sub-hub's create control carries data-mgtl-new now — round 2026-08-04 — and is handled with
+        // the switcher's other routes below, outside this block, so the ONE create screen is reachable from
+        // the chooser and from here alike.)
         if (e.target.closest('[data-mgt-back]')) { mgtView = null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
         const mgtRow = e.target.closest('[data-mgt-view]');
         if (mgtRow) { mgtView = mgtRow.getAttribute('data-mgt-view') || null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
@@ -11829,6 +12050,41 @@ function attachHandlers() {
           return;
         }
       }
+      // ── The tournament switcher (round 2026-08-04) ──────────────────────────────────────────────────
+      // Checked here, OUTSIDE any manageView block, because these four routes are reachable from more than
+      // one screen: data-mgtl-new fires from the chooser's top row AND from the sub-hub's dashed control,
+      // and data-mgtl-back leaves the chooser. All are checked BEFORE the generic data-mg-area so a tap can
+      // never fall through into plain navigation; none of them carries data-mg-area, so they could not
+      // match it anyway. The hub card and the New screen's back button DO carry data-mg-area ("tournaments")
+      // on purpose — they are ordinary navigation and want the area handler's fresh-entry reset.
+      const mgtlPick = e.target.closest('[data-mgtl-pick]');
+      if (mgtlPick) { mgPickTournament(mgtlPick.getAttribute('data-mgtl-pick') || ''); return; }
+      if (e.target.closest('[data-mgtl-new]')) {
+        mgntMakeActive = true;   // fresh form: the switch starts at its documented default
+        manageView = 'tournament-new';
+        repaintManage();
+        const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0;
+        const first = document.getElementById('mgnt-name'); if (first && first.focus) { try { first.focus(); } catch (_) {} }
+        return;
+      }
+      if (e.target.closest('[data-mgtl-back]')) {
+        manageView = 'lead';
+        repaintManage();
+        const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0;
+        return;
+      }
+      // The switch is flipped IN PLACE rather than through a repaint: rebuilding the container here would
+      // wipe a half-typed name, which is the whole reason the pickup form bails out of the background sync.
+      const mgntSw = e.target.closest('[data-mgnt-active]');
+      if (mgntSw) {
+        mgntMakeActive = !mgntMakeActive;
+        if (mgntSw.classList) mgntSw.classList.toggle('on', mgntMakeActive);
+        if (mgntSw.setAttribute) mgntSw.setAttribute('aria-checked', mgntMakeActive ? 'true' : 'false');
+        return;
+      }
+      const mgtlCreate = e.target.closest('[data-mgtl-create]');
+      if (mgtlCreate) { void mgntSubmitCreate(mgtlCreate); return; }
+
       // Manage tab (session-10 R1): flat-row navigation is a container-swap partial repaint (module var
       // manageView survives; NO full render()). data-mg-area="lead" returns to the lead; an area id opens its page.
       const mgArea = e.target.closest('[data-mg-area]');
@@ -11844,13 +12100,19 @@ function attachHandlers() {
         // Entering the Teams page fresh: 4s default, no open swap sheet, no stale UNDO strip (an Undo from
         // a move made before you left would silently restore a board you have since moved on from).
         if (nextArea === 'teams' && manageView !== 'teams') { mgtSize = 4; mgtSwapKey = null; mgtSwapFrom = null; mgtLastMove = null; }
-        // Entering the Tournament area fresh: no stale sub-view, and land on the PICKER when there is more
-        // than one tournament to pick between. With exactly one (or none) go straight into the sub-hub —
-        // a one-row list is friction, not a choice, and the sub-hub still carries its own create control.
-        if (nextArea === 'tournament' && manageView !== 'tournament') {
-          mgtView = null;
-          mgtFromPicker = false;
-          mgtPickerOpen = mgTournamentPickerList().length > 1;
+        // Entering the Tournament area fresh: no stale sub-view. It opens straight into the sub-hub for the
+        // tournament the hub's card names — the list is its own area now (round 2026-08-04), so this is no
+        // longer the screen that asks "which one".
+        if (nextArea === 'tournament' && manageView !== 'tournament') { mgtView = null; }
+        // Entering the chooser (round 2026-08-04). The Finished rows read from state.tournamentHistory, the
+        // same cache the public Past-tournaments screen fills, so the two lists cannot disagree about who
+        // won. It is loaded LAZILY and only once (undefined = never loaded; [] = loaded and genuinely
+        // empty), exactly as buildHistoryPageHTML treats it, then the list repaints itself. Until it
+        // arrives the finished rows show a name and a state word and claim nothing else.
+        if (nextArea === 'tournaments' && typeof state.tournamentHistory === 'undefined') {
+          Promise.resolve(loadTournamentHistory())
+            .then(() => { if (manageView === 'tournaments') repaintManage(); })
+            .catch(() => {});
         }
         // Entering the Admins area fresh (Task 11): land on the seats view, clear stale seat/log data +
         // any half-open assign field so the first paint shows the honest loading line.
