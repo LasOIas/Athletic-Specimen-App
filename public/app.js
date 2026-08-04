@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.03.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.03.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -8381,7 +8381,14 @@ function buildManageTournamentHTML() {
     + `<button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>`
     + `<div class="pd-htitle">${escapeHTML(t ? (t.name || 'Tournament') : 'Tournament')}</div></div>`;
   if (!t) {
-    return header + `<div class="pd-empty">No tournament yet. Create one from <b>Open the old admin</b> on the Manage screen. A create-tournament screen lands in a later slice.</div>`;
+    // 2026-08-03: this used to read "Create one from Open the old admin on the Manage screen. A create-
+    // tournament screen lands in a later slice." Both halves were dead: the old admin shell was removed in
+    // session 10/14, so the instruction could not be followed at all, and the later slice is THIS one. The
+    // empty state now carries the create control itself, because this is the exact screen an admin lands on
+    // after deleting their last tournament and it was the only thing standing between them and a new event.
+    return header
+      + `<div class="pd-empty">No tournament yet. Create one and it opens for registration right away.</div>`
+      + `<button type="button" class="pk-add" data-mgt-create>${PK_PLUS_SVG}Create a tournament</button>`;
   }
   const teams = state.tournamentTeams || [];
   const nTeams = teams.length;
@@ -8439,6 +8446,12 @@ function buildManageTournamentHTML() {
     + mgtRowHTML('settings', 'Event settings', settingsSub)
     + mgtRowHTML('rules', 'Rules sheet', rulesSub)
     + mgtRowHTML('closeout', 'Close out', 'Crowns the champion and archives the event', t.status === 'completed' ? 'Done' : 'Not yet');
+  // Start the NEXT event (2026-08-03). Deliberately NOT in the Danger zone below: that red box is for Reset
+  // and Delete, and putting a constructive action in it would teach the wrong thing about the box. This is
+  // the quiet dashed affordance the Teams screen already uses for "Add a team yourself" (.pk-add), sat under
+  // the rows and above the separator, so it reads as the last ordinary thing you can do here. Mike runs
+  // monthly events, so setting next month up while this one is still live is a normal act, not an escape.
+  const create = `<button type="button" class="pk-add" data-mgt-create>${PK_PLUS_SVG}Create another tournament</button>`;
   // Danger zone (round 2026-08-03) — replaces the loose reset button. Full reset lives HERE, on the sub-hub,
   // rather than inside Pools or Bracket, because the whole point is escaping a bad state: it has to be
   // reachable at every status, including 'completed'. Delete sits beside it with what each one takes with
@@ -8456,7 +8469,7 @@ function buildManageTournamentHTML() {
       + `</span><button type="button" class="mgts-danger mgv-dbtn mgv-del" data-mgt-delete>Delete</button></div>`
       + `<div class="mgv-dnote">Both ask you to type the tournament name before anything happens.</div>`
     + `</div>`;
-  return header + `<div class="mgt-stage">${escapeHTML(stage)}</div>` + rows + danger;
+  return header + `<div class="mgt-stage">${escapeHTML(stage)}</div>` + rows + create + danger;
 }
 
 // The Registration view (mockup r-b): THE ANNOUNCEMENT (editable textarea prefilled from the persisted value
@@ -10320,6 +10333,196 @@ async function mgTournamentDelete() {
   appNotice({ title: 'Tournament deleted', message: `${nm} is gone, along with its teams, payments and results.` });
 }
 
+// ── Create a tournament (2026-08-03) — the other half of the Danger zone ──────────────────────────────
+// Delete shipped in the 2026-08-03 round with NO create path anywhere in Manage. The sub-hub's empty state
+// pointed at "Open the old admin", a shell that was removed back in session 10/14, so the one instruction
+// the app gave a stranded admin was impossible to follow. Mike hit exactly that: he deleted his July event,
+// found no way to make a new one, and renamed the old JUNE row to "August 2026 tournament" as a workaround —
+// which is why that row carries a null venmo_link and a null buy_in, and why his registration page shows the
+// disabled "Venmo link coming soon" button. Both of those fields are in this dialog for that reason.
+//
+// NOTHING HERE IS A NEW WRITE. tdbCreateTournament already inserts the row with sane counts and
+// registration_open:true, and it is shared with two co-pilot actions (setup_tournament / create_tournament),
+// so its signature is left alone: buy_in and venmo_link go through the EXISTING tdbSetTournamentFields right
+// after the insert — the same door Registration and Event settings already save them through.
+//
+// Counts (pool_count / net_count / team size / scoring) deliberately keep tdbCreateTournament's defaults.
+// They are already editable in Event settings and in the Pools draw steppers, and a second place to set a
+// number is a second place for it to disagree with the first.
+
+// The one-sentence heads-up shown in the dialog when another tournament is not closed out yet. It never
+// BLOCKS the create — Mike runs monthly events and setting next month up early is a normal thing to do —
+// it just states the part that is not obvious, which is what the PUBLIC ends up looking at. Two truths,
+// because the public resolver in tdbRefreshTournaments prefers a pools/bracket tournament over a fresh
+// setup one: a RUNNING event keeps the public, a setup one loses them to the newer draft. '' when every
+// tournament is completed (nothing to warn about) and '' when there are none at all.
+function mgCreateLiveWarning() {
+  const list = Array.isArray(state.tournaments) ? state.tournaments : [];
+  const nameOf = (t) => (String((t && t.name) || '').trim() || 'the current one');
+  const running = list.find((t) => t && (t.status === 'pools' || t.status === 'bracket'));
+  if (running) {
+    return `Your other tournament, ${nameOf(running)}, is still running, so players keep seeing that one until you close it out.`;
+  }
+  const open = list.find((t) => t && t.status !== 'completed');
+  if (open) {
+    return `Your other tournament, ${nameOf(open)}, has not finished yet, and players will see this new one instead as soon as you create it.`;
+  }
+  return '';
+}
+
+// The dialog's inner markup. Built on the SHARED popup kit and carrying the same class grammar as the
+// Edit-player dialog the 2026-08-03 round rebuilt: header, a scrolling body, then a footer action bar.
+// NOTE for whoever owns styles.css: that round's polish is written as `#player-edit-modal .pe-*`, so the
+// .pe-* classes below are inert here and this dialog renders on the shared kit's own .popup-card / .card /
+// .popup-header / .popup-body / .edit-actions / .popup-edit-* rules. Widening those selectors is a CSS-side
+// change, not one this builder can make; the grammar is here so it inherits the round the moment it happens.
+function mgCreateTournamentDialogHTML() {
+  const warn = mgCreateLiveWarning();
+  return `
+    <div class="popup-header pe-head">
+      <span class="pe-who"><h3 id="mgc-title">New tournament</h3></span>
+      <button type="button" class="pe-x secondary" data-mgc-close aria-label="Close">&times;</button>
+    </div>
+    <div class="popup-body pe-body">
+      ${warn ? `<div class="pk-note">${escapeHTML(warn)}</div>` : ''}
+      <div class="pe-f">
+        <label class="popup-edit-label" for="mgc-name">Name</label>
+        <input id="mgc-name" type="text" class="popup-edit-input" placeholder="August 2026 tournament" autocapitalize="words" autocomplete="off" />
+      </div>
+      <div class="pe-f">
+        <label class="popup-edit-label" for="mgc-buyin">Buy-in</label>
+        <input id="mgc-buyin" type="text" class="popup-edit-input" placeholder="$80 a team" autocomplete="off" />
+      </div>
+      <div class="pe-f">
+        <label class="popup-edit-label" for="mgc-venmo">Venmo link</label>
+        <input id="mgc-venmo" type="text" class="popup-edit-input" inputmode="url" placeholder="https://venmo.com/u/athleticspecimen" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="pk-note">Buy-in and the Venmo link are optional, and both are editable later in Registration.</div>
+      <div class="pk-msg" id="mgc-msg" role="alert"></div>
+    </div>
+    <div class="edit-actions pe-actions">
+      <button type="button" class="btn-save-edit pe-save" data-mgc-save>Create tournament</button>
+      <button type="button" class="btn-cancel-edit secondary pe-cancel" data-mgc-close>Cancel</button>
+    </div>
+  `;
+}
+
+function closeMgCreateTournamentPopup() {
+  const el = document.getElementById('tournament-create-modal');
+  if (el) el.remove();
+  document.body.style.overflow = '';
+}
+
+// Body-level overlay → outside #app-content's delegated listeners AND immune to the background sync's
+// container swap, so a half-typed name survives a poll (the same reason the team-pay modal is body-level).
+function openMgCreateTournamentPopup() {
+  if (!state.isAdmin) return;
+  closeMgCreateTournamentPopup();
+  const el = document.createElement('div');
+  el.id = 'tournament-create-modal';
+  el.className = 'popup-overlay';
+  el.style.display = 'flex';
+  el.innerHTML = `<div class="popup-card card pe-card" role="dialog" aria-modal="true" aria-labelledby="mgc-title">${mgCreateTournamentDialogHTML()}</div>`;
+  document.body.appendChild(el);
+  document.body.style.overflow = 'hidden'; // lock background scroll on iOS, as the player dialog does
+  el.addEventListener('click', (ev) => {
+    if (ev.target === el || (ev.target.closest && ev.target.closest('[data-mgc-close]'))) { closeMgCreateTournamentPopup(); return; }
+    const save = ev.target.closest && ev.target.closest('[data-mgc-save]');
+    if (save) { void mgcSubmitCreate(save); return; }
+  });
+  const first = el.querySelector('#mgc-name');
+  if (first && first.focus) { try { first.focus(); } catch (_) {} }
+}
+
+// The dialog's Create button. Reads the three fields, locks the button for the round trip (two taps must
+// never insert two tournaments), and hands off to mgTournamentCreate. THE DIALOG IS THE FAILURE SURFACE:
+// on a refusal it stays open with the typing intact and states why inline, rather than closing and firing a
+// modal over a form the admin then has to retype.
+async function mgcSubmitCreate(btn) {
+  const el = document.getElementById('tournament-create-modal');
+  if (!el) return;
+  const readVal = (id) => { const n = el.querySelector('#' + id); return n ? String(n.value || '') : ''; };
+  const say = (text) => { const m = el.querySelector('#mgc-msg'); if (m) m.textContent = text; };
+  say('');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+  const res = await mgTournamentCreate({
+    name: readVal('mgc-name'),
+    buyIn: readVal('mgc-buyin'),
+    venmoLink: readVal('mgc-venmo'),
+  });
+  if (res && res.ok) { closeMgCreateTournamentPopup(); return; }
+  if (btn) { btn.disabled = false; btn.textContent = 'Create tournament'; }
+  say((res && res.error) || 'Could not create the tournament. Try again.');
+}
+
+// The flow. Returns { ok, id } / { ok:false, error } so the dialog can report inline and any other caller
+// still gets the outcome. On ANY failure of the insert, no state moves at all — the app keeps managing
+// whatever it was managing before, because a half-applied create is how you end up pointing at a ghost.
+async function mgTournamentCreate({ name, buyIn, venmoLink } = {}) {
+  if (!state.isAdmin) return { ok: false, error: 'Only an admin can create a tournament.' };
+  const nm = String(name == null ? '' : name).trim();
+  if (!nm) return { ok: false, error: 'Give the tournament a name.' };
+  const buy = String(buyIn == null ? '' : buyIn).trim();
+  const venmo = String(venmoLink == null ? '' : venmoLink).trim();
+
+  let created;
+  try {
+    // Counts + preset omitted on purpose: tdbCreateTournament's own defaults, editable afterwards.
+    created = await tdbCreateTournament({ name: nm });
+  } catch (err) {
+    const why = (err && err.message) ? String(err.message) : 'Try again.';
+    return { ok: false, error: why + ' Nothing here changed.' };
+  }
+  if (!created || !created.id) {
+    // The insert returned no row. Treat it exactly like a throw: claiming success off a missing id is the
+    // silent-write failure mode the delete read-back exists to prevent.
+    return { ok: false, error: 'The tournament did not come back from the database. Nothing here changed.' };
+  }
+
+  // buy_in is FREE DISPLAY TEXT in this app ("$80 a team") and is never parsed into a number — it prints as
+  // written on the sub-hub, the announcement and the registration page. Only write the fields actually given;
+  // an empty box must not overwrite anything with ''.
+  const fields = {};
+  if (buy) fields.buy_in = buy;
+  if (venmo) fields.venmo_link = venmo;
+  let fieldsErr = '';
+  if (Object.keys(fields).length) {
+    try {
+      await tdbSetTournamentFields(created.id, fields);
+    } catch (err) {
+      // The tournament EXISTS at this point, so this is not a failed create and must not be reported as one.
+      // Say which part did not land and where to fix it, then carry on selecting the new row.
+      fieldsErr = [buy ? 'buy-in' : '', venmo ? 'Venmo link' : ''].filter(Boolean).join(' and ');
+    }
+  }
+
+  // ORDER MATTERS HERE, and not for an obvious reason. tdbRefreshTournaments re-reads the list and then
+  // NULLS state.activeTournamentId if that id is not in what came back — the stale-tournament guard added
+  // 2026-06-27. Pointing at the new row BEFORE the refresh therefore hands the whole outcome to one SELECT:
+  // if that read cannot see the row yet, the guard quietly wipes the selection and the admin lands back on
+  // the empty state having just been told the tournament was created. So the refresh runs with the id
+  // cleared (which also stops it reloading the OLD tournament's teams/pools/matches over the caches cleared
+  // just below), and the selection is made after it, off the row the insert actually returned.
+  state.activeTournamentId = null;
+  state.tournamentTeams = []; state.tournamentPools = []; state.tournamentMatches = []; state.teamMembers = null;
+  state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null; state.seedOverride = null;
+  manageView = 'tournament';
+  mgtView = null;                 // land on the new tournament's sub-hub, not a sub-view of the old one
+  mgpControlsOpen = false; mgpPoolFilter = null; mgCloseoutChampId = undefined;
+  await tdbRefreshTournaments();
+  state.activeTournamentId = created.id;
+  // The insert returned this row, so it exists whether or not the list read has caught up with it. A brand
+  // new tournament has no teams, pools or matches, so the caches cleared above are already correct for it.
+  if (!(state.tournaments || []).some((x) => x && x.id === created.id)) {
+    state.tournaments = [created, ...(state.tournaments || [])];
+  }
+  repaintManage();
+  appNotice(fieldsErr
+    ? { title: 'Tournament created', message: `${nm} is open for registration, but the ${fieldsErr} did not save. Add it in Registration.` }
+    : { title: 'Tournament created', message: `${nm} is open for registration. Teams can sign up now.` });
+  return { ok: true, id: created.id };
+}
+
 
 function renderPublicShell() {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
@@ -11328,6 +11531,11 @@ function attachHandlers() {
         // Delete the whole tournament (round 2026-08-03 §7) — the irreversible sibling. Same placement rule:
         // checked before the generic hub rows, and it carries no data-mgt-view so it cannot open a sub-view.
         if (e.target.closest('[data-mgt-delete]')) { void mgTournamentDelete(); return; }
+        // Create a tournament (2026-08-03) — the constructive counterweight to the two above. It is reached
+        // from BOTH the sub-hub's dashed row AND the empty state (the screen a stranded admin actually lands
+        // on after deleting their last event), and both live in this same manageView === 'tournament' block.
+        // Checked before the generic hub rows for the same reason as its siblings.
+        if (e.target.closest('[data-mgt-create]')) { openMgCreateTournamentPopup(); return; }
         if (e.target.closest('[data-mgt-back]')) { mgtView = null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
         const mgtRow = e.target.closest('[data-mgt-view]');
         if (mgtRow) { mgtView = mgtRow.getAttribute('data-mgt-view') || null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
