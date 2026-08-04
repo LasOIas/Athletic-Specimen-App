@@ -3072,3 +3072,1100 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   body.pd-public-active #tab-home .hm.is-live .hm-rail > .hm-standings{ order: 4; }
   body.pd-public-active #tab-home .hm.is-live .hm-rail > .hm-link{ order: 5; }
 }
+
+/* ============================================================
+   TOURNAMENT + MANAGE DESIGN ROUND - 2026-08-03 (Mike's handoff)
+   Ported from the round's _rounds.css. Block comments preserved.
+   ============================================================
+
+   Ported as an appended layer, which is what the round was written to be:
+   overrides that land AFTER production, so append order alone gives them the
+   win — no !important escalation was added anywhere.
+
+   Four things in the round were prototype-harness only and did NOT come across
+   verbatim. Each is marked inline below with a PORT NOTE:
+     1. team peek position/size overrides — DROPPED (fights openTeamPeek's
+        runtime coordinates; see the note at the end of this section)
+     2. #tab-tournament .container { position: relative } — DROPPED
+     3. move-players directions A (swap mode) and C (compare tray) — DROPPED,
+        README §6 chose direction B (drag by a handle); A and C are the two
+        documented-and-rejected alternatives, live only in the exploration doc
+     4. three markup-dependent rules — GUARDED with :has() so they stay inert
+        until app.js emits the new markup, instead of regressing today's screens
+   ============================================================ */
+
+/* Round 2026-08-03 — "separate the nets more, so it's easier to see what is
+   what" (Pools & schedule, games list).
+   Before: each net was a single 11.5px accent label in one flat run of rows,
+   so NET 1 / 2 / 3 read as one 15-row list and you had to count backwards to
+   the label to know which net a game was on.
+   Now: each net is its own boxed group — tinted header bar (label only, no
+   trailing rule), hairline sides, closed bottom, and real air between groups.
+   Same .pl-net/.pl-g kit drives
+   the public pool board and both admin score sheets, so all three inherit it.
+   The rows themselves (round tag, matchup, score, FINAL/LIVE/UP NEXT) are
+   untouched. */
+.pl-net {
+  --net-bd: oklch(0.82 0.008 75); /* one step darker than --border, group box only */
+  align-items: center;
+  gap: 9px;
+  margin: 24px 0 0;
+  padding: 8px 11px;
+  background: var(--accent-soft);
+  border: 1px solid var(--net-bd);
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  font-size: 12px;
+  letter-spacing: .12em;
+}
+/* no trailing hairline next to the net number — the tinted bar already reads
+   as the group header */
+.pl-net::after { content: none; display: none; }
+
+/* The games are flat siblings of their net label, so `~` scopes these to the
+   games run only — standings rows (.pl-srow) and controls sit above/below it. */
+.pl-net ~ .pl-g {
+  padding-left: 11px;
+  padding-right: 11px;
+  border-left: 1px solid oklch(0.82 0.008 75);
+  border-right: 1px solid oklch(0.82 0.008 75);
+}
+/* Production styles a live game as a free-standing rounded pill (3px block
+   margin + 10px radius). Inside a net group that margin punches a visible gap
+   through the box sides, so sit live rows flush — the green tint and the LIVE
+   pill already do the highlighting. */
+.pl-net ~ .pl-g.live {
+  margin: 0;
+  border-radius: 0;
+}
+
+/* close the box on the last row of each net group */
+.pl-net ~ .pl-g:has(+ .pl-net),
+.pl-net ~ .pl-g:has(+ .pl-sect),
+.pl-net ~ .pl-g:has(+ button),
+.pl-net ~ .pl-g:last-child {
+  border-bottom: 1px solid oklch(0.82 0.008 75);
+  border-radius: 0 0 var(--r-md) var(--r-md);
+}
+
+/* Round 2026-08-03 — "why is your team's row not lined up with the rest"
+   (standings, both the pool tabs and Seeding). Production styles .pl-you as a
+   free-standing rounded chip: 8px inline padding vs 2px on every other row, an
+   extra 1px of block padding, and 2px block margin. So the seed number and team
+   name sat 6px right, Diff 6px left, and the row broke the row rhythm by 4px.
+   Same treatment as the live game row — sit it flush and let the tint alone
+   carry the highlight. */
+.pl-srow.pl-you {
+  margin-block: 0;
+  padding: 8px 2px;
+}
+
+/* Round 2026-08-03 — "have this say 'Seeding in pool …'" (standings column
+   header). The bare "#" didn't say what the numbers were. The label needs more
+   than the 26px the numeral column gets, so let the header's first cell size to
+   its text and left-align; the empty team cell next to it absorbs the slack.
+   Data rows (.pl-srow .c1) keep the narrow centered numeral column. */
+.pl-colh .c1 {
+  flex: 0 0 auto;
+  width: auto;
+  text-align: left;
+  white-space: nowrap;
+}
+
+/* Round 2026-08-03 — "for each of these only your team should be bold" (games
+   list). Production emphasised the WINNER: .gt runs at 600 and .lose drops to
+   500 + muted ink, so pulling the <b> off the winner changed nothing you could
+   see. Flatten every name to 500 and let the <b> on your team be the only
+   emphasis in the row — full ink even when your team lost. */
+.pl-g .gt,
+.pl-g .gt .tapname { font-weight: 500; }
+/* winners also read as emphasis through ink (full-ink winner vs muted .lose),
+   so flatten both to one weight AND one colour — the word "def." still says who
+   won. Your team is the only name at full ink and 700. */
+.pl-g .gt .tapname,
+.pl-g .gt .lose,
+.pl-g .gt .lose .tapname { color: oklch(0.40 0.005 75); }
+.pl-g .gt b,
+.pl-g .gt b .tapname { font-weight: 700; }
+.pl-g .gt b,
+.pl-g .gt b .tapname,
+.pl-g .gt .lose b,
+.pl-g .gt .lose b .tapname { color: oklch(0.18 0.005 75); }
+
+/* Round 2026-08-03 — "on each pool it needs to show the nets they are with"
+   (Pools & schedule tabs). Tab label stacks over its net range; the range is a
+   9px caps line so the pool name stays the primary read. Net ranges come from
+   the pool sheets — every pool currently rotates through Nets 1-3. */
+/* PORT NOTE: scoped to :has(.pl-tabn). The .pl-tab kit is shared — Manage ·
+   Check-in reuses it for its All / In / Out filter chips, which are single-line
+   and must not become two-line flex columns. The guard keeps the stack on the
+   pools tabs only, and matches the round's own idiom for shared kits
+   (.mgt-nm:has(.mgv-hnd), .mg-row:has(.mgv-rmeta)). */
+.pl-tab:has(.pl-tabn) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  line-height: 1.1;
+}
+.pl-tabn {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  opacity: .88;
+}
+
+/* Round 2026-08-03 — legend under the games header, so the bold name in every
+   row reads as "your team" rather than an unexplained emphasis. */
+/* rides on .pl-sect so it inherits that element's content column at every
+   breakpoint — a hard-coded max-width only matched the wide layout. Only the
+   type is reset back to plain caption. */
+.pl-legend {
+  margin-top: 0;
+  margin-bottom: 10px;
+  font-size: 13px; /* same size as the section header it sits under */
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--muted);
+}
+/* .pl-sect draws a trailing hairline after its label; the legend is a caption,
+   not a section head, so it doesn't get one */
+.pl-legend::after { content: none; display: none; }
+.pl-legend b { font-weight: 700; color: oklch(0.18 0.005 75); }
+
+/* Round 2026-08-03 — "maybe we can highlight the winner with green" (games
+   list). :has(.def) limits this to finished games — a "vs" row has no winner
+   yet. The loser stays inside .lose, so the winner is the only direct-child
+   name. Green is the design's own positive-diff ink, dark enough to read at
+   13px; it sits after the your-team rules so a win by your team is bold green. */
+.pl-g .gt:has(.def) > .tapname,
+.pl-g .gt:has(.def) > b > .tapname { color: oklch(0.40 0.09 150); }
+
+/* Round 2026-08-03 — "change how this looks to 'Your next game… at net… vs…'"
+   (My Team). Reads as a sentence now; the net tile that repeated the net number
+   and the countdown line are both gone. */
+.mt-nv b { font-weight: 700; color: var(--ink); }
+
+/* Round 2026-08-03 — "can we find a new way to show the wins and losses"
+   (My Team hero). Before: seven anonymous dots — you could count them but not
+   read them, and the upcoming game looked like a third result state.
+   Now: result letters in game order. Wins carry the system green, losses sit
+   quiet in neutral (the design uses green for positive and neutral for
+   negative — no red anywhere), and the game still to play is a dashed outline
+   labelled Next, so it reads as a slot rather than a result. */
+.mt-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.mt-fl {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mt-fchips { display: flex; gap: 4px; align-items: center; }
+.mt-fc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+.mt-fc.w { background: var(--success); color: #fff; }
+.mt-fc.l { background: oklch(0.93 0.005 75); color: var(--muted); }
+.mt-fc.up {
+  background: none;
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+/* the dots kit is no longer emitted here, but kill it if a cached screen renders */
+/* PORT NOTE: guarded with :has(.mt-form). The round assumed the prototype's
+   markup, where the dots were already gone — but production app.js STILL emits
+   .mt-pips in .mt-hero, so an unguarded display:none would blank the My Team
+   results row outright until the markup lands. The guard hides the dots only
+   once the replacement chips are actually on the page. */
+.mt-hero:has(.mt-form) .mt-pips { display: none; }
+
+/* Round 2026-08-03 — "make the edit player modal better" (Manage · Players).
+   Before: a flat stack of label+input with the dialog title "Edit Player", two
+   Cancels (header and footer), a group control that showed the same membership
+   three times (button, menu, chips) with "(Primary)" spelled into every label,
+   an orphaned Account row, and a green Save.
+   Now: the player IS the header (avatar + name + status), one × closes, fields
+   are grouped rows with hints where the value needs explaining, groups are
+   chips + one dashed "add" affordance with primary shown as a tag, and the
+   footer is a real action bar with Save in the accent (green is reserved for
+   live/positive in this system). Scoped to #player-edit-modal so no other
+   dialog in the kit moves. */
+#player-edit-modal .pe-card {
+  display: flex;              /* card caps its height in production, so the */
+  flex-direction: column;     /* field area scrolls and the action bar stays put */
+  width: min(452px, calc(100vw - 28px));
+  padding: 0;
+  border-radius: 18px;
+  overflow: hidden;
+}
+#player-edit-modal .pe-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 16px;
+  border-bottom: 1px solid var(--border);
+}
+#player-edit-modal .pe-av {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-bd);
+  color: var(--accent);
+  font-size: 16px;
+  font-weight: 700;
+}
+#player-edit-modal .pe-who { display: grid; gap: 2px; min-width: 0; }
+#player-edit-modal .pe-who h3 { margin: 0; font-size: 17px; line-height: 1.2; }
+/* check-in state reuses the players-list IN pill, sat left of the close button */
+#player-edit-modal .pe-in { flex: none; margin-left: auto; }
+#player-edit-modal .pe-x {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;   /* .secondary ships a min-height, so it was 32x38 */
+  min-height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+#player-edit-modal .pe-x:hover { color: var(--ink); border-color: oklch(0.82 0.008 75); }
+#player-edit-modal .pe-head { flex: none; }
+#player-edit-modal .pe-body {
+  flex: 1 1 auto;
+  min-height: 0;             /* flex items default to min-height:auto and won't shrink */
+  overflow-y: auto;
+  padding: 16px;
+}
+#player-edit-modal .pe-f:last-child { margin-bottom: 0; }
+#player-edit-modal .pe-f { display: grid; gap: 7px; margin-bottom: 18px; }
+#player-edit-modal .popup-edit-label {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+/* PORT NOTE: production ships .popup-edit-input with `padding: 10px 12px
+   !important`, so the round's `padding: 0 12px` below is inert in the real app.
+   Left exactly as the round wrote it rather than starting an !important war —
+   the field still lands at 44px with the 11px radius and the accent focus ring,
+   which is the visible intent. Flagged for the app.js builder. */
+#player-edit-modal .popup-edit-input {
+  width: 100%;
+  height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 15px;
+}
+#player-edit-modal .popup-edit-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+#player-edit-modal .pe-skillrow { display: grid; gap: 6px; }
+#player-edit-modal .pe-skillin { width: 108px; font-variant-numeric: tabular-nums; }
+#player-edit-modal .pe-hint { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
+#player-edit-modal .pe-2col { grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+#player-edit-modal .pe-cell { display: grid; gap: 7px; min-width: 0; }
+#player-edit-modal .pe-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  margin: 0;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+  background: oklch(0.985 0.003 75);
+}
+#player-edit-modal .pe-save {
+  flex: 1;
+  height: 46px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#player-edit-modal .pe-save:hover { background: oklch(0.48 0.08 240); }
+#player-edit-modal .pe-cancel {
+  height: 46px;
+  padding: 0 18px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ============================================================
+   Round 2026-08-03 — "a new way to move players" (Manage · Teams, pickup).
+   Three directions, all inline on the Teams screen, all built for a straight
+   two-player swap, all sharing the same two safety rails Mike asked for: an
+   Undo strip like Check-in's, and a warning when the swap leaves teams apart
+   on skill. One screen each: mg-teams-move-a / -b / -c.
+     A  swap mode — tap a name, tap their partner
+     B  drag the name by a handle onto another team
+     C  pin two teams into a compare tray and swap across it
+
+   PORT NOTE: only the shared rails and direction B are ported. README §6 names
+   B the chosen direction ("drag by a handle onto another team"); A and C are
+   the two documented-and-rejected alternatives, and their classes appear in NO
+   shipping screen — only in the exploration doc move-players.html. Dropping
+   them also removes a real leak: direction C shipped an UNSCOPED .mgv-tfoot,
+   which would have applied its margin-top/font-size to the team payment
+   modal's footer (#team-pay-modal .mgv-tfoot) further down this section.
+   Recoverable from the round's _rounds.css if a direction is ever revisited.
+   ============================================================ */
+
+/* shared: undo strip + drift warning */
+.mgv-undo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: oklch(0.985 0.003 75);
+}
+.mgv-undo-t { font-size: 13px; color: var(--muted); }
+.mgv-undo-t b { font-weight: 700; color: var(--ink); }
+.mgv-undo-b {
+  margin-left: auto;
+  flex: none;
+  height: 36px;
+  padding: 0 15px;
+  border: 1px solid var(--accent-bd);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.mgv-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 14px;
+  padding: 11px 12px;
+  border: 1px solid oklch(0.88 0.055 75);
+  border-radius: 13px;
+  background: oklch(0.975 0.03 80);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: oklch(0.42 0.08 70);
+}
+.mgv-warn svg { flex: none; width: 17px; height: 17px; margin-top: 1px; }
+.mgv-warn b { font-weight: 700; }
+.mgv-note { margin: 2px 0 12px; font-size: 12.5px; color: var(--muted); }
+
+/* B — drag */
+/* production .mgt-nm is space-between with exactly two children; the grip is a
+   third, so pack them left and push the skill back out to the right edge */
+.mgv-hnd { flex: none; width: 17px; height: 17px; margin-right: 2px; color: oklch(0.74 0.006 75); }
+.mgt-nm:has(.mgv-hnd) { justify-content: flex-start; }
+.mgt-nm:has(.mgv-hnd) .mgt-nsk { margin-left: auto; }
+.mgv-slot {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px dashed oklch(0.84 0.006 75);
+  border-radius: 10px;
+  background: oklch(0.98 0.003 75);
+  font-size: 14px;
+  color: oklch(0.72 0.006 75);
+}
+.mgt-trow.mgv-over { box-shadow: inset 0 0 0 2px var(--accent-bd); background: var(--accent-soft); }
+.mgv-lift {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-bd);
+  border-radius: 11px;
+  background: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  transform: rotate(-1.2deg) translateY(-2px);
+  box-shadow: 0 12px 26px oklch(0.18 0.005 75 / .18);
+}
+.mgv-lift .mgt-nsk { margin-left: auto; color: var(--muted); font-weight: 600; }
+.mgv-delta {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+}
+/* .mgt-trow is a flex row of [team label | names], so the hint has to live
+   inside .mgt-names to get block flow instead of becoming a third column */
+.mgv-rowhint { margin-top: 8px; font-size: 12px; color: var(--accent); }
+.mgv-lift .mgt-nmn { flex: 1; }
+.mgv-rowhint b { font-weight: 700; }
+
+/* Round 2026-08-03 — "add more to each part already in the Tournament sub-hub"
+   + "somewhere the reset and a delete tournament are".
+   Rows now carry real status in the subtitle plus a right-hand state word, and
+   the two destructive actions live in one Danger zone with what each one takes
+   with it spelled out. .mg-row is space-between with two children, so the new
+   state word packs after .mg-rb instead of becoming a third column. */
+.mg-row:has(.mgv-rmeta) { justify-content: flex-start; }
+.mgv-rmeta {
+  flex: none;
+  margin-left: auto;
+  padding-left: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.mgv-dsect { margin-top: 26px; margin-bottom: 14px; } /* label-less: just .pl-sect's hairline */
+.mgv-danger {
+  border: 1px solid oklch(0.88 0.05 25);
+  border-radius: 15px;
+  background: oklch(0.985 0.012 25);
+  overflow: hidden;
+}
+.mgv-drow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 13px;
+}
+.mgv-drow + .mgv-drow { border-top: 1px solid oklch(0.91 0.035 25); }
+.mgv-dtxt { flex: 1 1 auto; display: grid; gap: 3px; min-width: 0; }
+.mgv-dt { font-size: 14px; font-weight: 600; color: var(--ink); }
+.mgv-dd { font-size: 12px; line-height: 1.45; color: var(--muted); text-wrap: pretty; }
+.mgv-danger .mgv-dbtn {
+  flex: none;
+  width: auto;
+  min-width: 84px;
+  height: 38px;
+  margin: 2px 0 0;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+}
+.mgv-danger .mgv-del,
+.kc-confirm.mgv-del { background: oklch(0.52 0.17 25); border-color: oklch(0.52 0.17 25); color: #fff; }
+.mgv-dnote {
+  padding: 10px 13px 12px;
+  border-top: 1px solid oklch(0.91 0.035 25);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* Round 2026-08-03 — "move the paid function inside the team you click open"
+   (Tournament · Teams & payment). The list row was doing two jobs: a PAID /
+   TAP WHEN PAID button big enough to hit by accident, sat right next to the
+   chevron that opens the team. Now the row only REPORTS state and the toggle
+   lives in the team sheet, next to the fee it settles. */
+.mgv-pmeta {
+  flex: none;
+  margin-left: auto;
+  padding-left: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.mgv-pmeta.is-paid { color: oklch(0.40 0.09 150); }
+.mgv-pmeta.is-unpaid { color: oklch(0.50 0.11 70); }
+
+/* the team opens as a centred popup on the shared popup kit, matching the
+   player-edit dialog: identity in the header with the payment state beside the
+   close button, and the paid action sat under the fee it settles. */
+#team-pay-modal .mgv-tcard {
+  display: flex;
+  flex-direction: column;
+  width: min(452px, calc(100vw - 28px));
+  padding: 0;
+  border-radius: 18px;
+  overflow: hidden;
+}
+#team-pay-modal .mgv-thead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 15px 16px;
+  border-bottom: 1px solid var(--border);
+}
+#team-pay-modal .mgv-twho { display: grid; gap: 2px; min-width: 0; }
+#team-pay-modal .mgv-twho h3 { margin: 0; font-size: 17px; line-height: 1.2; }
+#team-pay-modal .mgv-tsub { font-size: 12px; color: var(--muted); }
+#team-pay-modal .mgv-tx {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+#team-pay-modal .mgv-tbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px; }
+#team-pay-modal .mgv-tf { display: grid; gap: 7px; margin-bottom: 16px; }
+#team-pay-modal .mgv-tlabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+#team-pay-modal .mgv-troster { display: flex; flex-wrap: wrap; gap: 6px; }
+#team-pay-modal .mgv-tr {
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: oklch(0.975 0.003 75);
+  font-size: 13px;
+}
+#team-pay-modal .mgv-tfee { display: flex; align-items: baseline; gap: 10px; }
+#team-pay-modal .mgv-tfv { font-size: 19px; font-weight: 700; font-variant-numeric: tabular-nums; }
+#team-pay-modal .mgv-tfn { font-size: 12px; color: var(--muted); }
+#team-pay-modal .mgv-tpay {
+  width: 100%;
+  height: 46px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#team-pay-modal .mgv-tpay:hover { background: oklch(0.48 0.08 240); }
+#team-pay-modal .mgv-tnote { margin-top: 9px; font-size: 11.5px; color: var(--muted); }
+#team-pay-modal .mgv-tfoot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: oklch(0.985 0.003 75);
+}
+#team-pay-modal .mgv-twd {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: oklch(0.52 0.17 25);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#team-pay-modal .mgv-twd:hover { text-decoration: underline; }
+#team-pay-modal .mgv-tdone {
+  margin-left: auto;
+  height: 40px;
+  padding: 0 18px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#team-pay-modal .mgv-pmeta { margin-left: auto; }
+
+/* Round 2026-08-03 — "make the input fields look better, match the rest of the
+   app" (Tournament · Pools before draw). A full-width 40px grey text box for a
+   one-digit count read like a form from another app. Same framed-row pattern as
+   the other rounds here: label left, pill stepper right, both counts in one
+   box, 34px targets, native spinners removed. */
+.mgv-nbox {
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: #fff;
+  overflow: hidden;
+}
+.pk-fld.mgv-nfld {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+}
+.pk-fld.mgv-nfld + .pk-fld.mgv-nfld { border-top: 1px solid var(--border); }
+.mgv-nfld .pk-fl {
+  flex: 1;
+  width: auto;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+}
+.mgv-step {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: oklch(0.975 0.003 75);
+}
+.mgv-sb {
+  width: 34px;
+  height: 34px;
+  min-width: 34px;   /* production ships min-height:38px on buttons */
+  min-height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 2px oklch(0.18 0.005 75 / .10);
+}
+.mgv-sb:hover { color: var(--accent); }
+.mgv-nfld .mgv-sv {
+  width: 46px;
+  height: 34px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.mgv-nfld .mgv-sv:focus { outline: none; color: var(--accent); }
+.mgv-sv::-webkit-outer-spin-button,
+.mgv-sv::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.mgv-nhint { margin-top: 9px; }
+
+/* Round 2026-08-03 — "the Bracket controls area needs to be at the very top"
+   (Tournament · Bracket & scores). Was below fourteen games and four TBD
+   rounds; now it sits under the page title. The rounds list starts after it, so
+   the first round header gets air above it. */
+.mgbk-note + .mgbk-rnd { margin-top: 22px; }
+/* the destructive action stays out of the controls block at the top and closes
+   the page instead, under a plain hairline */
+.mgbk-players + .mgbk-rnd { margin-top: 22px; }
+.mgv-dsect + .mgts-danger { margin-top: 0; }
+
+/* Round 2026-08-03 — "a new look for everything under Bracket controls"
+   (Tournament · Bracket & scores). Before: one flat run of rows reading
+   "Winner def. Loser  21–18", so you read a sentence to find a score and the
+   TBD placeholders looked like real games.
+   Now each round is a boxed group with a tinted header and its progress —
+   the same grouping language the net groups use on the pools board — and each
+   match is a two-line scoreboard: team over team, scores in a tabular column,
+   a check on the winner, state pill only when it's live or next. Placeholders
+   are dashed and score-less so they can't be mistaken for playable games.
+   .mgv-bkm keeps the data-mgbk-score hook, so tapping still opens the sheet. */
+.mgv-bkr {
+  margin-top: 20px;
+  border: 1px solid oklch(0.82 0.008 75);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: #fff;
+}
+.mgv-bkrh {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid oklch(0.82 0.008 75);
+  background: var(--accent-soft);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.mgv-bkrs { margin-left: auto; font-size: 10px; letter-spacing: .08em; color: var(--muted); }
+.mgv-bkm {
+  position: relative;         /* pill is pulled out of the flex line so the */
+  display: flex;              /* score column measures the same on every row */
+  align-items: flex-start;
+  gap: 11px;
+  padding: 11px 66px 11px 12px;
+  cursor: pointer;
+}
+.mgv-bkm + .mgv-bkm { border-top: 1px solid var(--border); }
+.mgv-bkm.is-live { background: oklch(0.97 0.025 150); }
+/* one sequential game number across both brackets — G1-G4 winners, G5-G6
+   losers, G7-G8 winners, and so on to the grand final, matching how the
+   bracket is drawn out on paper. Placeholders name their feeder game. */
+/* the net is what an organiser walks to, so it sits in the left rail with the
+   game number rather than inside the meta sentence */
+.mgv-bkidw { flex: none; display: grid; gap: 4px; justify-items: start; min-width: 44px; padding-top: 2px; }
+.mgv-bknet {
+  padding: 2px 6px;
+  border: 1px solid var(--accent-bd);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.mgv-bkidw .mgv-bkid { padding-top: 0; }
+.mgv-bkid {
+  flex: none;
+  min-width: 30px;
+  padding-top: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.mgv-bkb { flex: 1; min-width: 0; }
+.mgv-bkl { display: flex; align-items: center; gap: 8px; min-height: 22px; }
+.mgv-bkn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.mgv-bkl.is-win .mgv-bkn { font-weight: 700; color: oklch(0.40 0.09 150); }
+.mgv-bkw { flex: none; width: 13px; height: 13px; }
+.mgv-bks {
+  margin-left: auto;
+  padding-left: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.mgv-bkl.is-win .mgv-bks { font-weight: 700; }
+.mgv-bkmeta { margin-top: 5px; font-size: 11px; color: var(--muted); }
+.mgv-bkpill {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+.mgv-bkpill.is-live { background: var(--success); color: #fff; }
+.mgv-bkpill.is-next { border: 1px solid var(--border); background: #fff; color: var(--muted); }
+/* Finished games are off the list — the admin only needs what is live, next,
+   or coming. They stay one tap away behind the "already final" row so a wrong
+   score can still be fixed. Placeholders keep their dashed, score-less look. */
+.mgv-bkm.is-tbd { cursor: default; background: oklch(0.985 0.003 75); }
+.mgv-bkm.is-tbd .mgv-bkn { color: var(--muted); } /* these rows carry who feeds whom — the dashed, score-less row says "not playable yet" */
+.mgv-bkm.is-tbd .mgv-bkid { color: oklch(0.72 0.006 75); }
+.mgv-bkdone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 16px;
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: #fff;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.mgv-bkdonel { margin-left: auto; font-weight: 700; color: var(--accent); }
+
+/* bracket score entry reuses the pools score sheet; the one thing it adds is
+   where each side goes next, because that is the consequence of tapping Final */
+.mgv-bknext {
+  margin: 12px 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: oklch(0.985 0.003 75);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.mgv-bknext b { font-weight: 700; color: var(--ink); }
+
+/* Round 2026-08-03 — "this looks so bad" (bracket score entry). Was the pools
+   slide-up: two loose stepper columns with small square buttons and a second
+   full-width button competing with the primary. Now it is a centred popup on
+   the same kit as the player and team dialogs — one framed box, a row per team
+   with the pill stepper used elsewhere, the consequence line, then one primary
+   action with the live-score update as a quiet secondary. Hooks kept:
+   data-mgss-step / data-mgss / #mgss-a / #mgss-b / .mgss-sval. */
+#mgss-sheet .mgv-sccard {
+  display: flex;
+  flex-direction: column;
+  width: min(452px, calc(100vw - 28px));
+  padding: 0;
+  border-radius: 18px;
+  overflow: hidden;
+}
+#mgss-sheet .mgv-schead {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: none;
+  padding: 15px 16px;
+  border-bottom: 1px solid var(--border);
+}
+#mgss-sheet .mgv-scwho { display: grid; gap: 3px; min-width: 0; }
+#mgss-sheet .mgv-scwho h3 { margin: 0; font-size: 17px; line-height: 1.25; }
+#mgss-sheet .mgss-vs { font-weight: 500; color: var(--muted); }
+#mgss-sheet .mgv-scmeta { font-size: 12px; color: var(--muted); }
+#mgss-sheet .mgv-scx {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+}
+#mgss-sheet .mgv-scbody { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px; }
+#mgss-sheet .mgv-scbox {
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: #fff;
+  overflow: hidden;
+}
+#mgss-sheet .mgv-scrow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+}
+#mgss-sheet .mgv-scrow + .mgv-scrow { border-top: 1px solid var(--border); }
+#mgss-sheet .mgv-scname { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; }
+#mgss-sheet .mgv-scstep {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: oklch(0.975 0.003 75);
+}
+#mgss-sheet .mgv-scb {
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 2px oklch(0.18 0.005 75 / .10);
+}
+#mgss-sheet .mgv-scb:hover { color: var(--accent); }
+#mgss-sheet .mgv-scval {
+  min-width: 52px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+#mgss-sheet .mgv-bknext { margin-bottom: 0; }
+#mgss-sheet .mgv-scfoot {
+  display: grid;
+  gap: 8px;
+  flex: none;
+  padding: 13px 16px;
+  border-top: 1px solid var(--border);
+  background: oklch(0.985 0.003 75);
+}
+#mgss-sheet .mgv-scfinal {
+  height: 48px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#mgss-sheet .mgv-scfinal:hover { background: oklch(0.48 0.08 240); }
+#mgss-sheet .mgv-sclive {
+  height: 38px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#mgss-sheet .mgv-sclive:hover { color: var(--accent); text-decoration: underline; }
+
+/* Round 2026-08-03 — "there needs to be a way to just choose a winner", all in
+   one view: each row does both jobs. Tap the team to mark them the winner, use
+   the stepper only if a score was kept — no modes, no tabs. */
+#mgss-sheet .mgv-scwin {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);   /* production buttons ship white text */
+  text-align: left;
+  cursor: pointer;
+}
+#mgss-sheet .mgv-scwin .mgv-scname { color: var(--ink); }
+#mgss-sheet .mgv-scdot {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 1px solid oklch(0.84 0.006 75);
+  border-radius: 999px;
+  background: #fff;
+}
+#mgss-sheet .mgv-scrow.is-won { background: var(--accent-soft); }
+#mgss-sheet .mgv-scrow.is-won .mgv-scdot {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 4px #fff;
+}
+#mgss-sheet .mgv-scrow.is-won .mgv-scname { font-weight: 700; }
+#mgss-sheet .mgv-schint { margin-top: 10px; font-size: 12px; color: var(--muted); }
+
+/* Round 2026-08-03 — "line this up" (team peek header). The close button was
+   absolutely positioned 9px past the card's content edge and sat a line above
+   the View only chip, which was itself centred against the 40px badge. Both now
+   ride in the header row, so avatar, name, chip and close share one centre line
+   and one right edge. */
+/* PORT NOTE: guarded. In the prototype the × lives INSIDE .pd-peek-top; in
+   production app.js it is still a SIBLING of .pd-peek-top, absolutely
+   positioned at the card's top-right. Unguarded, `position:static` would drop
+   it out of the corner into its own block above the header, and
+   `padding-right:0` would let the View only chip slide under it — both worse
+   than today. The :has()/descendant guards keep production's layout until the
+   markup moves the button into the header row, then take effect automatically. */
+#pd-team-peek .pd-peek-top:has(.pd-peek-x) { align-items: center; padding-right: 0; }
+#pd-team-peek .pd-peek-lock { margin-left: auto; align-self: center; }
+#pd-team-peek .pd-peek-top .pd-peek-x {
+  position: static;
+  flex: none;
+  align-self: center;
+  margin-left: 10px;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  min-height: 26px;
+}
+/* one text column for the whole card: the name sat at 73, the record label at
+   71 and the row labels at 58 — three left edges. The badge, the big record and
+   each row icon now share a 40px lead column (icons centred in it), so every
+   line of copy starts at the same x. */
+#pd-team-peek .pd-peek-rec { gap: 10px; }
+#pd-team-peek .pd-peek-recbig { min-width: 40px; }
+#pd-team-peek .pd-peek-row { gap: 0; }
+#pd-team-peek .pd-peek-ic { margin: 0 17px 0 7px; }
+
+/* PORT NOTE — DROPPED: the round's team-peek position/size block, and the
+   `#tab-tournament .container { position: relative }` that supported it.
+   README §3 flags this itself: "In the app, anchor it to the tapped row
+   instead of hardcoding coordinates." The app already does exactly that —
+   openTeamPeek() appends #pd-team-peek to document.body and writes left/width/
+   top INLINE from getBoundingClientRect(), which are VIEWPORT coordinates that
+   only mean anything against production's `position: fixed`. Switching to
+   `position: absolute` would resolve those numbers against the initial
+   containing block instead, so the peek would drift by the scroll offset on
+   every scrolled page, and .pd-peek-flip (the flip-above path) would go with
+   it. The dropped declarations and why each is unshippable here:
+     position: absolute            → breaks the JS viewport coordinates (above)
+     top: auto / left / width      → dead anyway; inline styles from JS win
+     max-width: none               → fights production's max-width + JS width
+     z-index: 40                   → LOWERS production's 60, a regression
+     transform: none / margin      → no-ops against production .pd-peek
+     #tab-tournament .container {position:relative} → does nothing for a peek
+       that lives on document.body, but would newly become the containing block
+       and stacking context for anything else absolutely positioned in the
+       tournament container. Pure risk, no benefit.
+   Everything ABOVE this note — the single 40px lead column, the header on one
+   row, the static close button, the gap/min-width values — is the layout work
+   from README §3 and is ported in full. */
+
+/* ============ end TOURNAMENT + MANAGE DESIGN ROUND ============ */
