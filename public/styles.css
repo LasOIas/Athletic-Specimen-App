@@ -3309,9 +3309,16 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
    are grouped rows with hints where the value needs explaining, groups are
    chips + one dashed "add" affordance with primary shown as a tag, and the
    footer is a real action bar with Save in the accent (green is reserved for
-   live/positive in this system). Scoped to #player-edit-modal so no other
-   dialog in the kit moves. */
-#player-edit-modal .pe-card {
+   live/positive in this system).
+
+   2026-08-03 (later the same day): originally scoped to #player-edit-modal so no
+   other dialog in the kit would move. Widened to the bare .pe-* classes when the
+   Create-tournament dialog shipped on the same grammar: under the id scope it
+   inherited none of this and fell back to the kit's GREEN save, which contradicts
+   the rule stated two lines up. The .pe- namespace is exclusive to these two
+   dialogs (verified: every .pe- class in app.js is emitted exactly twice, once
+   per dialog), so widening moves nothing else. */
+.pe-card {
   display: flex;              /* card caps its height in production, so the */
   flex-direction: column;     /* field area scrolls and the action bar stays put */
   width: min(452px, calc(100vw - 28px));
@@ -3319,14 +3326,14 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   border-radius: 18px;
   overflow: hidden;
 }
-#player-edit-modal .pe-head {
+.pe-head {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 15px 16px;
   border-bottom: 1px solid var(--border);
 }
-#player-edit-modal .pe-av {
+.pe-av {
   flex: none;
   width: 42px;
   height: 42px;
@@ -3339,11 +3346,11 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   font-size: 16px;
   font-weight: 700;
 }
-#player-edit-modal .pe-who { display: grid; gap: 2px; min-width: 0; }
-#player-edit-modal .pe-who h3 { margin: 0; font-size: 17px; line-height: 1.2; }
+.pe-who { display: grid; gap: 2px; min-width: 0; }
+.pe-who h3 { margin: 0; font-size: 17px; line-height: 1.2; }
 /* check-in state reuses the players-list IN pill, sat left of the close button */
-#player-edit-modal .pe-in { flex: none; margin-left: auto; }
-#player-edit-modal .pe-x {
+.pe-in { flex: none; margin-left: auto; }
+.pe-x {
   flex: none;
   display: grid;
   place-items: center;
@@ -3360,16 +3367,16 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   line-height: 1;
   cursor: pointer;
 }
-#player-edit-modal .pe-x:hover { color: var(--ink); border-color: oklch(0.82 0.008 75); }
-#player-edit-modal .pe-head { flex: none; }
-#player-edit-modal .pe-body {
+.pe-x:hover { color: var(--ink); border-color: oklch(0.82 0.008 75); }
+.pe-head { flex: none; }
+.pe-body {
   flex: 1 1 auto;
   min-height: 0;             /* flex items default to min-height:auto and won't shrink */
   overflow-y: auto;
   padding: 16px;
 }
-#player-edit-modal .pe-f:last-child { margin-bottom: 0; }
-#player-edit-modal .pe-f { display: grid; gap: 7px; margin-bottom: 18px; }
+.pe-f:last-child { margin-bottom: 0; }
+.pe-f { display: grid; gap: 7px; margin-bottom: 18px; }
 #player-edit-modal .popup-edit-label {
   margin: 0;
   font-size: 10px;
@@ -3399,12 +3406,12 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-#player-edit-modal .pe-skillrow { display: grid; gap: 6px; }
-#player-edit-modal .pe-skillin { width: 108px; font-variant-numeric: tabular-nums; }
-#player-edit-modal .pe-hint { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
-#player-edit-modal .pe-2col { grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
-#player-edit-modal .pe-cell { display: grid; gap: 7px; min-width: 0; }
-#player-edit-modal .pe-actions {
+.pe-skillrow { display: grid; gap: 6px; }
+.pe-skillin { width: 108px; font-variant-numeric: tabular-nums; }
+.pe-hint { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
+.pe-2col { grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+.pe-cell { display: grid; gap: 7px; min-width: 0; }
+.pe-actions {
   display: flex;
   flex: none;
   gap: 8px;
@@ -3413,7 +3420,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   border-top: 1px solid var(--border);
   background: oklch(0.985 0.003 75);
 }
-#player-edit-modal .pe-save {
+.pe-save {
   flex: 1;
   height: 46px;
   border: 0;
@@ -3424,8 +3431,8 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   font-weight: 700;
   cursor: pointer;
 }
-#player-edit-modal .pe-save:hover { background: oklch(0.48 0.08 240); }
-#player-edit-modal .pe-cancel {
+.pe-save:hover { background: oklch(0.48 0.08 240); }
+.pe-cancel {
   height: 46px;
   padding: 0 18px;
   border: 1px solid var(--border);
