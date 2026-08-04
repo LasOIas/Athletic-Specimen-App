@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.04.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.04.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3695,6 +3695,10 @@ let rulesReturnView = 'hub'; // 'hub' | 'register'
 // SURVIVES a background partialRenderTournament — the success page has no inputs, so tournamentTabIsDirty()
 // is false and a 15s sync would otherwise rebuild an empty form over it. Reset to null on any hub/sub-page nav.
 let regSubmittedTeam = null;
+// True when connect_profile_by_name linked the signer to a roster row during THIS registration,
+// so the success screen can say "you're on the roster" instead of asking them to claim a spot
+// the app already knows is theirs (Mike, 2026-08-04).
+let regAutoAttached = false;
 let pdPoolFilter = 'all'; // Pools & schedule tab: 'seeding' | a pool label | 'all'/stale -> resolves to first pool — survives partialRender
 
 // Atom-up redesign (spec 2026-07-10 §1): the signed-out gate. The Tournament page is PERSONAL, so a
@@ -4155,6 +4159,27 @@ async function submitRegisterForm(btn) {
   // state flag FIRST so the render() below already paints the payoff (not a flash of empty form), then the
   // explicit swap guarantees success even if that render() threw.
   regSubmittedTeam = v.teamName;
+  // AUTO-ATTACH (Mike, 2026-08-04: "if i am logged into the app A.S knows who i am and should
+  // automatically attach me to me, its the same first and last name"). register_team has just
+  // created a tournament_players row for every roster name; if the signer's name is one of them
+  // it is UNCLAIMED, which is what used to produce the "Claim your spot on X" tap.
+  // The linking already existed server-side and was already correct - connect_profile_by_name
+  // (0053) links EVERY unclaimed exact-name match across tournament_players AND the pickup
+  // roster, idempotently. The only defect was WHEN the client called it: promptNameFillIfNeeded
+  // fires it once per session at sign-in, latching `identityConnectAttempted`, which is BEFORE
+  // this registration exists. So it always ran with nothing to find and never ran again.
+  // Re-running it here is the whole fix. Idempotent, so a repeat costs one no-op round trip.
+  regAutoAttached = false;
+  if (state.authSession && accountName && accountName.first && accountName.last) {
+    try {
+      const res = await connectProfileByName(accountName.first, accountName.last);
+      regAutoAttached = !!(res && Number(res.tournament_linked) > 0);
+    } catch (err) {
+      // Never block the payoff: the team IS registered. The success screen falls back to the
+      // manual claim affordance, which is exactly the pre-2026-08-04 behaviour.
+      console.error('auto-attach after registration', err);
+    }
+  }
   try { await tdbRefreshTournaments(); render(); } catch (_) {}
   renderRegisterFormSuccess(v.teamName);
 }
@@ -4178,7 +4203,10 @@ function buildRegisterSuccessHTML(teamName) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/></svg>
           Payment: sent on Venmo
         </span>
-        <button type="button" class="pd-reg-cta" data-role="reg-page-claim">Claim your spot on ${nm}</button>
+        ${regAutoAttached
+          ? `<div class="pd-reg-wonsub">You're on the roster. Your games show up under My Team.</div>
+        <button type="button" class="pd-reg-cta" data-nav-tab="myteam">Go to My Team</button>`
+          : `<button type="button" class="pd-reg-cta" data-role="reg-page-claim">Claim your spot on ${nm}</button>`}
         <button type="button" class="pd-reg-backlink" data-tn-view="hub">Back to tournament</button>
       </div>
     </section>`;
