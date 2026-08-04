@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.03.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.04.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2899,6 +2899,45 @@ async function tdbDeleteTournament(tournament) {
     throw new Error('The delete did not go through. Check you are signed in as an admin, then try again.');
   }
 }
+// END A TOURNAMENT THAT NEVER PLAYED (2026-08-04). The gap the 0050 close-out leaves open: close_tournament
+// accepts ONLY 'pools' or 'bracket' and RAISEs "Nothing to close yet" from 'setup' (0050_closeout.sql:50-55),
+// so a tournament created and never played could only be RESET (which leaves it sitting in setup) or DELETED
+// (which takes its registered teams and their paid flags with it). There was no way to simply retire it.
+// That is not only untidy. A stale setup row COMPETES with the real next event on the public surface: the
+// registration screens all select `registration_open && status === 'setup'` (lines ~3033 / ~6215 / ~6738) and
+// tdbCreateTournament opens registration on every new row (~2339), so with two setup rows the public page can
+// advertise the dead one. Same class as the June fallthrough.
+// The write goes through tdbSetTournamentFields — the door this app already uses for every other tournament
+// field — and sets exactly the three columns close_tournament itself would set. It is NOT a sneak-around of
+// that RPC's guard: the RPC refuses 'setup' BY DESIGN, and changing it is a migration (Mike's call).
+// CONSTRUCTIVE, NOT DESTRUCTIVE: nothing is deleted. The registered teams, teams.paid, the rosters,
+// team_members, the rules sheet and the announcement all survive, and reopen_tournament (0050:75) brings it
+// back — so this needs no Danger-zone grammar.
+async function tdbEndTournamentUnplayed(tournament) {
+  if (!supabaseClient || !tournament || !tournament.id) throw new Error('No tournament.');
+  await tdbSetTournamentFields(tournament.id, {
+    status: 'completed',
+    registration_open: false,
+    champion_team_id: null, // nobody played, so there is no champion to record — say so in the data too
+  });
+  // READ-BACK, and it is mandatory (same lesson as tdbResetTournamentFull and tdbDeleteTournament above). The
+  // RLS policies on tournaments are USING row FILTERS, not RAISE guards: a session that has drifted to anon or
+  // off its organizer membership gets an UPDATE that matches ZERO rows and returns `error: null`. Every check
+  // would pass and the screen would report a confident "ended" over a tournament still sitting in setup —
+  // still open for registration, still competing with the real next event. tournaments is anon-readable, so
+  // re-selecting the row is true ground truth rather than a permission echo; and if the read-back ITSELF fails
+  // we refuse to claim success either way, because an unproven write is exactly what this guard exists to catch.
+  const { data, error } = await supabaseClient.from('tournaments')
+    .select('status').eq('id', tournament.id).single();
+  if (error) {
+    console.error('tdbEndTournamentUnplayed read-back', error);
+    throw new Error('Ending the tournament did not go through. Check you are signed in as an admin, then try again.');
+  }
+  if (!data || data.status !== 'completed') {
+    throw new Error('Ending the tournament did not go through. Check you are signed in as an admin, then try again.');
+  }
+}
+
 async function tdbGenerateBracket(tournament, seedOrder) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
   // Bracket-wipe race guard (defense-in-depth; the real guard is server-side in generate_bracket_atomic):
@@ -8899,9 +8938,23 @@ function buildMgCloseoutHTML() {
     + `<div class="pd-htitle">Close out</div></div>`;
   if (!t) return header + `<div class="pd-empty">No tournament to close yet.</div>`;
   const status = t.status;
-  // Setup — nothing has happened, so there is nothing to close (this is the June mistake, guarded honestly).
+  // Setup — no games, so there is no champion to crown, but there IS something to do (2026-08-04). This used
+  // to be a dead end that offered nothing: an event created and never played could only be Reset (which leaves
+  // it in setup) or Deleted (which destroys its teams and their paid flags), so organizers had no way to
+  // simply retire one — and a stale setup row keeps advertising itself on the public registration surface.
+  // The action is CONSTRUCTIVE and reversible (tdbEndTournamentUnplayed → reopen), so it is deliberately NOT
+  // Danger-zone grammar: the ordinary primary CTA the active branch below uses, one tap, no typed name. The
+  // note says what survives, the way the Reset control does.
   if (status === 'setup') {
-    return header + `<div class="pd-empty">Nothing to close yet. The tournament hasn't started.</div>`;
+    const nSetupTeams = (state.tournamentTeams || []).length;
+    const kept = nSetupTeams
+      ? `Your ${nSetupTeams} registered team${nSetupTeams === 1 ? '' : 's'}, their payments, the rosters and the rules sheet are kept.`
+      : 'Nothing is deleted.';
+    return header
+      + `<div class="pd-empty">No games were played, so there is no champion to crown.</div>`
+      + `<div class="pl-sect">End without playing</div>`
+      + `<button type="button" class="mgt-cta" data-mgco-endunplayed>End this tournament without playing it</button>`
+      + `<div class="mgt-note">Moves it to Past tournaments and closes registration. ${kept} You can reopen it from there if you need it back.</div>`;
   }
   const teams = state.tournamentTeams || [];
   // Completed — show the recorded champion (stored champion_team_id) and offer a reopen.
@@ -8928,9 +8981,17 @@ function buildMgCloseoutHTML() {
           + `<div class="mgco-name">${value}</div></div>`
         + (stored ? '' : `<button type="button" class="mgco-change" data-mgco-change>CHANGE</button>`)
       + `</div>`;
+    // 2026-08-04 WORDING FIX (not a restructure). This note used to open "The tournament finished without a
+    // champion being written down." That sentence became FALSE the moment a tournament could be ended without
+    // playing it (the setup branch above): such an event lands here with no champion and no games, and the
+    // note would claim it finished. It is stated as the plain fact now, which is true for BOTH the C80 case
+    // (a bracket that finished and forgot its winner) and an event that never played.
+    // Deliberately NOT branched on "has no matches": an event whose matches have not LOADED yet looks
+    // identical to one that never played, so a branch there would put a confident false claim on the screen
+    // during the load window. One sentence that is true either way beats a guess about which case this is.
     const record = stored ? '' : (`<button type="button" class="mgt-cta" data-mgco-record>`
         + `${choice.teamId ? 'Record ' + escapeHTML(choice.name) + ' as champion' : 'Record the champion'}</button>`
-      + `<div class="mgt-note">The tournament finished without a champion being written down. This records it and closes the tournament back up.</div>`);
+      + `<div class="mgt-note">No champion is written down for this tournament. This records one and closes it back up.</div>`);
     const reopen = `<div class="pl-sect">Reopen</div>`
       + `<button type="button" class="mgco-reopen" data-mgco-reopen>Reopen the tournament</button>`
       + `<div class="mgt-note">It's in Past tournaments now. Reopen to fix a score or re-crown. The recorded champion stays until you close again.</div>`;
@@ -9023,6 +9084,44 @@ async function mgCloseoutEnd() {
     appNotice({ title: 'Could not end the tournament', message: (err && err.message) || 'Try again.' });
   }
   repaintManage();
+}
+
+// End a tournament that never played (2026-08-04) — the setup branch's action. ONE plain confirm naming the
+// event and the team count, then tdbEndTournamentUnplayed and its read-back. Deliberately NOT the type-the-
+// name grammar the Danger zone uses: nothing is destroyed here and it reopens, so demanding typing would
+// teach that this is as serious as Delete. It is still worth a confirm — ending an event with paid teams in
+// it is not a tap to make by accident — so the dialog is danger-styled and the sentence says what is kept.
+// On a failed write NOTHING changes client-side: the notice carries the read-back's own plain-language error
+// and the screen stays exactly as it was, still offering the action.
+async function mgCloseoutEndUnplayed() {
+  if (!state.isAdmin) return;
+  const t = mgActiveTournament();
+  if (!t) return;
+  const nm = (t.name || '').trim() || 'this tournament';
+  // Only count teams that actually belong to THIS tournament — state.tournamentTeams is the active
+  // tournament's list, so a mismatched id means the count is not ours to quote (same guard as mgTournamentDelete).
+  const nTeams = (state.activeTournamentId === t.id && Array.isArray(state.tournamentTeams))
+    ? state.tournamentTeams.length : 0;
+  const kept = nTeams
+    ? ` Its ${nTeams} registered team${nTeams === 1 ? '' : 's'} and their payments are kept.`
+    : ' Nothing is deleted.';
+  const ok = await appConfirm({
+    title: 'End without playing',
+    message: `This ends ${nm} without any games being played.${kept} It moves to Past tournaments and registration closes. You can reopen it.`,
+    confirmText: 'End the tournament',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    await tdbEndTournamentUnplayed(t);
+  } catch (err) {
+    appNotice({ title: 'Could not end the tournament', message: (err && err.message) || 'Try again.' });
+    return;
+  }
+  mgCloseoutChampId = undefined;
+  await tdbRefreshTournaments();
+  repaintManage();
+  appNotice({ title: 'Tournament ended', message: `${nm} is in Past tournaments. Its teams and their payments are still there.` });
 }
 
 // Reopen a completed tournament: confirm → reopen_tournament RPC (restores bracket/pools, KEEPS the champion)
@@ -11522,6 +11621,9 @@ function attachHandlers() {
         if (mgtView === 'closeout') {
           if (e.target.closest('[data-mgco-change]')) { openMgChampionPicker(); return; }
           if (e.target.closest('[data-mgco-end]')) { void mgCloseoutEnd(); return; }
+          // 2026-08-04: the setup branch's "end without playing" CTA. Checked BEFORE data-mgco-end would ever
+          // match (it is a different attribute, so order is belt-and-braces) and inside the same closeout block.
+          if (e.target.closest('[data-mgco-endunplayed]')) { void mgCloseoutEndUnplayed(); return; }
           if (e.target.closest('[data-mgco-record]')) { void mgCloseoutRecordChampion(); return; }
           if (e.target.closest('[data-mgco-reopen]')) { void mgCloseoutReopen(); return; }
         }

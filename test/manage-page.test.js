@@ -1611,13 +1611,19 @@ describe('buildMgCloseoutHTML — deliberate close-out (pick R12)', () => {
     expect(html).toContain('data-mgco-reopen');
   });
 
-  it('setup: honest empty — nothing to close yet, no destructive controls', () => {
+  // 2026-08-04: setup is no longer an empty dead end. It still crowns nobody and still offers none of the
+  // played close-out controls, but it now carries the one thing that WAS missing — ending an event that never
+  // played, instead of forcing Delete (which destroys the teams and their paid flags). Full coverage of that
+  // action lives in test/tournament-end-unplayed.test.js; this keeps pinning what setup must NOT offer.
+  it('setup: no champion, none of the played close-out controls, but a way to end it', () => {
     setTournamentState({ id: 'T', name: 'July 2026', status: 'setup', registration_open: true });
     const html = bridge.buildCloseout();
-    expect(html).toContain("Nothing to close yet");
-    expect(html).not.toContain('data-mgco-end');
+    expect(html).toContain('No games were played, so there is no champion to crown.');
+    expect(html).toContain('data-mgco-endunplayed');
+    expect(html).not.toContain('data-mgco-end>');   // the RPC close-out CTA (close_tournament refuses setup)
     expect(html).not.toContain('data-mgco-reopen');
     expect(html).not.toContain('data-mgco-change');
+    expect(html).not.toContain('data-mgco-record');
   });
 
   it('escapes a team name with markup in the champion card', () => {
