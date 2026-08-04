@@ -679,7 +679,13 @@ describe('buildManageTournamentHTML — the tournament sub-hub (pick R2, mockup 
     setTournamentState(setupOpen);
     const html = bridge.buildTournament();
     expect(html).toContain('class="mgt-on">Open<');
-    expect(html).toContain('3 teams · close it when full');
+    // Round 2026-08-03 (README §7): subtitles carry real status. The prototype's "6 of 12
+    // teams · closes Fri 6 PM" is NOT rendered - there is no team-cap or close-time column,
+    // and Mike's ruling was to drop unbacked clauses rather than invent a figure.
+    expect(html).toContain('3 teams in');
+    expect(html).not.toMatch(/of \d+ teams/);   // no invented cap
+    expect(html).not.toMatch(/closes \w+ \d/);  // no invented close time
+    expect(html).toContain('class="mgv-rmeta"'); // the right-hand state word
   });
 
   it('shows Closed (no green word) on the Registration row when registration is closed', () => {
@@ -694,12 +700,19 @@ describe('buildManageTournamentHTML — the tournament sub-hub (pick R2, mockup 
   it('teams-and-payment + stage-honest subs read from state', () => {
     setTournamentState(setupOpen);
     const html = bridge.buildTournament();
-    expect(html).toContain('3 registered · 2 unpaid');
-    expect(html).toContain('Not drawn yet');   // pools sub in setup
-    expect(html).toContain('After pool play'); // bracket sub before pools
+    expect(html).toContain('3 teams registered · 2 teams unpaid');
+    expect(html).not.toContain('collected');   // no invented money total
+    // Round 2026-08-03: the pools/bracket subs carry real status plus a state word.
+    expect(html).toContain('Not drawn');                       // pools sub in setup
+    expect(html).toContain('>To do<');                         // its state word
+    expect(html).toContain('opens when pool play finishes');   // bracket sub before pools
+    expect(html).toContain('>Locked<');                        // its state word
     expect(html).toContain('4s co-ed · $80');  // settings one-liner from real fields
-    expect(html).toContain('Edit what players read on the Rules page');
-    expect(html).toContain('End the tournament · crown the champion');
+    // Rules sub reports real content state. It deliberately does NOT date the sheet: tournaments
+    // .updated_at moves on any field write, so "updated Jul 28" would be a lie.
+    expect(html).toContain('Not written yet');
+    expect(html).not.toMatch(/updated \w+ \d/);
+    expect(html).toContain('Crowns the champion and archives the event');
   });
 
   it('honest empty state when there is no tournament to manage', () => {
@@ -943,16 +956,21 @@ describe('buildMgTeamsHTML — Teams & payment list (pick R8, mockup tp-a)', () 
     expect(bridge.buildMgTeams()).toContain('Alex · Bailey'); // members override the roster jsonb
   });
 
-  it('shows the PAID / TAP WHEN PAID tag as a tappable toggle (never a bare dot)', () => {
+  // Round 2026-08-03 (README §8): the row-level PAID / TAP WHEN PAID toggle is GONE. It was a
+  // hit-sized button sitting next to the chevron that opens the team, so a mis-tap flipped a
+  // payment. Rows now only REPORT state; marking paid moved into the team popup.
+  it('reports paid state on the row and no longer carries the toggle', () => {
     setTeamsFixture();
     const html = bridge.buildMgTeams();
-    expect(html).toContain('data-mgtp-paid="t1"');
-    expect(html).toContain('data-mgtp-paid="t2"');
-    expect(html).toContain('mgtp-tag paid');   // t1 is paid
-    expect(html).toContain('>PAID<');
-    expect(html).toContain('mgtp-tag unpaid');  // t2 is not
-    expect(html).toContain('>TAP WHEN PAID<');
-    expect(html).not.toMatch(/mt-pip|•/);       // no bare dots
+    expect(html).toContain('mgv-pmeta is-paid');    // t1 is paid
+    expect(html).toContain('>Paid<');
+    expect(html).toContain('mgv-pmeta is-unpaid');  // t2 is not
+    expect(html).toContain('>Unpaid<');
+    // The whole row opens the team; the destructive toggle is not on it.
+    expect(html).toContain('data-mgtp-team="t1"');
+    expect(html).not.toContain('data-mgtp-paid=');
+    expect(html).not.toContain('TAP WHEN PAID');
+    expect(html).not.toMatch(/mt-pip|•/);           // no bare dots
   });
 
   it('offers the dashed "Add a team yourself" affordance', () => {

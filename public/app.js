@@ -7995,12 +7995,29 @@ const MGT_STAGE_SUBLINE = { setup: 'Setup · registration phase', pools: 'Pool p
 const MGT_SUB_TITLES = { registration: 'Registration', teams: 'Teams & payment', pools: 'Pools & schedule', bracket: 'Bracket & scores', settings: 'Event settings', rules: 'Rules sheet', closeout: 'Close out' };
 
 // One sub-hub row. Mirrors mgRowHTML but carries data-mgt-view (opens a tournament sub-view) instead of
-// data-mg-area. subHTML is emitted RAW — callers pre-escape any user-derived content.
-function mgtRowHTML(view, name, subHTML) {
+// data-mg-area. subHTML is emitted RAW — callers pre-escape any user-derived content. metaHTML is the
+// right-hand state word (.mgv-rmeta, round 2026-08-03) and is optional: .mg-row is space-between with two
+// children, so styles.css repacks the row left (.mg-row:has(.mgv-rmeta)) and pushes the word to the edge.
+function mgtRowHTML(view, name, subHTML, metaHTML) {
+  const meta = metaHTML ? `<span class="mgv-rmeta">${metaHTML}</span>` : '';
   return `<a class="mg-row" data-mgt-view="${view}">
       <div class="mg-rb"><div class="mg-rn">${name}</div><div class="mg-rs">${subHTML}</div></div>
-      ${MG_CHEV}
+      ${meta}${MG_CHEV}
     </a>`;
+}
+
+// "First to 21, win by 2 (cap 25)" from a scoringRulesFor() row. Shared by the sub-hub Event-settings
+// subtitle, the pools setup preset and the score popup's context line.
+function mgRuleLine(r) {
+  return 'First to ' + r.target + (r.winBy2 ? ', win by 2' : '') + (r.cap != null ? ' (cap ' + r.cap + ')' : '');
+}
+// "Jul 22" for a stored timestamp. Returns '' on a missing/unparseable value so the caller drops the clause
+// rather than printing "Invalid Date".
+function mgShortDate(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '';
+  try { return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch (_) { return ''; }
 }
 
 // The plain sub-hub (mockup t-b): header (back-to-Manage + the active tournament name, Barlow 22 via
@@ -8017,27 +8034,75 @@ function buildManageTournamentHTML() {
   const nTeams = teams.length;
   const unpaid = teams.filter((x) => !x.paid).length;
   const stage = MGT_STAGE_SUBLINE[t.status] || MGT_STAGE_SUBLINE.setup;
+  // Round 2026-08-03: every subtitle carries REAL status and every row a right-hand state word. Mike's
+  // ruling on the prototype's "6 of 12 teams · closes Fri 6 PM" and "$480 of $640 collected": there is no
+  // team-cap column, no registration-close-time column, and buy_in is free display TEXT ("$80 per team"),
+  // not a number — so those clauses are DROPPED rather than filled with an invented figure. Every clause
+  // below reads a value that is actually loaded in state.
+  const pools = Array.isArray(state.tournamentPools) ? state.tournamentPools : [];
+  const matches = Array.isArray(state.tournamentMatches) ? state.tournamentMatches : [];
+  const poolMatches = matches.filter((m) => (m.phase ? m.phase === 'pool' : !!m.pool_id));
+  const mainMatches = matches.filter((m) => m.phase === 'main');
+  const finalCt = (list) => list.filter((m) => m.status === 'final').length;
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const nets = Number(t.net_count) > 0 ? Number(t.net_count) : 0;
+
   const regSub = t.registration_open
-    ? `<span class="mgt-on">Open</span> · ${nTeams} team${nTeams === 1 ? '' : 's'} · close it when full`
-    : 'Closed';
-  const teamsSub = `${nTeams} registered · ${unpaid ? unpaid + ' unpaid' : 'all paid'}`;
-  const poolsSub = t.status === 'setup' ? 'Not drawn yet' : (t.status === 'pools' ? 'Pool play underway' : 'Pools complete');
-  const bracketSub = t.status === 'bracket' ? 'Bracket underway' : (t.status === 'completed' ? 'Complete' : 'After pool play');
+    ? `<span class="mgt-on">Open</span> · ${plural(nTeams, 'team')} in`
+    : `Closed · ${plural(nTeams, 'team')} in`;
+  const teamsSub = nTeams
+    ? `${plural(nTeams, 'team')} registered · ${unpaid ? plural(unpaid, 'team') + ' unpaid' : 'all paid'}`
+    : 'No teams yet';
+  let poolsSub, poolsMeta;
+  if (!pools.length) { poolsSub = nets ? `Not drawn · ${plural(nets, 'net')} ready` : 'Not drawn'; poolsMeta = 'To do'; }
+  else if (!poolMatches.length) { poolsSub = `Drawn, not started · ${plural(pools.length, 'pool')}`; poolsMeta = 'Ready'; }
+  else {
+    const done = finalCt(poolMatches);
+    poolsSub = `${done} of ${plural(poolMatches.length, 'game')} final`;
+    poolsMeta = done === poolMatches.length ? 'Done' : 'Live';
+  }
+  let bracketSub, bracketMeta;
+  if (!mainMatches.length) { bracketSub = 'Double elimination · opens when pool play finishes'; bracketMeta = 'Locked'; }
+  else {
+    const done = finalCt(mainMatches);
+    bracketSub = `${done} of ${plural(mainMatches.length, 'game')} final`;
+    bracketMeta = (t.status === 'completed' || done === mainMatches.length) ? 'Done' : 'Live';
+  }
   const size = Number(t.team_size) || 4;
   const buyIn = (t.buy_in != null && String(t.buy_in).trim()) ? String(t.buy_in).trim() : '';
-  const settingsSub = `${size}s co-ed${buyIn ? ' · ' + escapeHTML(buyIn) : ''} · scoring targets &amp; caps`;
-  const rows = mgtRowHTML('registration', 'Registration', regSub)
-    + mgtRowHTML('teams', 'Teams &amp; payment', teamsSub)
-    + mgtRowHTML('pools', 'Pools &amp; schedule', poolsSub)
-    + mgtRowHTML('bracket', 'Bracket &amp; scores', bracketSub)
+  const settingsSub = `${size}s co-ed${buyIn ? ' · ' + escapeHTML(buyIn) : ''} · ${escapeHTML(mgRuleLine(scoringRulesFor('main', t)))}`;
+  // "N sections" is real: rulesToHTML treats a "## " line as a section heading, so the count is the sheet's
+  // own structure. The prototype's "updated Jul 28" is NOT rendered — tournaments.updated_at moves on any
+  // field write, so dating the rules from it would be a lie.
+  const rulesText = typeof t.rules === 'string' ? t.rules : '';
+  const rulesSections = rulesText ? rulesText.split(/\r?\n/).filter((l) => l.trim().startsWith('## ')).length : 0;
+  const rulesSub = rulesText
+    ? (rulesSections ? `${plural(rulesSections, 'section')} · live on the Rules page` : 'Live on the Rules page')
+    : 'Not written yet';
+  const rows = mgtRowHTML('registration', 'Registration', regSub, t.registration_open ? 'Open' : 'Closed')
+    + mgtRowHTML('teams', 'Teams &amp; payment', teamsSub, unpaid ? `${unpaid} unpaid` : (nTeams ? 'All paid' : ''))
+    + mgtRowHTML('pools', 'Pools &amp; schedule', poolsSub, poolsMeta)
+    + mgtRowHTML('bracket', 'Bracket &amp; scores', bracketSub, bracketMeta)
     + mgtRowHTML('settings', 'Event settings', settingsSub)
-    + mgtRowHTML('rules', 'Rules sheet', 'Edit what players read on the Rules page')
-    + mgtRowHTML('closeout', 'Close out', 'End the tournament · crown the champion');
-  // Full reset (2026-07-26). Lives HERE, on the sub-hub, rather than inside Pools or Bracket, because the
-  // whole point is escaping a bad state — it has to be reachable at every status, including 'completed'.
-  // Same locked danger grammar as Reset pools / Reset the bracket (mgts-danger + note + type-name confirm).
-  const danger = `<button type="button" class="mgts-danger" data-mgt-fullreset>Reset the whole tournament</button>`
-    + `<div class="mgps-note">Clears the pools, the schedule, every score and the bracket, and puts this back to setup. Your registered teams and their payments are kept. Type the tournament name to confirm.</div>`;
+    + mgtRowHTML('rules', 'Rules sheet', rulesSub)
+    + mgtRowHTML('closeout', 'Close out', 'Crowns the champion and archives the event', t.status === 'completed' ? 'Done' : 'Not yet');
+  // Danger zone (round 2026-08-03) — replaces the loose reset button. Full reset lives HERE, on the sub-hub,
+  // rather than inside Pools or Bracket, because the whole point is escaping a bad state: it has to be
+  // reachable at every status, including 'completed'. Delete sits beside it with what each one takes with
+  // it spelled out; both keep the locked type-the-name grammar. NOTE: data-mgt-delete is rendered but NOT
+  // wired — the delete server operation is the next slice's.
+  const danger = `<div class="pl-sect mgv-dsect" aria-hidden="true"></div>`
+    + `<div class="mgv-danger">`
+      + `<div class="mgv-drow"><span class="mgv-dtxt">`
+        + `<span class="mgv-dt">Reset the whole tournament</span>`
+        + `<span class="mgv-dd">Clears the pools, the schedule, every score and the bracket, and puts this back to setup. Registered teams and their payments are kept.</span>`
+      + `</span><button type="button" class="mgts-danger mgv-dbtn" data-mgt-fullreset>Reset</button></div>`
+      + `<div class="mgv-drow"><span class="mgv-dtxt">`
+        + `<span class="mgv-dt">Delete this tournament</span>`
+        + `<span class="mgv-dd">Removes the event, its teams, their payments and every result. Players lose it too, and it cannot be undone.</span>`
+      + `</span><button type="button" class="mgts-danger mgv-dbtn mgv-del" data-mgt-delete>Delete</button></div>`
+      + `<div class="mgv-dnote">Both ask you to type the tournament name before anything happens.</div>`
+    + `</div>`;
   return header + `<div class="mgt-stage">${escapeHTML(stage)}</div>` + rows + danger;
 }
 
@@ -8700,9 +8765,12 @@ function buildMgTeamsHTML() {
     const preview = first.length ? escapeHTML(first.join(' · ')) : 'No players yet';
     const paid = !!tm.paid;
     const idAttr = escapeHTMLText(String(tm.id));
+    // Round 2026-08-03: the row no longer carries the PAID / TAP WHEN PAID toggle (a hit-sized button sat
+    // right next to the chevron that opens the team). It only REPORTS state now — the toggle moved into the
+    // team popup, next to the fee it settles.
     return `<div class="mgtp-row" data-mgtp-team="${idAttr}">
         <div class="mgtp-tn"><div class="mgtp-nm">${escapeHTML(tm.name || 'Team')}</div><div class="mgtp-rs">${preview}</div></div>
-        <button type="button" class="mgtp-tag ${paid ? 'paid' : 'unpaid'}" data-mgtp-paid="${idAttr}" aria-label="${paid ? 'Paid. Tap to unmark' : 'Tap when this team has paid'}">${paid ? 'PAID' : 'TAP WHEN PAID'}</button>
+        <span class="mgv-pmeta ${paid ? 'is-paid' : 'is-unpaid'}">${paid ? 'Paid' : 'Unpaid'}</span>
         ${MG_CHEV}
       </div>`;
   }).join('');
@@ -8882,6 +8950,71 @@ function openMgTeamSheet(teamId) {
   setTimeout(() => { const n = document.getElementById('mgts-name'); if (n) { try { n.focus({ preventScroll: true }); } catch (_) { try { n.focus(); } catch (_e) {} } } }, 60);
 }
 
+// ── The team payment popup (#team-pay-modal, round 2026-08-03) ───────────────────────────────────────
+// Tapping a team on Teams & payment now opens a CENTRED popup on the shared dialog kit (same card geometry
+// as #player-edit-modal): identity in the header with the payment state beside the close, roster chips, the
+// fee, the paid action sat under the fee it settles, and a quiet Withdraw + Done footer. Body-level like the
+// other sheets, so the 15s poll / partialRender can never wipe it.
+// UNWIRED THIS SLICE (next slice owns the writes): data-mgtp-paid ("Mark as paid") and data-mgtp-withdraw.
+// Both render with their hooks; neither has a handler branch below.
+function buildMgTeamPayModalHTML(team) {
+  if (!team) return '';
+  const t = mgActiveTournament();
+  const paid = !!team.paid;
+  const idAttr = escapeHTMLText(String(team.id));
+  const names = mgTeamRosterNames(team);
+  // "Registered Jul 22" from teams.created_at. The prototype's "· captain Harper Vale" is DROPPED: the
+  // loaded team_members shape (tdbListTeamMembers) carries no is_captain, so there is no captain to name.
+  const reg = mgShortDate(team.created_at);
+  const sub = reg ? `<span class="mgv-tsub">Registered ${escapeHTML(reg)}</span>` : '';
+  const roster = names.length
+    ? `<div class="mgv-troster">${names.map((n) => `<span class="mgv-tr">${escapeHTML(n)}</span>`).join('')}</div>`
+    : `<div class="mgv-tfn">No players on this roster yet.</div>`;
+  // buy_in is free display TEXT ("$80 per team"), so it prints as written — never parsed into a number.
+  // No buy-in set = no fee block at all rather than a made-up amount.
+  const buyIn = (t && t.buy_in != null && String(t.buy_in).trim()) ? String(t.buy_in).trim() : '';
+  const venmo = !!(t && /^https?:\/\//i.test(String(t.venmo_link || '')));
+  const fee = buyIn
+    ? `<div class="mgv-tf"><span class="mgv-tlabel">Team fee</span><div class="mgv-tfee">`
+      + `<span class="mgv-tfv">${escapeHTML(buyIn)}</span>`
+      + `<span class="mgv-tfn">${venmo ? 'Cash or Venmo at the courts' : 'Cash at the courts'}</span>`
+      + `</div></div>`
+    : '';
+  return `<div class="popup-card card mgv-tcard" role="dialog" aria-modal="true" aria-labelledby="team-pay-title">`
+    + `<div class="mgv-thead"><span class="mgv-twho"><h3 id="team-pay-title">${escapeHTML(team.name || 'Team')}</h3>${sub}</span>`
+      + `<span class="mgv-pmeta ${paid ? 'is-paid' : 'is-unpaid'}">${paid ? 'Paid' : 'Unpaid'}</span>`
+      + `<button type="button" class="mgv-tx" data-mgtp-close aria-label="Close">&times;</button></div>`
+    + `<div class="mgv-tbody">`
+      + `<div class="mgv-tf"><span class="mgv-tlabel">Roster</span>${roster}</div>`
+      + fee
+      + `<button type="button" class="mgv-tpay" data-mgtp-paid="${idAttr}">${paid ? 'Mark as unpaid' : 'Mark as paid'}</button>`
+      + `<div class="mgv-tnote">Logged in the activity log with your name.</div>`
+    + `</div>`
+    + `<div class="mgv-tfoot">`
+      + `<button type="button" class="mgv-twd" data-mgtp-withdraw="${idAttr}">Withdraw team</button>`
+      + `<button type="button" class="mgv-tdone" data-mgtp-close>Done</button>`
+    + `</div></div>`;
+}
+
+function closeMgTeamPayModal() { const el = document.getElementById('team-pay-modal'); if (el) el.remove(); }
+
+function openMgTeamPayModal(teamId) {
+  const team = mgFindTeam(teamId);
+  if (!team || !state.isAdmin) return;
+  closeMgTeamPayModal();
+  const el = document.createElement('div');
+  el.id = 'team-pay-modal';
+  el.className = 'popup-overlay';
+  el.style.display = 'flex';
+  el.innerHTML = buildMgTeamPayModalHTML(team);
+  document.body.appendChild(el);
+  // Body-level → outside #app-content's delegated listeners, so it binds its own. Only open/close is wired
+  // this slice; the paid + withdraw branches are deliberately absent (see the note above).
+  el.addEventListener('click', (ev) => {
+    if (ev.target === el || ev.target.closest('[data-mgtp-close]')) { closeMgTeamPayModal(); return; }
+  });
+}
+
 // ── Task 7 (pick R9): Pools & schedule admin — score on the schedule ──────────────────────────────────
 // The public Pools page grammar (pl-* tabs + Seeding, standings-lite, net-hairline games) reused inside
 // #tab-manage with admin verbs: SCORE on unscored rows, tap-to-update on live, quiet EDIT on finals — all
@@ -8913,14 +9046,17 @@ function mgPoolsSetupHTML(t, teams, pools) {
     const size = Number(t.team_size) || 4;
     const pr = scoringRulesFor('pool', t);
     const br = scoringRulesFor('main', t);
-    const rline = (r) => 'First to ' + r.target + (r.winBy2 ? ', win by 2' : '') + (r.cap != null ? ' (cap ' + r.cap + ')' : '');
-    const preset = [`${size}s co-ed`, `Pool: ${rline(pr)}`, `Bracket: ${rline(br)}`];
+    const preset = [`${size}s co-ed`, `Pool: ${mgRuleLine(pr)}`, `Bracket: ${mgRuleLine(br)}`];
     const enough = teamCt >= 2;
+    // Round 2026-08-03: the two full-width 40px grey text boxes for a single digit become ONE framed box
+    // with a row per count — label left, pill stepper right, native spinners removed by the CSS. The input
+    // ids are untouched (mgPoolsDraw still reads #mgps-poolcount / #mgps-nets), so the draw path is unchanged.
     return `<div class="pl-sect">Draw setup</div>`
-      + `<div class="pk-fld"><label class="pk-fl" for="mgps-poolcount">Pools</label>`
-        + `<input class="pk-fv" id="mgps-poolcount" type="number" min="1" inputmode="numeric" value="${escapeHTMLText(String(defPools))}" /></div>`
-      + `<div class="pk-fld"><label class="pk-fl" for="mgps-nets">Nets</label>`
-        + `<input class="pk-fv" id="mgps-nets" type="number" min="1" inputmode="numeric" value="${escapeHTMLText(String(defNets))}" /></div>`
+      + `<div class="mgv-nbox">`
+        + mgpStepperFieldHTML('mgps-poolcount', 'Pools', defPools, 'pools')
+        + mgpStepperFieldHTML('mgps-nets', 'Nets', defNets, 'nets')
+      + `</div>`
+      + `<div class="mgps-note mgv-nhint" id="mgps-hint">${escapeHTML(mgPoolsDrawHint(teamCt, defPools, defNets))}</div>`
       + `<div class="pl-sect">Format</div>`
       + preset.map((p) => `<div class="mgps-sub">${escapeHTML(p)}</div>`).join('')
       + `<div class="mgps-note">Edit these in Event settings.</div>`
@@ -8931,6 +9067,51 @@ function mgPoolsSetupHTML(t, teams, pools) {
     + pools.map((p) => mgPoolTeamsBlockHTML(p, teams, null, false)).join('')
     + `<button type="button" class="mgt-cta" data-mgps-start>Start pool play</button>`
     + `<button type="button" class="mgps-quiet" data-mgps-redraw>Draw again</button>`;
+}
+
+// One count row inside the framed draw-setup box: label left, pill stepper right. The INPUT keeps its
+// production id (#mgps-poolcount / #mgps-nets) and min="1" so mgPoolsDraw reads it exactly as before —
+// the ± buttons only write into it. Native spinners are killed in CSS (.mgv-sv appearance:textfield).
+function mgpStepperFieldHTML(id, label, value, noun) {
+  const v = Math.max(1, Math.floor(Number(value) || 1));
+  return `<div class="pk-fld mgv-nfld"><label class="pk-fl" for="${id}">${escapeHTML(label)}</label>`
+    + `<span class="mgv-step">`
+      + `<button type="button" class="mgv-sb" data-mgps-dec="${id}" aria-label="Fewer ${escapeHTMLText(noun)}">&minus;</button>`
+      + `<input class="pk-fv mgv-sv" id="${id}" type="number" min="1" inputmode="numeric" value="${escapeHTMLText(String(v))}" />`
+      + `<button type="button" class="mgv-sb" data-mgps-inc="${id}" aria-label="More ${escapeHTMLText(noun)}">+</button>`
+    + `</span></div>`;
+}
+
+// The line under the draw-setup box, stated as the RESULT of the two counts: "6 teams split into 2 pools of
+// 3, playing across 3 nets." Mirrors tdbDrawPools' own clamp (every pool gets at least 2 teams), so it
+// promises what the draw will actually do rather than echoing the field. Uneven splits read "3 or 4".
+function mgPoolsDrawHint(teamCt, pools, nets) {
+  const n = Math.max(0, Math.floor(Number(teamCt) || 0));
+  const p = Math.max(1, Math.floor(Number(pools) || 1));
+  const k = Math.max(1, Math.floor(Number(nets) || 1));
+  const netPart = k === 1 ? 'playing on 1 net' : `playing across ${k} nets`;
+  if (n < 2) return `${n} team${n === 1 ? '' : 's'} so far, ${netPart}.`;
+  const real = Math.max(1, Math.min(p, Math.floor(n / 2)));
+  const base = Math.floor(n / real);
+  const rem = n % real;
+  return `${n} teams split into ${real} pool${real === 1 ? '' : 's'} of ${rem ? base + ' or ' + (base + 1) : base}, ${netPart}.`;
+}
+
+// A ± tap: clamp at min 1, write straight into the input and re-state the hint IN PLACE. No repaint — a
+// container swap would re-read the tournament defaults and throw away what the admin just dialled in.
+function mgpStepCount(inputId, d) {
+  const el = document.getElementById(inputId);
+  if (!el) return;
+  el.value = String(Math.max(1, Math.floor(Number(el.value) || 1) + d));
+  mgpSyncDrawHint();
+}
+function mgpSyncDrawHint() {
+  const hint = document.getElementById('mgps-hint');
+  if (!hint) return;
+  const pc = document.getElementById('mgps-poolcount');
+  const nc = document.getElementById('mgps-nets');
+  const teamCt = (Array.isArray(state.tournamentTeams) ? state.tournamentTeams : []).length;
+  hint.textContent = mgPoolsDrawHint(teamCt, pc ? pc.value : 1, nc ? nc.value : 1);
 }
 
 // One pool's teams (each tappable → the T6 openMgTeamSheet for move/edit). Shared by the drawn-not-started
@@ -10256,6 +10437,9 @@ function attachHandlers() {
         if (listEl) listEl.innerHTML = mgckListHTML(checkinConsoleModel(mgckRows(), mgckFilter, mgckQ));
         return;
       }
+      // Draw setup: typing straight into a count input re-states the hint line under the box. Text only —
+      // the input itself is never touched, so focus and caret survive.
+      if (e.target && (e.target.id === 'mgps-poolcount' || e.target.id === 'mgps-nets')) { mgpSyncDrawHint(); return; }
       if (!e.target || e.target.id !== 'mg-player-search') return;
       mgPlayerQuery = e.target.value || '';
       const listEl = document.getElementById('mgp-list');
@@ -10398,16 +10582,14 @@ function attachHandlers() {
       // (data-mgr-copy) act inline. All container-swap repaints (mgtView survives). Checked BEFORE the generic
       // data-mg-area so these never fall through to nav; the hub's own back carries data-mg-area="lead".
       if (manageView === 'tournament') {
-        // Teams & payment (Task 6, pick R8): the tag toggles paid WITHOUT opening the sheet (checked first,
-        // even though it sits inside the row); the row opens the body-level edit sheet; the dashed row adds a
-        // team by name. The sheet binds its own listeners (body-level → poll-clobber-immune). The teams-list
-        // header's back button carries data-mgt-back (handled below → returns to the sub-hub).
+        // Teams & payment (Task 6, pick R8; re-cut by the 2026-08-03 round): the row-level PAID toggle is
+        // gone — the row only reports state — and tapping a team opens the body-level #team-pay-modal, which
+        // binds its own listeners (poll-clobber-immune). The dashed row still adds a team by name. The
+        // teams-list header's back button carries data-mgt-back (handled below → returns to the sub-hub).
         if (mgtView === 'teams') {
-          const paidTag = e.target.closest('[data-mgtp-paid]');
-          if (paidTag) { void mgTeamTogglePaid(paidTag.getAttribute('data-mgtp-paid'), paidTag); return; }
           if (e.target.closest('[data-mgtp-add]')) { void mgTeamAddPrompt(); return; }
           const teamRow = e.target.closest('[data-mgtp-team]');
-          if (teamRow) { openMgTeamSheet(teamRow.getAttribute('data-mgtp-team')); return; }
+          if (teamRow) { openMgTeamPayModal(teamRow.getAttribute('data-mgtp-team')); return; }
         }
         // Pools & schedule (Task 7, pick R9): tab switch + score-sheet open + the two-step draw/start + Pool
         // controls (move team → the T6 sheet, edit nets, reset). Checked BEFORE the generic hub rows so a tab
@@ -10417,6 +10599,12 @@ function attachHandlers() {
           if (psTab) { mgpPoolFilter = psTab.getAttribute('data-mgps-tab'); repaintManage(); return; }
           const psScore = e.target.closest('[data-mgps-score]');
           if (psScore) { openMgScoreSheet(psScore.getAttribute('data-mgps-score')); return; }
+          // Draw-setup steppers (round 2026-08-03): in-place ± on the count inputs, min 1. Checked before
+          // Draw so a ± tap never falls through to the CTA.
+          const psInc = e.target.closest('[data-mgps-inc]');
+          if (psInc) { mgpStepCount(psInc.getAttribute('data-mgps-inc'), 1); return; }
+          const psDec = e.target.closest('[data-mgps-dec]');
+          if (psDec) { mgpStepCount(psDec.getAttribute('data-mgps-dec'), -1); return; }
           if (e.target.closest('[data-mgps-draw]')) { void mgPoolsDraw(); return; }
           if (e.target.closest('[data-mgps-start]')) { void mgPoolsStart(); return; }
           if (e.target.closest('[data-mgps-redraw]')) { void mgPoolsRedraw(); return; }

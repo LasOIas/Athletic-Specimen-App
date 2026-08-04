@@ -258,27 +258,35 @@ describe('the Reset the whole tournament control on the sub-hub', () => {
     });
   });
 
-  it('reuses the locked danger grammar and does not become a sub-view row', () => {
+  // Design round 2026-08-03 (README §7): the loose reset button became a bordered Danger zone
+  // holding TWO rows, Reset and Delete, each with its own description and right-aligned button.
+  it('lives in the Danger zone beside Delete, and does not become a sub-view row', () => {
     const { bridge } = loadApp();
     const html = bridge.hub({ id: JULY, name: 'July 26 2026 tournament', status: 'pools' }, teams);
-    expect(html).toContain('class="mgts-danger" data-mgt-fullreset');
-    expect(html).toContain('class="mgps-note"');
-    // It must NOT carry data-mgt-view, or tapping it would open a sub-view instead of resetting.
+    expect(html).toContain('class="mgv-danger"');
+    expect(html).toContain('data-mgt-fullreset');
+    expect(html).toContain('data-mgt-delete');   // the destructive sibling shares the box
+    // Neither may carry data-mgt-view, or tapping would open a sub-view instead of acting.
     expect(html).not.toContain('data-mgt-view="fullreset"');
+    expect(html).not.toContain('data-mgt-view="delete"');
     // The seven real sub-view rows are still exactly seven.
     ['registration', 'teams', 'pools', 'bracket', 'settings', 'rules', 'closeout'].forEach((v) =>
       expect(html.split(`data-mgt-view="${v}"`).length - 1).toBe(1));
   });
 
-  it('says what survives, in plain copy with no em dash and no emoji', () => {
+  it('says what each action takes and keeps, in plain copy with no em dash and no emoji', () => {
     const { bridge } = loadApp();
     const html = bridge.hub({ id: JULY, name: 'July 26 2026 tournament', status: 'pools' }, teams);
-    const note = html.slice(html.indexOf('class="mgps-note"'));
-    expect(note).toContain('registered teams and their payments are kept');
-    expect(note).toContain('Type the tournament name to confirm');
-    expect(note).not.toContain('—');   // em dash — banned in app copy
-    expect(note).not.toContain('&mdash;');  // and its entity form (the July sweep missed these)
-    expect(note).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u); // no emoji
+    const zone = html.slice(html.indexOf('class="mgv-danger"'));
+    // Reset is the recoverable one: it says what SURVIVES.
+    expect(zone).toMatch(/[Rr]egistered teams and their payments are kept/);
+    // Delete is the irreversible one: it must say so, and say it takes the players' copy too.
+    expect(zone).toContain('cannot be undone');
+    expect(zone).toMatch(/[Bb]oth ask you to type the tournament name/);
+    // The copy law still holds on the new strings (the handoff shipped 4 em dashes here).
+    expect(zone).not.toContain('—');
+    expect(zone).not.toContain('&mdash;');
+    expect(zone).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u); // no emoji
   });
 
   it('is absent when there is no tournament to reset', () => {
