@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.04.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.04.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -281,11 +281,18 @@ function findInlineEditRowByPlayerKey(playerKey) {
     // checked; the disabled guard is belt-and-suspenders (a disabled <button> emits no click).
     const regPageSubmit = e.target.closest('[data-role="reg-page-submit"]');
     if (regPageSubmit) { e.preventDefault(); if (!regPageSubmit.hasAttribute('disabled')) submitRegisterForm(regPageSubmit); return; }
+    // The success screen no longer offers to CLAIM a spot (Mike, 2026-08-04): a signed-in
+    // registrant is attached automatically, so the only people who see a CTA here are the ones
+    // who cannot be matched yet. Two honest reasons, two destinations - never the claim search.
+    const regPageName = e.target.closest('[data-role="reg-page-name"]');
+    if (regPageName) { e.preventDefault(); openNameFillOverlay(); return; }
     const regPageClaim = e.target.closest('[data-role="reg-page-claim"]');
     if (regPageClaim) {
       e.preventDefault();
-      if (state.authSession) { openClaimPage(); }
-      else { claimIntent = true; openAuthPage(); }
+      // Signed out: sign in, and land back here attached. `claimIntent` is what makes the
+      // post-auth flow resume instead of dumping them on the hub.
+      claimIntent = true;
+      openAuthPage();
       return;
     }
 
@@ -4172,11 +4179,17 @@ async function submitRegisterForm(btn) {
   regAutoAttached = false;
   if (state.authSession && accountName && accountName.first && accountName.last) {
     try {
-      const res = await connectProfileByName(accountName.first, accountName.last);
-      regAutoAttached = !!(res && Number(res.tournament_linked) > 0);
+      await connectProfileByName(accountName.first, accountName.last);
+      // ATTACHED is a STATE, not a row count. The first cut gated this on
+      // `tournament_linked > 0` and that was wrong: the RPC only updates rows WHERE
+      // profile_id IS NULL, so a person already linked from a previous event changes ZERO
+      // rows - which is success, not failure. Mike hit exactly that (his own row was already
+      // linked to his profile) and still got asked to claim a spot he already owned.
+      // Signed in + a full name + the connect returned = you are you. The server links what
+      // it can and leaves what is already yours alone; either way you are on the roster.
+      regAutoAttached = true;
     } catch (err) {
-      // Never block the payoff: the team IS registered. The success screen falls back to the
-      // manual claim affordance, which is exactly the pre-2026-08-04 behaviour.
+      // Never block the payoff: the team IS registered. Fall back to the sign-in prompt.
       console.error('auto-attach after registration', err);
     }
   }
@@ -4206,7 +4219,11 @@ function buildRegisterSuccessHTML(teamName) {
         ${regAutoAttached
           ? `<div class="pd-reg-wonsub">You're on the roster. Your games show up under My Team.</div>
         <button type="button" class="pd-reg-cta" data-nav-tab="myteam">Go to My Team</button>`
-          : `<button type="button" class="pd-reg-cta" data-role="reg-page-claim">Claim your spot on ${nm}</button>`}
+          : (state.authSession
+            ? `<div class="pd-reg-wonsub">Add your name so we can put you on the roster.</div>
+        <button type="button" class="pd-reg-cta" data-role="reg-page-name">Add your name</button>`
+            : `<div class="pd-reg-wonsub">Sign in to see your pool, your games and your results.</div>
+        <button type="button" class="pd-reg-cta" data-role="reg-page-claim">Sign in</button>`)}
         <button type="button" class="pd-reg-backlink" data-tn-view="hub">Back to tournament</button>
       </div>
     </section>`;

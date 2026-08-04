@@ -12,8 +12,9 @@
 // user was left staring at a "Claim your spot on X" tap for a row the app could have matched
 // by name on its own.
 //
-// These tests pin the fix at the seam that broke: the connect fires AFTER the register write,
-// and the success screen only claims attachment when the server says a row was actually linked.
+// These tests pin the fix at the seam that broke: the connect fires AFTER the register write.
+// They also pin the SECOND bug found the same day - gating attachment on rows-changed, which
+// misread an already-linked person as unattached.
 // Duplicate names are deliberately NOT defended against - Mike: "dont worry about duplicated no
 // one has both the same first and last names." The RPC still reports `collision` when a
 // same-name row belongs to SOMEONE ELSE, and that path is untouched.
@@ -21,7 +22,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-// `linked` is what connect_profile_by_name reports back (tournament_linked > 0 = attached).
+// `linked` is the row count connect_profile_by_name reports. It is deliberately NOT what decides
+// attachment - zero can mean 'already linked'. See the zero-rows test below.
 // `rpcThrows` proves a failed link never costs the user their registration.
 function loadApp({ linked = 1, rpcThrows = false, signedIn = true, named = true } = {}) {
   const pureSrc = readFileSync(new URL('../public/pure.js', import.meta.url), 'utf8');
@@ -103,13 +105,20 @@ function loadApp({ linked = 1, rpcThrows = false, signedIn = true, named = true 
         regAutoAttached = false;
         if (state.authSession && accountName && accountName.first && accountName.last) {
           try {
-            const res = await connectProfileByName(accountName.first, accountName.last);
-            regAutoAttached = !!(res && Number(res.tournament_linked) > 0);
+            await connectProfileByName(accountName.first, accountName.last);
+            regAutoAttached = true; // a STATE, not a row count - see the app.js comment
           } catch (err) { /* swallowed by design - the team IS registered */ }
         }
         return regAutoAttached;
       },
-      successHTML: (team, attached) => { regAutoAttached = attached; return buildRegisterSuccessHTML(team); },
+      // The render reads state.authSession directly, so the harness must set it - the CTA
+      // differs for a signed-out registrant (sign in) and a signed-in one who could not be
+      // matched (add your name).
+      successHTML: (team, attached, signedIn) => {
+        regAutoAttached = attached;
+        state.authSession = signedIn ? { user: { id: 'u1' } } : null;
+        return buildRegisterSuccessHTML(team);
+      },
     };
   `;
   vm.createContext(sandbox);
@@ -154,11 +163,13 @@ describe('auto-attach after registering (the claim tap this replaces)', () => {
     expect(call.args).toEqual({ p_first: 'Jordan', p_last: 'Reyes' });
   });
 
-  it('does NOT claim attachment when the server linked nothing', async () => {
-    // The name on the roster did not match the account name. Saying "you're on the roster"
-    // here would be the exact lie this project rates worst.
+  // THE BUG MIKE ACTUALLY HIT. His `Mikey Olas` row was ALREADY linked to his profile from a
+  // previous event, and connect_profile_by_name only updates rows WHERE profile_id IS NULL, so
+  // it changed ZERO rows. The first cut read that as "not attached" and asked him to claim a
+  // spot he already owned. Zero linked means "nothing left to link", which is success.
+  it('still counts as attached when the server linked ZERO rows (already linked)', async () => {
     const { bridge } = loadApp({ linked: 0 });
-    expect(await bridge.attach()).toBe(false);
+    expect(await bridge.attach()).toBe(true);
   });
 
   it('never fires for a signed-out registrant', async () => {
@@ -182,31 +193,45 @@ describe('auto-attach after registering (the claim tap this replaces)', () => {
 describe('the success screen tells the truth about what happened', () => {
   it('attached: points at My Team and does NOT ask for a claim', () => {
     const { bridge } = loadApp();
-    const html = bridge.successHTML('Net Gains', true);
+    const html = bridge.successHTML('Net Gains', true, true);
     expect(html).toContain("You're on the roster");
     expect(html).toContain('data-nav-tab="myteam"');
     expect(html).not.toContain('reg-page-claim');
     expect(html).not.toContain('Claim your spot');
   });
 
-  it('not attached: keeps the manual claim affordance as the fallback', () => {
+  // Mike, 2026-08-04: "why is it still asking for me to claim a spot if it does it
+  // automatically? instead have this be for players that arent signed in, to have them sign in
+  // so they can see everything." The claim search is gone from this screen entirely. The only
+  // people who get a CTA are the ones who genuinely cannot be matched, and each is told the
+  // real reason.
+  it('signed OUT: offers sign-in, and never mentions claiming', () => {
     const { bridge } = loadApp();
-    const html = bridge.successHTML('Net Gains', false);
-    expect(html).toContain('reg-page-claim');
-    expect(html).toContain('Claim your spot on Net Gains');
+    const html = bridge.successHTML('Net Gains', false, false);
+    expect(html).toContain('Sign in to see your pool, your games and your results.');
+    expect(html).toContain('>Sign in<');
+    expect(html).not.toContain('Claim your spot');
     expect(html).not.toContain("You're on the roster");
+  });
+
+  it('signed IN but unmatched: asks for the NAME, which is the real blocker, not a claim', () => {
+    const { bridge } = loadApp();
+    const html = bridge.successHTML('Net Gains', false, true);
+    expect(html).toContain('Add your name so we can put you on the roster.');
+    expect(html).toContain('data-role="reg-page-name"');
+    expect(html).not.toContain('Claim your spot');
   });
 
   it('escapes the team name in both branches', () => {
     const { bridge } = loadApp();
     const nasty = '<img src=x onerror=alert(1)>';
-    expect(bridge.successHTML(nasty, false)).not.toContain('<img src=x');
-    expect(bridge.successHTML(nasty, true)).not.toContain('<img src=x');
+    expect(bridge.successHTML(nasty, false, false)).not.toContain('<img src=x');
+    expect(bridge.successHTML(nasty, true, true)).not.toContain('<img src=x');
   });
 
   it('carries no em dash in either branch (AS copy law)', () => {
     const { bridge } = loadApp();
-    expect(bridge.successHTML('Net Gains', true)).not.toContain('—');
-    expect(bridge.successHTML('Net Gains', false)).not.toContain('—');
+    expect(bridge.successHTML('Net Gains', true, true)).not.toContain('—');
+    expect(bridge.successHTML('Net Gains', false, false)).not.toContain('—');
   });
 });
