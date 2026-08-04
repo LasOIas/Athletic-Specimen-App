@@ -120,33 +120,44 @@ describe('buildMyTeamPageHTML — signed-in + claimed (single scroll)', () => {
     expect(html).toContain('Summer Slam · Pool A · Seed 1');
   });
 
-  it('renders one pip per known game — 2 wins + 2 unplayed', () => {
-    expect(count(html, 'class="mt-pip w"')).toBe(2);
-    expect(count(html, 'class="mt-pip"')).toBe(2);   // the two scheduled/live (unplayed) games
-    expect(count(html, 'class="mt-pip l"')).toBe(0);
+  // Design round 2026-08-03 (Mike's handoff, README §4): the seven anonymous .mt-pips dots
+  // became result LETTERS in game order under a "Game by game" label, so a player can read
+  // which game they lost rather than counting dots.
+  it('renders result letter chips in game order — 2 wins, no losses, one Next chip', () => {
+    expect(count(html, 'class="mt-fc w"')).toBe(2);
+    expect(count(html, 'class="mt-fc l"')).toBe(0);
+    expect(count(html, 'class="mt-fc up"')).toBe(1); // the dashed "Next" chip
+    expect(html).toContain('class="mt-form"');
+    expect(html).toContain('class="mt-fchips"');
+    expect(html).not.toContain('class="mt-pip'); // the dots are gone
   });
 
-  it('shows the up-next strip with a filled-blue NET tile and the HAPPENING NOW label', () => {
+  // README §4: the next-game block reads as a sentence. The NET tile repeated the net and was
+  // removed; the countdown line was dropped.
+  it('reads the next game as a sentence, with no NET tile and no countdown', () => {
     expect(html).toContain('class="mt-next"');
-    expect(html).toContain('class="mt-nettile"');
-    expect(html).toContain('>NET<');
-    expect(html).toContain('UP NEXT · HAPPENING NOW'); // gA3 is live, no games ahead
-    expect(html).toContain('vs Dinks');
+    expect(html).toContain('class="mt-nl"');
+    expect(html).toContain('>Your next game<');
+    expect(html).toContain('vs <b>Dinks</b>');
+    expect(html).not.toContain('class="mt-nettile"');
+    expect(html).not.toContain('HAPPENING NOW');
   });
 
-  it('stacks BOTH Games and Roster sections in one render — no toggle', () => {
+  it('stacks BOTH Games and the roster in one render — no toggle', () => {
     expect(html).toContain('>Games<');
-    expect(html).toContain('>Roster<');
+    expect(html).toContain('>Your team<');   // README §4: the roster heading reads "Your team"
     expect(html).not.toContain('data-pd-myteam-tab');
     expect(html).not.toContain('pd-seg');
   });
 
-  it('renders game rows with a W/L letter, the score, vs opponent, and Net · R# meta', () => {
+  it('renders game rows with a W/L letter, the score, vs opponent, and Net · G# meta', () => {
     expect(html).toContain('class="mt-wl w">W<');
     expect(html).toContain('15' + EN + '12');        // my score first
     expect(html).toContain('21' + EN + '10');
-    expect(html).toContain('Net 1 · R1');
-    expect(html).toContain('Net 1 · R2');
+    // "Rn" became "Gn" across the app this round: inside a pool you play one game per round,
+    // so the tag reads as "your Nth game".
+    expect(html).toContain('Net 1 · G1');
+    expect(html).toContain('Net 1 · G2');
   });
 
   it('renders roster rows with initials chips and the You pill on the claimed player only', () => {
