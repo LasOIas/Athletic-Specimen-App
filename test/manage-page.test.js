@@ -94,7 +94,7 @@ function loadApp() {
       buildTeamSheet: (id) => buildMgTeamSheetHTML(mgFindTeam(id)),
       buildMgPools: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'pools'; mgpPoolFilter = (opts.filter === undefined ? null : opts.filter); mgpControlsOpen = !!opts.controls; return buildMgPoolsHTML(); },
       buildScoreSheet: (m) => buildMgScoreSheetHTML(m),
-      buildBracket: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'bracket'; state.seedOverride = (opts.seedOverride === undefined ? null : opts.seedOverride); return buildMgBracketHTML(); },
+      buildBracket: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'bracket'; state.seedOverride = (opts.seedOverride === undefined ? null : opts.seedOverride); mgBracketShowDone = !!opts.showDone; return buildMgBracketHTML(); },
       buildSettings: () => { manageView = 'tournament'; mgtView = 'settings'; return buildMgSettingsHTML(); },
       buildRules: () => { manageView = 'tournament'; mgtView = 'rules'; return buildMgRulesHTML(); },
       buildCloseout: (opts) => {
@@ -1149,8 +1149,23 @@ describe('buildMgScoreSheetHTML — the shared score sheet (T7 defines, T8 reuse
     expect(html).toContain('id="mgss-b"');
     expect(html).toContain('Dink Responsibly wins 12' + EN + '9'); // leader-first final label
     expect(html).toContain('data-mgss="final"');
-    expect(html).toContain('Just update the live score');
+    expect(html).toContain('Update the live score without ending the game');
     expect(html).toContain('data-mgss="live"');
+  });
+
+  // Round 2026-08-03 (README §11): the pools slide-up became a centred popup on the shared dialog kit. Every
+  // row does BOTH jobs — a winner radio and a pill stepper — and every existing hook survived the move.
+  it('is a centred popup whose rows carry a winner radio beside the stepper (hooks kept)', () => {
+    setPoolsFixture();
+    const html = bridge.buildScoreSheet(bridge.getState().tournamentMatches.find((m) => m.id === 'gA2'));
+    expect(html).toContain('class="mgv-schead"');       // header block of the popup card
+    expect(html).toContain('class="mgv-scbox"');        // one framed box holding both rows
+    expect(html).toContain('data-mgss-winner="a"');     // tap a team to mark them the winner
+    expect(html).toContain('data-mgss-winner="b"');
+    expect(html).toContain('Tap a team to mark them the winner. The score is optional.');
+    expect(html).toContain('class="mgss-sval mgv-scval"'); // the stepper value keeps its .mgss-sval hook
+    expect(html).toContain('class="mgss-sbtn mgv-scb"');   // and the ± keep .mgss-sbtn
+    expect(html).toContain('Pool A · Game 2 ·');        // Rn → Gn in the context line
   });
 
   it('disables the final CTA on a tie (0-0 scheduled game)', () => {
@@ -1221,60 +1236,87 @@ describe('buildMgBracketHTML — live by-round rows (pick R10-C, mockup bk2-c)',
   let html;
   beforeEach(() => { setBracketLiveFixture(); html = bridge.buildBracket(); });
 
-  it('groups games by round with Winners / Losers / Grand Final headers', () => {
-    expect(html).toContain('>Winners · Round 2<');
-    expect(html).toContain('>Losers · Round 1<');
-    expect(html).toContain('>Winners · Round 1 · final<'); // a fully-final round carries the · final suffix
-    expect(html).toContain('>Grand Final<');
+  // Round 2026-08-03 (README §10): rounds became BOXED groups (.mgv-bkr) with a tinted header carrying the
+  // group name, its game-number range and its progress — the same grouping language the pool net groups use.
+  it('groups games into boxed rounds with a name, a game range and a progress word', () => {
+    expect(html).toContain('class="mgv-bkr"');
+    expect(html).toContain('class="mgv-bkrh"');
+    expect(html).toContain('<span>Winners bracket final · G4' + BEN + 'G5</span>'); // the live pair
+    expect(html).toContain('<span>Grand final · G6</span>');
+    expect(html).toContain('class="mgv-bkrs">live now<');
+    expect(html).toContain('class="mgv-bkrs">up next<');
     expect(html).not.toContain('pd-card');
   });
 
-  it('orders the groups active-first: live round, then up-next, then finished (not raw play order)', () => {
-    const iLive = html.indexOf('Winners · Round 2');   // live → top
-    const iUp = html.indexOf('Losers · Round 1');      // up next (plays earlier, q2) but comes AFTER live
-    const iDone = html.indexOf('Winners · Round 1');   // finished → below up-next
-    const iGf = html.indexOf('Grand Final');           // unresolved → last
+  it('orders the groups active-first: live round, then up-next, then still-unresolved', () => {
+    const iLive = html.indexOf('Winners bracket final');  // live → top
+    const iUp = html.indexOf('Losers bracket');           // up next (plays earlier, q2) but comes AFTER live
+    const iGf = html.indexOf('Grand final');              // unresolved → last
     expect(iLive).toBeGreaterThanOrEqual(0);
     expect(iLive).toBeLessThan(iUp);
-    expect(iUp).toBeLessThan(iDone);
-    expect(iDone).toBeLessThan(iGf);
+    expect(iUp).toBeLessThan(iGf);
   });
 
-  it('shows multiple LIVE rows at once with green live scores and a LIVE pill each', () => {
-    expect(count(html, '>LIVE<')).toBe(2);
-    expect(html).toContain('>18' + BEN + '15<');
-    expect(html).toContain('>7' + BEN + '4<');
-    expect(html).toContain('class="mgbk-sc"'); // green live score
+  it('shows multiple live rows at once, each a two-line scoreboard with a Live pill', () => {
+    expect(count(html, 'class="mgv-bkpill is-live">Live<')).toBe(2);
+    expect(count(html, 'class="mgv-bkm is-live"')).toBe(2);
+    expect(html).toContain('class="mgv-bks">18<');   // right-aligned tabular score column, one per line
+    expect(html).toContain('class="mgv-bks">15<');
+    expect(html).toContain('class="mgv-bks">7<');
+    expect(html).toContain('class="mgv-bks">4<');
   });
 
-  it('shows the UP NEXT faint tag on a ready-but-unscored game', () => {
-    expect(html).toContain('>UP NEXT<');
-    expect(html).toContain('when it opens'); // the net sub for an up-next game
+  it('names the game number over a net chip in the left rail', () => {
+    expect(html).toContain('<span class="mgv-bkid">G4</span><span class="mgv-bknet">Net 1</span>');
+    expect(html).toContain('<span class="mgv-bkid">G5</span><span class="mgv-bknet">Net 2</span>');
   });
 
-  it('renders finals winner-first with def. and the final score', () => {
-    expect(html).toContain('def.');
-    expect(html).toContain('>21' + BEN + '14<');
-    expect(html).toContain('>21' + BEN + '18<');
-    expect(html).toContain('class="mgbk-fsc"');
+  it('shows the Up next pill on a ready-but-unscored game with a start hint, and no score', () => {
+    expect(html).toContain('class="mgv-bkpill is-next">Up next<');
+    expect(html).toContain('starts when Net 1 opens'); // the net sub for an up-next game
   });
 
-  it('makes EVERY resolved row (live, up-next, final) open the shared openMgScoreSheet', () => {
+  // Finished games are held back so the board shows what is live or next; Show reveals them so a wrong score
+  // can still be corrected (README §10 + "State: showFinished, default false").
+  it('hides the already-final games behind a closing Show row by default', () => {
+    expect(html).not.toContain('data-mgbk-score="bm-w1a"'); // WB R1 is final → off the board
+    expect(html).not.toContain('data-mgbk-score="bm-w1b"');
+    expect(html).toContain('data-mgbk-showdone');
+    expect(html).toContain('G1' + BEN + 'G2 already final');
+    expect(html).toContain('class="mgv-bkdonel">Show<');
+  });
+
+  it('reveals the finished games on Show, winner-first with a green check and the final score', () => {
+    const open = bridge.buildBracket({ showDone: true });
+    expect(open).toContain('data-mgbk-score="bm-w1a"');
+    expect(open).toContain('class="mgv-bkl is-win"');
+    expect(open).toContain('class="mgv-bkw"');            // the check glyph on the winner
+    expect(open).toContain('class="mgv-bks">21<');
+    expect(open).toContain('class="mgv-bks">14<');
+    expect(open).toContain('Tap to edit');
+    expect(open).toContain('class="mgv-bkdonel">Hide<');
+  });
+
+  it('makes every resolved row (live, up-next) open the shared openMgScoreSheet', () => {
     expect(html).toContain('data-mgbk-score="bm-w2a"'); // live
     expect(html).toContain('data-mgbk-score="bm-l1a"'); // up next
-    expect(html).toContain('data-mgbk-score="bm-w1a"'); // final
+    expect(bridge.buildBracket({ showDone: true })).toContain('data-mgbk-score="bm-w1a"'); // final, once shown
   });
 
-  it('renders an unresolved (TBD) game muted and non-tappable', () => {
-    expect(html).toContain('class="mgbk-g mgbk-tbd"');
-    expect(html).not.toContain('data-mgbk-score="bm-gf"'); // no score hook on a TBD row
-    expect(html).toContain('Winner of WB R2 M1');          // shows the source labels instead of teams
+  it('renders a placeholder game muted, score-less and non-tappable, naming its feeder', () => {
+    expect(html).toContain('class="mgv-bkm is-tbd"');
+    expect(html).not.toContain('data-mgbk-score="bm-gf"'); // no score hook on a placeholder row
+    expect(html).toContain('Winner of G4');                // the feeder, rewritten to its game number
+    expect(html).toContain('class="mgv-bkrs">needs G4<');  // and the group says what it is waiting on
   });
 
-  it('offers the reset control + the players-view link + never uses pd-card', () => {
-    expect(html).toContain('data-mgbk-reset');
+  it('puts the controls at the top and closes the page with Reset under a hairline', () => {
     expect(html).toContain('data-mgbk-players');
     expect(html).toContain("Full bracket tree · the players' view");
+    expect(html).toContain('data-mgbk-reset');
+    expect(html).toContain('class="pl-sect mgv-dsect"');   // the plain closing hairline
+    expect(html.indexOf('data-mgbk-players')).toBeLessThan(html.indexOf('class="mgv-bkr"'));
+    expect(html.indexOf('class="mgv-bkr"')).toBeLessThan(html.indexOf('data-mgbk-reset'));
   });
 });
 
@@ -1289,9 +1331,13 @@ describe('buildMgBracketHTML — completed (mockup bk2-c, quiet close-out pointe
     });
     const html = bridge.buildBracket();
     expect(html).toContain('Tournament completed. Close-out lives in its own page.');
-    expect(html).toContain('def.');            // the final rows still render
-    expect(html).toContain('data-mgbk-reset');  // reset still available
-    expect(html).toContain('>Grand Final<');
+    // Every game is final here, so hiding them would empty the page — the board keeps them on screen and
+    // renders no Show row at all (round 2026-08-03).
+    expect(html).toContain('data-mgbk-score="bm-w1a"');
+    expect(html).toContain('class="mgv-bkl is-win"'); // the final rows still render, winner in green
+    expect(html).not.toContain('data-mgbk-showdone');
+    expect(html).toContain('data-mgbk-reset');        // reset still available
+    expect(html).toContain('<span>Grand final · G2</span>');
   });
 });
 

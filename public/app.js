@@ -110,10 +110,9 @@ function ensurePlayerEditModal() {
   el.className = 'popup-overlay';
   el.style.display = 'none';
   el.setAttribute('aria-hidden', 'true');
-  el.innerHTML = '<div class="popup-card card" role="dialog" aria-modal="true" aria-labelledby="player-edit-modal-title">'
-    + '<div class="popup-header"><h3 id="player-edit-modal-title">Edit Player</h3>'
-    + '<button type="button" class="secondary" data-role="close-popup" data-target="player-edit-modal">Cancel</button></div>'
-    + '<div class="popup-body" id="player-edit-modal-body"></div></div>';
+  // Round 2026-08-03 (README §5): the card is a flex COLUMN — header, a scrolling body, then an action bar
+  // that stays reachable. openPlayerEditPopup writes all three, because the header carries the player.
+  el.innerHTML = '<div class="popup-card card pe-card" role="dialog" aria-modal="true" aria-labelledby="player-edit-modal-title"></div>';
   document.body.appendChild(el);
   // Close on an overlay-backdrop tap or the header Cancel (the body's own Cancel/Save are delegated).
   el.addEventListener('click', (e) => {
@@ -124,8 +123,8 @@ function ensurePlayerEditModal() {
 
 function openPlayerEditPopup(playerKey) {
   const modal = ensurePlayerEditModal();
-  const body  = document.getElementById('player-edit-modal-body');
-  if (!modal || !body) return;
+  const card  = modal ? modal.querySelector('.pe-card') : null;
+  if (!modal || !card) return;
 
   const player = state.players.find(p => playerIdentityKey(p) === playerKey);
   if (!player) return;
@@ -136,41 +135,61 @@ function openPlayerEditPopup(playerKey) {
   const playerId     = escapeHTMLText(String(player.id || ''));
   const keyAttr      = escapeHTMLText(playerKey);
 
-  body.innerHTML = `
+  // First / Last split for the two side-by-side fields (round 2026-08-03). First token is the first name, the
+  // rest is the last name, so "Mary Jo Smith" round-trips through the save join without losing a word.
+  const whole = String(player.name || '').trim().replace(/\s+/g, ' ');
+  const parts = whole ? whole.split(' ') : [];
+  const firstName = parts[0] || '';
+  const lastName  = parts.slice(1).join(' ');
+  const initial   = (firstName.charAt(0) || whole.charAt(0) || '?').toUpperCase();
+  // The players-list green IN pill for check-in state. When the player is NOT checked in the pill is replaced
+  // by an empty .pe-in spacer — .pe-in carries the margin-left:auto that pushes the close button to the edge.
+  const isIn = new Set(state.checkedIn || []).has(playerKey);
+  const inHTML = isIn
+    ? `<span class="mgp-in pe-in">IN</span>`
+    : `<span class="pe-in" aria-hidden="true"></span>`;
+
+  card.innerHTML = `
+    <div class="popup-header pe-head">
+      <span class="pe-av" aria-hidden="true">${escapeHTML(initial)}</span>
+      <span class="pe-who"><h3 id="player-edit-modal-title">${escapeHTML(whole || 'Edit player')}</h3></span>
+      ${inHTML}
+      <button type="button" class="pe-x secondary" data-role="close-popup" data-target="player-edit-modal" aria-label="Close">&times;</button>
+    </div>
+    <div class="popup-body pe-body" id="player-edit-modal-body">
     <div class="edit-row show popup-edit-row" data-player-key="${keyAttr}">
-      <label class="popup-edit-label">Name</label>
-      <input type="text" class="edit-name popup-edit-input" placeholder="Name" value="${escapeHTMLText(player.name)}" autocapitalize="words" autocomplete="off" spellcheck="false" />
-      <label class="popup-edit-label">Skill (0–10)</label>
-      <input type="number" class="edit-skill popup-edit-input" placeholder="Skill" step="0.1" min="0" max="10" value="${player.skill}" />
-      <label class="popup-edit-label">Group</label>
-      <div class="group-select" data-player-key="${keyAttr}">
-        <input type="hidden" class="edit-group"  value="${escapeHTMLText(playerGroup)}" />
-        <input type="hidden" class="edit-groups" value="${groupsValue}" />
-        <button type="button" class="group-btn">${escapeHTMLText(playerGroup || 'Choose group…')}</button>
-        <div class="group-list" role="menu" aria-hidden="true">
-          ${getAvailableGroups().map((g) => {
-            const gn = normalizeGroupName(g);
-            const mi = playerGroups.indexOf(gn);
-            const isMember  = mi !== -1;
-            const isPrimary = mi === 0;
-            const lbl = `${gn}${isPrimary ? ' (Primary)' : isMember ? ' (Member)' : ''}`;
-            return `<button type="button" class="group-item ${isMember ? 'is-member' : ''} ${isPrimary ? 'is-primary' : ''}" data-value="${escapeHTMLText(gn)}">${escapeHTMLText(lbl)}</button>`;
-          }).join('')}
+      <div class="pe-f pe-2col">
+        <span class="pe-cell">
+          <label class="popup-edit-label" for="pe-first">First name</label>
+          <input id="pe-first" type="text" class="edit-name popup-edit-input" placeholder="First" value="${escapeHTMLText(firstName)}" autocapitalize="words" autocomplete="off" spellcheck="false" />
+        </span>
+        <span class="pe-cell">
+          <label class="popup-edit-label" for="pe-last">Last name</label>
+          <input id="pe-last" type="text" class="edit-lastname popup-edit-input" placeholder="Last" value="${escapeHTMLText(lastName)}" autocapitalize="words" autocomplete="off" spellcheck="false" />
+        </span>
+      </div>
+      <div class="pe-f">
+        <label class="popup-edit-label" for="pe-skill">Skill</label>
+        <div class="pe-skillrow">
+          <input id="pe-skill" type="number" class="edit-skill popup-edit-input pe-skillin" placeholder="Skill" step="0.5" min="0" max="10" value="${escapeHTMLText(String(player.skill))}" />
         </div>
-        <div class="group-chips">${renderEditGroupChipsMarkup(playerGroups)}</div>
       </div>
-      ${player.id ? `
-      <label class="popup-edit-label">Account</label>
-      <div class="edit-account">
-        <span class="edit-account-status small">Checking&hellip;</span>
-        <button type="button" class="btn-unlink-account secondary" style="display:none;">Unlink</button>
-      </div>` : ''}
-      <div class="edit-actions" style="margin-top:12px;">
-        <button type="button" class="btn-save-edit success" data-player-key="${keyAttr}" data-id="${playerId}">Save</button>
-        <button type="button" class="btn-cancel-edit secondary" data-player-key="${keyAttr}">Cancel</button>
-      </div>
+      <!-- The Groups control and the Account row came OUT of this dialog in the 2026-08-03 round, so group
+           membership has no editor here (README open question 2, unanswered). These two hidden inputs stay:
+           the delegated Save reads them, and dropping them would silently WIPE a player's groups every time
+           an organiser fixed a name. The .group-item / set-primary-group handlers are untouched, just
+           unreachable from this dialog. -->
+      <input type="hidden" class="edit-group"  value="${escapeHTMLText(playerGroup)}" />
+      <input type="hidden" class="edit-groups" value="${groupsValue}" />
+    </div>
+    </div>
+    <div class="edit-actions pe-actions">
+      <button type="button" class="btn-save-edit success pe-save" data-player-key="${keyAttr}" data-id="${playerId}">Save changes</button>
+      <button type="button" class="btn-cancel-edit secondary pe-cancel" data-player-key="${keyAttr}">Cancel</button>
     </div>
   `;
+  const body = document.getElementById('player-edit-modal-body');
+  if (!body) return;
 
   modal.style.display = 'flex';
   modal.setAttribute('aria-hidden', 'false');
@@ -388,11 +407,16 @@ function findInlineEditRowByPlayerKey(playerKey) {
     const rowPlayerKey = String(row.getAttribute('data-player-key') || buttonPlayerKey).trim();
 
     const nameInput  = row.querySelector('.edit-name');
+    const lastInput  = row.querySelector('.edit-lastname');
     const skillInput = row.querySelector('.edit-skill');
     const groupInput = row.querySelector('.edit-group');
     const groupsInput = row.querySelector('.edit-groups');
 
-    const name  = (nameInput?.value || '').trim();
+    // Round 2026-08-03: the dialog splits the stored name across First (.edit-name) + Last (.edit-lastname).
+    // Rejoin here. With no last-name field present, .edit-name still carries the whole name (old behaviour).
+    const name = (lastInput
+      ? [(nameInput?.value || '').trim(), (lastInput.value || '').trim()].filter(Boolean).join(' ')
+      : (nameInput?.value || '')).replace(/\s+/g, ' ').trim();
     let   skill = parseFloat(skillInput?.value);
     const parsedGroups = parseEditGroupsValue(groupsInput?.value || '');
     const fallbackGroup = normalizeGroupName(groupInput?.value || '');
@@ -6872,6 +6896,11 @@ let mgtView = null;
 // survive the container-swap repaint (a background score sync must not reset the tab or collapse the panel).
 let mgpPoolFilter = null;
 let mgpControlsOpen = false;
+// Task 8 / round 2026-08-03 (README §10 "State: showFinished, default false"): the Bracket board hides
+// games that are already final so it shows only what is live, next, or coming. The closing "already final ·
+// Show" row flips this. Survives the container-swap repaint like every other manage toggle, so a background
+// score sync can never re-hide a board the admin just opened to fix a wrong score.
+let mgBracketShowDone = false;
 // Task 10 (Close out, pick R12): the champion the admin will record on close. undefined = follow the computed
 // bracket suggestion (computeChampion); a team-id string = a manual CHANGE-picker override; '' = an explicit
 // "no champion recorded". Survives the container-swap repaint (a background sync must not reset the pick); the
@@ -9221,10 +9250,48 @@ function mgPoolsControlsHTML(t, teams, pools, matches) {
 }
 
 // ── The shared body-level score sheet (Task 7 defines it; Task 8's bracket reuses openMgScoreSheet) ──────
+// "Winners bracket · G7" — a bracket match's place in the round 2026-08-03 vocabulary, for the score
+// popup's context line. Falls back to the bare game number when the match carries no side (older rows).
+function mgBracketMatchLabel(m) {
+  const part = bracketLabelPart(m); // "G7" from the EXISTING bracketGameNumbers, else the stored round label
+  if (!m || (m.side !== 'winners' && m.side !== 'losers' && m.side !== 'grand_final')) return part;
+  const main = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).filter((x) => x.phase === 'main');
+  const maxRounds = { winners: 0, losers: 0 };
+  main.forEach((x) => {
+    if (x.side === 'winners' || x.side === 'losers') maxRounds[x.side] = Math.max(maxRounds[x.side], x.round || 0);
+  });
+  const side = mgBracketSideName({ side: m.side, round: m.round || 0 }, maxRounds);
+  return part ? side + ' · ' + part : side;
+}
+
+// "Winner goes to G11 · loser drops to G10" — what tapping Final actually does, derived from the match's REAL
+// wiring (winner_next_match_id / loser_next_match_id). A clause is omitted when there is no such destination,
+// so the grand final — which has neither — renders no line at all.
+function mgScoreNextHTML(match) {
+  if (!match || match.phase !== 'main') return '';
+  const main = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).filter((x) => x.phase === 'main');
+  const byId = bracketGameNumbers(main).byId;
+  const parts = [];
+  if (match.winner_next_match_id && byId[match.winner_next_match_id]) parts.push(`Winner goes to <b>G${byId[match.winner_next_match_id]}</b>`);
+  if (match.loser_next_match_id && byId[match.loser_next_match_id]) parts.push(`loser drops to <b>G${byId[match.loser_next_match_id]}</b>`);
+  if (!parts.length) return '';
+  return `<div class="mgv-bknext">${parts.join(' · ')}</div>`;
+}
+
+// The primary action's label. The LEADER is what it names, so the button can never claim a winner the score
+// contradicts (tapping a team swaps the numbers to match — see openMgScoreSheet).
+function mgScoreFinalLabel(aName, bName, a, b, isFinal) {
+  const leader = a > b ? aName : (b > a ? bName : null);
+  if (!leader) return isFinal ? 'Enter a winning score' : 'Final · set the score to pick a winner';
+  return (isFinal ? 'Save · ' : 'Final · ') + leader + ' wins ' + Math.max(a, b) + '–' + Math.min(a, b);
+}
+
 // Match-generic: handles phase 'pool' | 'main'. Content builder is pure (like buildMgTeamSheetHTML); the
-// interactive steppers + writes live in openMgScoreSheet. Writes: pool final → tdbSubmitResult, bracket
-// final → tdbSubmitBracketResult, edit-final → tdbEditMatchScore, live → tdbSetLiveScore.
-function buildMgScoreSheetHTML(match) {
+// interactive steppers, the winner radio + the writes live in openMgScoreSheet. Writes: pool final →
+// tdbSubmitResult, bracket final → tdbSubmitBracketResult, edit-final → tdbEditMatchScore, live →
+// tdbSetLiveScore. Round 2026-08-03: a CENTRED popup on the shared dialog kit, one framed box, a row per
+// team doing both jobs (winner radio + pill stepper), the consequence line, then one primary action.
+function buildMgScoreSheetHTML(match, winner) {
   if (!match) return '';
   const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];
   const aName = teamNameById(teams, match.team_a_id) || 'Team A';
@@ -9235,43 +9302,53 @@ function buildMgScoreSheetHTML(match) {
   const t = (Array.isArray(state.tournaments) ? state.tournaments : []).find((x) => x.id === match.tournament_id) || mgActiveTournament() || {};
   // Pass the match so the championship (grand final set 1) gets its published no-cap rule.
   const rules = scoringRulesFor(match.phase, t, match);
-  const ruleText = 'First to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ' (cap ' + rules.cap + ')' : '');
   const bits = [];
   if (match.phase === 'main') {
-    bits.push(bracketLabelPart(match));
+    bits.push(mgBracketMatchLabel(match));
   } else {
     const pool = (Array.isArray(state.tournamentPools) ? state.tournamentPools : []).find((p) => p.id === match.pool_id);
     if (pool) bits.push('Pool ' + (pool.label || ''));
-    if (match.queue_order) bits.push('Round ' + match.queue_order);
+    if (match.queue_order) bits.push('Game ' + match.queue_order); // Rn → Gn (round 2026-08-03)
   }
   if (match.net) bits.push('Net ' + match.net);
-  bits.push(ruleText);
+  bits.push(mgRuleLine(rules));
   const meta = bits.filter(Boolean).join(' · ');
+  // Which side is marked the winner. Explicit pick when the caller has one, else the score leader.
+  const pick = winner || (a > b ? 'a' : (b > a ? 'b' : null));
 
-  const head = `<div class="pd-reg-grip"></div>`
-    + `<div class="mgts-head"><div class="mgts-eyebrow">${isFinal ? 'Edit result' : 'Score'}</div>`
-    + `<button type="button" class="pd-reg-sheetx" data-mgss="close" aria-label="Close">`
-    + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
-  const title = `<div class="mgss-title">${escapeHTML(aName)} <span class="mgss-vs">vs</span> ${escapeHTML(bName)}</div>`;
-  const metaLine = `<div class="mgss-meta">${escapeHTML(meta)}</div>`;
-  const stepper = (side, name, val) => `<div class="mgss-step">`
-    + `<div class="mgss-sname">${escapeHTML(name)}</div>`
-    + `<div class="mgss-srow">`
-      + `<button type="button" class="mgss-sbtn" data-mgss-step="${side}" data-mgss-d="-1" aria-label="${escapeHTMLText(name)} minus one">−</button>`
-      + `<span class="mgss-sval" id="mgss-${side}">${val}</span>`
-      + `<button type="button" class="mgss-sbtn" data-mgss-step="${side}" data-mgss-d="1" aria-label="${escapeHTMLText(name)} plus one">+</button>`
-    + `</div></div>`;
-  const steppers = `<div class="mgss-steps">${stepper('a', aName, a)}${stepper('b', bName, b)}</div>`;
-  const err = `<div class="mgss-err" id="mgss-err" hidden></div>`;
-  const leader = a > b ? aName : (b > a ? bName : null);
-  const finalLabel = leader
-    ? (isFinal ? 'Save · ' : 'Final · ') + escapeHTML(leader) + ' wins ' + Math.max(a, b) + '–' + Math.min(a, b)
-    : (isFinal ? 'Enter a winning score' : 'Final · set the score to pick a winner');
-  const primary = `<button type="button" class="mgt-cta mgss-final" data-mgss="${isFinal ? 'edit' : 'final'}"${leader ? '' : ' disabled'}>${finalLabel}</button>`;
-  const quiet = isFinal
-    ? `<p class="mgss-note">Fixing the score. Same winner only. To change who won, clear the result first.</p>`
-    : `<button type="button" class="mgss-quiet" data-mgss="live">Just update the live score</button>`;
-  return head + title + metaLine + steppers + err + primary + quiet;
+  const head = `<div class="mgv-schead">`
+    + `<span class="mgv-scwho">`
+      + `<h3 id="mgv-sctitle">${escapeHTML(aName)} <span class="mgss-vs">vs</span> ${escapeHTML(bName)}</h3>`
+      + `<span class="mgv-scmeta">${escapeHTML(meta)}</span>`
+    + `</span>`
+    + `<button type="button" class="mgv-scx pd-reg-sheetx" data-mgss="close" aria-label="Close">&times;</button></div>`;
+  // One row per team doing BOTH jobs: tap the team to mark it the winner, use the stepper only if a score
+  // was kept. A finished game is a same-winner correction (the RPC refuses a flip), so its radio is inert.
+  const row = (side, name, val) => {
+    const won = pick === side;
+    return `<div class="mgv-scrow${won ? ' is-won' : ''}">`
+      + `<button type="button" class="mgv-scwin" data-mgss-winner="${side}" aria-pressed="${won ? 'true' : 'false'}"`
+        + ` aria-label="${escapeHTMLText(name)} won this game"${isFinal ? ' disabled' : ''}>`
+        + `<span class="mgv-scdot" aria-hidden="true"></span><span class="mgv-scname">${escapeHTML(name)}</span></button>`
+      + `<span class="mgv-scstep">`
+        + `<button type="button" class="mgss-sbtn mgv-scb" data-mgss-step="${side}" data-mgss-d="-1" aria-label="${escapeHTMLText(name)} minus one">&minus;</button>`
+        + `<span class="mgss-sval mgv-scval" id="mgss-${side}">${val}</span>`
+        + `<button type="button" class="mgss-sbtn mgv-scb" data-mgss-step="${side}" data-mgss-d="1" aria-label="${escapeHTMLText(name)} plus one">+</button>`
+      + `</span></div>`;
+  };
+  const hint = isFinal
+    ? 'Fixing the score. Same winner only. To change who won, clear the result first.'
+    : 'Tap a team to mark them the winner. The score is optional.';
+  const body = `<div class="mgv-scbody">`
+    + `<div class="mgv-scbox">${row('a', aName, a)}${row('b', bName, b)}</div>`
+    + `<div class="mgv-schint">${escapeHTML(hint)}</div>`
+    + `<div class="mgss-err" id="mgss-err" hidden></div>`
+    + mgScoreNextHTML(match)
+    + `</div>`;
+  const primary = `<button type="button" class="mgv-scfinal" data-mgss="${isFinal ? 'edit' : 'final'}"${a === b ? ' disabled' : ''}>`
+    + `${escapeHTML(mgScoreFinalLabel(aName, bName, a, b, isFinal))}</button>`;
+  const quiet = isFinal ? '' : `<button type="button" class="mgv-sclive" data-mgss="live">Update the live score without ending the game</button>`;
+  return head + body + `<div class="mgv-scfoot">${primary}${quiet}</div>`;
 }
 
 function closeMgScoreSheet() { const el = document.getElementById('mgss-sheet'); if (el) el.remove(); }
@@ -9286,14 +9363,20 @@ function openMgScoreSheet(matchId) {
   const isFinal = match.status === 'final';
   let a = Math.max(0, Number(match.score_a) || 0);
   let b = Math.max(0, Number(match.score_b) || 0);
+  // Which team is marked the winner (round 2026-08-03). Seeded from the recorded winner on a finished game,
+  // else from whoever leads the score.
+  let pick = isFinal && match.winner_team_id
+    ? (match.winner_team_id === match.team_a_id ? 'a' : 'b')
+    : (a > b ? 'a' : (b > a ? 'b' : null));
   let submitting = false;
+  // A centred popup on the shared dialog kit (was the pools slide-up). Both phases use this one sheet, so the
+  // pools board gets the same popup — the round's CSS is scoped to #mgss-sheet, not to a bracket-only class.
   const scrim = document.createElement('div');
   scrim.id = 'mgss-sheet';
-  scrim.className = 'pd-reg-scrim';
-  scrim.setAttribute('role', 'dialog');
-  scrim.setAttribute('aria-modal', 'true');
-  scrim.setAttribute('aria-label', isFinal ? 'Edit result' : 'Enter score');
-  scrim.innerHTML = `<div class="pd-reg-sheet">${buildMgScoreSheetHTML(match)}</div>`;
+  scrim.className = 'popup-overlay';
+  scrim.style.display = 'flex';
+  scrim.innerHTML = `<div class="popup-card card mgv-sccard" role="dialog" aria-modal="true" aria-labelledby="mgv-sctitle"`
+    + ` aria-label="${escapeHTMLText(isFinal ? 'Edit result' : 'Enter score')}">${buildMgScoreSheetHTML(match, pick)}</div>`;
   document.body.appendChild(scrim);
   const errEl = () => document.getElementById('mgss-err');
   const fail = (msg) => { const e = errEl(); if (e) { e.textContent = msg; e.hidden = false; } };
@@ -9301,16 +9384,16 @@ function openMgScoreSheet(matchId) {
     const ea = document.getElementById('mgss-a'), eb = document.getElementById('mgss-b');
     if (ea) ea.textContent = String(a);
     if (eb) eb.textContent = String(b);
-    const btn = scrim.querySelector('.mgss-final');
+    scrim.querySelectorAll('[data-mgss-winner]').forEach((wb) => {
+      const on = wb.getAttribute('data-mgss-winner') === pick;
+      wb.setAttribute('aria-pressed', on ? 'true' : 'false');
+      const row = wb.closest('.mgv-scrow');
+      if (row) row.classList.toggle('is-won', on);
+    });
+    const btn = scrim.querySelector('.mgv-scfinal');
     if (btn) {
-      const leader = a > b ? aName : (b > a ? bName : null);
-      if (leader) {
-        btn.removeAttribute('disabled');
-        btn.textContent = (isFinal ? 'Save · ' : 'Final · ') + leader + ' wins ' + Math.max(a, b) + '–' + Math.min(a, b);
-      } else {
-        btn.setAttribute('disabled', 'true');
-        btn.textContent = isFinal ? 'Enter a winning score' : 'Final · set the score to pick a winner';
-      }
+      if (a !== b) btn.removeAttribute('disabled'); else btn.setAttribute('disabled', 'true');
+      btn.textContent = mgScoreFinalLabel(aName, bName, a, b, isFinal);
     }
   };
   const doFinal = async () => {
@@ -9339,11 +9422,24 @@ function openMgScoreSheet(matchId) {
   };
   scrim.addEventListener('click', (ev) => {
     if (ev.target === scrim) { closeMgScoreSheet(); return; }
+    // Tap a team to mark them the winner. If a score is already on the board and it contradicts the pick, the
+    // two numbers swap so the button can never read "X wins 7–9" — the DB derives the winner from the score.
+    const win = ev.target.closest('[data-mgss-winner]');
+    if (win) {
+      if (isFinal) return; // edit mode is a same-winner correction; the RPC refuses a flip
+      const side = win.getAttribute('data-mgss-winner');
+      pick = side;
+      if (a !== b && ((side === 'a' && b > a) || (side === 'b' && a > b))) { const s = a; a = b; b = s; }
+      const e = errEl(); if (e) e.hidden = true;
+      sync();
+      return;
+    }
     const step = ev.target.closest('[data-mgss-step]');
     if (step) {
       const side = step.getAttribute('data-mgss-step');
       const d = Number(step.getAttribute('data-mgss-d')) || 0;
       if (side === 'a') a = Math.max(0, a + d); else b = Math.max(0, b + d);
+      if (a !== b) pick = a > b ? 'a' : 'b'; // the score is the stronger signal while it is being edited
       const e = errEl(); if (e) e.hidden = true;
       sync();
       return;
@@ -9447,6 +9543,8 @@ async function mgPoolsResetPools() {
 // §51 matte, Barlow display, single --accent, flat on stone (mgbk-* kit per bk2-c/bk-c values).
 const MGBK_UP_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>';
 const MGBK_DN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+// The check that rides beside a winning team's name on a two-line scoreboard (round 2026-08-03).
+const MGBK_WIN_SVG = '<svg class="mgv-bkw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 13 4 4L19 7"/></svg>';
 
 // The tournament the Bracket view manages. Unlike the other sub-views, this one has a COMPLETED state
 // (bk2-c) — and manageLeadTournament() deliberately excludes 'completed'. Resolve the ACTIVE tournament
@@ -9465,7 +9563,9 @@ function buildMgBracketHTML() {
   if (!t) return header + `<div class="pd-empty">No tournament to build a bracket for yet.</div>`;
   const status = t.status || 'setup';
   if (status === 'bracket' || status === 'completed') {
-    return header + mgBracketLiveHTML(t) + mgBracketControlsHTML(t, status === 'completed');
+    // Round 2026-08-03 (README §10): controls ride at the TOP (the public-bracket link only) and the
+    // destructive Reset closes the page under a plain hairline, so the board itself is what you land on.
+    return header + mgBracketControlsHTML(t, status === 'completed') + mgBracketLiveHTML(t) + mgBracketResetHTML();
   }
   return header + mgBracketSeedingHTML(t);
 }
@@ -9534,69 +9634,166 @@ function mgBracketGroups(main) {
   return groups;
 }
 
-function mgBracketGroupLabel(g) {
-  if (g.side === 'grand_final') { const m0 = g.matches[0]; return (m0 && m0.round_label) || 'Grand Final'; }
-  const base = (g.side === 'winners' ? 'Winners' : 'Losers') + ' · Round ' + g.round;
-  return g.allFinal ? base + ' · final' : base; // a fully-final round carries the · final suffix (bk2-c)
+// "G1–G4 and G8" from [8,1,2,3,4]. Contiguous runs collapse to a range; the last part joins with "and".
+// Used by the closing "already final" row and by each group header's game-number range.
+function mgBracketGameList(nums) {
+  const list = [...new Set((nums || []).filter((n) => Number.isFinite(n)))].sort((a, b) => a - b);
+  if (!list.length) return '';
+  const parts = [];
+  let start = list[0], prev = list[0];
+  for (let i = 1; i < list.length; i++) {
+    if (list[i] === prev + 1) { prev = list[i]; continue; }
+    parts.push(start === prev ? 'G' + start : 'G' + start + '–G' + prev);
+    start = prev = list[i];
+  }
+  parts.push(start === prev ? 'G' + start : 'G' + start + '–G' + prev);
+  if (parts.length === 1) return parts[0];
+  return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
 }
 
+// The group's name in the round 2026-08-03 vocabulary: "Winners bracket", "Losers bracket final", "Grand
+// final". maxRounds carries the LAST round number on each side, computed over EVERY main match (never the
+// visible subset) so hiding the finished games can't rename a round.
+function mgBracketSideName(g, maxRounds) {
+  if (g.side === 'grand_final') return 'Grand final';
+  const base = g.side === 'winners' ? 'Winners bracket' : 'Losers bracket';
+  return (g.round >= ((maxRounds || {})[g.side] || 0)) ? base + ' final' : base;
+}
+
+// The right-hand progress word in a group header: "live now" / "up next" / "final", or — when nothing in the
+// group is playable yet — the feeder games it is waiting on ("needs G5, G6, G7"). A feeder is only NAMED when
+// it is itself playable now (both teams known); otherwise the group is just "waiting", because pointing at a
+// game that can't be played either tells the organiser nothing.
+function mgBracketGroupProgress(g, all, gn) {
+  if (g.matches.some((m) => m.status === 'live')) return 'live now';
+  const resolved = g.matches.filter((m) => m.team_a_id && m.team_b_id);
+  if (resolved.some((m) => m.status !== 'final')) return 'up next';
+  if (resolved.length && resolved.every((m) => m.status === 'final')) return 'final';
+  const byLabel = {};
+  (all || []).forEach((m) => { if (m && m.round_label) byLabel[m.round_label] = m; });
+  const need = [];
+  g.matches.forEach((m) => {
+    [[m.team_a_id, m.source_a], [m.team_b_id, m.source_b]].forEach(([id, src]) => {
+      if (id || !src) return;
+      const ref = String(src).replace(/^(?:Winner of|Loser of)\s+/, '');
+      const feeder = byLabel[ref];
+      if (!feeder || !feeder.team_a_id || !feeder.team_b_id) return;
+      const num = (gn && gn.byId) ? gn.byId[feeder.id] : null;
+      if (num && need.indexOf(num) === -1) need.push(num);
+    });
+  });
+  if (!need.length) return 'waiting';
+  return 'needs ' + need.sort((a, b) => a - b).map((n) => 'G' + n).join(', ');
+}
+
+// The live board (round 2026-08-03, README §10): every round is a boxed group with a tinted header carrying
+// its name, its game-number range and its progress; every match is a two-line scoreboard. Games that are
+// already FINAL are held back behind the closing "already final · Show" row (mgBracketShowDone) so the board
+// shows what is live or next — unless hiding them would leave nothing at all (a completed tournament), in
+// which case they stay on screen rather than emptying the page.
 function mgBracketLiveHTML(t) {
   const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];
   const main = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).filter((m) => m.phase === 'main');
   if (!main.length) return `<div class="pd-empty">The bracket has no games yet.</div>`;
-  return mgBracketGroups(main).map((g) => {
-    const rows = g.matches.map((m) => mgBracketRowHTML(m, teams)).join('');
-    return `<div class="mgbk-rnd">${escapeHTML(mgBracketGroupLabel(g))}</div>${rows}`;
+  const gn = bracketGameNumbers(main); // the EXISTING interleaved numbering (pure.js) — never a second scheme
+  const isDone = (m) => m.status === 'final' && !!m.team_a_id && !!m.team_b_id;
+  const done = main.filter(isDone);
+  const rest = main.filter((m) => !isDone(m));
+  const canHide = done.length > 0 && rest.length > 0;
+  const hiding = canHide && !mgBracketShowDone;
+  const shown = hiding ? rest : main;
+  const maxRounds = { winners: 0, losers: 0 };
+  main.forEach((m) => {
+    if (m.side === 'winners' || m.side === 'losers') maxRounds[m.side] = Math.max(maxRounds[m.side], m.round || 0);
+  });
+  const groups = mgBracketGroups(shown).map((g) => {
+    const range = mgBracketGameList(g.matches.map((m) => gn.byId[m.id]));
+    const name = mgBracketSideName(g, maxRounds) + (range ? ' · ' + range : '');
+    const rows = g.matches.map((m) => mgBracketRowHTML(m, teams, gn)).join('');
+    return `<div class="mgv-bkr"><div class="mgv-bkrh">`
+      + `<span>${escapeHTML(name)}</span>`
+      + `<span class="mgv-bkrs">${escapeHTML(mgBracketGroupProgress(g, main, gn))}</span>`
+      + `</div>${rows}</div>`;
   }).join('');
+  const toggle = canHide
+    ? `<button type="button" class="mgv-bkdone" data-mgbk-showdone>`
+      + `<span>${escapeHTML(mgBracketGameList(done.map((m) => gn.byId[m.id])))} already final</span>`
+      + `<span class="mgv-bkdonel">${hiding ? 'Show' : 'Hide'}</span></button>`
+    : '';
+  return groups + toggle;
 }
 
-// One bracket game row. Resolved rows (both teams set) are the whole-row tap target (data-mgbk-score) → the
-// shared openMgScoreSheet. A TBD row (a slot still fed by an unfinished game) is muted + non-tappable and
-// shows the source labels ("Winner of …") instead of team names.
-function mgBracketRowHTML(m, teams) {
-  const EN = '–';
+// One bracket game as a two-line scoreboard. Left rail = the game number over its net chip (the net is what
+// an organiser walks to, so it is not buried in the meta sentence). Body = team over team, the winner green
+// + 700 with a check, scores in a right-aligned tabular column, then a meta line. The Live / Up next pill is
+// ABSOLUTELY positioned (the row reserves padding-right:66px) — as a flex sibling it shrank the body and
+// broke the score column. Resolved rows keep data-mgbk-score → the shared openMgScoreSheet. A placeholder
+// (a slot still fed by an unfinished game) is score-less, muted, tinted and NOT tappable; it names its feeder.
+function mgBracketRowHTML(m, teams, gn) {
+  const num = (gn && gn.byId) ? gn.byId[m.id] : null;
+  const gid = num ? ('G' + num) : (m.round_label || '').replace(/ M\d+$/, '');
+  const net = m.net != null ? ('Net ' + m.net) : '';
   const hasBoth = !!(m.team_a_id && m.team_b_id);
+  const srcA = bracketSourceLabel(m.source_a, gn && gn.byRoundLabel);
+  const srcB = bracketSourceLabel(m.source_b, gn && gn.byRoundLabel);
   if (!hasBoth) {
-    const aLbl = m.team_a_id ? teamNameById(teams, m.team_a_id) : (m.source_a || 'TBD');
-    const bLbl = m.team_b_id ? teamNameById(teams, m.team_b_id) : (m.source_b || 'TBD');
-    return `<div class="mgbk-g mgbk-tbd"><div class="mgbk-gt">`
-      + `<div class="mgbk-gn">${escapeHTML(aLbl)} <span class="mgbk-vs">vs</span> ${escapeHTML(bLbl)}</div>`
-      + `<div class="mgbk-gm">Waiting on the feeding games</div></div></div>`;
+    const aLbl = m.team_a_id ? teamNameById(teams, m.team_a_id) : (srcA || 'TBD');
+    const bLbl = m.team_b_id ? teamNameById(teams, m.team_b_id) : (srcB || 'TBD');
+    return `<div class="mgv-bkm is-tbd"><span class="mgv-bkid">${escapeHTML(gid)}</span><div class="mgv-bkb">`
+      + `<div class="mgv-bkl"><span class="mgv-bkn">${escapeHTML(aLbl)}</span></div>`
+      + `<div class="mgv-bkl"><span class="mgv-bkn">${escapeHTML(bLbl)}</span></div>`
+      + `</div></div>`;
   }
-  const idAttr = escapeHTMLText(String(m.id));
+  const rail = net
+    ? `<span class="mgv-bkidw"><span class="mgv-bkid">${escapeHTML(gid)}</span><span class="mgv-bknet">${escapeHTML(net)}</span></span>`
+    : `<span class="mgv-bkid">${escapeHTML(gid)}</span>`;
   const aN = escapeHTML(teamNameById(teams, m.team_a_id));
   const bN = escapeHTML(teamNameById(teams, m.team_b_id));
-  const net = m.net != null ? ('Net ' + m.net) : '';
+  const line = (name, score, win) => `<div class="mgv-bkl${win ? ' is-win' : ''}">`
+    + `<span class="mgv-bkn">${name}${win ? MGBK_WIN_SVG : ''}</span>`
+    + (score == null ? '' : `<span class="mgv-bks">${escapeHTML(String(score))}</span>`)
+    + `</div>`;
+  const idAttr = escapeHTMLText(String(m.id));
+  let body = '';
+  let pill = '';
+  let cls = '';
   if (m.status === 'final') {
     const aWin = m.winner_team_id === m.team_a_id;
-    const w = aWin ? aN : bN, l = aWin ? bN : aN;
-    const ws = aWin ? m.score_a : m.score_b, ls = aWin ? m.score_b : m.score_a;
-    const scr = (ws != null && ls != null) ? `<span class="mgbk-fsc">${escapeHTML(String(ws))}${EN}${escapeHTML(String(ls))}</span>` : '';
-    return `<div class="mgbk-g" data-mgbk-score="${idAttr}"><div class="mgbk-gt">`
-      + `<div class="mgbk-gn"><b>${w}</b> <span class="mgbk-def">def.</span> ${l}</div>`
-      + `<div class="mgbk-gm">Tap to edit</div></div>${scr}</div>`;
+    const have = m.score_a != null && m.score_b != null;
+    body = line(aN, have ? m.score_a : null, aWin) + line(bN, have ? m.score_b : null, !aWin)
+      + `<div class="mgv-bkmeta">Tap to edit</div>`;
+  } else if (m.status === 'live') {
+    cls = ' is-live';
+    body = line(aN, Number(m.score_a) || 0, false) + line(bN, Number(m.score_b) || 0, false)
+      + `<div class="mgv-bkmeta">Tap to score</div>`;
+    pill = `<span class="mgv-bkpill is-live">Live</span>`;
+  } else {
+    // scheduled / ready (both teams set) — up next, still tappable to score ahead
+    const lower = (s) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
+    const feeders = (srcA && srcB) ? `${srcA} vs ${lower(srcB)}` : '';
+    const meta = [feeders, net ? `starts when ${net} opens` : ''].filter(Boolean).join(' · ') || 'Up next';
+    body = line(aN, null, false) + line(bN, null, false)
+      + `<div class="mgv-bkmeta">${escapeHTML(meta)}</div>`;
+    pill = `<span class="mgv-bkpill is-next">Up next</span>`;
   }
-  if (m.status === 'live') {
-    const sa = Number(m.score_a) || 0, sb = Number(m.score_b) || 0;
-    return `<div class="mgbk-g mgbk-live" data-mgbk-score="${idAttr}"><div class="mgbk-gt">`
-      + `<div class="mgbk-gn">${aN} <span class="mgbk-vs">vs</span> ${bN}</div>`
-      + `<div class="mgbk-gm">${escapeHTML(net ? net + ' · tap to score' : 'Tap to score')}</div></div>`
-      + `<span class="mgbk-sc">${sa}${EN}${sb}</span><span class="mgbk-pill">LIVE</span></div>`;
-  }
-  // scheduled / ready (both teams set) — up next, still tappable to score ahead
-  return `<div class="mgbk-g" data-mgbk-score="${idAttr}"><div class="mgbk-gt">`
-    + `<div class="mgbk-gn">${aN} <span class="mgbk-vs">vs</span> ${bN}</div>`
-    + `<div class="mgbk-gm">${escapeHTML(net ? net + ' when it opens' : 'Up next')}</div></div>`
-    + `<span class="mgbk-up">UP NEXT</span></div>`;
+  return `<div class="mgv-bkm${cls}" data-mgbk-score="${idAttr}">${rail}<div class="mgv-bkb">${body}</div>${pill}</div>`;
 }
 
+// The TOP of the bracket page: the completed note, then the one non-destructive control (the players' view).
+// The destructive Reset lives in mgBracketResetHTML at the BOTTOM (round 2026-08-03).
 function mgBracketControlsHTML(t, completed) {
   const doneNote = completed ? `<div class="mgbk-done">Tournament completed. Close-out lives in its own page.</div>` : '';
   return doneNote
     + `<div class="pl-sect">Bracket controls</div>`
     + `<button type="button" class="mgbk-players" data-mgbk-players>`
       + `<div class="mg-rb"><div class="mg-rn">Full bracket tree · the players' view</div>`
-      + `<div class="mg-rs">Open the public bracket page</div></div>${MG_CHEV}</button>`
+      + `<div class="mg-rs">Open the public bracket page</div></div>${MG_CHEV}</button>`;
+}
+
+// The BOTTOM of the bracket page: Reset closes the page under a plain hairline (.mgv-dsect is a label-less
+// .pl-sect — just the rule), the same grammar the sub-hub's danger zone uses.
+function mgBracketResetHTML() {
+  return `<div class="pl-sect mgv-dsect" aria-hidden="true"></div>`
     + `<button type="button" class="mgts-danger" data-mgbk-reset>Reset the bracket</button>`
     + `<div class="mgbk-note">Clears the bracket and returns to pools. Pool games and scores are kept. Type the tournament name to confirm.</div>`;
 }
@@ -10620,6 +10817,9 @@ function attachHandlers() {
         // Reset the bracket (type-name unlock) and the players'-view link out to the public bracket page.
         // Checked BEFORE the generic hub rows so a seed nudge / score / generate never falls through.
         if (mgtView === 'bracket') {
+          // The closing "already final · Show" row (round 2026-08-03): reveal / re-hide the finished games so
+          // a wrong score can still be corrected. Checked FIRST so the tap never falls through to a row.
+          if (e.target.closest('[data-mgbk-showdone]')) { mgBracketShowDone = !mgBracketShowDone; repaintManage(); return; }
           const bkScore = e.target.closest('[data-mgbk-score]');
           if (bkScore) { openMgScoreSheet(bkScore.getAttribute('data-mgbk-score')); return; }
           const seedUp = e.target.closest('[data-mgbk-seedup]');
