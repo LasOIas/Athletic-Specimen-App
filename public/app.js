@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.07.26.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.03.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4256,8 +4256,13 @@ function buildPoolsSchedulePageHTML() {
     ? 'seeding'
     : (poolLabels.includes(pdPoolFilter) ? pdPoolFilter : poolLabels[0]);
 
-  const tab = (label, val) => `<button type="button" class="pl-tab${selected === val ? ' pl-on' : ''}" data-pl-tab="${escapeHTML(val)}"${selected === val ? ' aria-current="true"' : ''}>${escapeHTML(label)}</button>`;
-  const tabs = `<div class="pl-tabs" role="group" aria-label="Pools and seeding">${activePools.map((p) => tab('Pool ' + (p.label || ''), p.label || '')).join('')}${tab('Seeding', 'seeding')}</div>`;
+  // Design round 2026-08-03: every tab is two stacked lines — the pool name over ITS OWN net range. The
+  // prototype hardcoded "Nets 1-3" on all four tabs, which is wrong the moment there are two pools (pool B
+  // sits on 4-6), so the range comes from poolNetRange() over that pool's real games. Seeding reads "All
+  // pools". An empty range (no game carries a net yet) drops the second line rather than printing an empty
+  // element. Class + data-pl-tab attribute order is unchanged — the tab click handler keys off data-pl-tab.
+  const tab = (label, val, sub) => `<button type="button" class="pl-tab${selected === val ? ' pl-on' : ''}" data-pl-tab="${escapeHTML(val)}"${selected === val ? ' aria-current="true"' : ''}><span class="pl-tabl">${escapeHTML(label)}</span>${sub ? `<span class="pl-tabn">${escapeHTML(sub)}</span>` : ''}</button>`;
+  const tabs = `<div class="pl-tabs" role="group" aria-label="Pools and seeding">${activePools.map((p) => tab('Pool ' + (p.label || ''), p.label || '', poolNetRange(matches.filter((m) => m.pool_id === p.id)))).join('')}${tab('Seeding', 'seeding', 'All pools')}</div>`;
 
   // Round meta: total rounds = max queue_order across pool games; current round = highest round with any
   // final + 1 (capped at total). "done of total" counts pool-phase games that have both teams (byes excluded).
@@ -4267,11 +4272,15 @@ function buildPoolsSchedulePageHTML() {
   const maxRound = Math.max(1, ...poolGames.map((m) => m.queue_order || 0));
   const finalOrders = poolGames.filter((m) => m.status === 'final').map((m) => m.queue_order || 0);
   const curRound = Math.min(maxRound, (finalOrders.length ? Math.max(...finalOrders) : 0) + 1);
-  const meta = `<p class="pl-meta">Round ${curRound} of ${maxRound} · ${done} of ${total} game${total === 1 ? '' : 's'} final</p>`;
+  // Design round 2026-08-03 copy sweep: "Round n" reads "Game n" everywhere on the player-facing board —
+  // inside a pool each team plays one game per round, so round 4 IS your fourth game. Nothing is renumbered.
+  const meta = `<p class="pl-meta">Game ${curRound} of ${maxRound} · ${done} of ${total} game${total === 1 ? '' : 's'} final</p>`;
 
   const myTeam = myTeamInfo();
   const myTeamId = myTeam ? myTeam.teamId : null;
-  const colh = `<div class="pl-colh"><span class="c1">#</span><span class="c2">Team</span><span class="c3">W${EN}L</span><span class="c4">Diff</span></div>`;
+  // Design round: the bare "#" now names what the column IS ("Seeding in pool A" / "Overall seed and pool").
+  // The "Team" label text is dropped, but its cell STAYS so #/W-L/Diff keep their column alignment.
+  const colh = (seedLabel) => `<div class="pl-colh"><span class="c1">${escapeHTML(seedLabel)}</span><span class="c2"></span><span class="c3">W${EN}L</span><span class="c4">Diff</span></div>`;
   // One standings-lite row (# / Team / W-L / Diff). `badge` prefixes the team cell (pool chip on Seeding).
   // Task 7: the row markup is now the shared poolStandRowHTML() so the admin Manage → Pools view reuses the
   // EXACT standings-lite grammar (the "You" highlight is public-only — admin passes myTeamId null).
@@ -4287,14 +4296,16 @@ function buildPoolsSchedulePageHTML() {
       const badge = poolByTeam[r.teamId] ? `<span class="pl-pl">${escapeHTML(poolByTeam[r.teamId])}</span> ` : '';
       return srow(r.seed, r.teamId, r.name, r.wins, r.losses, r.pointDiff, badge);
     }).join('');
-    body = `<div class="pl-sect">Overall seeding</div>${colh}${rows}<p class="pl-foot">Seeded by win %, then point diff. This sets the bracket order.</p>`;
+    body = `<div class="pl-sect">Overall seeding</div>${colh('Overall seed and pool')}${rows}<p class="pl-foot">Seeded by win %, then point diff. This sets the bracket order.</p>`;
   } else {
     const pool = activePools.find((p) => (p.label || '') === selected) || activePools[0];
     const shaped = shapeStandingsByPool(pools, teams, matches).find((s) => s.poolLabel === (pool.label || ''));
     const standRows = (shaped ? shaped.rows : []).map((r) => srow(r.rank, r.teamId, r.name, r.wins, r.losses, r.pointDiff, '')).join('');
     const poolMatches = matches.filter((m) => m.pool_id === pool.id);
     const nets = [...new Set(poolMatches.map((m) => m.net).filter((n) => n != null))].sort((a, b) => a - b);
-    const netsLabel = nets.length ? ('Net' + (nets.length > 1 ? 's' : '') + ' ' + formatNetList(nets)) : '';
+    // Same net range the pool's tab shows — one helper, one answer (poolNetRange already carries the
+    // "Net"/"Nets" prefix and returns '' when no game has a net yet).
+    const netsLabel = poolNetRange(poolMatches);
     const gsections = nets.map((net) => {
       const games = poolMatches.filter((m) => m.net === net).sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0));
       const rows = games.map((g, i) => {
@@ -4302,24 +4313,39 @@ function buildPoolsSchedulePageHTML() {
         const aId = g.team_a_id, bId = g.team_b_id;
         const aN = escapeHTML(teamNameById(teams, aId));
         const bN = escapeHTML(teamNameById(teams, bId));
-        const aTap = aId ? `<span class="tapname" data-team-peek="${escapeHTML(aId)}">${aN}</span>` : aN;
-        const bTap = bId ? `<span class="tapname" data-team-peek="${escapeHTML(bId)}">${bN}</span>` : bN;
+        // Design round: <b> now marks YOUR team — the one bold, full-ink name on the board — instead of the
+        // winner. The winner reads green off `.pl-g .gt:has(.def) > .tapname`, which only matches a DIRECT
+        // child of .gt: the loser's name stays nested in .lose and "vs" rows carry no .def, so both are
+        // excluded. That is why the winner's .tapname is no longer wrapped in <b>.
+        const nameHTML = (id, txt) => {
+          const tapped = id ? `<span class="tapname" data-team-peek="${escapeHTML(id)}">${txt}</span>` : txt;
+          return (myTeamId && id === myTeamId) ? `<b>${tapped}</b>` : tapped;
+        };
+        const aTap = nameHTML(aId, aN);
+        const bTap = nameHTML(bId, bN);
         if (g.status === 'final') {
           const aWin = g.winner_team_id === aId;
           const w = aWin ? aTap : bTap, l = aWin ? bTap : aTap;
           // Score pair follows the displayed winner-first name order (§27 TRUE), not the stored a-b order.
           const ws = aWin ? g.score_a : g.score_b, ls = aWin ? g.score_b : g.score_a;
-          return `<div class="pl-g"><span class="rd">R${escapeHTML(String(order))}</span><span class="gt"><b>${w}</b> <span class="def">def.</span> <span class="lose">${l}</span></span><span class="sc">${escapeHTML(String(ws))}${EN}${escapeHTML(String(ls))}</span><span class="ftag">FINAL</span></div>`;
+          return `<div class="pl-g"><span class="rd">G${escapeHTML(String(order))}</span><span class="gt">${w} <span class="def">def.</span> <span class="lose">${l}</span></span><span class="sc">${escapeHTML(String(ws))}${EN}${escapeHTML(String(ls))}</span><span class="ftag">FINAL</span></div>`;
         }
         if (g.status === 'live') {
           const sa = Number(g.score_a) || 0, sb = Number(g.score_b) || 0;
-          return `<div class="pl-g live"><span class="rd">R${escapeHTML(String(order))}</span><span class="gt">${aTap} <span class="vs">vs</span> ${bTap}</span><span class="sc">${sa}${EN}${sb}</span><span class="pill">LIVE</span></div>`;
+          return `<div class="pl-g live"><span class="rd">G${escapeHTML(String(order))}</span><span class="gt">${aTap} <span class="vs">vs</span> ${bTap}</span><span class="sc">${sa}${EN}${sb}</span><span class="pill">LIVE</span></div>`;
         }
-        return `<div class="pl-g"><span class="rd">R${escapeHTML(String(order))}</span><span class="gt up">${aTap} <span class="vs">vs</span> ${bTap}</span><span class="ftag">UP NEXT</span></div>`;
+        return `<div class="pl-g"><span class="rd">G${escapeHTML(String(order))}</span><span class="gt up">${aTap} <span class="vs">vs</span> ${bTap}</span><span class="ftag">UP NEXT</span></div>`;
       }).join('');
       return `<div class="pl-net">NET ${escapeHTML(String(net))}</div>${rows}`;
     }).join('');
-    body = `<div class="pl-sect">Pool ${escapeHTML(pool.label || '')} standings</div>${colh}${standRows}<div class="pl-sect">Games${netsLabel ? ' · ' + escapeHTML(netsLabel) : ''}</div>${gsections}`;
+    // Design round: a caption under the games header states the emphasis rule. Rendered ONLY when a real team
+    // is resolved AND that team actually plays in THIS pool — a spectator with no claim, or one looking at a
+    // pool their team isn't in, never sees a dangling or untrue "is your team".
+    const mineHere = myTeamId && poolMatches.some((m) => m.team_a_id === myTeamId || m.team_b_id === myTeamId);
+    const legend = mineHere && myTeam.teamName
+      ? `<div class="pl-sect pl-legend"><b>${escapeHTML(myTeam.teamName)}</b> is your team</div>`
+      : '';
+    body = `<div class="pl-sect">Pool ${escapeHTML(pool.label || '')} standings</div>${colh('Seeding in pool ' + (pool.label || ''))}${standRows}<div class="pl-sect">Games${netsLabel ? ' · ' + escapeHTML(netsLabel) : ''}</div>${legend}${gsections}`;
   }
 
   return `${header}${meta}${tabs}${body}`;
@@ -4371,14 +4397,19 @@ function buildTeamPeekInnerHTML(m) {
   if (!rows) {
     rows = `<div class="pd-peek-row"><div class="pd-peek-ic pd-peek-nx"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg></div><div class="pd-peek-rl"><div class="k">Schedule</div><div class="v">No upcoming game right now</div></div></div>`;
   }
+  // Design round 2026-08-03: the header is ONE row — badge · name + pool chip · "View only" · close. The X
+  // used to be absolutely positioned outside the content edge and a line above the chip; it now sits inside
+  // .pd-peek-top so all four share one centre line and one right edge. Same button, same
+  // data-role="peek-close" hook (openTeamPeek's delegated click listener is untouched) — only its place in
+  // the markup moved. Sizing/positioning of the box itself stays in CSS + openTeamPeek's anchor math.
   return `<span class="pd-peek-arrow" aria-hidden="true"></span>
-    <button type="button" class="pd-peek-x" data-role="peek-close" aria-label="Close">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-    </button>
     <div class="pd-peek-top">
       <div class="pd-peek-mark"><span>${escapeHTML(m.initials)}</span></div>
       <div class="pd-peek-id"><div class="pd-peek-name">${escapeHTML(m.teamName)}</div><div class="pd-peek-sub">${poolChip}${escapeHTML(poolPos)}</div></div>
       <span class="pd-peek-lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg> View only</span>
+      <button type="button" class="pd-peek-x" data-role="peek-close" aria-label="Close">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
     </div>
     <div class="pd-peek-rec"><div class="pd-peek-recbig">${m.wins}&ndash;${m.losses}</div><div class="pd-peek-recl">${escapeHTML(recLine)}</div></div>
     <div class="pd-peek-rows">${rows}</div>
@@ -6663,16 +6694,31 @@ function buildMyTeamPageHTML() {
   const eyebrow = [t.name || 'Tournament', pool && pool.label ? ('Pool ' + pool.label) : '', seedRow && seedRow.seed ? ('Seed ' + seedRow.seed) : '']
     .filter(Boolean).join(' · ');
 
-  // Pips: one per game of mine with both teams known — green W, muted-red L, gray unplayed (§27 semantics).
+  // Design round 2026-08-03: the seven anonymous dots (.mt-pips) became result LETTERS in game order under a
+  // "Game by game" micro-label — W for a win, L for a loss, and one dashed "Next" chip standing for the next
+  // unplayed game. The row carries a real aria-label spelling the sequence out, because a screen reader can
+  // read "W L W" as three letters and lose the meaning.
   const myAll = matches.filter((m) => (m.team_a_id === mine.teamId || m.team_b_id === mine.teamId) && m.team_a_id && m.team_b_id);
-  const pips = rec.results.map((g) => `<span class="mt-pip ${g.won ? 'w' : 'l'}"></span>`).join('')
-    + Array.from({ length: Math.max(0, myAll.length - rec.results.length) }, () => '<span class="mt-pip"></span>').join('');
+  const unplayed = Math.max(0, myAll.length - rec.results.length);
+  const formChips = rec.results.map((g) => `<span class="mt-fc ${g.won ? 'w' : 'l'}">${g.won ? 'W' : 'L'}</span>`).join('')
+    + (unplayed ? '<span class="mt-fc up">Next</span>' : '');
+  const formSaid = [
+    rec.results.length
+      ? 'Results in order: ' + rec.results.map((g) => (g.won ? 'win' : 'loss')).join(', ') + '.'
+      : 'No games played yet.',
+    unplayed ? (unplayed === 1 ? 'One game to play.' : unplayed + ' games to play.') : '',
+  ].filter(Boolean).join(' ');
+  const form = formChips
+    ? `<div class="mt-form" aria-label="${escapeHTML(formSaid)}"><span class="mt-fl">Game by game</span><span class="mt-fchips">${formChips}</span></div>`
+    : '';
 
   const EN = '–'; // en dash — record + score separator (matches the pl-* pools kit)
+  // Design round: the next-game block reads as one sentence — "Your next game / at Net 3 vs Sand Sharks".
+  // The NET tile went (it repeated the net the sentence already names) and so did the countdown tail
+  // (~12 min / N games ahead), which was a guess dressed as a fact. Net is only spoken when we know it.
   const nextStrip = tl.next ? `<div class="mt-next">
-      <div class="mt-nettile"><span class="n1">NET</span><span class="n2">${tl.next.net ? escapeHTML(String(tl.next.net)) : '—'}</span></div>
-      <div><div class="mt-nl">${tl.next.isNow ? 'UP NEXT · HAPPENING NOW' : 'UP NEXT'}</div>
-        <div class="mt-nv">vs ${escapeHTML(tl.next.oppName || '—')}${tl.next.isNow ? '' : (tl.next.etaMin != null ? ' · ~' + tl.next.etaMin + ' min' : (tl.next.gamesAhead ? ' · ' + tl.next.gamesAhead + (tl.next.gamesAhead === 1 ? ' game ahead' : ' games ahead') : ''))}</div>
+      <div><div class="mt-nl">Your next game</div>
+        <div class="mt-nv">${tl.next.net ? `at <b>Net ${escapeHTML(String(tl.next.net))}</b> ` : ''}vs <b>${escapeHTML(tl.next.oppName || 'TBD')}</b></div>
       </div>
     </div>` : '';
 
@@ -6685,7 +6731,7 @@ function buildMyTeamPageHTML() {
   const gamesRows = rec.results.length
     ? rec.results.map((g, i) => {
         const m = myFinals[i] || {};
-        const meta = [m.net != null ? ('Net ' + m.net) : '', (m.queue_order || m.round) ? ('R' + (m.queue_order || m.round)) : ''].filter(Boolean).join(' · ');
+        const meta = [m.net != null ? ('Net ' + m.net) : '', (m.queue_order || m.round) ? ('G' + (m.queue_order || m.round)) : ''].filter(Boolean).join(' · ');
         return `<div class="mt-game${g.won ? '' : ' l'}"><span class="mt-wl ${g.won ? 'w' : 'l'}">${g.won ? 'W' : 'L'}</span><span class="mt-sc">${g.myScore}${EN}${g.oppScore}</span><span class="mt-vs">vs ${escapeHTML(g.oppName || '—')}</span>${meta ? `<span class="mt-meta">${escapeHTML(meta)}</span>` : ''}</div>`;
       }).join('')
     : '<div class="mt-note">No games scored yet. Results land here as they finish.</div>';
@@ -6695,13 +6741,14 @@ function buildMyTeamPageHTML() {
     ? roster.map((c) => `<div class="mt-pl"><span class="av">${escapeHTML(c.initials)}</span><span class="mt-nm">${escapeHTML(c.name)}</span>${c.id === mine.playerId ? '<span class="mt-you">You</span>' : ''}</div>`).join('')
     : '<div class="mt-note">No roster on file for this team.</div>';
 
-  // Single scroll (Mike pick Q): flat scoreboard hero -> up-next strip -> stacked GAMES then ROSTER.
+  // Single scroll (Mike pick Q): flat scoreboard hero -> next-game sentence -> stacked GAMES then the roster
+  // (headed "Your team" since the design round — it is the player's own side, not a generic roster).
   return `${header}
-    <div class="mt-hero"><span class="pd-eyebrow">${escapeHTML(eyebrow)}</span><div class="mt-team">${escapeHTML(mine.teamName)}</div><div class="mt-rn">${rec.wins}${EN}${rec.losses}</div><div class="mt-pips">${pips}</div></div>
+    <div class="mt-hero"><span class="pd-eyebrow">${escapeHTML(eyebrow)}</span><div class="mt-team">${escapeHTML(mine.teamName)}</div><div class="mt-rn">${rec.wins}${EN}${rec.losses}</div>${form}</div>
     ${nextStrip}
     <div class="pl-sect">Games</div>
     ${gamesRows}
-    <div class="pl-sect">Roster</div>
+    <div class="pl-sect">Your team</div>
     ${rosterRows}`;
 }
 
@@ -8961,7 +9008,8 @@ function mgPoolGameRowHTML(g, order, teams) {
   const idAttr = escapeHTMLText(String(g.id));
   const aN = escapeHTML(teamNameById(teams, g.team_a_id));
   const bN = escapeHTML(teamNameById(teams, g.team_b_id));
-  const rd = `<span class="rd">R${escapeHTML(String(order))}</span>`;
+  // Design round copy sweep: the row tag reads G# ("your second game"), matching the public pools board.
+  const rd = `<span class="rd">G${escapeHTML(String(order))}</span>`;
   if (g.status === 'final') {
     const aWin = g.winner_team_id === g.team_a_id;
     const w = aWin ? aN : bN, l = aWin ? bN : aN;
