@@ -981,6 +981,29 @@ function pickPoolCurrentGames(netGames) {
   return currentByNet;
 }
 
+// Pool tabs name their OWN nets (design round 2026-08-03 — README open question 1). Each pool owns a block of
+// nets (splitNetsAcrossPools), so the prototype's hardcoded "Nets 1-3" on every tab is wrong the moment there
+// are two pools — pool B is on 4-6. Takes the pool's games (each carrying `net` — the same list the pools page
+// already filters by pool_id), dedupes and sorts NUMERICALLY, then compresses runs the way an organiser says
+// it out loud: contiguous "Nets 1-3", a single "Net 4", a split block "Nets 1, 3, 5". Nets are 1-based, so 0 /
+// blank / junk drop out. Returns '' when no game carries a net, and the caller omits the line entirely rather
+// than printing a bare label. Title case — the tab's `text-transform:uppercase` does the shouting.
+function poolNetRange(games) {
+  const list = Array.isArray(games) ? games : [];
+  const nets = [...new Set(list.map((g) => Number(g && g.net)))].filter((n) => Number.isFinite(n) && n > 0)
+    .sort((a, b) => a - b);
+  if (!nets.length) return '';
+  const parts = [];
+  let start = nets[0], prev = nets[0];
+  for (let i = 1; i < nets.length; i++) {
+    if (nets[i] === prev + 1) { prev = nets[i]; continue; }
+    parts.push(start === prev ? String(start) : (start + '-' + prev));
+    start = prev = nets[i];
+  }
+  parts.push(start === prev ? String(start) : (start + '-' + prev));
+  return 'Net' + (nets.length > 1 ? 's' : '') + ' ' + parts.join(', ');
+}
+
 // Bracket game numbering (Mike, 2026-06-27): ONE continuous "G" number per bracket match across the whole
 // double-elim — winners bracket first (by round, then slot), then the losers bracket, then the grand final —
 // so games read G1, G2, … GN start to finish. Render-only (no DB): derived from the match list each render.
@@ -1380,6 +1403,67 @@ function teamSkillTotal(team) {
     return acc + ((Number.isFinite(n) && n > 0) ? n : 0);
   }, 0);
   return sum.toFixed(1);
+}
+
+// How far apart the teams ended up on skill (design round §6 + "State", 2026-08-03). After a player is dragged
+// between pickup teams the board warns "Team 2 and Team 3 are 11.0 apart on skill."; this returns the raw
+// material for that sentence — { spread, highIndex, lowIndex }, 0-based team indexes — or null when there are
+// not two teams to compare. Totals come from teamSkillTotal, so the warning can never disagree with the totals
+// printed on the team rows, and the spread is rounded to that same one decimal (which also keeps binary float
+// noise like 3.3 - 1.1 out of the copy). NO THRESHOLD LIVES HERE: whether a spread is worth warning about is
+// the CALLER's call and still open with Mike (the prototype warns at 11.0 and calls 3.5 "apart"). Ties resolve
+// to the FIRST highest and the LAST lowest, which keeps the two indexes distinct even when every team is dead
+// level — otherwise a spread of 0 would read "Team 1 and Team 1 are 0 apart".
+function teamSkillDrift(teams) {
+  const list = Array.isArray(teams) ? teams : [];
+  if (list.length < 2) return null;
+  const totals = list.map((team) => Number(teamSkillTotal(team)));
+  let highIndex = 0, lowIndex = 0;
+  totals.forEach((total, i) => {
+    if (total > totals[highIndex]) highIndex = i; // strict > → the FIRST of equal highs
+    if (total <= totals[lowIndex]) lowIndex = i;  // <=       → the LAST of equal lows
+  });
+  return { spread: Number((totals[highIndex] - totals[lowIndex]).toFixed(1)), highIndex, lowIndex };
+}
+
+// Drag a player onto another team (design round §6, 2026-08-03) — the PURE half of the shipped
+// moveGeneratedPlayerBetweenTeams (app.js). Same rule, no `state`, addressed by INDEX rather than identity key
+// because the drag already knows the row it lifted: `from` is {teamIndex, playerIndex}, `to` is the target
+// team's index. THE RULE, unchanged from the shipped swap sheet: a target that is SHORT takes a plain move
+// (filling a short team can only help the balance); otherwise the dragged player TRADES PLACES with the
+// target's closest skill, which is what keeps two even teams even. Each lands in the other's slot. Returns a
+// NEW teams array — every team array copied, player objects carried by reference so identity survives the
+// move. Anything it cannot honour (same team, a bad index, a malformed roster) returns the INPUT ITSELF, so a
+// caller can read `out === teams` as "nothing moved" instead of diffing rosters. The closest-skill branch can
+// never see an empty target: it only runs when the source is no larger than the target, and the source always
+// holds at least the dragged player.
+function swapPlayersBetweenTeams(teams, from, to) {
+  if (!Array.isArray(teams) || teams.length < 2) return teams;
+  if (!from || typeof from !== 'object') return teams;
+  const fromTeamIndex = from.teamIndex, playerIndex = from.playerIndex;
+  if (!Number.isInteger(fromTeamIndex) || !Number.isInteger(playerIndex) || !Number.isInteger(to)) return teams;
+  if (fromTeamIndex < 0 || fromTeamIndex >= teams.length || to < 0 || to >= teams.length) return teams;
+  if (fromTeamIndex === to) return teams; // dropped on the team it came from
+  if (!Array.isArray(teams[fromTeamIndex]) || !Array.isArray(teams[to])) return teams;
+  if (playerIndex < 0 || playerIndex >= teams[fromTeamIndex].length) return teams;
+
+  const next = teams.map((team) => (Array.isArray(team) ? team.slice() : team));
+  const fromTeam = next[fromTeamIndex], toTeam = next[to];
+  const dragged = fromTeam[playerIndex];
+  if (fromTeam.length > toTeam.length) { // the target is short — move, don't trade
+    fromTeam.splice(playerIndex, 1);
+    toTeam.push(dragged);
+    return next;
+  }
+  const draggedSkill = Number(dragged && dragged.skill) || 0;
+  let bestIdx = 0, bestDiff = Infinity;
+  toTeam.forEach((p, idx) => {
+    const diff = Math.abs((Number(p && p.skill) || 0) - draggedSkill);
+    if (diff < bestDiff) { bestDiff = diff; bestIdx = idx; } // strict < → the first of equal distances
+  });
+  fromTeam[playerIndex] = toTeam[bestIdx];
+  toTeam[bestIdx] = dragged;
+  return next;
 }
 
 // Finish-line Slice 3 (spec §13.5): the registration EVENT view-model. Pure shape for the event card —
@@ -1821,13 +1905,14 @@ if (typeof module !== "undefined" && module.exports) {
     resolveTournamentMatch, publicHubStatus,
     scoringRulesFor, gameScoreStatus,
     splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
-    layoutRoundsOnNets, assignPoolGameSlots, relayoutPoolGamesOnNets,
+    layoutRoundsOnNets, assignPoolGameSlots, relayoutPoolGamesOnNets, poolNetRange,
     bracketGameNumbers, bracketSourceLabel,
     shouldAutoPromptBracket, assignBracketNets,
     shapeStandingsByPool, computeAllTimeLeaderboard,
     shapeClaimCandidates, filterClaimCandidates,
     resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
     teamPeekModel, checkinHeroModel, checkinConsoleModel, teamSkillTotal,
+    teamSkillDrift, swapPlayersBetweenTeams,
     bracketOutcome, bracketRoundLabel, bracketStatusLine,
     registerEventModel, joinSheetValidate, registerFormValidate, teamNameTaken,
     extractVenmoUsername, composeVenmoPayURL,
