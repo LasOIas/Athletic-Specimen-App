@@ -2865,6 +2865,40 @@ async function tdbResetTournamentFull(tournament) {
     throw new Error('The reset did not go through. Check you are signed in as an admin, then try again.');
   }
 }
+
+// DELETE THE WHOLE TOURNAMENT (round 2026-08-03, README §7) — the Danger zone's second row, the one that
+// does not come back. Unlike the reset above, this deletes exactly ONE row.
+// SCHEMA FACT (db/migrations/0001_tournament_schema.sql): every child table's tournament_id FK is
+// ON DELETE CASCADE, so removing the tournaments row takes matches, pools, teams, team_members and
+// tournament_players with it. Hand-deleting children first would only widen the blast radius for nothing.
+// Scoped to .eq('id', ...) — the June 2026 event lives in the same table and is irreplaceable.
+//
+// THE READ-BACK IS THE POINT, and it is not paranoia (same lesson as tdbResetTournamentFull above). The RLS
+// policies here are USING row FILTERS, not RAISE guards: a session that has drifted to anon or off its
+// organizer membership gets a DELETE that matches ZERO rows and returns `error: null`. Every check would
+// pass and the button would report a confident success while the tournament still existed. For the reset
+// that was recoverable; for a DELETE a false success is worse, because Mike would believe the event is gone
+// and stop looking. So we re-select the row by id and REQUIRE it to be absent.
+// tournaments is anon-readable in every version of the policy set, so "still there" is real ground truth
+// rather than a permission echo — and if the read-back itself FAILS we refuse to claim success either way,
+// because an unproven delete is exactly what this guard exists to catch.
+// NOTE FOR THE CONTROLLER: the migration files and this file's own RLS comments disagree about which policy
+// set is live on tournaments, and settling that needs Mike's DB access. This guard makes the button honest
+// whichever is true, so nothing here guesses at the policy state.
+async function tdbDeleteTournament(tournament) {
+  if (!supabaseClient || !tournament || !tournament.id) throw new Error('No tournament.');
+  const { error } = await supabaseClient.from('tournaments').delete().eq('id', tournament.id);
+  if (error) { console.error('tdbDeleteTournament', error); throw error; }
+  const left = await supabaseClient.from('tournaments')
+    .select('id', { count: 'exact', head: true }).eq('id', tournament.id);
+  if (left && left.error) {
+    console.error('tdbDeleteTournament read-back', left.error);
+    throw new Error('The delete did not go through. Check you are signed in as an admin, then try again.');
+  }
+  if (left && left.count) {
+    throw new Error('The delete did not go through. Check you are signed in as an admin, then try again.');
+  }
+}
 async function tdbGenerateBracket(tournament, seedOrder) {
   if (!supabaseClient || !tournament) throw new Error('No tournament.');
   // Bracket-wipe race guard (defense-in-depth; the real guard is server-side in generate_bracket_atomic):
@@ -6886,6 +6920,14 @@ let mgRenameGroup = null;       // the group name being inline-renamed in the gr
 let mgtSize = 4;                // the active size chip (2/3/4/6); 4s default per the mockup
 let mgtSwapKey = null;          // the playerIdentityKey being swapped (null = swap sheet closed)
 let mgtSwapFrom = null;         // the team index the swapped player currently sits on
+// Round 2026-08-03 §6 — DRAG to move players between pickup teams (Mike's pick: direction B). Press the grip
+// at a name's left, drag the lifted card onto another team row, release to trade with the closest player
+// there. mgtDrag is the in-flight gesture (null between drags); mgtLastMove is the snapshot the Undo strip
+// restores. Both are module vars so the container-swap repaint and a background sync leave them alone; the
+// gesture itself never repaints (see mgtDragMove) because rebuilding the list under the finger would drop it.
+let mgtDrag = null;             // { key, from, playerIndex, name, skillText, pointerId, startX/Y, active, over, lift, slot, row }
+let mgtLastMove = null;         // { before, movedName, partnerName, toTeam, mode } — powers .mgv-undo
+let mgtDragSuppressClick = false; // a completed drag must not also fire the name's tap-to-swap sheet
 // Task 5 (Tournament sub-hub, pick R2 + Registration, pick R7): the open tournament sub-view under
 // manageView==='tournament'. null = the sub-hub (the 7 rows); 'registration' = the Registration view (built
 // now); 'teams'|'pools'|'bracket'|'settings'|'rules'|'closeout' render honest placeholders until Tasks 6-10
@@ -6921,6 +6963,24 @@ let mgLogLoading = false;
 let mgLogError = '';
 
 const MG_CHEV ='<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
+
+// The 17px drag grip (round 2026-08-03 §6). It MUST be the first child INSIDE .mgt-nm: the shipped CSS guard
+// is `.mgt-nm:has(.mgv-hnd)` (production .mgt-nm is justify-content:space-between with exactly two children,
+// so without the guard firing the names fly to the row's centre). touch-action:none is inline because it is
+// behaviour, not design — without it iOS scrolls the page instead of dragging, and styles.css shipped this
+// round already. data-mgt-grip is the JS hook; the class is the design's.
+const MGT_GRIP_SVG = '<svg class="mgv-hnd" data-mgt-grip viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="touch-action:none" aria-hidden="true"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg>';
+const MGT_WARN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 2.4 18a1.8 1.8 0 0 0 1.6 2.7h16a1.8 1.8 0 0 0 1.6-2.7L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/></svg>';
+// A press has to travel this far before it becomes a drag. Under it the gesture stays a TAP, which still
+// opens the existing swap sheet — so a fat finger on the 17px grip is never a dead zone.
+const MGT_DRAG_SLOP = 6;
+// UNCONFIRMED — README open question 3 ("Skill-drift threshold for the warning") is still open with Mike.
+// Picked so the warning means something rather than crying wolf: the balancer's own output sits inside ~1-3
+// points of spread, and the exploration doc calls 3.5 merely "apart", so warning there would fire on almost
+// every drag. 8.0 is roughly two full skill grades across a 4s roster (~40% of a typical 20-point team
+// total) — visibly lopsided, and it still fires on the prototype's own 11.0 example. It only ever WARNS:
+// no move is blocked, per the same open question.
+const MGT_DRIFT_WARN_AT = 8;
 
 // The tournament the Manage lead reports on: a live event (pools/bracket), else the most-recent SETUP
 // tournament — REGARDLESS of registration_open. The old filter (`registration_open && status==='setup'`)
@@ -7925,12 +7985,19 @@ function buildManageTeamsHTML() {
         const n = Number(p && p.skill);
         const skPos = Number.isFinite(n) && n > 0;
         return `<div class="mgt-nm" data-mgt-swap="${escapeHTMLText(key)}" data-mgt-from="${idx}">`
+          + MGT_GRIP_SVG
           + `<span class="mgt-nmn">${escapeHTML(String((p && p.name) || 'Player'))}</span>`
           + `<span class="mgt-nsk${skPos ? '' : ' n'}">${mgpSkillText(p && p.skill)}</span></div>`;
       }).join('');
-      return `<div class="mgt-trow"><span class="mgt-tt">TEAM ${idx + 1}<b class="mgt-tsk">${teamSkillTotal(team)}</b></span><div class="mgt-names">${names}</div></div>`;
+      // data-mgt-team is the drop target's identity: the pointer hit-test reads it off the row it lands on,
+      // so the drop never depends on the row's position among its siblings.
+      return `<div class="mgt-trow" data-mgt-team="${idx}"><span class="mgt-tt">TEAM ${idx + 1}<b class="mgt-tsk">${teamSkillTotal(team)}</b></span><div class="mgt-names">${names}</div></div>`;
     }).join('');
-    teamsSect = `<div class="pl-sect">Today's teams</div>${rows}`
+    teamsSect = `<div class="pl-sect">Today's teams</div>`
+      + `<div class="mgv-note">Drag a name by its handle onto another team.</div>`
+      + rows
+      + mgtDriftWarnHTML(teams)
+      + mgtUndoStripHTML()
       + `<div class="mgt-note">Tap a name to swap players between teams · regenerate any time</div>`;
   } else {
     teamsSect = `<div class="mgt-empty">No teams yet. Pick a size and generate.</div>`;
@@ -7980,6 +8047,7 @@ function mgtGenerateTeams() {
   state.liveMatchResults = {};
   state.liveMatchSkillSnapshots = {};
   mgtSwapKey = null; mgtSwapFrom = null;
+  mgtLastMove = null; // a fresh board has nothing to undo back to
   saveLocal();
   repaintManage();
 }
@@ -7990,7 +8058,263 @@ function mgtApplySwap(toTeamIndex) {
   if (mgtSwapKey == null || mgtSwapFrom == null) return;
   const result = moveGeneratedPlayerBetweenTeams(Number(mgtSwapFrom), Number(toTeamIndex), mgtSwapKey);
   mgtSwapKey = null; mgtSwapFrom = null;
+  // A sheet move supersedes the dragged one, so the Undo strip goes rather than offering to restore a board
+  // two moves back (an Undo that quietly reverts a move you did NOT make is worse than no Undo).
+  mgtLastMove = null;
   if (result && result.changed) saveLocal();
+  repaintManage();
+}
+
+// ── Round 2026-08-03 §6: drag a player onto another team (Mike's pick, direction B) ───────────────────
+// Pointer Events + setPointerCapture throughout, NEVER HTML5 drag-and-drop: dragstart/drop do not fire on
+// iOS Safari, and this is a phone interaction standing at the courts. No long-press gate either — the grip
+// IS the affordance (README §6), so the drag begins on the first movement past MGT_DRAG_SLOP.
+//
+// THE RULE lives in ONE place: swapPlayersBetweenTeams (pure.js), which already mirrors the shipped
+// moveGeneratedPlayerBetweenTeams — a short target takes a plain move, otherwise the dragged player trades
+// places with the target's closest skill. The drag and the tap-to-swap sheet therefore can never disagree.
+// The mid-drag PREVIEW is computed by running that same function and diffing the result, so what the hint
+// promises and what the drop does are the same computation, not two implementations of one rule.
+
+// The mid-drag model for dragging teams[from][playerIndex] over team `to`. null when the drop would change
+// nothing (same team, bad index, malformed roster) — the caller then shows no highlight and commits nothing.
+// deltas[] is per-team skill change, one decimal, ready for the .mgv-delta chips on BOTH team headers.
+function mgtDragModel(teams, from, playerIndex, to) {
+  const list = Array.isArray(teams) ? teams : [];
+  const next = swapPlayersBetweenTeams(list, { teamIndex: from, playerIndex }, to);
+  if (next === list) return null;                       // the helper's own "nothing moved" signal
+  const moved = next[from].length < list[from].length;  // the target was short → a move, nobody comes back
+  const partner = moved ? null : next[from][playerIndex];
+  const skill = partner == null ? null : Number(partner.skill);
+  return {
+    mode: moved ? 'move' : 'swap',
+    partnerName: partner ? String(partner.name || 'Player') : '',
+    partnerSkill: (Number.isFinite(skill) && skill > 0) ? skill.toFixed(1) : 'unrated',
+    deltas: list.map((team, i) => Number((Number(teamSkillTotal(next[i])) - Number(teamSkillTotal(team))).toFixed(1))),
+    next,
+  };
+}
+
+// The delta chip on a team header during the drag ("+6.5" / "−6.5"). No chip at all when nothing changes —
+// an explicit "0" would read as a number the admin has to interpret.
+function mgtDeltaHTML(delta) {
+  const n = Number(delta);
+  if (!Number.isFinite(n) || n === 0) return '';
+  return `<span class="mgv-delta">${n > 0 ? '+' : '&minus;'}${Math.abs(n).toFixed(1)}</span>`;
+}
+
+// The hint that names who you would trade with. It goes INSIDE .mgt-names, never as a third child of
+// .mgt-trow — that row is a flex row of [team label | names] and a third column crushes the roster.
+function mgtRowHintHTML(model) {
+  if (!model) return '';
+  if (model.mode === 'move') return `<div class="mgv-rowhint">Drop to add them to this team</div>`;
+  return `<div class="mgv-rowhint">Drop to swap with <b>${escapeHTML(model.partnerName)} &middot; ${escapeHTML(model.partnerSkill)}</b></div>`;
+}
+
+// The lifted card that rides under the finger. Same three children as the resting name so it reads as the
+// row picked up rather than a new object.
+function mgtLiftHTML(name, skillText, unrated) {
+  return MGT_GRIP_SVG
+    + `<span class="mgt-nmn">${escapeHTML(String(name || 'Player'))}</span>`
+    + `<span class="mgt-nsk${unrated ? ' n' : ''}">${skillText}</span>`;
+}
+
+// The Undo strip after a drop. Restores the exact rosters through the same write path the move used.
+function mgtUndoStripHTML() {
+  const m = mgtLastMove;
+  if (!m) return '';
+  const who = `<b>${escapeHTML(m.movedName)}</b>`;
+  const line = m.mode === 'swap'
+    ? `${who} and <b>${escapeHTML(m.partnerName)}</b> swapped`
+    : `${who} moved to Team ${Number(m.toTeam) + 1}`;
+  return `<div class="mgv-undo"><span class="mgv-undo-t">${line}</span>`
+    + `<button type="button" class="mgv-undo-b" data-mgv-undo>Undo</button></div>`;
+}
+
+// The skill-drift warning. Fires only AFTER a move (mgtLastMove), because it is the consequence of what the
+// admin just did — the balancer's own output never drifts this far, so warning on a freshly generated board
+// would be noise. WARN ONLY: the move is already applied and nothing is blocked (README open question 3).
+function mgtDriftWarnHTML(teams) {
+  if (!mgtLastMove) return '';
+  const d = teamSkillDrift(teams);
+  if (!d || d.spread < MGT_DRIFT_WARN_AT) return '';
+  const lo = Math.min(d.highIndex, d.lowIndex), hi = Math.max(d.highIndex, d.lowIndex);
+  return `<div class="mgv-warn">${MGT_WARN_SVG}<span>Team ${lo + 1} and Team ${hi + 1} are `
+    + `<b>${d.spread.toFixed(1)}</b> apart on skill. Drag one more player to even them up.</span></div>`;
+}
+
+// Commit the drop. Snapshots the rosters for Undo, applies the pure move, then persists through EXACTLY the
+// path the tap-to-swap sheet uses: updateGeneratedTeamsSummaryFromCurrent + saveLocal (→ queueLiveStateSave).
+// There is no second persistence route. Returns true when something actually moved.
+function mgtDragCommit(to) {
+  const d = mgtDrag;
+  if (!d) return false;
+  const teams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
+  const model = mgtDragModel(teams, d.from, d.playerIndex, Number(to));
+  if (!model) return false;
+  mgtLastMove = {
+    before: teams.map((t) => (Array.isArray(t) ? t.slice() : t)),
+    movedName: d.name,
+    partnerName: model.partnerName,
+    toTeam: Number(to),
+    mode: model.mode,
+  };
+  state.generatedTeams = model.next;
+  updateGeneratedTeamsSummaryFromCurrent(model.next);
+  saveLocal();
+  return true;
+}
+
+// Undo — the same write path in reverse, restoring the snapshot taken before the move.
+function mgtUndoLastMove() {
+  const m = mgtLastMove;
+  if (!m || !Array.isArray(m.before)) return false;
+  state.generatedTeams = m.before.map((t) => (Array.isArray(t) ? t.slice() : t));
+  updateGeneratedTeamsSummaryFromCurrent(state.generatedTeams);
+  mgtLastMove = null;
+  saveLocal();
+  repaintManage();
+  return true;
+}
+
+// ── The gesture itself (DOM only — every decision above is testable without a browser) ────────────────
+// Mid-drag deliberately does NOT repaint: rebuilding the list would destroy the node under the finger and
+// kill the gesture. The three visual states are applied in place; the drop repaints once, at the end.
+function mgtDragTeamAt(x, y) {
+  if (!document.elementFromPoint) return null;
+  const el = document.elementFromPoint(x, y);
+  const row = el && el.closest ? el.closest('[data-mgt-team]') : null;
+  if (!row) return null;
+  const n = Number(row.getAttribute('data-mgt-team'));
+  return Number.isInteger(n) ? { index: n, row } : null;
+}
+
+function mgtDragPointerDown(e) {
+  if (manageView !== 'teams' || mgtDrag) return;
+  const grip = e.target && e.target.closest ? e.target.closest('[data-mgt-grip]') : null;
+  if (!grip) return;
+  const nameEl = grip.closest('[data-mgt-swap]');
+  if (!nameEl) return;
+  const from = Number(nameEl.getAttribute('data-mgt-from'));
+  const key = nameEl.getAttribute('data-mgt-swap') || '';
+  const teams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
+  if (!Array.isArray(teams[from])) return;
+  const playerIndex = teams[from].findIndex((p) => playerIdentityKey(p) === key);
+  if (playerIndex < 0) return;
+  const p = teams[from][playerIndex];
+  const sk = Number(p && p.skill);
+  mgtDrag = {
+    key, from, playerIndex, row: nameEl,
+    name: String((p && p.name) || 'Player'),
+    skillText: mgpSkillText(p && p.skill),
+    unrated: !(Number.isFinite(sk) && sk > 0),
+    pointerId: e.pointerId, startX: e.clientX, startY: e.clientY,
+    active: false, over: null, lift: null, slot: null,
+  };
+  // Capture on the stable #app-content, not the name: the source node is replaced by the drop's repaint,
+  // and a capture on a detached node would strand the gesture mid-air.
+  const host = document.getElementById('app-content');
+  if (host && host.setPointerCapture) { try { host.setPointerCapture(e.pointerId); } catch (_) {} }
+}
+
+// First real movement: lift the name out, hold its slot open dashed, and start following the finger.
+function mgtDragBeginVisual(e) {
+  const d = mgtDrag;
+  if (!d || d.active) return;
+  d.active = true;
+  const rect = (d.row && d.row.getBoundingClientRect) ? d.row.getBoundingClientRect() : null;
+  d.grabX = rect ? (d.startX - rect.left) : 20;
+  d.grabY = rect ? (d.startY - rect.top) : 14;
+  const slot = document.createElement('div');
+  slot.className = 'mgv-slot';
+  slot.textContent = d.name;
+  if (d.row && d.row.parentNode) {
+    d.row.parentNode.insertBefore(slot, d.row);
+    d.row.style.display = 'none';
+    d.slot = slot;
+  }
+  const lift = document.createElement('div');
+  lift.className = 'mgv-lift';
+  lift.innerHTML = mgtLiftHTML(d.name, d.skillText, d.unrated);
+  lift.style.cssText = 'position:fixed;z-index:60;pointer-events:none;'
+    + (rect ? `width:${Math.round(rect.width)}px;` : 'width:220px;');
+  document.body.appendChild(lift);
+  d.lift = lift;
+  mgtDragPlaceLift(e.clientX, e.clientY);
+}
+
+function mgtDragPlaceLift(x, y) {
+  const d = mgtDrag;
+  if (!d || !d.lift) return;
+  d.lift.style.left = Math.round(x - (d.grabX || 0)) + 'px';
+  d.lift.style.top = Math.round(y - (d.grabY || 0)) + 'px';
+}
+
+// Enter / leave a team row: highlight it, preview both headers' totals, and name who you would trade with.
+function mgtDragHover(hit) {
+  const d = mgtDrag;
+  if (!d) return;
+  const to = (hit && hit.index !== d.from) ? hit.index : null;
+  if (to === d.over) return;
+  mgtDragClearHover();
+  d.over = to;
+  if (to == null) return;
+  const teams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
+  const model = mgtDragModel(teams, d.from, d.playerIndex, to);
+  if (!model) { d.over = null; return; }
+  const overRow = hit.row;
+  overRow.classList.add('mgv-over');
+  const names = overRow.querySelector('.mgt-names');
+  if (names) names.insertAdjacentHTML('beforeend', mgtRowHintHTML(model));
+  [d.from, to].forEach((i) => {
+    const row = document.querySelector(`[data-mgt-team="${i}"]`);
+    const tt = row && row.querySelector('.mgt-tt');
+    if (tt) tt.insertAdjacentHTML('beforeend', mgtDeltaHTML(model.deltas[i]));
+  });
+}
+
+function mgtDragClearHover() {
+  document.querySelectorAll('.mgt-trow.mgv-over').forEach((r) => r.classList.remove('mgv-over'));
+  document.querySelectorAll('.mgv-rowhint, .mgv-delta').forEach((n) => n.remove());
+  if (mgtDrag) mgtDrag.over = null;
+}
+
+function mgtDragPointerMove(e) {
+  const d = mgtDrag;
+  if (!d || e.pointerId !== d.pointerId) return;
+  if (!d.active) {
+    if (Math.abs(e.clientX - d.startX) < MGT_DRAG_SLOP && Math.abs(e.clientY - d.startY) < MGT_DRAG_SLOP) return;
+    mgtDragBeginVisual(e);
+  }
+  if (e.cancelable) e.preventDefault();
+  mgtDragPlaceLift(e.clientX, e.clientY);
+  mgtDragHover(mgtDragTeamAt(e.clientX, e.clientY));
+}
+
+// Tear the gesture's own DOM down. Safe to call twice, and safe when the drop never started.
+function mgtDragTeardown() {
+  const d = mgtDrag;
+  if (!d) return;
+  mgtDragClearHover();
+  if (d.lift) d.lift.remove();
+  if (d.slot) d.slot.remove();
+  if (d.row && d.row.style) d.row.style.display = '';
+  const host = document.getElementById('app-content');
+  if (host && host.releasePointerCapture) { try { host.releasePointerCapture(d.pointerId); } catch (_) {} }
+  mgtDrag = null;
+}
+
+function mgtDragPointerUp(e, cancelled) {
+  const d = mgtDrag;
+  if (!d || e.pointerId !== d.pointerId) return;
+  const to = cancelled ? null : d.over;
+  const wasActive = d.active;
+  // ORDER MATTERS: mgtDragCommit reads the in-flight mgtDrag, and mgtDragTeardown nulls it. Committing
+  // after the teardown silently drops every drop on the floor.
+  if (wasActive && to != null) mgtDragCommit(to);
+  mgtDragTeardown();
+  if (!wasActive) return;                 // never travelled: stays a tap, the swap sheet opens as before
+  mgtDragSuppressClick = true;            // a real drag must not ALSO open that sheet
   repaintManage();
 }
 
@@ -8118,8 +8442,8 @@ function buildManageTournamentHTML() {
   // Danger zone (round 2026-08-03) — replaces the loose reset button. Full reset lives HERE, on the sub-hub,
   // rather than inside Pools or Bracket, because the whole point is escaping a bad state: it has to be
   // reachable at every status, including 'completed'. Delete sits beside it with what each one takes with
-  // it spelled out; both keep the locked type-the-name grammar. NOTE: data-mgt-delete is rendered but NOT
-  // wired — the delete server operation is the next slice's.
+  // it spelled out; both keep the locked type-the-name grammar. data-mgt-delete → mgTournamentDelete
+  // (tdbDeleteTournament + its mandatory read-back guard); data-mgt-fullreset → mgTournamentFullReset.
   const danger = `<div class="pl-sect mgv-dsect" aria-hidden="true"></div>`
     + `<div class="mgv-danger">`
       + `<div class="mgv-drow"><span class="mgv-dtxt">`
@@ -8847,18 +9171,73 @@ function buildMgTeamSheetHTML(team) {
 }
 
 // ── Teams-list actions (delegated via #app-content when manageView==='tournament' && mgtView==='teams') ──
-// Tapping the tag toggles paid without opening the sheet (optimistic in-place flip, then refresh + repaint).
-async function mgTeamTogglePaid(teamId, tagEl) {
+// THE paid write path. It was the Teams-list row toggle until the 2026-08-03 round (README §8) moved the
+// control into #team-pay-modal — "move the paid function inside the team you click open" — so the row now
+// only REPORTS state and this is called from the popup's Mark as paid. Same tdbSetTeamPaid update the
+// body-level team sheet's switch uses: ONE write path, so the two surfaces can never disagree.
+// The refresh doubles as a READ-BACK: tdbRefreshTournaments re-reads teams from the server, so if RLS
+// silently filtered the update to zero rows (a row FILTER returns error:null, see tdbResetTournamentFull)
+// the re-read still says Unpaid and we say so instead of reporting a payment that was never recorded.
+async function mgTeamTogglePaid(teamId, btnEl) {
   if (!state.isAdmin || !teamId) return;
   const team = mgFindTeam(teamId);
   if (!team) return;
   const next = !team.paid;
-  if (tagEl) {
-    tagEl.classList.toggle('paid', next);
-    tagEl.classList.toggle('unpaid', !next);
-    tagEl.textContent = next ? 'PAID' : 'TAP WHEN PAID';
+  const label = () => (mgFindTeam(teamId) || team).paid ? 'Mark as unpaid' : 'Mark as paid';
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = next ? 'Marking as paid…' : 'Marking as unpaid…'; }
+  try {
+    await tdbSetTeamPaid(teamId, next);
+    await tdbRefreshTournaments();
+  } catch (err) {
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = label(); }
+    appNotice({ title: 'Could not save that', message: (err && err.message) || 'Try again.' });
+    return;
   }
-  try { await tdbSetTeamPaid(teamId, next); await tdbRefreshTournaments(); } catch (err) { console.warn('mgTeamTogglePaid', err); }
+  const fresh = mgFindTeam(teamId);
+  // Repaint the popup in place (body-level, so repaintManage never reaches it) and the list under it, so the
+  // state word, the button label and the row's .mgv-pmeta all move together off the SAME server truth.
+  const modal = document.getElementById('team-pay-modal');
+  if (modal && fresh) modal.innerHTML = buildMgTeamPayModalHTML(fresh);
+  repaintManage();
+  if (fresh && !!fresh.paid !== next) {
+    appNotice({ title: 'That did not save', message: 'The change did not go through. Check you are signed in as an admin, then try again.' });
+  }
+}
+
+// Withdraw a registered team, from INSIDE the popup only (README §8 — the quiet red footer action; the list
+// row deliberately has no destructive control). No new primitive: the two shipped team-removal paths already
+// cover the two real cases, and this picks between them by the tournament's stage exactly the way the
+// body-level team sheet does.
+//   mid-play (status pools|bracket) → tdbWithdrawTeam, which FORFEITS their remaining pool games so nobody
+//     else's record is distorted. Deleting the row here would null team_a_id/team_b_id on games they already
+//     played (the FK is ON DELETE SET NULL) and silently corrupt the standings.
+//   before the draw → tdbDeleteTeam: there are no games yet, so on the registration list "withdraw" honestly
+//     means the registration goes.
+// Type-to-confirm is NOT specified for this one (README §8), so it uses the house appConfirm danger dialog.
+async function mgtpWithdraw(teamId) {
+  if (!state.isAdmin || !teamId) return;
+  const t = mgActiveTournament();
+  const team = mgFindTeam(teamId);
+  if (!team) return;
+  const nm = (team.name || '').trim() || 'This team';
+  const midPlay = !!t && (t.status === 'pools' || t.status === 'bracket');
+  const ok = await appConfirm({
+    title: 'Withdraw team',
+    message: midPlay
+      ? `${nm} forfeits their remaining games (opponents win by the pool target) and drops out of the tournament. This can't be undone.`
+      : `${nm} comes off the tournament. Their registration and payment record go with them. This can't be undone.`,
+    confirmText: 'Withdraw',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    if (midPlay) await tdbWithdrawTeam(teamId, t); else await tdbDeleteTeam(teamId);
+    await tdbRefreshTournaments();
+  } catch (err) {
+    appNotice({ title: 'Could not withdraw the team', message: (err && err.message) || 'Try again.' });
+    return;
+  }
+  closeMgTeamPayModal();
   repaintManage();
 }
 // The dashed "Add a team yourself" — a house text-input dialog (never window.prompt), then tdbAddTeam.
@@ -8984,8 +9363,8 @@ function openMgTeamSheet(teamId) {
 // as #player-edit-modal): identity in the header with the payment state beside the close, roster chips, the
 // fee, the paid action sat under the fee it settles, and a quiet Withdraw + Done footer. Body-level like the
 // other sheets, so the 15s poll / partialRender can never wipe it.
-// UNWIRED THIS SLICE (next slice owns the writes): data-mgtp-paid ("Mark as paid") and data-mgtp-withdraw.
-// Both render with their hooks; neither has a handler branch below.
+// data-mgtp-paid → mgTeamTogglePaid (the shipped tdbSetTeamPaid write, moved here from the row toggle);
+// data-mgtp-withdraw → mgtpWithdraw (forfeit mid-play, else remove the registration). Both wired below.
 function buildMgTeamPayModalHTML(team) {
   if (!team) return '';
   const t = mgActiveTournament();
@@ -9017,7 +9396,13 @@ function buildMgTeamPayModalHTML(team) {
       + `<div class="mgv-tf"><span class="mgv-tlabel">Roster</span>${roster}</div>`
       + fee
       + `<button type="button" class="mgv-tpay" data-mgtp-paid="${idAttr}">${paid ? 'Mark as unpaid' : 'Mark as paid'}</button>`
-      + `<div class="mgv-tnote">Logged in the activity log with your name.</div>`
+      // COPY CHANGED FROM THE HANDOFF, deliberately. The prototype says "Logged in the activity log with
+      // your name." — that is not true today and the app must not claim it. The activity log (action_log,
+      // migrations 0002/0051) is written ONLY from inside SECURITY DEFINER RPCs and has no client INSERT
+      // policy; paid rides tdbSetTeamPaid, a direct teams UPDATE, so it leaves no log row. Making the
+      // sentence true needs a set_team_paid DEFINER RPC that writes teams + action_log in one call — a
+      // MIGRATION, which is db-agent's to write, not this slice's. Until then this says what is true.
+      + `<div class="mgv-tnote">Every admin sees this straight away.</div>`
     + `</div>`
     + `<div class="mgv-tfoot">`
       + `<button type="button" class="mgv-twd" data-mgtp-withdraw="${idAttr}">Withdraw team</button>`
@@ -9037,10 +9422,13 @@ function openMgTeamPayModal(teamId) {
   el.style.display = 'flex';
   el.innerHTML = buildMgTeamPayModalHTML(team);
   document.body.appendChild(el);
-  // Body-level → outside #app-content's delegated listeners, so it binds its own. Only open/close is wired
-  // this slice; the paid + withdraw branches are deliberately absent (see the note above).
+  // Body-level → outside #app-content's delegated listeners, so it binds its own.
   el.addEventListener('click', (ev) => {
     if (ev.target === el || ev.target.closest('[data-mgtp-close]')) { closeMgTeamPayModal(); return; }
+    const payBtn = ev.target.closest('[data-mgtp-paid]');
+    if (payBtn) { void mgTeamTogglePaid(payBtn.getAttribute('data-mgtp-paid'), payBtn); return; }
+    const wdBtn = ev.target.closest('[data-mgtp-withdraw]');
+    if (wdBtn) { void mgtpWithdraw(wdBtn.getAttribute('data-mgtp-withdraw')); return; }
   });
 }
 
@@ -9882,6 +10270,48 @@ async function mgTournamentFullReset() {
   } catch (err) { appNotice({ title: 'Could not reset the tournament', message: (err && err.message) || 'Try again.' }); }
 }
 
+// Delete the whole tournament (round 2026-08-03, README §7) — the Danger zone's irreversible row. Same shape
+// as mgTournamentFullReset above: mgActiveTournament (so a COMPLETED event can be deleted too), the
+// type-the-tournament-name unlock, then the write. The handoff's copy carried an em dash; it is two plain
+// sentences here (§ copy law).
+// AFTER a proven delete the app must not keep pointing at a dead tournament: activeTournamentId and every
+// per-tournament cache are cleared BEFORE the refresh, so nothing renders against an id that no longer
+// exists even for the length of one round trip. tdbRefreshTournaments then re-resolves from the server.
+async function mgTournamentDelete() {
+  if (!state.isAdmin) return;
+  const t = mgActiveTournament();
+  if (!t) return;
+  const nm = (t.name || '').trim() || 'this tournament';
+  const nTeams = (state.activeTournamentId === t.id && Array.isArray(state.tournamentTeams))
+    ? state.tournamentTeams.length : 0;
+  // `plural` is a LOCAL helper inside buildManageTournamentHTML, not a global — spelled out here instead.
+  const what = nTeams
+    ? `the event, its ${nTeams} team${nTeams === 1 ? '' : 's'}, their payments and every result`
+    : 'the event and every result';
+  const typed = await appPrompt({
+    title: 'Delete this tournament',
+    message: `This removes ${what}, for players too. It cannot be undone. Type the tournament name to confirm.`,
+    placeholder: nm,
+    confirmText: 'Delete tournament',
+  });
+  if (String(typed || '').trim() !== nm) return;
+  try {
+    await tdbDeleteTournament(t);
+  } catch (err) {
+    appNotice({ title: 'Could not delete the tournament', message: (err && err.message) || 'Try again.' });
+    return;
+  }
+  if (typeof _autoGenPrompted !== 'undefined' && _autoGenPrompted) delete _autoGenPrompted[t.id];
+  if (state.activeTournamentId === t.id) state.activeTournamentId = null;
+  state.tournaments = (state.tournaments || []).filter((x) => x && x.id !== t.id);
+  state.tournamentTeams = []; state.tournamentPools = []; state.tournamentMatches = []; state.teamMembers = null;
+  state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null; state.seedOverride = null;
+  mgtView = null; mgpControlsOpen = false; mgpPoolFilter = null; mgCloseoutChampId = undefined;
+  await tdbRefreshTournaments();
+  repaintManage();
+  appNotice({ title: 'Tournament deleted', message: `${nm} is gone, along with its teams, payments and results.` });
+}
+
 
 function renderPublicShell() {
   const sharedSyncNoticeHTML = buildSharedSyncNoticeHTML();
@@ -10622,6 +11052,17 @@ function attachHandlers() {
   const appContent = document.getElementById('app-content');
   if (appContent && !appContent.dataset.navTabBound) {
     appContent.dataset.navTabBound = '1';
+    // Round 2026-08-03 §6: drag to move a player between pickup teams. Pointer Events only (HTML5 drag and
+    // drop does not fire on iOS Safari, and this is used on a phone at the courts). Delegated on the stable
+    // #app-content so it survives every container-swap repaint, and the capture is taken on #app-content
+    // too, so move/up keep arriving after the drop repaints the row the drag started from.
+    // Every fresh gesture starts with a clean suppress flag. A drop repaints the list, which can detach the
+    // node the trailing click was aimed at — that click then never reaches this delegate, so the flag would
+    // otherwise stay armed and swallow the NEXT real tap.
+    appContent.addEventListener('pointerdown', (e) => { mgtDragSuppressClick = false; mgtDragPointerDown(e); });
+    appContent.addEventListener('pointermove', (e) => { mgtDragPointerMove(e); });
+    appContent.addEventListener('pointerup', (e) => { mgtDragPointerUp(e, false); });
+    appContent.addEventListener('pointercancel', (e) => { mgtDragPointerUp(e, true); });
     // Task 3: the Players directory search is a live filter. Delegated on the stable #app-content ancestor so
     // it survives the container-swap repaints (the input element is re-created on each swap). Re-renders ONLY
     // the #mgp-list sub-container — the input itself (and its focus/caret) is never touched.
@@ -10765,6 +11206,10 @@ function attachHandlers() {
       // module vars survive). Checked BEFORE the generic data-mg-area so these never fall through to nav; the
       // page's own back button carries data-mg-area="lead" (handled below).
       if (manageView === 'teams') {
+        // A completed drag (round 2026-08-03 §6) swallows the click it trails, or releasing the grip over a
+        // name would ALSO open that name's swap sheet on top of the move that just landed.
+        if (mgtDragSuppressClick) { mgtDragSuppressClick = false; return; }
+        if (e.target.closest('[data-mgv-undo]')) { mgtUndoLastMove(); return; }
         const sizeBtn = e.target.closest('[data-mgt-size]');
         if (sizeBtn) { mgtSize = Number(sizeBtn.getAttribute('data-mgt-size')) || 4; repaintManage(); return; }
         if (e.target.closest('[data-mgt-generate]')) { mgtGenerateTeams(); return; }
@@ -10866,6 +11311,9 @@ function attachHandlers() {
         // Full reset (2026-07-26): the sub-hub danger button. Checked before the generic hub rows so the
         // tap never falls through to a sub-view; it carries no data-mgt-view so it cannot match one anyway.
         if (e.target.closest('[data-mgt-fullreset]')) { void mgTournamentFullReset(); return; }
+        // Delete the whole tournament (round 2026-08-03 §7) — the irreversible sibling. Same placement rule:
+        // checked before the generic hub rows, and it carries no data-mgt-view so it cannot open a sub-view.
+        if (e.target.closest('[data-mgt-delete]')) { void mgTournamentDelete(); return; }
         if (e.target.closest('[data-mgt-back]')) { mgtView = null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
         const mgtRow = e.target.closest('[data-mgt-view]');
         if (mgtRow) { mgtView = mgtRow.getAttribute('data-mgt-view') || null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
@@ -10916,8 +11364,9 @@ function attachHandlers() {
         if (nextArea === 'players' && manageView !== 'players') {
           mgPlayerQuery = ''; mgSelectMode = false; mgSelected = new Set(); mgGroupsOpen = false; mgMoveOpen = false; mgRenameGroup = null;
         }
-        // Entering the Teams page fresh: 4s default + no open swap sheet.
-        if (nextArea === 'teams' && manageView !== 'teams') { mgtSize = 4; mgtSwapKey = null; mgtSwapFrom = null; }
+        // Entering the Teams page fresh: 4s default, no open swap sheet, no stale UNDO strip (an Undo from
+        // a move made before you left would silently restore a board you have since moved on from).
+        if (nextArea === 'teams' && manageView !== 'teams') { mgtSize = 4; mgtSwapKey = null; mgtSwapFrom = null; mgtLastMove = null; }
         // Entering the Tournament area fresh: land on the sub-hub (not a stale sub-view).
         if (nextArea === 'tournament' && manageView !== 'tournament') { mgtView = null; }
         // Entering the Admins area fresh (Task 11): land on the seats view, clear stale seat/log data +
