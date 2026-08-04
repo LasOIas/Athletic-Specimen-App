@@ -1162,7 +1162,11 @@ describe('buildMgScoreSheetHTML — the shared score sheet (T7 defines, T8 reuse
     expect(html).toContain('class="mgv-scbox"');        // one framed box holding both rows
     expect(html).toContain('data-mgss-winner="a"');     // tap a team to mark them the winner
     expect(html).toContain('data-mgss-winner="b"');
-    expect(html).toContain('Tap a team to mark them the winner. The score is optional.');
+    // The design's hint said "The score is optional." The DB disagrees: submit_match_score
+    // derives the winner from the scores and rejects a tie, so a scoreless final is impossible
+    // today. The copy must not promise it. (Making it true = a scoreless-final RPC.)
+    expect(html).toContain('Tap a team to mark them the winner, then enter the score.');
+    expect(html).not.toContain('The score is optional');
     expect(html).toContain('class="mgss-sval mgv-scval"'); // the stepper value keeps its .mgss-sval hook
     expect(html).toContain('class="mgss-sbtn mgv-scb"');   // and the ± keep .mgss-sbtn
     expect(html).toContain('Pool A · Game 2 ·');        // Rn → Gn in the context line

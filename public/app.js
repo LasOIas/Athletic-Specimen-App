@@ -9724,9 +9724,17 @@ function buildMgScoreSheetHTML(match, winner) {
         + `<button type="button" class="mgss-sbtn mgv-scb" data-mgss-step="${side}" data-mgss-d="1" aria-label="${escapeHTMLText(name)} plus one">+</button>`
       + `</span></div>`;
   };
+  // The design's hint read "The score is optional." It is NOT, and shipping that would be a
+  // promise the app breaks: submit_match_score / edit_match_score derive the winner FROM the
+  // scores and reject a tie, so a winner tap on 0-0 cannot be finalised. Inventing a nominal
+  // 1-0 was refused deliberately - pool seeding is decided on point differential, so a made-up
+  // score would corrupt the standings. The copy tells the truth instead. Making the original
+  // sentence true needs a scoreless-final path in the DB (an RPC that accepts a winner with no
+  // score); until then the tap still does real work - it picks the winner, and swaps the
+  // numbers when a score is already in so the pick and the scoreboard can never disagree.
   const hint = isFinal
     ? 'Fixing the score. Same winner only. To change who won, clear the result first.'
-    : 'Tap a team to mark them the winner. The score is optional.';
+    : 'Tap a team to mark them the winner, then enter the score.';
   const body = `<div class="mgv-scbody">`
     + `<div class="mgv-scbox">${row('a', aName, a)}${row('b', bName, b)}</div>`
     + `<div class="mgv-schint">${escapeHTML(hint)}</div>`
