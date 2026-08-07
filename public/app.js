@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.07.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.07.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -524,7 +524,7 @@ function findInlineEditRowByPlayerKey(playerKey) {
 // 2026-08-07: the ORIGINAL Teams-tab drag-and-drop (HTML5 dragstart/drop + a touch-ghost fallback) was
 // removed here with the same ask. It had already been unreachable since the old shell was deleted in the
 // DR-4 admin remake - nothing has emitted .generated-team / .team-player-card since, so no listener could
-// ever fire. moveGeneratedPlayerBetweenTeams (its mutation) stays: the tap-to-swap sheet uses it.
+// ever fire. Its mutation went too, with the swap sheet, later the same day.
 
 // -- Tap the "Athletic Specimen" title in the header → scroll active tab to top --
 (function ensureHeaderTapToTop() {
@@ -1930,85 +1930,9 @@ function clampSkillOneDecimal(value) {
 // OneDecimal stays (shared skill helper); normalizeLiveMatchSkillSnapshots stays (localStorage plumbing).
 
 
-function updateGeneratedTeamsSummaryFromCurrent(teams) {
-  const fairness = summarizeTeamFairness(teams);
-  const prevAttempts = Number(state.generatedTeamsSummary && state.generatedTeamsSummary.attempts);
-  state.generatedTeamsSummary = {
-    skillSpread: Number(fairness.skillSpread.toFixed(2)),
-    countSpread: fairness.countSpread,
-    attempts: Number.isFinite(prevAttempts) ? prevAttempts : 0,
-    fairnessScore: Number(fairness.score.toFixed(2))
-  };
-}
-
-function moveGeneratedPlayerBetweenTeams(fromTeamIndex, toTeamIndex, playerKey, swapWithKey) {
-  const teamCount = Array.isArray(state.generatedTeams) ? state.generatedTeams.length : 0;
-  if (!teamCount) return { changed: false, reason: 'no-teams' };
-  if (!Number.isInteger(fromTeamIndex) || !Number.isInteger(toTeamIndex)) {
-    return { changed: false, reason: 'invalid-target' };
-  }
-  if (fromTeamIndex < 0 || toTeamIndex < 0 || fromTeamIndex >= teamCount || toTeamIndex >= teamCount) {
-    return { changed: false, reason: 'invalid-target' };
-  }
-  if (fromTeamIndex === toTeamIndex) return { changed: false, reason: 'same-team' };
-  if (!playerKey) return { changed: false, reason: 'missing-player' };
-
-  const teams = state.generatedTeams.map((team) => team.slice());
-  const fromTeam = teams[fromTeamIndex];
-  const toTeam = teams[toTeamIndex];
-  const fromIdx = fromTeam.findIndex((p) => playerIdentityKey(p) === playerKey);
-  if (fromIdx < 0) return { changed: false, reason: 'missing-player' };
-
-  if (swapWithKey) {
-    const toIdx = toTeam.findIndex((p) => playerIdentityKey(p) === swapWithKey);
-    if (toIdx >= 0) {
-      const dragged = fromTeam[fromIdx];
-      fromTeam[fromIdx] = toTeam[toIdx];
-      toTeam[toIdx] = dragged;
-      state.generatedTeams = teams;
-      updateGeneratedTeamsSummaryFromCurrent(teams);
-      return { changed: true, mode: 'swap' };
-    }
-  }
-
-  // Simple move when fromTeam is larger — won't worsen balance.
-  if (fromTeam.length > toTeam.length) {
-    const [dragged] = fromTeam.splice(fromIdx, 1);
-    toTeam.push(dragged);
-    state.generatedTeams = teams;
-    updateGeneratedTeamsSummaryFromCurrent(teams);
-    return { changed: true, mode: 'move' };
-  }
-
-  // Equal sizes: auto-swap with the closest-skill player in the target team.
-  const draggedSkill = Number(fromTeam[fromIdx].skill) || 0;
-  let bestIdx = 0;
-  let bestDiff = Infinity;
-  toTeam.forEach((p, idx) => {
-    const diff = Math.abs((Number(p.skill) || 0) - draggedSkill);
-    if (diff < bestDiff) { bestDiff = diff; bestIdx = idx; }
-  });
-  const dragged = fromTeam[fromIdx];
-  fromTeam[fromIdx] = toTeam[bestIdx];
-  toTeam[bestIdx] = dragged;
-  state.generatedTeams = teams;
-  updateGeneratedTeamsSummaryFromCurrent(teams);
-  return { changed: true, mode: 'auto-swap' };
-}
-
-function showTeamMoveToast(message) {
-  try {
-    const toast = document.createElement('div');
-    toast.className = 'save-toast';
-    toast.textContent = message;
-    toast.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 12px;border-radius:var(--r-sm);box-shadow:var(--shadow-md);z-index:10000;font-size:14px;';
-    document.body.appendChild(toast);
-    setTimeout(() => { try { toast.classList.add('is-leaving'); } catch {} }, 1300);
-    setTimeout(() => toast.remove(), 1500);
-  } catch {}
-}
-
-
+// 2026-08-07 (Mike, "remove all ways to switch players"): moveGeneratedPlayerBetweenTeams,
+// updateGeneratedTeamsSummaryFromCurrent and showTeamMoveToast removed with the swap sheet. Generated teams
+// are now read-only once built - the only way to change them is Generate, which rebuilds the whole board.
 
 // Global state. We use a simple object to hold application state. When
 // properties change the UI is rebuilt. Keeping all state in one place
@@ -6782,15 +6706,15 @@ let mgSelected = new Set();     // selected player identity keys (playerIdentity
 let mgGroupsOpen = false;       // the inline group manager (toggled from the meta group count)
 let mgMoveOpen = false;         // the Move-to-group chip row (toggled from the bar's "Move to group")
 let mgRenameGroup = null;       // the group name being inline-renamed in the group manager (null = none)
-// Task 4 (Teams page, pick R5 trimmed): the selected team-SIZE chip (4s default) + the open swap sheet.
-// All survive the container-swap repaint (a background sync must not reset a chosen size or a half-open swap).
+// Task 4 (Teams page, pick R5 trimmed): the selected team-SIZE chip (4s default). Survives the
+// container-swap repaint (a background sync must not reset a chosen size).
 let mgtSize = 4;                // the active size chip (2/3/4/6); 4s default per the mockup
-let mgtSwapKey = null;          // the playerIdentityKey being swapped (null = swap sheet closed)
-let mgtSwapFrom = null;         // the team index the swapped player currently sits on
-// 2026-08-07 (Mike): the drag-to-move gesture from the 2026-08-03 round is REMOVED. Moving a player between
-// generated teams is tap-to-swap only again (data-mgt-swap → the sheet → mgtApplySwap). Removed with it:
-// the grip, the lifted card, the mid-drag preview, the Undo strip and the skill-drift warning, all of which
-// existed only as parts of that gesture.
+// 2026-08-07 (Mike): GENERATED TEAMS ARE READ-ONLY. First "remove the drag and drop player feature from the
+// teams that are generated" took out the 2026-08-03 grip gesture (with its Undo strip and skill-drift
+// warning, which only that gesture could ever populate); then "remove all ways to switch players" took out
+// the tap-to-swap sheet as well, and with it mgtSwapKey/mgtSwapFrom, buildMgtSwapSheetHTML, mgtApplySwap and
+// the moveGeneratedPlayerBetweenTeams mutation. A team row now carries no hooks at all. The ONLY way to
+// change the board is Generate, which rebuilds every team.
 // Task 5 (Tournament sub-hub, pick R2 + Registration, pick R7): the open tournament sub-view under
 // manageView==='tournament'. null = the sub-hub (the 7 rows); 'registration' = the Registration view (built
 // now); 'teams'|'pools'|'bracket'|'settings'|'rules'|'closeout' render honest placeholders until Tasks 6-10
@@ -7942,12 +7866,12 @@ async function mgpDeleteGroup(groupName) {
 
 // ── Task 4: Teams page (session-10 pick R5 TRIMMED) — chips + generate + stacked teams ───────────────
 // Mockup r10-manage/k-h1. Reuses the manage-area chrome (pd-pagehdr/pd-back/pd-htitle) + pl-sect labels +
-// the pl-tab chip grammar; the mgt-* kit carries the CTA / stacked team rows / swap sheet. MAKE TEAMS ·
+// the pl-tab chip grammar; the mgt-* kit carries the CTA / stacked team rows. MAKE TEAMS ·
 // N CHECKED IN (size chips 2/3/4/6, 4s default) → Generate balanced teams (reuses generateBalancedGroups) →
-// TODAY'S TEAMS (TEAM n label + names STACKED one per line, faint hairlines). Tap a name → a swap sheet
-// listing the OTHER teams; tapping one applies moveGeneratedPlayerBetweenTeams. The
-// casual live-courts board is CUT (Mike): no net cards, no report/clear result, skills change by admin edit
-// only. Team persistence rides the normal saveLocal → queueLiveStateSave path (courts stripped from it).
+// TODAY'S TEAMS (TEAM n label + names STACKED one per line, faint hairlines) — READ-ONLY as of 2026-08-07
+// (Mike: "remove all ways to switch players"): no drag, no tap-to-swap sheet, no hooks on a name. Generate
+// is the only control that changes the board. The casual live-courts board is CUT (Mike): no net cards, no
+// report/clear result, skills change by admin edit only. Persistence rides saveLocal → queueLiveStateSave.
 function buildManageTeamsHTML() {
   const inNow = (state.checkedIn || []).length;
   const teams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
@@ -7965,56 +7889,29 @@ function buildManageTeamsHTML() {
     + chips
     + `<button type="button" class="mgt-cta" data-mgt-generate>Generate balanced teams</button>`;
 
-  // TODAY'S TEAMS — omitted entirely until teams exist. Names STACKED one per line; each name is tappable
-  // (carries its identity key + current team index) to open the swap sheet. Never "tonight" (§ style rule).
+  // TODAY'S TEAMS — omitted entirely until teams exist. Names STACKED one per line. READ-ONLY as of
+  // 2026-08-07 (Mike: "remove all ways to switch players"): a name carries no hooks and nothing is tappable,
+  // so the board can only change by regenerating it. Never "tonight" (§ style rule).
   let teamsSect;
   if (teams.length) {
     const rows = teams.map((team, idx) => {
       const names = (Array.isArray(team) ? team : []).map((p) => {
-        const key = playerIdentityKey(p);
         const n = Number(p && p.skill);
         const skPos = Number.isFinite(n) && n > 0;
-        return `<div class="mgt-nm" data-mgt-swap="${escapeHTMLText(key)}" data-mgt-from="${idx}">`
+        return `<div class="mgt-nm">`
           + `<span class="mgt-nmn">${escapeHTML(String((p && p.name) || 'Player'))}</span>`
           + `<span class="mgt-nsk${skPos ? '' : ' n'}">${mgpSkillText(p && p.skill)}</span></div>`;
       }).join('');
-      // data-mgt-team is the drop target's identity: the pointer hit-test reads it off the row it lands on,
-      // so the drop never depends on the row's position among its siblings.
-      return `<div class="mgt-trow" data-mgt-team="${idx}"><span class="mgt-tt">TEAM ${idx + 1}<b class="mgt-tsk">${teamSkillTotal(team)}</b></span><div class="mgt-names">${names}</div></div>`;
+      return `<div class="mgt-trow"><span class="mgt-tt">TEAM ${idx + 1}<b class="mgt-tsk">${teamSkillTotal(team)}</b></span><div class="mgt-names">${names}</div></div>`;
     }).join('');
     teamsSect = `<div class="pl-sect">Today's teams</div>`
       + rows
-      + `<div class="mgt-note">Tap a name to swap players between teams · regenerate any time</div>`;
+      + `<div class="mgt-note">Regenerate any time to rebuild the teams</div>`;
   } else {
     teamsSect = `<div class="mgt-empty">No teams yet. Pick a size and generate.</div>`;
   }
 
-  return header + makeSect + teamsSect + buildMgtSwapSheetHTML();
-}
-
-// The swap sheet (module-var gated so it survives the container-swap repaint). Lists the OTHER teams as
-// destinations; a tap reuses moveGeneratedPlayerBetweenTeams (simple move when uneven, auto-swap when even).
-function buildMgtSwapSheetHTML() {
-  if (mgtSwapKey == null || mgtSwapFrom == null) return '';
-  const teams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
-  const from = Number(mgtSwapFrom);
-  const fromTeam = teams[from];
-  if (!Array.isArray(fromTeam)) return '';
-  const player = fromTeam.find((p) => playerIdentityKey(p) === mgtSwapKey);
-  const name = (player && player.name) ? String(player.name) : 'this player';
-  const dests = teams.map((team, idx) => ({ team, idx }))
-    .filter((x) => x.idx !== from)
-    .map((x) => {
-      const preview = (Array.isArray(x.team) ? x.team : [])
-        .map((p) => escapeHTML(String((p && p.name) || ''))).filter(Boolean).join(', ');
-      return `<button type="button" class="mgt-to" data-mgt-to="${x.idx}"><span class="mgt-to-t">TEAM ${x.idx + 1}<b class="mgt-tsk">${teamSkillTotal(x.team)}</b></span><span class="mgt-to-r">${preview}</span></button>`;
-    }).join('');
-  return `<div class="mgt-sheet-backdrop" data-mgt-cancel></div>`
-    + `<div class="mgt-sheet" role="dialog" aria-label="Swap player">`
-    + `<div class="mgt-sheet-h">Move ${escapeHTML(name)} <b class="mgt-hsk">&middot; ${mgpSkillText(player && player.skill)}</b></div>`
-    + `<div class="mgt-sheet-sub">Pick a team. Even sizes swap the closest player back.</div>`
-    + (dests || `<div class="mgt-empty">No other team to move to yet.</div>`)
-    + `<button type="button" class="mgt-cancel" data-mgt-cancel>Cancel</button></div>`;
+  return header + makeSect + teamsSect;
 }
 
 // Generate balanced teams from the checked-in players at the selected size (reuses generateBalancedGroups +
@@ -8032,18 +7929,7 @@ function mgtGenerateTeams() {
   state.liveCourtOrder = defaultLiveCourtOrder(gen.teams.length); // kept coherent for the dormant old shell
   state.liveMatchResults = {};
   state.liveMatchSkillSnapshots = {};
-  mgtSwapKey = null; mgtSwapFrom = null;
   saveLocal();
-  repaintManage();
-}
-
-// Apply the open swap: move the swapped player onto the tapped team, persist,
-// close the sheet, repaint.
-function mgtApplySwap(toTeamIndex) {
-  if (mgtSwapKey == null || mgtSwapFrom == null) return;
-  const result = moveGeneratedPlayerBetweenTeams(Number(mgtSwapFrom), Number(toTeamIndex), mgtSwapKey);
-  mgtSwapKey = null; mgtSwapFrom = null;
-  if (result && result.changed) saveLocal();
   repaintManage();
 }
 
@@ -11575,19 +11461,14 @@ function attachHandlers() {
         const ckRow = e.target.closest('[data-mgck-id]');
         if (ckRow) { mgckToggleRow(ckRow.getAttribute('data-mgck-id') || ''); return; }
       }
-      // Teams page (Task 4, pick R5): size chips select the size, Generate builds teams, tapping a name opens
-      // the swap sheet, a destination tap moves the player. All container-swap partial repaints (the mgt*
-      // module vars survive). Checked BEFORE the generic data-mg-area so these never fall through to nav; the
-      // page's own back button carries data-mg-area="lead" (handled below).
+      // Teams page (Task 4, pick R5): size chips select the size and Generate builds the teams. That is the
+      // whole surface as of 2026-08-07 — the team rows themselves are read-only. Container-swap partial
+      // repaints (mgtSize survives). Checked BEFORE the generic data-mg-area so these never fall through to
+      // nav; the page's own back button carries data-mg-area="lead" (handled below).
       if (manageView === 'teams') {
         const sizeBtn = e.target.closest('[data-mgt-size]');
         if (sizeBtn) { mgtSize = Number(sizeBtn.getAttribute('data-mgt-size')) || 4; repaintManage(); return; }
         if (e.target.closest('[data-mgt-generate]')) { mgtGenerateTeams(); return; }
-        const toBtn = e.target.closest('[data-mgt-to]');
-        if (toBtn) { mgtApplySwap(Number(toBtn.getAttribute('data-mgt-to'))); return; }
-        if (e.target.closest('[data-mgt-cancel]')) { mgtSwapKey = null; mgtSwapFrom = null; repaintManage(); return; }
-        const swapName = e.target.closest('[data-mgt-swap]');
-        if (swapName) { mgtSwapKey = swapName.getAttribute('data-mgt-swap') || null; mgtSwapFrom = Number(swapName.getAttribute('data-mgt-from')); repaintManage(); return; }
       }
       // Tournament sub-hub (Task 5, pick R2) + Registration view (pick R7). data-mgt-view opens a sub-view
       // from the hub; data-mgt-back returns to the hub; the reg switch (data-mgr-regtoggle) + Copy CTA
@@ -11783,9 +11664,8 @@ function attachHandlers() {
         if (nextArea === 'players' && manageView !== 'players') {
           mgPlayerQuery = ''; mgSelectMode = false; mgSelected = new Set(); mgGroupsOpen = false; mgMoveOpen = false; mgRenameGroup = null;
         }
-        // Entering the Teams page fresh: 4s default, no open swap sheet, no stale UNDO strip (an Undo from
-        // a move made before you left would silently restore a board you have since moved on from).
-        if (nextArea === 'teams' && manageView !== 'teams') { mgtSize = 4; mgtSwapKey = null; mgtSwapFrom = null; }
+        // Entering the Teams page fresh: 4s default. Nothing else is stateful here any more.
+        if (nextArea === 'teams' && manageView !== 'teams') { mgtSize = 4; }
         // Entering the Tournament area fresh: no stale sub-view. It opens straight into the sub-hub for the
         // tournament the hub's card names — the list is its own area now (round 2026-08-04), so this is no
         // longer the screen that asks "which one".

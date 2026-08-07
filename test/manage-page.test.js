@@ -80,8 +80,6 @@ function loadApp() {
       buildTeams: (opts) => {
         opts = opts || {};
         mgtSize = (opts.size == null ? 4 : opts.size);
-        mgtSwapKey = opts.swapKey || null;
-        mgtSwapFrom = (opts.swapFrom == null ? null : opts.swapFrom);
         return buildManageTeamsHTML();
       },
       buildTournament: () => { manageView = 'tournament'; mgtView = null; return buildManageTournamentHTML(); },
@@ -538,7 +536,7 @@ describe('buildManagePlayersHTML — Select (bulk) mode', () => {
 
 // ── Task 4: Teams page (session-10 pick R5 TRIMMED) — chips + generate + stacked teams ────────
 // Mockup r10-manage/k-h1: MAKE TEAMS · N CHECKED IN (size chips 2s/3s/4s/6s, 4s default) + Generate
-// balanced teams + TODAY'S TEAMS (TEAM n label + names STACKED one-per-line) + tap a name → swap sheet.
+// balanced teams + TODAY'S TEAMS (TEAM n label + names STACKED one-per-line), READ-ONLY since 2026-08-07.
 // The casual live-courts board is CUT (Mike): NO net cards, NO report/clear result, skills manual-only.
 function setTeams(extra = {}) {
   const st = bridge.getState();
@@ -616,12 +614,33 @@ describe('buildManageTeamsHTML — the Teams page (mockup k-h1, R5 trimmed)', ()
     expect(html).toContain('Aaron Wells');
   });
 
-  it('makes each name tappable to open the swap sheet (carries player key + from-team)', () => {
+  // 2026-08-07 (Mike: "remove the drag and drop player feature from the teams that are generated", then
+  // "remove all ways to switch players"). The board is READ-ONLY: a name carries no hooks, there is no drag
+  // grip, no swap sheet, no Undo strip and no drift warning. Generate is the only control that changes it.
+  // This test replaces the two that asserted the swap sheet — it locks the removal so a future round cannot
+  // quietly reintroduce a move affordance without deciding to.
+  it('renders the team board READ-ONLY — no swap, drag, undo or drift affordance survives', () => {
     setTeams({ generatedTeams: twoTeams });
     const html = bridge.buildTeams({});
-    expect(html).toContain('data-mgt-swap="id:p1"');
-    expect(html).toContain('data-mgt-from="0"');
-    expect(html).toContain('Tap a name to swap');         // the helper note
+    // tap-to-swap
+    expect(html).not.toContain('data-mgt-swap');
+    expect(html).not.toContain('data-mgt-from');
+    expect(html).not.toContain('data-mgt-to');
+    expect(html).not.toContain('data-mgt-cancel');
+    expect(html).not.toContain('mgt-sheet');
+    expect(html).not.toMatch(/Tap a name/i);
+    // the drag gesture and its two riders
+    expect(html).not.toContain('data-mgt-grip');
+    expect(html).not.toContain('mgv-hnd');
+    expect(html).not.toContain('data-mgv-undo');
+    expect(html).not.toContain('mgv-undo');
+    expect(html).not.toContain('mgv-warn');
+    expect(html).not.toMatch(/Drag a name/i);
+    // ...while the board itself still renders, and Generate still works
+    expect(html).toContain('class="mgt-nm"');
+    expect(html).toContain('Mikey Olas');
+    expect(html).toContain('data-mgt-generate');
+    expect(html).toContain('Regenerate any time');
   });
 
   it('has NO casual courts / report-result / net-card strings anywhere', () => {
@@ -635,15 +654,6 @@ describe('buildManageTeamsHTML — the Teams page (mockup k-h1, R5 trimmed)', ()
     expect(html).not.toContain('Won</button>');
   });
 
-  it('opens the swap sheet listing the OTHER teams when a name is being swapped', () => {
-    setTeams({ generatedTeams: twoTeams });
-    // swapping Mikey (id:p1) out of team 0 → the sheet offers team 1 (TEAM 2) as a destination
-    const html = bridge.buildTeams({ swapKey: 'id:p1', swapFrom: 0 });
-    expect(html).toContain('data-mgt-to="1"');            // destination = the other team
-    expect(html).not.toContain('data-mgt-to="0"');        // never the team the player is already on
-    expect(html).toContain('Mikey Olas');                 // names the player being moved
-    expect(html).toContain('data-mgt-cancel');            // a way out
-  });
 });
 
 // ── Task 5: Tournament sub-hub (pick R2) + Registration (pick R7) ─────────────
