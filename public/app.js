@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.04.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.07.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -521,258 +521,10 @@ function findInlineEditRowByPlayerKey(playerKey) {
   }, true);
 })();
 
-let generatedTeamDragState = null;
-
-function clearGeneratedTeamDragVisuals() {
-  document.querySelectorAll('.generated-team.is-drop-enabled').forEach((el) => el.classList.remove('is-drop-enabled'));
-  document.querySelectorAll('.generated-team.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
-  document.querySelectorAll('.team-player-card.is-swap-target').forEach((el) => el.classList.remove('is-swap-target'));
-  document.querySelectorAll('.team-player-card.is-dragging').forEach((el) => el.classList.remove('is-dragging'));
-  document.body.classList.remove('generated-team-dragging');
-}
-
-function resetGeneratedTeamDragState() {
-  clearGeneratedTeamDragVisuals();
-  generatedTeamDragState = null;
-}
-
-(function ensureGeneratedTeamDnDBound() {
-  if (window.__generatedTeamDnDBound) return;
-  window.__generatedTeamDnDBound = true;
-
-  document.addEventListener('dragstart', (e) => {
-    const card = e.target.closest('.team-player-card');
-    if (!card) return;
-
-    const fromTeamIndex = Number(card.getAttribute('data-team-index'));
-    const playerKey = String(card.getAttribute('data-player-key') || '');
-    if (!Number.isInteger(fromTeamIndex) || !playerKey) return;
-
-    generatedTeamDragState = { fromTeamIndex, playerKey };
-    card.classList.add('is-dragging');
-    document.body.classList.add('generated-team-dragging');
-    document.querySelectorAll('.generated-team[data-team-index]').forEach((teamEl) => {
-      const idx = Number(teamEl.getAttribute('data-team-index'));
-      if (Number.isInteger(idx) && idx !== fromTeamIndex) {
-        teamEl.classList.add('is-drop-enabled');
-      }
-    });
-
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
-      try { e.dataTransfer.setData('text/plain', playerKey); } catch {}
-    }
-  });
-
-  document.addEventListener('dragover', (e) => {
-    if (!generatedTeamDragState) return;
-    const teamEl = e.target.closest('.generated-team[data-team-index]');
-    if (!teamEl) return;
-
-    const toTeamIndex = Number(teamEl.getAttribute('data-team-index'));
-    if (!Number.isInteger(toTeamIndex) || toTeamIndex === generatedTeamDragState.fromTeamIndex) return;
-
-    e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-
-    document.querySelectorAll('.generated-team.is-drop-target').forEach((el) => {
-      if (el !== teamEl) el.classList.remove('is-drop-target');
-    });
-    document.querySelectorAll('.team-player-card.is-swap-target').forEach((el) => el.classList.remove('is-swap-target'));
-    teamEl.classList.add('is-drop-target');
-
-    const targetCard = e.target.closest('.team-player-card');
-    if (targetCard && Number(targetCard.getAttribute('data-team-index')) === toTeamIndex) {
-      const targetKey = String(targetCard.getAttribute('data-player-key') || '');
-      if (targetKey && targetKey !== generatedTeamDragState.playerKey) {
-        targetCard.classList.add('is-swap-target');
-      }
-    }
-  });
-
-  document.addEventListener('drop', (e) => {
-    if (!generatedTeamDragState) return;
-    const teamEl = e.target.closest('.generated-team[data-team-index]');
-    if (!teamEl) {
-      resetGeneratedTeamDragState();
-      return;
-    }
-
-    const toTeamIndex = Number(teamEl.getAttribute('data-team-index'));
-    if (!Number.isInteger(toTeamIndex)) {
-      resetGeneratedTeamDragState();
-      return;
-    }
-
-    e.preventDefault();
-
-    const fromTeamIndex = generatedTeamDragState.fromTeamIndex;
-    const draggedKey = generatedTeamDragState.playerKey;
-    let swapWithKey = '';
-
-    const targetCard = e.target.closest('.team-player-card');
-    if (targetCard && Number(targetCard.getAttribute('data-team-index')) === toTeamIndex) {
-      const candidate = String(targetCard.getAttribute('data-player-key') || '');
-      if (candidate && candidate !== draggedKey) swapWithKey = candidate;
-    }
-
-    const result = moveGeneratedPlayerBetweenTeams(fromTeamIndex, toTeamIndex, draggedKey, swapWithKey);
-    resetGeneratedTeamDragState();
-
-    if (!result.changed) {
-      if (result.reason === 'swap-required') {
-        showTeamMoveToast('Drop on a player to swap when team sizes are even.');
-      }
-      return;
-    }
-
-    saveLocal();
-    render();
-  });
-
-  document.addEventListener('dragend', (e) => {
-    if (e.target.closest('.team-player-card')) {
-      resetGeneratedTeamDragState();
-    }
-  });
-})();
-
-// Touch drag-and-drop for generated teams (mobile support)
-(function ensureGeneratedTeamTouchDnDBound() {
-  if (window.__generatedTeamTouchDnDBound) return;
-  window.__generatedTeamTouchDnDBound = true;
-
-  const DRAG_THRESHOLD = 8;
-  let touchDrag = null;
-  let touchGhost = null;
-
-  function elAt(cx, cy) {
-    if (touchGhost) touchGhost.style.display = 'none';
-    const el = document.elementFromPoint(cx, cy);
-    if (touchGhost) touchGhost.style.display = '';
-    return el;
-  }
-
-  function createGhost(card) {
-    const rect = card.getBoundingClientRect();
-    const g = card.cloneNode(true);
-    Object.assign(g.style, {
-      position: 'fixed',
-      left: rect.left + 'px',
-      top: rect.top + 'px',
-      width: rect.width + 'px',
-      margin: '0',
-      zIndex: '99999',
-      opacity: '0.88',
-      pointerEvents: 'none',
-      boxShadow: '0 10px 32px rgba(0,0,0,0.35)',
-      transform: 'scale(1.06) rotate(2deg)',
-      transition: 'none',
-      borderRadius: 'var(--r-sm)',
-      background: 'var(--accent-soft)',
-    });
-    document.body.appendChild(g);
-    return g;
-  }
-
-  function moveGhost(cx, cy) {
-    if (!touchGhost) return;
-    const w = touchGhost.offsetWidth;
-    const h = touchGhost.offsetHeight;
-    touchGhost.style.left = (cx - w / 2) + 'px';
-    touchGhost.style.top = (cy - h / 2) + 'px';
-  }
-
-  function cleanup() {
-    if (touchGhost) { touchGhost.remove(); touchGhost = null; }
-    touchDrag = null;
-    clearGeneratedTeamDragVisuals();
-  }
-
-  document.addEventListener('touchstart', (e) => {
-    const card = e.target.closest('.team-player-card');
-    if (!card) return;
-    const fromTeamIndex = Number(card.getAttribute('data-team-index'));
-    const playerKey = String(card.getAttribute('data-player-key') || '');
-    if (!playerKey || isNaN(fromTeamIndex)) return;
-    const t = e.touches[0];
-    touchDrag = { fromTeamIndex, playerKey, card, startX: t.clientX, startY: t.clientY, started: false, targetTeamEl: null, targetCardEl: null };
-  }, { passive: true });
-
-  document.addEventListener('touchmove', (e) => {
-    if (!touchDrag) return;
-    const t = e.touches[0];
-
-    if (!touchDrag.started) {
-      if (Math.hypot(t.clientX - touchDrag.startX, t.clientY - touchDrag.startY) < DRAG_THRESHOLD) return;
-      touchDrag.started = true;
-      touchGhost = createGhost(touchDrag.card);
-      touchDrag.card.classList.add('is-dragging');
-      document.body.classList.add('generated-team-dragging');
-      document.querySelectorAll('.generated-team[data-team-index]').forEach((el) => {
-        if (Number(el.getAttribute('data-team-index')) !== touchDrag.fromTeamIndex) el.classList.add('is-drop-enabled');
-      });
-    }
-
-    e.preventDefault();
-    moveGhost(t.clientX, t.clientY);
-
-    // Edge autoscroll: if the finger nears the top/bottom of the scroll panel,
-    // nudge it so off-screen teams become reachable mid-drag.
-    const scrollPanel = document.querySelector('.tab-panel.active');
-    if (scrollPanel) {
-      const pr = scrollPanel.getBoundingClientRect();
-      const EDGE = 64, STEP = 16;
-      if (t.clientY < pr.top + EDGE) scrollPanel.scrollTop -= STEP;
-      else if (t.clientY > pr.bottom - EDGE) scrollPanel.scrollTop += STEP;
-    }
-
-    const below = elAt(t.clientX, t.clientY);
-    const teamEl = below ? below.closest('.generated-team[data-team-index]') : null;
-    const cardEl = below ? below.closest('.team-player-card') : null;
-
-    document.querySelectorAll('.generated-team.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
-    document.querySelectorAll('.team-player-card.is-swap-target').forEach((el) => el.classList.remove('is-swap-target'));
-
-    touchDrag.targetTeamEl = null;
-    touchDrag.targetCardEl = null;
-
-    if (teamEl && Number(teamEl.getAttribute('data-team-index')) !== touchDrag.fromTeamIndex) {
-      teamEl.classList.add('is-drop-target');
-      touchDrag.targetTeamEl = teamEl;
-      if (cardEl && cardEl !== touchDrag.card) {
-        const tk = String(cardEl.getAttribute('data-player-key') || '');
-        if (tk && tk !== touchDrag.playerKey) {
-          cardEl.classList.add('is-swap-target');
-          touchDrag.targetCardEl = cardEl;
-        }
-      }
-    }
-  }, { passive: false });
-
-  document.addEventListener('touchend', () => {
-    if (!touchDrag || !touchDrag.started) { cleanup(); return; }
-
-    const teamEl = touchDrag.targetTeamEl;
-    const cardEl = touchDrag.targetCardEl;
-    const { fromTeamIndex, playerKey } = touchDrag;
-
-    cleanup();
-
-    if (!teamEl) return;
-    const toTeamIndex = Number(teamEl.getAttribute('data-team-index'));
-    if (isNaN(toTeamIndex) || toTeamIndex === fromTeamIndex) return;
-
-    const swapWithKey = cardEl ? String(cardEl.getAttribute('data-player-key') || '') : '';
-    const result = moveGeneratedPlayerBetweenTeams(fromTeamIndex, toTeamIndex, playerKey, swapWithKey);
-    if (!result.changed) return;
-
-    saveLocal();
-    render();
-  });
-
-  document.addEventListener('touchcancel', cleanup);
-})();
+// 2026-08-07: the ORIGINAL Teams-tab drag-and-drop (HTML5 dragstart/drop + a touch-ghost fallback) was
+// removed here with the same ask. It had already been unreachable since the old shell was deleted in the
+// DR-4 admin remake - nothing has emitted .generated-team / .team-player-card since, so no listener could
+// ever fire. moveGeneratedPlayerBetweenTeams (its mutation) stays: the tap-to-swap sheet uses it.
 
 // -- Tap the "Athletic Specimen" title in the header → scroll active tab to top --
 (function ensureHeaderTapToTop() {
@@ -7035,14 +6787,10 @@ let mgRenameGroup = null;       // the group name being inline-renamed in the gr
 let mgtSize = 4;                // the active size chip (2/3/4/6); 4s default per the mockup
 let mgtSwapKey = null;          // the playerIdentityKey being swapped (null = swap sheet closed)
 let mgtSwapFrom = null;         // the team index the swapped player currently sits on
-// Round 2026-08-03 §6 — DRAG to move players between pickup teams (Mike's pick: direction B). Press the grip
-// at a name's left, drag the lifted card onto another team row, release to trade with the closest player
-// there. mgtDrag is the in-flight gesture (null between drags); mgtLastMove is the snapshot the Undo strip
-// restores. Both are module vars so the container-swap repaint and a background sync leave them alone; the
-// gesture itself never repaints (see mgtDragMove) because rebuilding the list under the finger would drop it.
-let mgtDrag = null;             // { key, from, playerIndex, name, skillText, pointerId, startX/Y, active, over, lift, slot, row }
-let mgtLastMove = null;         // { before, movedName, partnerName, toTeam, mode } — powers .mgv-undo
-let mgtDragSuppressClick = false; // a completed drag must not also fire the name's tap-to-swap sheet
+// 2026-08-07 (Mike): the drag-to-move gesture from the 2026-08-03 round is REMOVED. Moving a player between
+// generated teams is tap-to-swap only again (data-mgt-swap → the sheet → mgtApplySwap). Removed with it:
+// the grip, the lifted card, the mid-drag preview, the Undo strip and the skill-drift warning, all of which
+// existed only as parts of that gesture.
 // Task 5 (Tournament sub-hub, pick R2 + Registration, pick R7): the open tournament sub-view under
 // manageView==='tournament'. null = the sub-hub (the 7 rows); 'registration' = the Registration view (built
 // now); 'teams'|'pools'|'bracket'|'settings'|'rules'|'closeout' render honest placeholders until Tasks 6-10
@@ -7100,23 +6848,6 @@ let mgLogError = '';
 
 const MG_CHEV ='<svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
 
-// The 17px drag grip (round 2026-08-03 §6). It MUST be the first child INSIDE .mgt-nm: the shipped CSS guard
-// is `.mgt-nm:has(.mgv-hnd)` (production .mgt-nm is justify-content:space-between with exactly two children,
-// so without the guard firing the names fly to the row's centre). touch-action:none is inline because it is
-// behaviour, not design — without it iOS scrolls the page instead of dragging, and styles.css shipped this
-// round already. data-mgt-grip is the JS hook; the class is the design's.
-const MGT_GRIP_SVG = '<svg class="mgv-hnd" data-mgt-grip viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="touch-action:none" aria-hidden="true"><path d="M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01"/></svg>';
-const MGT_WARN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 2.4 18a1.8 1.8 0 0 0 1.6 2.7h16a1.8 1.8 0 0 0 1.6-2.7L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/></svg>';
-// A press has to travel this far before it becomes a drag. Under it the gesture stays a TAP, which still
-// opens the existing swap sheet — so a fat finger on the 17px grip is never a dead zone.
-const MGT_DRAG_SLOP = 6;
-// UNCONFIRMED — README open question 3 ("Skill-drift threshold for the warning") is still open with Mike.
-// Picked so the warning means something rather than crying wolf: the balancer's own output sits inside ~1-3
-// points of spread, and the exploration doc calls 3.5 merely "apart", so warning there would fire on almost
-// every drag. 8.0 is roughly two full skill grades across a 4s roster (~40% of a typical 20-point team
-// total) — visibly lopsided, and it still fires on the prototype's own 11.0 example. It only ever WARNS:
-// no move is blocked, per the same open question.
-const MGT_DRIFT_WARN_AT = 8;
 
 // The tournament the Manage lead reports on: a live event (pools/bracket), else the most-recent SETUP
 // tournament — REGARDLESS of registration_open. The old filter (`registration_open && status==='setup'`)
@@ -8214,7 +7945,7 @@ async function mgpDeleteGroup(groupName) {
 // the pl-tab chip grammar; the mgt-* kit carries the CTA / stacked team rows / swap sheet. MAKE TEAMS ·
 // N CHECKED IN (size chips 2/3/4/6, 4s default) → Generate balanced teams (reuses generateBalancedGroups) →
 // TODAY'S TEAMS (TEAM n label + names STACKED one per line, faint hairlines). Tap a name → a swap sheet
-// listing the OTHER teams; tapping one reuses the drag-drop mutation moveGeneratedPlayerBetweenTeams. The
+// listing the OTHER teams; tapping one applies moveGeneratedPlayerBetweenTeams. The
 // casual live-courts board is CUT (Mike): no net cards, no report/clear result, skills change by admin edit
 // only. Team persistence rides the normal saveLocal → queueLiveStateSave path (courts stripped from it).
 function buildManageTeamsHTML() {
@@ -8244,7 +7975,6 @@ function buildManageTeamsHTML() {
         const n = Number(p && p.skill);
         const skPos = Number.isFinite(n) && n > 0;
         return `<div class="mgt-nm" data-mgt-swap="${escapeHTMLText(key)}" data-mgt-from="${idx}">`
-          + MGT_GRIP_SVG
           + `<span class="mgt-nmn">${escapeHTML(String((p && p.name) || 'Player'))}</span>`
           + `<span class="mgt-nsk${skPos ? '' : ' n'}">${mgpSkillText(p && p.skill)}</span></div>`;
       }).join('');
@@ -8253,10 +7983,7 @@ function buildManageTeamsHTML() {
       return `<div class="mgt-trow" data-mgt-team="${idx}"><span class="mgt-tt">TEAM ${idx + 1}<b class="mgt-tsk">${teamSkillTotal(team)}</b></span><div class="mgt-names">${names}</div></div>`;
     }).join('');
     teamsSect = `<div class="pl-sect">Today's teams</div>`
-      + `<div class="mgv-note">Drag a name by its handle onto another team.</div>`
       + rows
-      + mgtDriftWarnHTML(teams)
-      + mgtUndoStripHTML()
       + `<div class="mgt-note">Tap a name to swap players between teams · regenerate any time</div>`;
   } else {
     teamsSect = `<div class="mgt-empty">No teams yet. Pick a size and generate.</div>`;
@@ -8306,274 +8033,17 @@ function mgtGenerateTeams() {
   state.liveMatchResults = {};
   state.liveMatchSkillSnapshots = {};
   mgtSwapKey = null; mgtSwapFrom = null;
-  mgtLastMove = null; // a fresh board has nothing to undo back to
   saveLocal();
   repaintManage();
 }
 
-// Apply the open swap: move the swapped player onto the tapped team (reuses the drag-drop mutation), persist,
+// Apply the open swap: move the swapped player onto the tapped team, persist,
 // close the sheet, repaint.
 function mgtApplySwap(toTeamIndex) {
   if (mgtSwapKey == null || mgtSwapFrom == null) return;
   const result = moveGeneratedPlayerBetweenTeams(Number(mgtSwapFrom), Number(toTeamIndex), mgtSwapKey);
   mgtSwapKey = null; mgtSwapFrom = null;
-  // A sheet move supersedes the dragged one, so the Undo strip goes rather than offering to restore a board
-  // two moves back (an Undo that quietly reverts a move you did NOT make is worse than no Undo).
-  mgtLastMove = null;
   if (result && result.changed) saveLocal();
-  repaintManage();
-}
-
-// ── Round 2026-08-03 §6: drag a player onto another team (Mike's pick, direction B) ───────────────────
-// Pointer Events + setPointerCapture throughout, NEVER HTML5 drag-and-drop: dragstart/drop do not fire on
-// iOS Safari, and this is a phone interaction standing at the courts. No long-press gate either — the grip
-// IS the affordance (README §6), so the drag begins on the first movement past MGT_DRAG_SLOP.
-//
-// THE RULE lives in ONE place: swapPlayersBetweenTeams (pure.js), which already mirrors the shipped
-// moveGeneratedPlayerBetweenTeams — a short target takes a plain move, otherwise the dragged player trades
-// places with the target's closest skill. The drag and the tap-to-swap sheet therefore can never disagree.
-// The mid-drag PREVIEW is computed by running that same function and diffing the result, so what the hint
-// promises and what the drop does are the same computation, not two implementations of one rule.
-
-// The mid-drag model for dragging teams[from][playerIndex] over team `to`. null when the drop would change
-// nothing (same team, bad index, malformed roster) — the caller then shows no highlight and commits nothing.
-// deltas[] is per-team skill change, one decimal, ready for the .mgv-delta chips on BOTH team headers.
-function mgtDragModel(teams, from, playerIndex, to) {
-  const list = Array.isArray(teams) ? teams : [];
-  const next = swapPlayersBetweenTeams(list, { teamIndex: from, playerIndex }, to);
-  if (next === list) return null;                       // the helper's own "nothing moved" signal
-  const moved = next[from].length < list[from].length;  // the target was short → a move, nobody comes back
-  const partner = moved ? null : next[from][playerIndex];
-  const skill = partner == null ? null : Number(partner.skill);
-  return {
-    mode: moved ? 'move' : 'swap',
-    partnerName: partner ? String(partner.name || 'Player') : '',
-    partnerSkill: (Number.isFinite(skill) && skill > 0) ? skill.toFixed(1) : 'unrated',
-    deltas: list.map((team, i) => Number((Number(teamSkillTotal(next[i])) - Number(teamSkillTotal(team))).toFixed(1))),
-    next,
-  };
-}
-
-// The delta chip on a team header during the drag ("+6.5" / "−6.5"). No chip at all when nothing changes —
-// an explicit "0" would read as a number the admin has to interpret.
-function mgtDeltaHTML(delta) {
-  const n = Number(delta);
-  if (!Number.isFinite(n) || n === 0) return '';
-  return `<span class="mgv-delta">${n > 0 ? '+' : '&minus;'}${Math.abs(n).toFixed(1)}</span>`;
-}
-
-// The hint that names who you would trade with. It goes INSIDE .mgt-names, never as a third child of
-// .mgt-trow — that row is a flex row of [team label | names] and a third column crushes the roster.
-function mgtRowHintHTML(model) {
-  if (!model) return '';
-  if (model.mode === 'move') return `<div class="mgv-rowhint">Drop to add them to this team</div>`;
-  return `<div class="mgv-rowhint">Drop to swap with <b>${escapeHTML(model.partnerName)} &middot; ${escapeHTML(model.partnerSkill)}</b></div>`;
-}
-
-// The lifted card that rides under the finger. Same three children as the resting name so it reads as the
-// row picked up rather than a new object.
-function mgtLiftHTML(name, skillText, unrated) {
-  return MGT_GRIP_SVG
-    + `<span class="mgt-nmn">${escapeHTML(String(name || 'Player'))}</span>`
-    + `<span class="mgt-nsk${unrated ? ' n' : ''}">${skillText}</span>`;
-}
-
-// The Undo strip after a drop. Restores the exact rosters through the same write path the move used.
-function mgtUndoStripHTML() {
-  const m = mgtLastMove;
-  if (!m) return '';
-  const who = `<b>${escapeHTML(m.movedName)}</b>`;
-  const line = m.mode === 'swap'
-    ? `${who} and <b>${escapeHTML(m.partnerName)}</b> swapped`
-    : `${who} moved to Team ${Number(m.toTeam) + 1}`;
-  return `<div class="mgv-undo"><span class="mgv-undo-t">${line}</span>`
-    + `<button type="button" class="mgv-undo-b" data-mgv-undo>Undo</button></div>`;
-}
-
-// The skill-drift warning. Fires only AFTER a move (mgtLastMove), because it is the consequence of what the
-// admin just did — the balancer's own output never drifts this far, so warning on a freshly generated board
-// would be noise. WARN ONLY: the move is already applied and nothing is blocked (README open question 3).
-function mgtDriftWarnHTML(teams) {
-  if (!mgtLastMove) return '';
-  const d = teamSkillDrift(teams);
-  if (!d || d.spread < MGT_DRIFT_WARN_AT) return '';
-  const lo = Math.min(d.highIndex, d.lowIndex), hi = Math.max(d.highIndex, d.lowIndex);
-  return `<div class="mgv-warn">${MGT_WARN_SVG}<span>Team ${lo + 1} and Team ${hi + 1} are `
-    + `<b>${d.spread.toFixed(1)}</b> apart on skill. Drag one more player to even them up.</span></div>`;
-}
-
-// Commit the drop. Snapshots the rosters for Undo, applies the pure move, then persists through EXACTLY the
-// path the tap-to-swap sheet uses: updateGeneratedTeamsSummaryFromCurrent + saveLocal (→ queueLiveStateSave).
-// There is no second persistence route. Returns true when something actually moved.
-function mgtDragCommit(to) {
-  const d = mgtDrag;
-  if (!d) return false;
-  const teams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
-  const model = mgtDragModel(teams, d.from, d.playerIndex, Number(to));
-  if (!model) return false;
-  mgtLastMove = {
-    before: teams.map((t) => (Array.isArray(t) ? t.slice() : t)),
-    movedName: d.name,
-    partnerName: model.partnerName,
-    toTeam: Number(to),
-    mode: model.mode,
-  };
-  state.generatedTeams = model.next;
-  updateGeneratedTeamsSummaryFromCurrent(model.next);
-  saveLocal();
-  return true;
-}
-
-// Undo — the same write path in reverse, restoring the snapshot taken before the move.
-function mgtUndoLastMove() {
-  const m = mgtLastMove;
-  if (!m || !Array.isArray(m.before)) return false;
-  state.generatedTeams = m.before.map((t) => (Array.isArray(t) ? t.slice() : t));
-  updateGeneratedTeamsSummaryFromCurrent(state.generatedTeams);
-  mgtLastMove = null;
-  saveLocal();
-  repaintManage();
-  return true;
-}
-
-// ── The gesture itself (DOM only — every decision above is testable without a browser) ────────────────
-// Mid-drag deliberately does NOT repaint: rebuilding the list would destroy the node under the finger and
-// kill the gesture. The three visual states are applied in place; the drop repaints once, at the end.
-function mgtDragTeamAt(x, y) {
-  if (!document.elementFromPoint) return null;
-  const el = document.elementFromPoint(x, y);
-  const row = el && el.closest ? el.closest('[data-mgt-team]') : null;
-  if (!row) return null;
-  const n = Number(row.getAttribute('data-mgt-team'));
-  return Number.isInteger(n) ? { index: n, row } : null;
-}
-
-function mgtDragPointerDown(e) {
-  if (manageView !== 'teams' || mgtDrag) return;
-  const grip = e.target && e.target.closest ? e.target.closest('[data-mgt-grip]') : null;
-  if (!grip) return;
-  const nameEl = grip.closest('[data-mgt-swap]');
-  if (!nameEl) return;
-  const from = Number(nameEl.getAttribute('data-mgt-from'));
-  const key = nameEl.getAttribute('data-mgt-swap') || '';
-  const teams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
-  if (!Array.isArray(teams[from])) return;
-  const playerIndex = teams[from].findIndex((p) => playerIdentityKey(p) === key);
-  if (playerIndex < 0) return;
-  const p = teams[from][playerIndex];
-  const sk = Number(p && p.skill);
-  mgtDrag = {
-    key, from, playerIndex, row: nameEl,
-    name: String((p && p.name) || 'Player'),
-    skillText: mgpSkillText(p && p.skill),
-    unrated: !(Number.isFinite(sk) && sk > 0),
-    pointerId: e.pointerId, startX: e.clientX, startY: e.clientY,
-    active: false, over: null, lift: null, slot: null,
-  };
-  // Capture on the stable #app-content, not the name: the source node is replaced by the drop's repaint,
-  // and a capture on a detached node would strand the gesture mid-air.
-  const host = document.getElementById('app-content');
-  if (host && host.setPointerCapture) { try { host.setPointerCapture(e.pointerId); } catch (_) {} }
-}
-
-// First real movement: lift the name out, hold its slot open dashed, and start following the finger.
-function mgtDragBeginVisual(e) {
-  const d = mgtDrag;
-  if (!d || d.active) return;
-  d.active = true;
-  const rect = (d.row && d.row.getBoundingClientRect) ? d.row.getBoundingClientRect() : null;
-  d.grabX = rect ? (d.startX - rect.left) : 20;
-  d.grabY = rect ? (d.startY - rect.top) : 14;
-  const slot = document.createElement('div');
-  slot.className = 'mgv-slot';
-  slot.textContent = d.name;
-  if (d.row && d.row.parentNode) {
-    d.row.parentNode.insertBefore(slot, d.row);
-    d.row.style.display = 'none';
-    d.slot = slot;
-  }
-  const lift = document.createElement('div');
-  lift.className = 'mgv-lift';
-  lift.innerHTML = mgtLiftHTML(d.name, d.skillText, d.unrated);
-  lift.style.cssText = 'position:fixed;z-index:60;pointer-events:none;'
-    + (rect ? `width:${Math.round(rect.width)}px;` : 'width:220px;');
-  document.body.appendChild(lift);
-  d.lift = lift;
-  mgtDragPlaceLift(e.clientX, e.clientY);
-}
-
-function mgtDragPlaceLift(x, y) {
-  const d = mgtDrag;
-  if (!d || !d.lift) return;
-  d.lift.style.left = Math.round(x - (d.grabX || 0)) + 'px';
-  d.lift.style.top = Math.round(y - (d.grabY || 0)) + 'px';
-}
-
-// Enter / leave a team row: highlight it, preview both headers' totals, and name who you would trade with.
-function mgtDragHover(hit) {
-  const d = mgtDrag;
-  if (!d) return;
-  const to = (hit && hit.index !== d.from) ? hit.index : null;
-  if (to === d.over) return;
-  mgtDragClearHover();
-  d.over = to;
-  if (to == null) return;
-  const teams = Array.isArray(state.generatedTeams) ? state.generatedTeams : [];
-  const model = mgtDragModel(teams, d.from, d.playerIndex, to);
-  if (!model) { d.over = null; return; }
-  const overRow = hit.row;
-  overRow.classList.add('mgv-over');
-  const names = overRow.querySelector('.mgt-names');
-  if (names) names.insertAdjacentHTML('beforeend', mgtRowHintHTML(model));
-  [d.from, to].forEach((i) => {
-    const row = document.querySelector(`[data-mgt-team="${i}"]`);
-    const tt = row && row.querySelector('.mgt-tt');
-    if (tt) tt.insertAdjacentHTML('beforeend', mgtDeltaHTML(model.deltas[i]));
-  });
-}
-
-function mgtDragClearHover() {
-  document.querySelectorAll('.mgt-trow.mgv-over').forEach((r) => r.classList.remove('mgv-over'));
-  document.querySelectorAll('.mgv-rowhint, .mgv-delta').forEach((n) => n.remove());
-  if (mgtDrag) mgtDrag.over = null;
-}
-
-function mgtDragPointerMove(e) {
-  const d = mgtDrag;
-  if (!d || e.pointerId !== d.pointerId) return;
-  if (!d.active) {
-    if (Math.abs(e.clientX - d.startX) < MGT_DRAG_SLOP && Math.abs(e.clientY - d.startY) < MGT_DRAG_SLOP) return;
-    mgtDragBeginVisual(e);
-  }
-  if (e.cancelable) e.preventDefault();
-  mgtDragPlaceLift(e.clientX, e.clientY);
-  mgtDragHover(mgtDragTeamAt(e.clientX, e.clientY));
-}
-
-// Tear the gesture's own DOM down. Safe to call twice, and safe when the drop never started.
-function mgtDragTeardown() {
-  const d = mgtDrag;
-  if (!d) return;
-  mgtDragClearHover();
-  if (d.lift) d.lift.remove();
-  if (d.slot) d.slot.remove();
-  if (d.row && d.row.style) d.row.style.display = '';
-  const host = document.getElementById('app-content');
-  if (host && host.releasePointerCapture) { try { host.releasePointerCapture(d.pointerId); } catch (_) {} }
-  mgtDrag = null;
-}
-
-function mgtDragPointerUp(e, cancelled) {
-  const d = mgtDrag;
-  if (!d || e.pointerId !== d.pointerId) return;
-  const to = cancelled ? null : d.over;
-  const wasActive = d.active;
-  // ORDER MATTERS: mgtDragCommit reads the in-flight mgtDrag, and mgtDragTeardown nulls it. Committing
-  // after the teardown silently drops every drop on the floor.
-  if (wasActive && to != null) mgtDragCommit(to);
-  mgtDragTeardown();
-  if (!wasActive) return;                 // never travelled: stays a tap, the swap sheet opens as before
-  mgtDragSuppressClick = true;            // a real drag must not ALSO open that sheet
   repaintManage();
 }
 
@@ -11955,22 +11425,11 @@ function attachHandlers() {
   const appContent = document.getElementById('app-content');
   if (appContent && !appContent.dataset.navTabBound) {
     appContent.dataset.navTabBound = '1';
-    // Round 2026-08-03 §6: drag to move a player between pickup teams. Pointer Events only (HTML5 drag and
-    // drop does not fire on iOS Safari, and this is used on a phone at the courts). Delegated on the stable
-    // #app-content so it survives every container-swap repaint, and the capture is taken on #app-content
-    // too, so move/up keep arriving after the drop repaints the row the drag started from.
-    // Every fresh gesture starts with a clean suppress flag. A drop repaints the list, which can detach the
-    // node the trailing click was aimed at — that click then never reaches this delegate, so the flag would
-    // otherwise stay armed and swallow the NEXT real tap.
     appContent.addEventListener('pointerdown', (e) => {
-      mgtDragSuppressClick = false; mgtDragPointerDown(e);
       // 2026-08-04: arm the tournament-edit Save BEFORE the focused field blurs (pointerdown lands first), so
       // the focusout safety net stands down and the batch stays ONE write. See mgArmSaveTap.
       if (e.target && typeof e.target.closest === 'function' && e.target.closest('[data-mg-save]')) mgArmSaveTap();
     });
-    appContent.addEventListener('pointermove', (e) => { mgtDragPointerMove(e); });
-    appContent.addEventListener('pointerup', (e) => { mgtDragPointerUp(e, false); });
-    appContent.addEventListener('pointercancel', (e) => { mgtDragPointerUp(e, true); });
     // Task 3: the Players directory search is a live filter. Delegated on the stable #app-content ancestor so
     // it survives the container-swap repaints (the input element is re-created on each swap). Re-renders ONLY
     // the #mgp-list sub-container — the input itself (and its focus/caret) is never touched.
@@ -12121,16 +11580,6 @@ function attachHandlers() {
       // module vars survive). Checked BEFORE the generic data-mg-area so these never fall through to nav; the
       // page's own back button carries data-mg-area="lead" (handled below).
       if (manageView === 'teams') {
-        // A completed drag (round 2026-08-03 §6) swallows the click it trails, or releasing the grip over a
-        // name would ALSO open that name's swap sheet on top of the move that just landed.
-        // ...but ONLY the click the drag actually trails. That click lands wherever the finger was
-        // released, which is a team row. A tap on the Undo strip is a fresh, deliberate gesture, and
-        // the strip only exists straight after a drop — so the suppressor was eating the one tap
-        // Undo is for. Browser-verified: before this, the first Undo tap did nothing (the drop had
-        // already set the flag), while calling mgtUndoLastMove() directly restored correctly.
-        const undoTap = e.target.closest('[data-mgv-undo]');
-        if (mgtDragSuppressClick) { mgtDragSuppressClick = false; if (!undoTap) return; }
-        if (undoTap) { mgtUndoLastMove(); return; }
         const sizeBtn = e.target.closest('[data-mgt-size]');
         if (sizeBtn) { mgtSize = Number(sizeBtn.getAttribute('data-mgt-size')) || 4; repaintManage(); return; }
         if (e.target.closest('[data-mgt-generate]')) { mgtGenerateTeams(); return; }
@@ -12336,7 +11785,7 @@ function attachHandlers() {
         }
         // Entering the Teams page fresh: 4s default, no open swap sheet, no stale UNDO strip (an Undo from
         // a move made before you left would silently restore a board you have since moved on from).
-        if (nextArea === 'teams' && manageView !== 'teams') { mgtSize = 4; mgtSwapKey = null; mgtSwapFrom = null; mgtLastMove = null; }
+        if (nextArea === 'teams' && manageView !== 'teams') { mgtSize = 4; mgtSwapKey = null; mgtSwapFrom = null; }
         // Entering the Tournament area fresh: no stale sub-view. It opens straight into the sub-hub for the
         // tournament the hub's card names — the list is its own area now (round 2026-08-04), so this is no
         // longer the screen that asks "which one".

@@ -3206,7 +3206,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
    Check-in reuses it for its All / In / Out filter chips, which are single-line
    and must not become two-line flex columns. The guard keeps the stack on the
    pools tabs only, and matches the round's own idiom for shared kits
-   (.mgt-nm:has(.mgv-hnd), .mg-row:has(.mgv-rmeta)). */
+   (.mg-row:has(.mgv-rmeta)). */
 .pl-tab:has(.pl-tabn) {
   display: flex;
   flex-direction: column;
@@ -3450,113 +3450,6 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   font-weight: 600;
   cursor: pointer;
 }
-
-/* ============================================================
-   Round 2026-08-03 — "a new way to move players" (Manage · Teams, pickup).
-   Three directions, all inline on the Teams screen, all built for a straight
-   two-player swap, all sharing the same two safety rails Mike asked for: an
-   Undo strip like Check-in's, and a warning when the swap leaves teams apart
-   on skill. One screen each: mg-teams-move-a / -b / -c.
-     A  swap mode — tap a name, tap their partner
-     B  drag the name by a handle onto another team
-     C  pin two teams into a compare tray and swap across it
-
-   PORT NOTE: only the shared rails and direction B are ported. README §6 names
-   B the chosen direction ("drag by a handle onto another team"); A and C are
-   the two documented-and-rejected alternatives, and their classes appear in NO
-   shipping screen — only in the exploration doc move-players.html. Dropping
-   them also removes a real leak: direction C shipped an UNSCOPED .mgv-tfoot,
-   which would have applied its margin-top/font-size to the team payment
-   modal's footer (#team-pay-modal .mgv-tfoot) further down this section.
-   Recoverable from the round's _rounds.css if a direction is ever revisited.
-   ============================================================ */
-
-/* shared: undo strip + drift warning */
-.mgv-undo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-  padding: 11px 12px;
-  border: 1px solid var(--border);
-  border-radius: 13px;
-  background: oklch(0.985 0.003 75);
-}
-.mgv-undo-t { font-size: 13px; color: var(--muted); }
-.mgv-undo-t b { font-weight: 700; color: var(--ink); }
-.mgv-undo-b {
-  margin-left: auto;
-  flex: none;
-  height: 36px;
-  padding: 0 15px;
-  border: 1px solid var(--accent-bd);
-  border-radius: 999px;
-  background: #fff;
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.mgv-warn {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  margin-top: 14px;
-  padding: 11px 12px;
-  border: 1px solid oklch(0.88 0.055 75);
-  border-radius: 13px;
-  background: oklch(0.975 0.03 80);
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: oklch(0.42 0.08 70);
-}
-.mgv-warn svg { flex: none; width: 17px; height: 17px; margin-top: 1px; }
-.mgv-warn b { font-weight: 700; }
-.mgv-note { margin: 2px 0 12px; font-size: 12.5px; color: var(--muted); }
-
-/* B — drag */
-/* production .mgt-nm is space-between with exactly two children; the grip is a
-   third, so pack them left and push the skill back out to the right edge */
-.mgv-hnd { flex: none; width: 17px; height: 17px; margin-right: 2px; color: oklch(0.74 0.006 75); }
-.mgt-nm:has(.mgv-hnd) { justify-content: flex-start; }
-.mgt-nm:has(.mgv-hnd) .mgt-nsk { margin-left: auto; }
-.mgv-slot {
-  display: flex;
-  align-items: center;
-  min-height: 40px;
-  padding: 0 12px;
-  border: 1px dashed oklch(0.84 0.006 75);
-  border-radius: 10px;
-  background: oklch(0.98 0.003 75);
-  font-size: 14px;
-  color: oklch(0.72 0.006 75);
-}
-.mgt-trow.mgv-over { box-shadow: inset 0 0 0 2px var(--accent-bd); background: var(--accent-soft); }
-.mgv-lift {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--accent-bd);
-  border-radius: 11px;
-  background: #fff;
-  font-size: 14px;
-  font-weight: 600;
-  transform: rotate(-1.2deg) translateY(-2px);
-  box-shadow: 0 12px 26px oklch(0.18 0.005 75 / .18);
-}
-.mgv-lift .mgt-nsk { margin-left: auto; color: var(--muted); font-weight: 600; }
-.mgv-delta {
-  margin-left: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--accent);
-}
-/* .mgt-trow is a flex row of [team label | names], so the hint has to live
-   inside .mgt-names to get block flow instead of becoming a third column */
-.mgv-rowhint { margin-top: 8px; font-size: 12px; color: var(--accent); }
-.mgv-lift .mgt-nmn { flex: 1; }
-.mgv-rowhint b { font-weight: 700; }
 
 /* Round 2026-08-03 — "add more to each part already in the Tournament sub-hub"
    + "somewhere the reset and a delete tournament are".
