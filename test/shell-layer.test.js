@@ -5,7 +5,10 @@
 // every programmatic scrollTop restore. The suite has no DOM, so these are text assertions on styles.css.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-const css = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8');
+// styles.css is CRLF in the working copy — normalise so multi-line literals match — and strip the
+// /* comments */: the PORT NOTES deliberately name the selectors these guards ban, and a note is not a rule.
+const css = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8')
+  .replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '');
 
 describe('shell layer port guards', () => {
   it('ships the header grid with the sync line under the avatar', () => {
@@ -22,7 +25,7 @@ describe('shell layer port guards', () => {
   });
   it('scroll manners target the real scroller and never smooth-scroll it', () => {
     expect(css).not.toMatch(/html,\s*body,\s*#app-content\s*\{/);
-    expect(css).not.toContain('pd-noscroll');
+    expect(css).not.toMatch(/body\.pd-noscroll[^{]*\{/); // a RULE, not the port note that names it
     expect(css).not.toMatch(/\.tab-panel[^}]*scroll-behavior:\s*smooth/);
     expect(css).toContain('.tab-panel { scroll-padding-top: 56px; -webkit-overflow-scrolling: touch; }');
   });
