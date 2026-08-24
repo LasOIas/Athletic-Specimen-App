@@ -1752,6 +1752,7 @@ body.copilot-open #cop-chat {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .001ms !important;
+    animation-delay: 0ms !important; /* 2026-08-24: the motion system staggers with delays — without this a reduce-motion user sees a blank page for the stagger's length */
     animation-iteration-count: 1 !important;
     transition-duration: .001ms !important;
     scroll-behavior: auto !important;
@@ -4360,3 +4361,127 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 .rf-divlab::before, .rf-divlab::after { content: none; display: none; }
 .rf-divlab > span { font-size: 11px; letter-spacing: .12em; color: var(--muted); }
 .rf-page .rf-divlab.is-pay span { color: var(--accent); }
+
+/* ============================================================
+   APP-WIDE SHELL LAYER - 2026-08-24 (Mike's handoff _shared.css, "APP-WIDE
+   CORRECTIONS"). Shared byte-for-byte by all five 2026-08-24 handoffs; the
+   Tournament / Manage / Account ports build on this. Mike's call: app-wide now.
+   NOT ported from that file (they belong to other screens or were wrong for prod):
+   the score card, pools caption, event-settings cards, rules editor, pools
+   controls, the bracket flow override (prod pans an absolute canvas from JS),
+   live scoring; `#app-header sticky` (the app header never scrolls - #app-content
+   is overflow:hidden); `.ph-pagehdr` (nothing emits it); the watermark
+   `display:block !important` (would un-hide it behind Manage, Mike 2026-07-12);
+   `html, body, #app-content` scroll rules (none of those scroll - .tab-panel does);
+   `scroll-behavior: smooth` (the app restores scrollTop programmatically after
+   every partial repaint - smooth would animate the restore); `body.pd-noscroll`
+   (nothing sets it); `#inline-app` (canvas harness); `.pl-legend` (already shipped);
+   `.mgs-body` / `[data-hscroll]` (nothing in prod carries them).
+   ============================================================ */
+
+/* "all headers everywhere need to be on the screen at all times even when
+   scrolling". .tab-panel is the scroll container (position:absolute; overflow-y:
+   scroll), so sticky needs no structural change. The gutter bleed matches
+   .container's padding: 8px under 768px, 12px above. */
+.pd-pagehdr {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  margin-inline: -8px;
+  padding-inline: 8px;
+  padding-top: 10px;
+  padding-bottom: 8px;
+  background: var(--bg);
+  box-shadow: 0 8px 10px -12px rgba(20, 20, 22, .55);
+}
+@media (min-width: 769px) { .pd-pagehdr { margin-inline: -12px; padding-inline: 12px; } }
+
+/* Section heads, everywhere. The Manage hub set the pattern — accent label,
+   count if it has one, then a 2px rule running out to the right edge. */
+.pl-sect {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 24px 0 5px;
+  padding-top: 0;
+  border-top: 0;
+  font-size: 13.5px;
+  letter-spacing: .12em;
+  color: var(--accent);
+}
+.pl-sect::after {
+  content: '';
+  display: block;
+  flex: 1;
+  min-width: 24px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.pl-sect:first-child { margin-top: 6px; }
+
+/* The logo mark: a quiet ghost behind the page. Prod already shows it on every
+   public tab (and hides it behind Manage); only the size and weight change. */
+body.pd-public-active .pd-watermark { width: 300px; opacity: .075; }
+
+/* APP HEADER — the title block owns the left, the account owns the right.
+   "Updated 7:42 PM" belongs to the account corner: right-aligned, tucked under the
+   bubble. Markup unchanged (renderPublicShell already emits this tree). */
+#app-header.pd-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 14px;
+  row-gap: 1px;
+}
+#app-header.pd-header > .app-header-mode { grid-area: 1 / 1; }
+#app-header.pd-header > .pd-wordmark { grid-area: 1 / 1 / span 2 / span 1; align-self: center; }
+#app-header.pd-header > #js-sync-notice {
+  grid-area: 2 / 2;
+  position: static;
+  inset: auto;
+  margin: 0;
+  justify-self: end;
+  text-align: right;
+}
+#app-header.pd-header > #js-sync-notice .shared-sync-notice {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+#app-header.pd-header > .pd-hgrp {
+  grid-area: 1 / 2;
+  position: static;
+  justify-self: end;
+  transform: none;
+  margin: 0;
+}
+
+/* SCROLLING — one bar for the whole app: a pill in the app's own warm ink on a
+   transparent track. The manners are retargeted to .tab-panel, the real scroller. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.66 0.012 75 / .5) transparent;
+}
+::-webkit-scrollbar { width: 11px; height: 11px; background: transparent; }
+::-webkit-scrollbar-track { background: transparent; border: 0; }
+::-webkit-scrollbar-thumb {
+  background: oklch(0.66 0.012 75 / .5);
+  background-clip: padding-box;
+  border: 3.5px solid transparent;
+  border-radius: 999px;
+  min-height: 44px;
+}
+::-webkit-scrollbar-thumb:hover { background: oklch(0.52 0.014 75 / .66); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:active { background: var(--accent); background-clip: padding-box; }
+::-webkit-scrollbar-corner, ::-webkit-scrollbar-button { display: none; background: transparent; }
+.tab-panel { scroll-padding-top: 56px; -webkit-overflow-scrolling: touch; }
+.popup-body, .mgv-tbody, .mgv-scbody {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+.bt-pan { scrollbar-width: none; overscroll-behavior-x: contain; }
+.bt-pan::-webkit-scrollbar { height: 0; width: 0; }
