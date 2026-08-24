@@ -1671,6 +1671,10 @@ const HM_LOGO = '<img class="hm-logo" src="/logo-mark.png" alt="" aria-hidden="t
 const HM_IC_PIN = '<svg viewBox="0 0 24 24"><path d="M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>';
 const HM_IC_USERS = '<svg viewBox="0 0 24 24"><circle cx="9" cy="7" r="3.5"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 4a3.6 3.6 0 0 1 0 6.8"/><path d="M20.5 20a5.5 5.5 0 0 0-4-5.3"/></svg>';
 const HM_IC_FORMAT = '<svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M8 6h3a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H8"/><path d="M13 12h3"/></svg>';
+// Details-card actions (design round 2026-08-24): clipboard / tick / rules-sheet glyphs. `.hmv-copy svg` sizes them.
+const HM_IC_COPY = '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M15 6.5V5.5a2 2 0 0 0-2-2H5.5a2 2 0 0 0-2 2V13a2 2 0 0 0 2 2h1"/></svg>';
+const HM_IC_TICK = '<svg viewBox="0 0 24 24"><path d="M4.5 12.5l4.5 4.5L19.5 6.5"/></svg>';
+const HM_IC_RULES = '<svg viewBox="0 0 24 24"><path d="M6 3.5h9l4 4V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z"/><path d="M14.5 3.7V8h4.2"/><path d="M8.5 13h7"/><path d="M8.5 16.5h4.5"/></svg>';
 
 // Shared lead block (no card): eyebrow (status dot + small-caps) → Barlow title → muted meta → optional
 // CTA, with the logo mark filling the open space to the right (Mike's directive). The CTA spans full width.
@@ -1688,8 +1692,30 @@ function hmLeadHTML(o) {
     </div>`;
 }
 
-function hmDetailRowHTML(icon, text) {
-  return `<div class="hm-detail">${icon}<span>${escapeHTML(text)}</span></div>`;
+// A Details-card row (design round 2026-08-24, "keep the style but make it its own card / it's too bland"):
+// accent icon tile + the FACT in ink over its QUALIFIER in muted, + an optional right-hand text action.
+// The qualifier span is omitted when empty so a venue with no address line stays a single line.
+function hmDetailRowHTML(icon, fact, sub, actionHTML) {
+  const subHTML = sub ? `<span>${escapeHTML(sub)}</span>` : '';
+  return `<div class="hm-detail"><span class="hmv-dico">${icon}</span><span class="hmv-dtx"><b>${escapeHTML(fact)}</b>${subHTML}</span>${actionHTML || ''}</div>`;
+}
+// "there needs to be a way to click something to quickly copy the address" — an accent text action at the
+// row's right edge; .is-done (set by hmCopyAddress for ~2s) swaps it to the green "Address copied".
+function hmCopyButtonHTML(payload) {
+  return `<button type="button" class="hmv-copy" data-hm-copy="${escapeHTMLText(payload)}" aria-label="Copy the address"><span class="hmv-cidle">${HM_IC_COPY}Copy address</span><span class="hmv-cdone">${HM_IC_TICK}Address copied</span></button>`;
+}
+// "in this box have a button for rules, that when clicked opens a pop up of the rules" — opens the shipped
+// rules text in a body-appended sheet (openHomeRules). Rendered ONLY when the tournament has rules text.
+function hmRulesButtonHTML() {
+  return `<button type="button" class="hmv-copy hmv-rules" data-hm-rules><span class="hmv-cidle">${HM_IC_RULES}Rules</span></button>`;
+}
+// The venue row reads migration 0058's two columns. Until they are applied (or while unset) it keeps
+// today's honest copy in the card's two-line grammar and renders NO copy action — never a fabricated address.
+function hmVenueRowHTML(reg) {
+  const venue = (tournamentHasVenue() && reg) ? String(reg.venue || '').trim() : '';
+  if (!venue) return hmDetailRowHTML(HM_IC_PIN, 'Location', 'Posted in GroupMe', '');
+  const addr = String(reg.venue_address || '').trim();
+  return hmDetailRowHTML(HM_IC_PIN, venue, addr, hmCopyButtonHTML(addr ? venue + ', ' + addr : venue));
 }
 
 // A tournament LIVE-NOW net block: net-header line + the game (two team rows + running score) + Playing pill.
@@ -1815,7 +1841,8 @@ function hmRegistrationHTML(reg) {
   // the divider and the logo auto-shrinks with it). The upcoming tournament stays visible on Home either
   // way; the DETAILS rows render in both variants.
   const metaHTML = meta ? `<div class="hm-meta">${escapeHTML(meta)}</div>` : '';
-  const status = `<div class="hm-status${rm.regOpen ? '' : ' is-closed'}"><span>${rm.regOpen ? 'Registration open' : 'Registration closed'}</span></div>`;
+  // Round 2026-08-22: only the STATE WORD takes colour (green open / red closed); "Registration" stays grey.
+  const status = `<div class="hm-status${rm.regOpen ? '' : ' is-closed'}"><span>Registration <b>${rm.regOpen ? 'open' : 'closed'}</b></span></div>`;
   const cta = rm.regOpen ? '<button type="button" class="hm-cta" data-tn-view="register">Register your team</button>' : '';
   const cluster = `<div class="hm-regwrap">
       <div class="hm-reginfo"><h1>${escapeHTML(rm.name)}</h1>${metaHTML}</div>
@@ -1824,9 +1851,14 @@ function hmRegistrationHTML(reg) {
       <img class="hm-reglogo" src="/logo-mark.png" alt="" aria-hidden="true">
     </div>`;
 
-  const rows = hmDetailRowHTML(HM_IC_PIN, 'posted in GroupMe')
-    + hmDetailRowHTML(HM_IC_USERS, rm.teamSize + ' per team, co-ed · at least 1 guy + 1 girl')
-    + hmDetailRowHTML(HM_IC_FORMAT, 'Pool play → double-elim bracket · win by 2');
+  // Details card (design round 2026-08-24): the same three facts, each split at its middot into fact +
+  // qualifier, boxed with a stone header strip. The Rules action rides the roster row only when the
+  // tournament has rules text (Mike's call: no stub on the front door).
+  const rulesAction = rulesToHTML(typeof reg.rules === 'string' ? reg.rules : '') ? hmRulesButtonHTML() : '';
+  const rows = hmVenueRowHTML(reg)
+    + hmDetailRowHTML(HM_IC_USERS, rm.teamSize + ' per team, co-ed', 'at least 1 guy + 1 girl', rulesAction)
+    + hmDetailRowHTML(HM_IC_FORMAT, 'Pool play → double-elim bracket', 'win by 2', '');
+  const card = `<div class="hmv-dcard"><div class="hmv-dhead"><span>Details</span></div>${rows}</div>`;
 
   // Add-to-Home-Screen hint (Mike's pick from the Safari nav round, 2026-07-11): rendered always,
   // but CSS shows it ONLY in browser display-mode on phone widths — installed users never see it.
@@ -1835,7 +1867,7 @@ function hmRegistrationHTML(reg) {
       <span>Get the full-screen app: tap share → <b>Add to Home Screen</b></span>
     </div>`;
 
-  return `<div class="hm">${cluster}<div class="hm-sect">Details</div>${rows}${a2hs}</div>`;
+  return `<div class="hm">${cluster}${card}${a2hs}</div>`;
 }
 
 // ── State 2d: quiet (nothing on). Muted lead + past tournaments + champions link. History is loaded lazily
@@ -1867,12 +1899,19 @@ function hmQuietHTML() {
   return `<div class="hm">${lead}${pastSection}${champLink}</div>`;
 }
 
+// The setup row Home shows (an upcoming tournament shows even with registration CLOSED — Mike 2026-07-10;
+// prefer a registration-open row when several exist). Shared by publicHomeHTML and the Home rules sheet so
+// the sheet can never open a different tournament's rules than the card it was tapped on.
+function publicHomeRegTournament() {
+  const setups = (state.tournaments || []).filter((x) => x.status === 'setup');
+  return setups.find((x) => x.registration_open) || setups[0] || null;
+}
+
 function publicHomeHTML() {
   const t = publicLiveTournament();
   // An upcoming (setup) tournament shows on Home even when registration is CLOSED (Mike 2026-07-10) — widened
   // from `registration_open && setup`. Prefer a registration-open setup row when several exist.
-  const setups = (state.tournaments || []).filter((x) => x.status === 'setup');
-  const reg = setups.find((x) => x.registration_open) || setups[0] || null;
+  const reg = publicHomeRegTournament();
   const st = publicHomeState({
     liveTournament: t,
     regTournament: reg,

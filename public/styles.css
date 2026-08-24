@@ -3040,7 +3040,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 .hm-mini .hm-rec{ font-family: var(--font-display); font-weight: 700; }
 .hm-link{ display: flex; justify-content: space-between; align-items: center; padding: 12px 2px; font: 600 13.5px 'Inter', sans-serif; color: var(--brand-dark); }
 .hm-detail{ display: flex; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--border); font-size: 14px; align-items: center; }
-.hm-detail:last-of-type{ border-bottom: none; }
+.hm-detail:last-child{ border-bottom: none; } /* 2026-08-24: was :last-of-type, which never matched (.hm-a2hs is the last div) — the third row drew a stray hairline */
 .hm-detail svg{ width: 18px; height: 18px; stroke: var(--faint); fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .hm-detail .hm-d2{ color: var(--muted); margin-left: auto; font-size: 13px; }
 /* — kit extensions required to render the spec states as <button>s (reset the global button chrome);
@@ -4168,3 +4168,110 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 .mgv-tnote { margin-top: 15px; font-size: 12px; line-height: 1.5; color: var(--muted); }
 
 /* ============ end TOURNAMENT + MANAGE DESIGN ROUND ============ */
+
+/* ============================================================
+   HOME DESIGN ROUND - 2026-08-24 (Mike's Claude Design handoff, "Home")
+   Ported from the handoff's _rounds.css (blocks dated 2026-08-22). Appended so
+   order alone gives it the win - no !important escalation except the ONE
+   documented iOS zoom-guard counter on .hmv-copy.
+   PORT NOTES: (1) every `.hmv-copy:focus` rule was dropped - the handoff reused
+   .hmv-copy for the Rules button without a .hmv-cdone child, so :focus hid its
+   only label; the copy confirmation is driven by .is-done alone and focus gets a
+   ring. (2) prod's global button{min-height:38px} and button:active{translateY}
+   are reset here - the handoff never did, so its 30px actions rendered 38px.
+   ============================================================ */
+
+/* Round 2026-08-22 — "keep the style of this but separate it from the rest of the
+   page, maybe have it be its own card" + "it's too bland" (public Home · Details). */
+.hmv-dcard {
+  margin: 18px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: #fff;
+  overflow: hidden;
+}
+.hmv-dhead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 13px;
+  border-bottom: 1px solid var(--border);
+  background: oklch(0.975 0.003 75);
+  font: 700 11.5px var(--font-display);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.hmv-dhead::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.hmv-dcard .hm-detail {
+  gap: 11px;
+  align-items: flex-start;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--border);
+}
+.hmv-dcard .hm-detail:last-child { border-bottom: none; }
+.hmv-dico {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--accent-bd);
+  border-radius: 9px;
+  background: var(--accent-soft);
+}
+.hmv-dcard .hmv-dico svg { width: 16px; height: 16px; stroke: var(--accent); }
+.hmv-dtx { display: grid; gap: 2px; min-width: 0; padding-top: 1px; }
+.hmv-dtx b { font-size: 14px; font-weight: 600; color: var(--ink); }
+.hmv-dtx > span { font-size: 12.5px; line-height: 1.4; color: var(--muted); text-wrap: pretty; }
+.hmv-dcard + .hm-a2hs { margin-top: 14px; }
+
+/* Round 2026-08-22 — "there needs to be a way to click something to quickly copy
+   the address", then "it needs to say copy address" / "still have it be on the right". */
+.hmv-dcard .hm-detail:has(.hmv-copy) { align-items: center; }
+.hmv-copy {
+  flex: none;
+  margin-left: auto;
+  min-width: 118px;
+  min-height: 0;            /* PORT NOTE: prod button { min-height: 38px } reset */
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font: 600 12.5px 'Inter', sans-serif;
+  font-size: 12.5px !important; /* production's button{font-size:16px!important} iOS zoom guard */
+  line-height: 1.25;
+  color: var(--brand-dark);
+  cursor: pointer;
+  transition: color .15s ease, background-color .15s ease, box-shadow .15s ease, opacity .15s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .hmv-copy:hover { color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-bd); }
+}
+.hmv-copy:active { transform: none; opacity: .7; } /* PORT NOTE: prod button:active { translateY(1px) } reset */
+.hmv-copy:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--brand-ring); }
+.hmv-copy.hmv-rules { min-width: 76px; }
+.hmv-cidle, .hmv-cdone { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; width: 100%; }
+.hmv-cdone { display: none; }
+.hmv-copy svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.hmv-copy.is-done {
+  color: var(--live-ink);
+  background: var(--live-soft);
+  box-shadow: inset 0 0 0 1px oklch(0.86 0.05 150);
+}
+.hmv-copy.is-done .hmv-cidle { display: none; }
+.hmv-copy.is-done .hmv-cdone { display: inline-flex; }
+
+/* Round 2026-08-22 — "when it's 'open' have open be green, when 'closed' have
+   closed be red" (public Home · registration status divider). */
+.hm-status span b { font-weight: inherit; color: var(--live-ink); }
+.hm-status.is-closed span b { color: oklch(0.52 0.17 25); }
