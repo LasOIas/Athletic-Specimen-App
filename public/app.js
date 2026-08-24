@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.24.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.24.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3836,7 +3836,7 @@ function buildRegisterPageHTML() {
       <div class="rf-plhead"><span class="rf-sect">Players</span><span class="rf-plhint">first + last name · at least 1 guy + 1 girl</span></div>
       <div class="rf-pllist">${rows}</div>
 
-      <div class="rf-divlab"><span>Payment</span></div>
+      <div class="rf-divlab is-pay"><span>Payment</span></div>
       <div class="rf-payline">${amtHTML}<span class="rf-payd">Teams pay to register. Your spot is held once it's sent.</span></div>
       ${venmoBlock}
       <label class="rf-paid"><input type="checkbox" id="reg-paid" class="rf-paidbox" /><span class="rf-paidt">We sent the <b>${escapeHTML(money)}</b> on Venmo</span></label>

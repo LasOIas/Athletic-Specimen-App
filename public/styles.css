@@ -4349,3 +4349,14 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   transition: background-color .15s ease, transform .08s ease;
 }
 #hm-rules-modal .hmv-rdone:active { transform: scale(.99); }
+
+/* Round 2026-08-22 — "make this all the blue" (Register your team · PAYMENT divider),
+   shipped through the handoff's app-wide "remove the line below payment": the
+   hairlines are GONE (the round's _rounds.css recoloured them, but its later
+   _shared.css set content:none, and the screenshot shows no rule), the label
+   drops to a plain 11px heading, and the payment one goes accent. .rf-divlab has
+   exactly one emitter (the register form). */
+.rf-divlab { display: block; margin: 24px 2px 2px; }
+.rf-divlab::before, .rf-divlab::after { content: none; display: none; }
+.rf-divlab > span { font-size: 11px; letter-spacing: .12em; color: var(--muted); }
+.rf-page .rf-divlab.is-pay span { color: var(--accent); }
