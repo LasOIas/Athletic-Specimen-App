@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.07.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.24.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2031,6 +2031,10 @@ function tournamentColumnLoaded(key) {
 }
 function tournamentHasEventDate() { return tournamentColumnLoaded('event_date'); }
 function tournamentHasTeamCap() { return tournamentColumnLoaded('team_cap'); }
+// Migration 0058 (design round 2026-08-24, Home Details card): venue + venue_address. Both keys must be
+// present — they arrive in one migration, and a row carrying only one would mean a schema this code has
+// never seen. Same contract as 0057: not rendered, not sent, not shown until the loaded rows carry them.
+function tournamentHasVenue() { return tournamentColumnLoaded('venue') && tournamentColumnLoaded('venue_address'); }
 
 async function tdbCreateTournament({ name, pool_count, net_count, preset }) {
   if (!supabaseClient) throw new Error('No database connection.');
@@ -8396,7 +8400,7 @@ function mgRegTournament() { return mgActiveTournament(); }
 // (c) what the background poll must not clobber — so the three can never drift apart.
 const MGR_FIELD_IDS = ['mgr-venmo', 'mgr-buyin', 'mgr-teamsize'];
 const MGES_FIELD_IDS = ['mges-name', 'mges-teamsize', 'mges-nets', 'mges-pooltarget', 'mges-poolcap',
-  'mges-brackettarget', 'mges-bracketcap', 'mges-buyin'];
+  'mges-brackettarget', 'mges-bracketcap', 'mges-buyin', 'mges-venue', 'mges-venueaddr'];
 const MG_SAVE_FAILED = 'That did not save. Check you are signed in as an admin, then try again.';
 const MG_SAVE_OFFLINE = 'Could not save. Check the connection and try again.';
 const MG_SAVE_NEEDS_NUMBER = 'That needs to be a number. Left it unchanged.';
@@ -8418,6 +8422,8 @@ function mgFieldCurrentText(id, t) {
   if (id === 'mges-poolcap') return s(t.pool_cap);
   if (id === 'mges-brackettarget') return s(t.bracket_target != null ? t.bracket_target : t.match_cap);
   if (id === 'mges-bracketcap') return s(t.bracket_cap);
+  if (id === 'mges-venue') return s(t.venue);            // migration 0058
+  if (id === 'mges-venueaddr') return s(t.venue_address);
   return '';
 }
 
@@ -8467,6 +8473,8 @@ function mgFieldWrite(id, raw, t) {
     return w;
   }
   if (id === 'mges-bracketcap') return intWrite('bracket_cap', true);
+  if (id === 'mges-venue') return { fields: { venue: txt || null } };            // free text; blank clears (0058)
+  if (id === 'mges-venueaddr') return { fields: { venue_address: txt || null } };
   return null;
 }
 
@@ -8719,6 +8727,15 @@ function buildMgSettingsHTML() {
     + `<div class="mges-half">${swFld('win_by_2', 'Win by 2', winBy2)}${swFld('grand_final_reset', 'Grand final reset', !!t.grand_final_reset)}</div>`
     + `<div class="pk-fld"><label class="pk-fl" for="mges-buyin">Buy-in</label>`
       + `<input class="pk-fv" id="mges-buyin" type="text" autocomplete="off" placeholder="$80 a team" value="${escapeHTMLText(t.buy_in == null ? '' : String(t.buy_in))}" /></div>`
+    // COLUMN-GUARDED (migration 0058). The venue fields render only once the loaded rows carry both keys —
+    // an input that cannot save is worse than an absent one (the 0057 rule). Home's Details card reads the
+    // same two columns; until they exist it keeps its "Posted in GroupMe" row.
+    + (tournamentHasVenue()
+      ? `<div class="pk-fld"><label class="pk-fl" for="mges-venue">Venue</label>`
+        + `<input class="pk-fv" id="mges-venue" type="text" autocomplete="off" autocapitalize="words" placeholder="Woodmen Valley Park" value="${escapeHTMLText(t.venue == null ? '' : String(t.venue))}" /></div>`
+        + `<div class="pk-fld"><label class="pk-fl" for="mges-venueaddr">Address</label>`
+        + `<input class="pk-fv" id="mges-venueaddr" type="text" autocomplete="off" placeholder="1000 Woodmen Valley Rd, Colorado Springs, CO" value="${escapeHTMLText(t.venue_address == null ? '' : String(t.venue_address))}" /></div>`
+      : '')
     // 2026-08-04: one Save for the whole sheet — every dirty knob in ONE write. The two switches above are
     // deliberately NOT behind it (flipping one is already the instruction); they apply and prove on tap.
     + mgSaveBtnHTML('settings')

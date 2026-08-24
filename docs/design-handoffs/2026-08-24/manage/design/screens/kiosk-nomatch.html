@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#f6f5f1" />
+  <title>Athletic Specimen · Check In</title>
+  <link rel="icon" type="image/png" href="https://athletic-specimen.com/favicon-32.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../_kiosk.css">
+<link rel="stylesheet" href="../_shared.css">
+<link rel="stylesheet" href="../_motion-app.css">
+<script src="../_shared.js" defer></script>
+<script src="../_motion-app.js" defer></script>
+</head>
+<body>
+  <div id="session-banner" style="
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+  ">
+    <div style="font-size:11px; letter-spacing:1.5px; text-transform:uppercase; color:var(--text-dim); font-weight:600; margin-bottom:8px;">Next Session</div>
+    <div id="session-date-el"  style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); font-size:16px;"><span style="display:flex; flex-shrink:0; color:var(--accent);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4.5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 2.5v4M16 2.5v4"/></svg></span><span>Saturday, August 15, 2026</span></div>
+    <div id="session-time-el"  style="display:flex; align-items:center; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); font-size:16px;"><span style="display:flex; flex-shrink:0; color:var(--accent);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span><span>9:00 AM</span></div>
+    <div id="session-loc-el"   style="display:flex; align-items:center; gap:8px; padding:6px 0; font-size:16px;"><span style="display:flex; flex-shrink:0; color:var(--accent);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 21s7-5.5 7-11a7 7 0 10-14 0c0 5.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg></span><span>Woodmen Valley Park</span></div>
+  </div>
+  <div id="app">
+    <div id="main">
+      <div class="header">
+        <img class="cik-logo" src="https://athletic-specimen.com/logo-mark.png" alt="Athletic Specimen" />
+        <h1>Check in</h1>
+        <div class="subtitle">Tap your name below</div>
+      </div>
+      <input
+        id="nameInput"
+        type="text"
+        placeholder="Start typing your name…"
+        autocomplete="off"
+        autocapitalize="words"
+        spellcheck="false"
+        value="Taryn"
+      />
+      <ul id="suggestions"></ul>
+      <div id="checkinError" class="error" hidden></div>
+      <div id="noMatch" class="no-match">
+        <p>Don't see your name?</p>
+        <button id="newPlayerBtn" class="btn btn-secondary">I'm new, register me</button>
+      </div>
+      <div id="loadingState" class="loading" hidden>Loading roster…</div>
+      <div id="loadError" class="error" hidden>
+        Couldn't load the roster. Check your connection and refresh.
+      </div>
+    </div>
+    <div id="successScreen" class="success" hidden>
+      <div class="success-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      </div>
+      <h2>You're checked in</h2>
+      <div class="name" id="successName"></div>
+      <button id="anotherBtn" class="btn btn-secondary">Check in someone else</button>
+    </div>
+  </div>
+  <div id="confirmDialog" class="dialog-overlay" hidden>
+    <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="dialogName">
+      <div class="dialog-avatar" id="dialogAvatar"></div>
+      <div class="dialog-name" id="dialogName"></div>
+      <div class="dialog-q" id="dialogQ">Check this person in?</div>
+      <button class="btn btn-primary" id="dialogConfirm">Check in</button>
+      <button class="btn btn-secondary" id="dialogCancel">Cancel</button>
+    </div>
+  </div>
+  <div id="registerDialog" class="dialog-overlay" hidden>
+    <div class="dialog-card" role="dialog" aria-modal="true" aria-labelledby="registerTitle">
+      <div class="dialog-avatar" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+      </div>
+      <div class="dialog-name" id="registerTitle">Welcome! Let's add you</div>
+      <div class="dialog-q">Enter your first and last name</div>
+      <input id="firstName" type="text" placeholder="First name" autocapitalize="words" spellcheck="false" />
+      <input id="lastName" type="text" placeholder="Last name" autocapitalize="words" spellcheck="false" />
+      <div id="registerError" class="error" hidden></div>
+      <button class="btn btn-primary" id="submitRegister">Register &amp; check in</button>
+      <button class="btn btn-secondary" id="registerCancel">Cancel</button>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bracket - before pool play ends</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_as.css">
+<link rel="stylesheet" href="../_rounds.css">
+<link rel="stylesheet" href="../_shared.css">
+<link rel="stylesheet" href="../_motion-app.css">
+<script src="../_shared.js" defer></script>
+<script src="../_motion-app.js" defer></script>
+</head>
+<body class="pd-public-active">
+<div id="root">
+<div id="app-shell">
+  <img class="pd-watermark" src="https://athletic-specimen.com/logo-mark.png" alt="" aria-hidden="true" />
+  <header id="app-header" class="pd-header">
+    <span class="app-header-mode">PUBLIC</span>
+    <div class="pd-wordmark">
+      <div class="pd-wm-1">ATHLETIC SPECIMEN</div>
+      <div class="pd-wm-2">COLORADO</div>
+    </div>
+    <div class="pd-hgrp">
+      <button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">M</button>
+    </div>
+    <div id="js-sync-notice"><p class="small shared-sync-notice is-live">Updated 7:42 PM</p></div>
+  </header>
+  <div id="app-content">
+    <div id="tab-tournament" class="tab-panel active">
+      <div class="container">
+<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-tn-view="hub" aria-label="Back to Tournament"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+      <div class="ph-titles"><span class="pd-eyebrow">August 2026 Tournament</span><div class="pd-htitle">Bracket</div></div>
+    </div><div class="bk-pv">
+      <div class="bk-pv-h">Sample bracket</div>
+      <div class="bk-pv-s">Built from the <b>8 teams</b> registered so far. Double elimination, so there are two sides: win and you stay on the winners side, lose and you get a second life on the losers side. Seeds fill in when the last pool game is played &mdash; the shape stays the same.</div>
+    </div>
+    <div class="bt-sides">
+      <button type="button" data-role="tv2-bracket-side" data-side="winners" class="on">Winners</button><button type="button" data-role="tv2-bracket-side" data-side="losers" class="">Losers</button><button type="button" data-role="tv2-bracket-side" data-side="grand_final" class="">Championship</button>
+    </div>
+    <div class="bt-bar"><span class="bt-hint">Sample shape &middot; swipe sideways for the later rounds</span></div>
+    <div class="bk-pv-pane" data-pv-side="winners">
+      <div class="bk-pv-ss">Lose once and you drop to the losers side.</div>
+      <div class="bt-pan pd-bk-ro bk-pv-pan" data-role="bt-pan">
+      <div class="bt-canvas" data-role="bt-canvas">
+        <div class="bt-cols" data-role="bt-cols"><div class="bt-col">
+      <div class="bt-rlabel">G1&ndash;G4</div>
+      <div class="bt-node"><div class="bt-meta">G1</div><div class="bt-row"><span class="bt-name bt-tbd">Seed 1</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Seed 8</span></div></div><div class="bt-node"><div class="bt-meta">G2</div><div class="bt-row"><span class="bt-name bt-tbd">Seed 4</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Seed 5</span></div></div><div class="bt-node"><div class="bt-meta">G3</div><div class="bt-row"><span class="bt-name bt-tbd">Seed 3</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Seed 6</span></div></div><div class="bt-node"><div class="bt-meta">G4</div><div class="bt-row"><span class="bt-name bt-tbd">Seed 2</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Seed 7</span></div></div>
+    </div><div class="bt-col">
+      <div class="bt-rlabel">G7&ndash;G8</div>
+      <div class="bt-node"><div class="bt-meta">G7</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G1</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G2</span></div></div><div class="bt-node"><div class="bt-meta">G8</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G3</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G4</span></div></div>
+    </div><div class="bt-col">
+      <div class="bt-rlabel">Semifinals<span class="bk-gid">G11</span></div>
+      <div class="bt-node"><div class="bt-meta">G11</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G7</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G8</span></div></div>
+    </div></div>
+      </div>
+    </div>
+    </div>
+    <div class="bk-pv-pane" data-pv-side="losers" hidden>
+      <div class="bk-pv-ss">Everyone who lost once lands here. Lose again and you are out.</div>
+      <div class="bt-pan pd-bk-ro bk-pv-pan" data-role="bt-pan">
+      <div class="bt-canvas" data-role="bt-canvas">
+        <div class="bt-cols" data-role="bt-cols"><div class="bt-col">
+      <div class="bt-rlabel">G5&ndash;G6</div>
+      <div class="bt-node"><div class="bt-meta">G5</div><div class="bt-row"><span class="bt-name bt-tbd">Loser of G1</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Loser of G2</span></div></div><div class="bt-node"><div class="bt-meta">G6</div><div class="bt-row"><span class="bt-name bt-tbd">Loser of G3</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Loser of G4</span></div></div>
+    </div><div class="bt-col">
+      <div class="bt-rlabel">G9&ndash;G10</div>
+      <div class="bt-node"><div class="bt-meta">G9</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G5</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Loser of G7</span></div></div><div class="bt-node"><div class="bt-meta">G10</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G6</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Loser of G8</span></div></div>
+    </div><div class="bt-col">
+      <div class="bt-rlabel">G12</div>
+      <div class="bt-node"><div class="bt-meta">G12</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G9</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G10</span></div></div>
+    </div><div class="bt-col">
+      <div class="bt-rlabel">Semifinals<span class="bk-gid">G13</span></div>
+      <div class="bt-node"><div class="bt-meta">G13</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G12</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Loser of G11</span></div></div>
+    </div></div>
+      </div>
+    </div>
+    </div>
+    <div class="bk-pv-pane" data-pv-side="grand_final" hidden>
+      <div class="bk-pv-ss">The two sides meet for the championship. G15 only happens if the losers-side team wins G14.</div>
+      <div class="bt-pan pd-bk-ro bk-pv-pan" data-role="bt-pan">
+      <div class="bt-canvas" data-role="bt-canvas">
+        <div class="bt-cols" data-role="bt-cols"><div class="bt-col">
+      <div class="bt-rlabel">Championship<span class="bk-gid">G14</span></div>
+      <div class="bt-node"><div class="bt-meta">G14</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G11</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G13</span></div></div>
+    </div><div class="bt-col">
+      <div class="bt-rlabel">G15</div>
+      <div class="bt-node"><div class="bt-meta">G15 &middot; if necessary</div><div class="bt-row"><span class="bt-name bt-tbd">Winner of G14</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">Loser of G14</span></div></div>
+    </div></div>
+      </div>
+    </div>
+    </div>
+    <div class="pd-bk-prog">
+        <div class="pd-bk-prog-top"><span class="pd-bk-prog-l">Pool play</span><span class="pd-bk-prog-n">14 of 36 games done</span></div>
+        <div class="pd-bk-bar"><div class="pd-bk-bar-fill" style="width:39%;"></div></div>
+      </div>
+      </div>
+    </div>
+  </div>
+  <nav id="bottom-nav">
+    <button class="nav-btn" data-nav-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="nav-btn active" data-nav-tab="tournament" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>
+      <span>Tournament</span>
+    </button>
+  </nav>
+</div>
+</div>
+<script>
+document.addEventListener('click', function (e) {
+  var b = e.target.closest && e.target.closest('[data-role="tv2-bracket-side"]');
+  if (!b) return;
+  var side = b.getAttribute('data-side');
+  document.querySelectorAll('[data-role="tv2-bracket-side"]').forEach(function (x) { x.classList.toggle('on', x === b); });
+  document.querySelectorAll('[data-pv-side]').forEach(function (p) { p.hidden = p.getAttribute('data-pv-side') !== side; });
+});
+</script>
+</body>
+</html>

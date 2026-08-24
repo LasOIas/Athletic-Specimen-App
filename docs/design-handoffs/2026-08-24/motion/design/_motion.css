@@ -1,0 +1,637 @@
+/* ============================================================
+   ATHLETIC SPECIMEN — MOTION
+   Round 2026-08-23 — "the entire app needs animations … everything feels like
+   it's from the 2000s … create a new page with a ton of options"
+
+   The app has no motion language: state changes are instant swaps, so nothing
+   confirms an action, nothing shows where a screen came from, and nothing tells
+   you a number changed. This file is the proposal — a small set of durations and
+   curves, then every action in the app expressed in them.
+
+   The rules the whole set obeys:
+   1. Transform and opacity only. Never width/height/top/left — they cost layout
+      and stutter on a phone in the sun.
+   2. Micro moves travel 6-10px. Anything further reads as a screen change.
+   3. Nothing an organizer does mid-game takes longer than 200ms. Celebration is
+      the only place allowed past 400ms, and it happens once per tournament.
+   4. Every animation has an off switch: prefers-reduced-motion collapses the
+      whole system to a 1ms crossfade, and the page has a switch to preview that.
+   ============================================================ */
+
+:root {
+  /* the scale — five steps, each with a job */
+  --m-tap: 90ms;      /* the surface answers your finger */
+  --m-state: 140ms;   /* a value or a colour changes in place */
+  --m-elem: 200ms;    /* an element enters or leaves */
+  --m-surface: 300ms; /* a sheet, a screen, a menu */
+  --m-cheer: 460ms;   /* once a tournament */
+
+  /* the curves */
+  --e-settle: cubic-bezier(.2, .7, .3, 1);    /* default — arrives calm */
+  --e-arrive: cubic-bezier(.16, 1, .3, 1);    /* strong decel, for surfaces */
+  --e-leave: cubic-bezier(.4, 0, 1, 1);       /* accelerates away */
+  --e-press: cubic-bezier(.34, 1.4, .5, 1);   /* one overshoot, for commits */
+
+  --m-scale: 2; /* the lab's speed control multiplies everything through this */
+}
+
+/* ============================================================
+   THE PLATES
+   Round 2026-08-23 — "redo the look of all of them, new styling, better looking,
+   not this bland stuff". The first pass was a spec sheet: white cards, grey
+   stages, small grey captions — motion shown on the same value as the page it sat
+   on, which is exactly where motion is hardest to read.
+   The set is now a plate catalog. Each demo sits on a deep ink stage, so the app's
+   own light UI reads as a lit object and the movement has something to move
+   against; the timing data is machine type in the footer; every plate is numbered
+   the way a specimen sheet numbers its samples. A playhead across the top of the
+   card draws the duration in real time, so you see the number and feel it at once.
+   ============================================================ */
+
+.mo {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 44px 24px 110px;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: var(--ink);
+  counter-reset: plate;
+}
+.mo-eye {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.mo-h {
+  margin-top: 10px;
+  font-family: var(--font-display);
+  font-size: clamp(46px, 7vw, 78px);
+  font-weight: 800;
+  line-height: .92;
+  letter-spacing: -.035em;
+  text-transform: uppercase;
+}
+.mo-sub { margin-top: 16px; max-width: 60ch; font-size: 15px; line-height: 1.65; color: var(--muted); text-wrap: pretty; }
+.mo-sub b { font-weight: 600; color: var(--ink); }
+
+.mo-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 26px 0 30px;
+  padding: 12px 0 14px;
+  background: linear-gradient(#faf9f7 72%, rgba(250, 249, 247, 0));
+  flex-wrap: wrap;
+}
+.mo-blab {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mo-seg { display: flex; gap: 3px; padding: 3px; border-radius: 999px; background: oklch(0.92 0.005 75); }
+.mo-seg button { padding: 6px 14px; border: 0; border-radius: 999px; background: none; cursor: pointer; transition: background-color .14s var(--e-settle); }
+.mo-seg button > span { font-size: 12px; font-weight: 700; color: var(--muted); }
+.mo-seg button:hover { background: rgba(255, 255, 255, .6); }
+.mo-seg button.on { background: #fff; box-shadow: 0 1px 3px rgba(20, 20, 22, .14); }
+.mo-seg button.on > span { color: var(--ink); }
+.mo-playall {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  padding: 10px 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink);
+  cursor: pointer;
+  transition: transform .1s var(--e-press);
+}
+.mo-playall > span { font-size: 12.5px; font-weight: 700; letter-spacing: .02em; color: #fff; }
+.mo-playall:hover { background: var(--ink); }
+.mo-playall:active { transform: scale(.97); }
+
+/* ---------- the scale, as a dark band ---------- */
+.mo-scale {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+  gap: 1px;
+  /* no band behind the grid: an odd count would leave a filled empty cell */
+}
+.mo-sc {
+  padding: 20px 18px 18px;
+  background: #fff;
+  box-shadow: 0 0 0 1px oklch(0.90 0.005 75);
+  cursor: pointer;
+  transition: background-color .16s var(--e-settle);
+}
+.mo-sc:first-child { border-radius: 20px 0 0 20px; }
+.mo-sc:last-child { border-radius: 0 20px 20px 0; }
+.mo-sc:hover { background: oklch(0.98 0.003 75); }
+.mo-scn {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.mo-scv {
+  margin-top: 9px;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.02em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.mo-scj { margin-top: 8px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.mo-sct { position: relative; height: 2px; margin-top: 16px; background: oklch(0.92 0.004 75); overflow: hidden; }
+.mo-sct::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 30%;
+  background: var(--accent);
+  transform: translateX(-100%);
+}
+.mo-sc.run .mo-sct::after { animation: mo-sweep calc(var(--d) * var(--m-scale)) var(--e) forwards; }
+@keyframes mo-sweep { from { transform: translateX(-100%); } to { transform: translateX(334%); } }
+
+/* ---------- groups ---------- */
+.mo-g { margin-top: 54px; }
+.mo-gh { display: flex; align-items: baseline; gap: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--ink); }
+.mo-gn {
+  font-family: var(--font-display);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -.01em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.mo-gd { margin-left: auto; text-align: right; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+.mo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(276px, 1fr)); gap: 14px; margin-top: 18px; }
+
+/* ---------- the plate ---------- */
+.mo-c {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .06), 0 0 0 1px oklch(0.90 0.005 75);
+  overflow: hidden;
+  transition: transform .18s var(--e-settle), box-shadow .18s var(--e-settle);
+}
+.mo-c:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 14px 30px -14px rgba(20, 20, 22, .3), 0 0 0 1px oklch(0.86 0.006 75);
+}
+/* the playhead draws the demo's own duration across the top of the plate */
+.mo-c::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  z-index: 3;
+}
+.mo-c.playing::after { animation: mo-ph calc(var(--d, 300ms) * var(--m-scale)) linear; }
+@keyframes mo-ph { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+.mo-cs {
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* 146 - 28 = a 118px content box, which clears the tallest specimen (114px) */
+  height: 146px;
+  padding: 14px;
+  background: oklch(0.972 0.003 75);
+  overflow: hidden;
+}
+/* every plate is numbered, the way a specimen sheet numbers its samples */
+.mo-c .mo-cs::before {
+  counter-increment: plate;
+  content: counter(plate, decimal-leading-zero);
+  position: absolute;
+  top: 11px;
+  left: 13px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .1em;
+  color: oklch(0.78 0.006 75);
+}
+.mo-cf { display: flex; align-items: flex-start; gap: 10px; padding: 13px 15px 15px; flex: 1; }
+.mo-cb { min-width: 0; }
+.mo-cn { font-size: 14px; font-weight: 700; letter-spacing: -.005em; color: var(--ink); }
+.mo-cm {
+  margin-top: 5px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.5;
+  letter-spacing: .01em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.mo-rep {
+  margin-left: auto;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: oklch(0.95 0.004 75);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background-color .14s var(--e-settle), transform .1s var(--e-press);
+}
+.mo-rep:hover { background: var(--ink); color: #fff; }
+.mo-rep:active { transform: scale(.92); }
+.mo-rep svg { width: 15px; height: 15px; }
+
+.mo-note {
+  margin-top: 54px;
+  padding: 26px 28px 28px;
+  border-radius: 20px;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-bd, var(--border));
+}
+.mo-noteh {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.mo-notel { margin: 14px 0 0; padding-left: 20px; font-size: 14px; line-height: 1.85; color: var(--ink); }
+.mo-notel b { font-weight: 700; }
+
+/* ============================================================
+   SPECIMENS — the app's own parts, at demo size
+   ============================================================ */
+/* The parts themselves, restyled. The old set was flat: a plain filled button,
+   a bare tick, rows with a single hairline under them, a pill switch with a naked
+   knob. Every one now has a real surface — a considered radius, one soft shadow
+   that reads as elevation rather than a border, and a confirmation mark that sits
+   in its own disc instead of floating as a stray glyph. */
+
+/* buttons */
+.sp-btn {
+  display: inline-flex;
+  align-items: center;
+  height: 42px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 13px;
+  background: var(--accent);
+  box-shadow: 0 6px 14px -6px oklch(0.55 0.07 240 / .55), inset 0 1px 0 rgba(255, 255, 255, .16);
+}
+.sp-btn > span { font-size: 13.5px; font-weight: 700; letter-spacing: .01em; color: #fff; }
+
+/* rows — a surface, not a line */
+.sp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .05), 0 0 0 1px oklch(0.91 0.005 75);
+}
+.sp-nm { font-size: 13px; font-weight: 600; letter-spacing: -.005em; color: var(--ink); }
+.sp-sub { font-size: 11px; color: var(--muted); }
+.sp-r {
+  margin-left: auto;
+  padding: 3px 8px;
+  border-radius: 7px;
+  background: oklch(0.96 0.004 75);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* chips — a ring, so an action chip does not read as a filled state */
+.sp-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 27px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: .01em;
+  color: var(--accent);
+}
+
+/* the confirmation mark gets a disc of its own */
+.a2 .d > svg, .a3 .d > svg, .a6 .d > svg, .f3 .ok > svg, .f4 .clear > svg, .f1 .toast > svg {
+  width: 18px;
+  height: 18px;
+  padding: 3.5px;
+  border-radius: 999px;
+  background: oklch(0.93 0.06 152);
+  color: var(--live-ink);
+  box-sizing: border-box;
+}
+.f1 .toast > svg { background: oklch(0.62 0.16 152); color: #fff; }
+
+.sp-stack { display: grid; gap: 6px; width: 100%; }
+.sp-stack .sp-row { padding-top: 8px; padding-bottom: 8px; }
+
+/* the phone frames in the navigation plates */
+.sp-mini {
+  width: 128px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 20px -10px rgba(20, 20, 22, .35), 0 0 0 1px oklch(0.90 0.005 75);
+  overflow: hidden;
+}
+.sp-mtop { display: flex; align-items: center; height: 22px; padding: 0 9px; background: oklch(0.955 0.004 75); box-shadow: inset 0 -1px 0 oklch(0.92 0.004 75); }
+.sp-mtop::before { content: ''; width: 40px; height: 5px; border-radius: 3px; background: oklch(0.80 0.006 75); }
+.sp-mline { height: 7px; margin: 9px 10px; border-radius: 4px; background: oklch(0.93 0.004 75); }
+.sp-mline.s { width: 54%; }
+
+/* every specimen restarts by having .run removed and re-added */
+.mo-cs .an { animation-play-state: running; }
+/* an inline <svg> with no attributes lays out at 300x150 — every icon inside a
+   specimen is a 16px glyph unless it says otherwise */
+.mo-cs svg { width: 16px; height: 16px; flex: none; }
+/* the STAGE centres the specimen (place-items above). This rule must not set
+   display: at (0,2,0) it outranks every specimen's own layout and silently turns
+   grids and blocks into centred flex rows. */
+.mo-cs .sp { max-width: 100%; }
+
+/* ---------- A. tap & commit ---------- */
+.a1 .sp-btn { transition: transform var(--m-tap) var(--e-press), box-shadow var(--m-tap) var(--e-press); }
+.a1.run .sp-btn { animation: a1 calc(var(--m-tap) * 2.4 * var(--m-scale)) var(--e-press); }
+@keyframes a1 { 0% { transform: scale(1); } 34% { transform: scale(.955); } 100% { transform: scale(1); } }
+
+.a2 { position: relative; width: 100%; }
+.a2 .f, .a2 .d { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; }
+.a2 .d { position: absolute; inset: 0; opacity: 0; color: var(--live-ink); font-size: 13px; font-weight: 600; }
+.a2.run .f { animation: a2out calc(var(--m-elem) * var(--m-scale)) var(--e-leave) forwards; }
+.a2.run .d { animation: a2in calc(var(--m-elem) * var(--m-scale)) calc(var(--m-elem) * .55 * var(--m-scale)) var(--e-settle) forwards; }
+@keyframes a2out { to { opacity: 0; transform: translateY(-7px); } }
+@keyframes a2in { from { opacity: 0; transform: translateY(9px); } to { opacity: 1; transform: none; } }
+
+.a3 { position: relative; width: 100%; }
+.a3 .f, .a3 .d { display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; }
+.a3 .f { position: absolute; inset: 0; opacity: 0; transform: translateY(-7px); }
+.a3 .d { color: var(--live-ink); font-size: 13px; font-weight: 600; }
+.a3.run .d { animation: a2out calc(var(--m-state) * var(--m-scale)) var(--e-leave) forwards; }
+.a3.run .f { animation: a2in calc(var(--m-elem) * var(--m-scale)) calc(var(--m-state) * .6 * var(--m-scale)) var(--e-settle) forwards; }
+
+.a4 .tick { width: 30px; height: 30px; display: grid; place-items: center; border: 2px solid oklch(0.86 0.006 75); border-radius: 10px; background: #fff; }
+.a4 .tick svg { width: 15px; height: 15px; color: #fff; }
+.a4 .tick path { stroke-dasharray: 26; stroke-dashoffset: 26; }
+/* the box has to keep its size while the whole specimen is centred */
+.a4 { display: flex; }
+.a4.run .tick { animation: a4box calc(var(--m-state) * var(--m-scale)) var(--e-press) forwards; }
+.a4.run .tick path { animation: a4tick calc(var(--m-elem) * var(--m-scale)) calc(var(--m-state) * .5 * var(--m-scale)) var(--e-settle) forwards; }
+@keyframes a4box { to { background: var(--live-ink); border-color: var(--live-ink); transform: scale(1.06); box-shadow: 0 0 0 5px oklch(0.62 0.16 152 / .16); } }
+@keyframes a4tick { to { stroke-dashoffset: 0; } }
+
+.a5 .sw { width: 54px; height: 31px; padding: 3px; border-radius: 999px; background: var(--live-ink); box-shadow: inset 0 1px 3px rgba(20, 20, 22, .18); }
+.a5 .kn { width: 25px; height: 25px; border-radius: 999px; background: #fff; box-shadow: 0 2px 5px rgba(20, 20, 22, .3); transform: translateX(23px); }
+.a5.run .sw { animation: a5sw calc(var(--m-state) * var(--m-scale)) var(--e-settle) forwards; }
+.a5.run .kn { animation: a5kn calc(var(--m-state) * var(--m-scale)) var(--e-press) forwards; }
+@keyframes a5sw { to { background: oklch(0.86 0.01 75); } }
+@keyframes a5kn { 50% { transform: translateX(9px) scaleX(1.18); } to { transform: translateX(0) scaleX(1); } }
+
+.a6 { position: relative; width: 100%; }
+.a6 .f { display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.a6 .d { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 6px; opacity: 0; font-size: 13px; font-weight: 700; color: var(--live-ink); white-space: nowrap; }
+.a6.run .f { animation: a6out calc(var(--m-state) * var(--m-scale)) var(--e-leave) forwards; }
+.a6.run .d { animation: a6in calc(var(--m-state) * var(--m-scale)) calc(var(--m-state) * .5 * var(--m-scale)) var(--e-settle) forwards; }
+@keyframes a6out { to { opacity: 0; transform: scale(.94); } }
+@keyframes a6in { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+
+/* ---------- B. scoring ---------- */
+.b1 { display: flex; align-items: center; gap: 14px; }
+.b1 .num { font-family: var(--font-display); font-size: 30px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+.b1.run .num { animation: b1 calc(var(--m-state) * var(--m-scale)) var(--e-press); }
+@keyframes b1 { 0% { transform: translateY(0); } 40% { transform: translateY(-6px); } 100% { transform: translateY(0); } }
+.b1 .stp { width: 38px; height: 38px; display: grid; place-items: center; border: 0; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(20,20,22,.06), 0 0 0 1px oklch(0.90 0.005 75); font-size: 18px; font-weight: 700; color: var(--ink); }
+.b1.run .stp.p { animation: a1 calc(var(--m-tap) * 2 * var(--m-scale)) var(--e-press); }
+
+.b2 .sp-row { position: relative; overflow: hidden; }
+.b2.run .sp-row { animation: b2 calc(var(--m-elem) * 1.6 * var(--m-scale)) var(--e-settle); }
+@keyframes b2 { 0% { background: #fff; } 30% { background: oklch(0.96 0.04 150); } 100% { background: #fff; } }
+.b2 .sp-r { opacity: 0; }
+.b2.run .sp-r { animation: a2in calc(var(--m-elem) * var(--m-scale)) calc(var(--m-state) * var(--m-scale)) var(--e-settle) forwards; }
+
+.b3 .w { color: var(--ink); font-size: 13px; font-weight: 600; }
+.b3.run .w { animation: b3 calc(var(--m-elem) * var(--m-scale)) var(--e-settle) forwards; }
+@keyframes b3 { to { color: var(--live-ink); font-weight: 700; } }
+
+.b4 .live { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 27px; padding: 0 13px; border-radius: 999px; background: oklch(0.95 0.05 152); box-shadow: inset 0 0 0 1px oklch(0.86 0.08 152); font-size: 11px; font-weight: 800; letter-spacing: .1em; color: var(--live-ink); }
+.b4 .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--live-ink); }
+.b4.run .dot { animation: b4 1600ms calc(var(--m-scale) * 1) ease-in-out infinite; }
+@keyframes b4 { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.82); } }
+
+/* ---------- C. navigation ---------- */
+.c1, .c2 { position: relative; width: 128px; height: 78px; }
+.c1 .sp-mini, .c2 .sp-mini { position: absolute; inset: 0; width: 100%; }
+.c1 .b { background: oklch(0.97 0.003 75); }
+.c1.run .t { animation: c1in calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) forwards; }
+.c1.run .b { animation: c1out calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) forwards; }
+@keyframes c1in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes c1out { from { transform: translateX(0); filter: brightness(1); } to { transform: translateX(-22%); filter: brightness(.94); } }
+.c2 .t { transform: translateX(0); }
+.c2 .b { transform: translateX(-22%); background: oklch(0.97 0.003 75); }
+.c2.run .t { animation: c2out calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) forwards; }
+.c2.run .b { animation: c2in calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) forwards; }
+@keyframes c2out { to { transform: translateX(100%); } }
+@keyframes c2in { to { transform: translateX(0); } }
+
+.c3 { width: 100%; }
+.c3 .tabs { position: relative; display: flex; width: 100%; border-bottom: 1px solid var(--border); }
+.c3 .tb { flex: 1; padding: 9px 0 11px; text-align: center; font-size: 12.5px; font-weight: 700; letter-spacing: -.005em; color: var(--muted); }
+.c3 .tb.on { color: var(--accent); }
+.c3 .ink { position: absolute; left: 0; bottom: -1px; width: 33.33%; height: 2.5px; border-radius: 2px; background: var(--accent); }
+.c3.run .ink { animation: c3 calc(var(--m-elem) * var(--m-scale)) var(--e-settle) forwards; }
+@keyframes c3 { to { transform: translateX(100%); } }
+.c3.run .t1 { animation: c3off calc(var(--m-state) * var(--m-scale)) forwards; }
+.c3.run .t2 { animation: c3on calc(var(--m-state) * var(--m-scale)) forwards; }
+@keyframes c3off { to { color: var(--muted); } }
+@keyframes c3on { to { color: var(--accent); } }
+
+.c4 { position: relative; width: 100%; display: grid; justify-items: center; }
+/* the menu rests open, like the toast — a card whose resting state is invisible
+   shows the reader nothing until they press replay */
+.c4 .men { width: 176px; margin-top: 8px; padding: 7px; border: 0; border-radius: 14px; background: #fff; box-shadow: 0 14px 30px -12px rgba(20,20,22,.3), 0 0 0 1px oklch(0.90 0.005 75); transform-origin: 50% 0; }
+.c4 .mi { padding: 8px 10px; border-radius: 9px; font-size: 12px; color: var(--ink); }
+.c4 .mi.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.c4.run .men { animation: c4 calc(var(--m-surface) * var(--m-scale)) var(--e-arrive); }
+@keyframes c4 { from { opacity: 0; transform: scaleY(.86) translateY(-6px); } to { opacity: 1; transform: none; } }
+.c4.run .mi { animation: c4i calc(var(--m-elem) * var(--m-scale)) var(--e-settle) backwards; }
+.c4.run .mi:nth-child(2) { animation-delay: calc(40ms * var(--m-scale)); }
+.c4.run .mi:nth-child(3) { animation-delay: calc(80ms * var(--m-scale)); }
+@keyframes c4i { from { opacity: 0; transform: translateY(-4px); } }
+
+.c5 { position: relative; width: 148px; height: 92px; border-radius: 12px; overflow: hidden; background: #fff; border: 1px solid var(--border); }
+/* a scrim over nothing is a grey box — the screen underneath has to be there */
+.c5 .bg { width: 100%; padding: 9px 10px; display: grid; gap: 6px; align-content: start; }
+.c5 .bg span { height: 6px; border-radius: 3px; background: oklch(0.93 0.004 75); }
+.c5 .bg span:nth-child(2) { width: 62%; }
+.c5 .bg span:nth-child(3) { width: 78%; }
+.c5 .scrim { position: absolute; inset: 0; background: rgba(20,20,22,.34); opacity: 0; }
+.c5 .sheet { position: absolute; left: 0; right: 0; bottom: 0; height: 58%; border-radius: 16px 16px 0 0; background: #fff; box-shadow: 0 -6px 18px -8px rgba(20,20,22,.4); transform: translateY(100%); }
+.c5 .grab { width: 36px; height: 4px; margin: 9px auto; border-radius: 4px; background: oklch(0.88 0.005 75); }
+.c5.run .scrim { animation: c5s calc(var(--m-surface) * var(--m-scale)) var(--e-settle) forwards; }
+.c5.run .sheet { animation: c5h calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) forwards; }
+@keyframes c5s { to { opacity: 1; } }
+@keyframes c5h { to { transform: translateY(0); } }
+
+/* ---------- D. lists ---------- */
+/* rows rest visible; `backwards` holds them at the keyframe's from-state during
+   the stagger delay while the animation plays */
+.d1.run .sp-row { animation: d1 calc(var(--m-elem) * var(--m-scale)) var(--e-settle) both; }
+.d1.run .sp-row:nth-child(2) { animation-delay: calc(45ms * var(--m-scale)); }
+.d1.run .sp-row:nth-child(3) { animation-delay: calc(90ms * var(--m-scale)); }
+@keyframes d1 { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+.d2 .sp-row.go { transform-origin: 50% 0; }
+.d2.run .sp-row.go { animation: d2 calc(var(--m-elem) * 1.3 * var(--m-scale)) var(--e-leave) forwards; }
+/* the gap closes with a transform on the row below, not a margin — animating
+   layout is the one thing this system does not do */
+.d2.run .sp-row:not(.go) { animation: d2shift calc(var(--m-elem) * var(--m-scale)) calc(var(--m-elem) * .5 * var(--m-scale)) var(--e-settle) forwards; }
+@keyframes d2 { 40% { opacity: 0; transform: translateX(26px); } 100% { opacity: 0; transform: translateX(26px) scaleY(.6); } }
+@keyframes d2shift { to { transform: translateY(-40px); } }
+
+/* one row's height plus the stack gap - the two rows trade places exactly */
+.d3.run .r1 { animation: d3a calc(var(--m-elem) * 1.4 * var(--m-scale)) var(--e-settle) forwards; }
+.d3.run .r2 { animation: d3b calc(var(--m-elem) * 1.4 * var(--m-scale)) var(--e-settle) forwards; }
+@keyframes d3a { to { transform: translateY(40px); } }
+@keyframes d3b { to { transform: translateY(-40px); } }
+
+.d4 { position: relative; width: 100%; }
+.d4.run .sp-row { animation: d4 calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) both; }
+.d4.run .sp-row:nth-child(2) { animation-delay: calc(70ms * var(--m-scale)); }
+.d4.run .sp-row:nth-child(3) { animation-delay: calc(140ms * var(--m-scale)); }
+@keyframes d4 { from { opacity: 0; transform: translate(-16px, -20px) rotate(-4deg); } to { opacity: 1; transform: none; } }
+
+.d5 { position: relative; display: flex; align-items: center; gap: 10px; width: 100%; }
+.d5 .node { flex: 1; padding: 9px 10px; border: 0; border-radius: 11px; background: #fff; box-shadow: 0 1px 2px rgba(20,20,22,.05), 0 0 0 1px oklch(0.91 0.005 75); font-size: 11.5px; font-weight: 600; }
+.d5 .node.next { background: none; box-shadow: 0 0 0 1.5px oklch(0.88 0.005 75) inset; color: var(--muted); }
+.d5 .fly { position: absolute; left: 16px; padding: 7px 9px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 11.5px; font-weight: 700; opacity: 0; }
+.d5.run .fly { animation: d5 calc(var(--m-surface) * 1.2 * var(--m-scale)) var(--e-arrive) forwards; }
+@keyframes d5 { 0% { opacity: 0; transform: none; } 18% { opacity: 1; } 100% { opacity: 0; transform: translateX(132px); } }
+.d5.run .node.next { animation: d5n calc(var(--m-state) * var(--m-scale)) calc(var(--m-surface) * .9 * var(--m-scale)) var(--e-press) forwards; }
+@keyframes d5n { to { border-style: solid; color: var(--ink); background: var(--accent-soft); } }
+
+/* ---------- E. state ---------- */
+.e1 { width: 100%; display: flex; gap: 3px; align-items: center; min-height: 24px; }
+.e1 .st { flex: 1; height: 3px; border-radius: 2px; background: oklch(0.93 0.004 75); transform-origin: 0 50%; }
+.e1 .st.done { background: var(--accent-bd, var(--accent)); }
+.e1.run .st.now { animation: e1 calc(var(--m-surface) * var(--m-scale)) var(--e-settle) forwards; }
+@keyframes e1 { from { transform: scaleX(0); background: var(--accent); } to { transform: scaleX(1); background: var(--accent); } }
+
+.e2 .bdg { display: grid; place-items: center; min-width: 26px; height: 26px; padding: 0 8px; border-radius: 999px; background: var(--accent); box-shadow: 0 4px 10px -4px oklch(0.55 0.07 240 / .6); color: #fff; font-size: 13px; font-weight: 700; }
+.e2.run .bdg { animation: e2 calc(var(--m-state) * 1.6 * var(--m-scale)) var(--e-press); }
+@keyframes e2 { 0% { transform: scale(1); } 35% { transform: scale(1.32); } 100% { transform: scale(1); } }
+
+.e3 .net { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 11px; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(20,20,22,.05), 0 0 0 1px oklch(0.91 0.005 75); }
+.e3 .nn { width: 27px; height: 27px; display: grid; place-items: center; border: 1.5px dashed oklch(0.86 0.006 75); border-radius: 9px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.e3 .lbl { font-size: 12px; color: var(--muted); }
+.e3.run .nn { animation: e3n calc(var(--m-state) * var(--m-scale)) var(--e-press) forwards; }
+.e3.run .lbl { animation: e3l calc(var(--m-elem) * var(--m-scale)) var(--e-settle) forwards; }
+@keyframes e3n { to { border-style: solid; border-color: var(--ink); background: var(--ink); color: #fff; } }
+@keyframes e3l { from { opacity: .4; transform: translateY(3px); } to { opacity: 1; transform: none; color: var(--ink); } }
+
+.e4 { position: relative; width: 100%; display: grid; gap: 7px; }
+.e4 .sk { height: 13px; border-radius: 5px; background: linear-gradient(100deg, oklch(0.94 0.004 75) 20%, oklch(0.97 0.003 75) 42%, oklch(0.94 0.004 75) 64%); background-size: 260% 100%; }
+.e4 .sk.s { width: 58%; }
+/* the skeleton has to resolve into something \u2014 an empty stage is not a handoff */
+.e4 .real { position: absolute; inset: 0; display: grid; align-content: center; gap: 3px; opacity: 0; }
+.e4.run .real { animation: a2in calc(var(--m-elem) * var(--m-scale)) calc(950ms * var(--m-scale)) var(--e-settle) forwards; }
+.e4.run .sk { animation: e4sh 1100ms linear infinite, e4out calc(var(--m-elem) * var(--m-scale)) calc(900ms * var(--m-scale)) var(--e-leave) forwards; }
+@keyframes e4sh { to { background-position: -260% 0; } }
+@keyframes e4out { to { opacity: 0; } }
+
+/* ---------- F. attention ---------- */
+/* the toast rests visible: a card whose resting state is an empty stage shows
+   nothing to the reader who has not pressed replay */
+.f1 .toast { display: flex; align-items: center; gap: 10px; padding: 11px 16px 11px 12px; border-radius: 999px; background: var(--ink); box-shadow: 0 10px 24px -10px rgba(20,20,22,.6); color: #fff; font-size: 12.5px; font-weight: 600; }
+.f1.run .toast { animation: f1 calc(var(--m-cheer) * 5 * var(--m-scale)) var(--e-arrive); }
+@keyframes f1 {
+  0% { opacity: 0; transform: translateY(14px) scale(.96); }
+  9% { opacity: 1; transform: none; }
+  86% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(8px); }
+}
+
+.f2.run .fld { animation: f2 calc(var(--m-elem) * 1.9 * var(--m-scale)) cubic-bezier(.36,.07,.19,.97); }
+.f2 .fld { display: flex; align-items: center; width: 178px; height: 44px; padding: 0 14px; border: 0; border-radius: 13px; background: #fff; box-shadow: 0 0 0 1.5px oklch(0.52 0.17 25), 0 0 0 5px oklch(0.52 0.17 25 / .12); font-size: 13px; font-weight: 500; color: oklch(0.52 0.17 25); }
+@keyframes f2 { 10%, 90% { transform: translateX(-2px); } 20%, 80% { transform: translateX(4px); } 30%, 50%, 70% { transform: translateX(-7px); } 40%, 60% { transform: translateX(7px); } }
+
+.f3 { position: relative; display: flex; align-items: center; gap: 10px; }
+.f3 .sp-chip { opacity: 1; }
+.f3.run .sp-chip { animation: f3 calc(var(--m-surface) * var(--m-scale)) var(--e-leave) forwards; }
+/* the name goes with the chip, or the confirmation lands on top of it */
+.f3.run .sp-nm { animation: a6out calc(var(--m-state) * var(--m-scale)) var(--e-leave) forwards; }
+@keyframes f3 { to { opacity: 0; transform: translate(46px, -26px) scale(.82) rotate(9deg); } }
+.f3 .ok { position: absolute; left: 0; right: 0; text-align: center; opacity: 0; font-size: 12.5px; font-weight: 700; color: var(--live-ink); }
+.f3.run .ok { animation: a2in calc(var(--m-elem) * var(--m-scale)) calc(var(--m-surface) * .8 * var(--m-scale)) var(--e-settle) forwards; }
+
+.f4 { position: relative; width: 100%; display: grid; gap: 6px; }
+.f4 .clear { position: absolute; left: 0; right: 0; text-align: center; opacity: 0; font-size: 13px; font-weight: 700; color: var(--live-ink); }
+.f4.run .sp-row { animation: d2 calc(var(--m-elem) * 1.3 * var(--m-scale)) var(--e-leave) forwards; }
+.f4.run .sp-row:nth-child(2) { animation-delay: calc(60ms * var(--m-scale)); }
+.f4.run .clear { animation: a2in calc(var(--m-elem) * var(--m-scale)) calc(var(--m-surface) * var(--m-scale)) var(--e-settle) forwards; }
+
+/* ---------- G. celebration ---------- */
+.g1 .crown { display: grid; place-items: center; gap: 7px; }
+.g1 .cup { width: 52px; height: 52px; display: grid; place-items: center; border-radius: 999px; background: var(--accent-soft); box-shadow: 0 0 0 6px oklch(0.55 0.07 240 / .07); color: var(--accent); }
+.g1 .cup svg { width: 26px; height: 26px; }
+.g1 .nm { font-family: var(--font-display); font-size: 15px; font-weight: 800; color: var(--ink); }
+.g1.run .cup { animation: g1c calc(var(--m-cheer) * var(--m-scale)) var(--e-press) both; }
+.g1.run .nm { animation: g1n calc(var(--m-elem) * var(--m-scale)) calc(var(--m-cheer) * .45 * var(--m-scale)) var(--e-settle) both; }
+@keyframes g1c { from { opacity: 0; transform: scale(.6) rotate(-12deg); } to { opacity: 1; transform: none; } }
+@keyframes g1n { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: none; } }
+
+.g2 { position: relative; display: grid; place-items: center; width: 100%; height: 100%; }
+.g2 .pc { position: absolute; top: 46%; width: 7px; height: 11px; border-radius: 2px; opacity: 0; }
+.g2 .p1 { background: var(--accent); }
+.g2 .p2 { background: var(--live-ink); }
+.g2 .p3 { background: oklch(0.72 0.14 70); }
+.g2 .p4 { background: var(--accent-bd, var(--accent)); }
+.g2 .p5 { background: var(--ink); }
+.g2.run .pc { animation: g2 calc(var(--m-cheer) * 2.2 * var(--m-scale)) var(--e-leave) forwards; }
+.g2.run .p1 { --dx: -66px; --dy: -40px; --rz: -140deg; }
+.g2.run .p2 { --dx: -28px; --dy: -58px; --rz: 90deg; animation-delay: calc(40ms * var(--m-scale)); }
+.g2.run .p3 { --dx: 12px; --dy: -62px; --rz: 200deg; animation-delay: calc(20ms * var(--m-scale)); }
+.g2.run .p4 { --dx: 48px; --dy: -46px; --rz: -80deg; animation-delay: calc(60ms * var(--m-scale)); }
+.g2.run .p5 { --dx: 74px; --dy: -30px; --rz: 160deg; animation-delay: calc(10ms * var(--m-scale)); }
+@keyframes g2 {
+  0% { opacity: 0; transform: none; }
+  14% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rz)); }
+}
+.g2 .word { font-family: var(--font-display); font-size: 15px; font-weight: 800; color: var(--ink); }
+.g2.run .word { animation: e2 calc(var(--m-elem) * 1.6 * var(--m-scale)) var(--e-press); }
+
+/* ---------- the off switch ---------- */
+body.no-motion .mo-cs *, body.no-motion .mo-sc * { animation-duration: 1ms !important; animation-delay: 0ms !important; transition-duration: 1ms !important; }
+@media (prefers-reduced-motion: reduce) {
+  .mo-cs *, .mo-sc * { animation-duration: 1ms !important; animation-delay: 0ms !important; transition-duration: 1ms !important; }
+}

@@ -1,0 +1,234 @@
+/* ============================================================
+   ATHLETIC SPECIMEN — MOTION, APPLIED
+   Round 2026-08-24 — "now incorporate everything from the motion page
+   to the rest of the app"
+
+   motion.html is the specimen book. This file is that system wired into
+   the shipped screens: same five durations, same four curves, same rules
+   (transform + opacity only, micro-moves 6-10px, nothing past 200ms
+   except the one celebration a tournament earns).
+
+   It is deliberately structural rather than per-screen — it hangs off the
+   patterns every screen already has (the container, rows, buttons,
+   surfaces, checkmarks) so a new screen inherits the motion for free.
+   Loaded last, after _as.css and _rounds.css.
+   ============================================================ */
+
+:root {
+  --m-tap: 90ms;
+  --m-state: 140ms;
+  --m-elem: 200ms;
+  --m-surface: 300ms;
+  --m-cheer: 460ms;
+
+  --e-settle: cubic-bezier(.2, .7, .3, 1);
+  --e-arrive: cubic-bezier(.16, 1, .3, 1);
+  --e-leave: cubic-bezier(.4, 0, 1, 1);
+  --e-press: cubic-bezier(.34, 1.4, .5, 1);
+
+  --m-scale: 1;
+}
+
+/* Fill mode is BACKWARDS, never BOTH: a finished animation must leave no
+   transform behind. A lingering transform makes every animated element a
+   stacking context, which traps absolutely-positioned panels (the tournament
+   picker) underneath their own later siblings. Backwards holds the from-state
+   during the stagger delay and lets go at the end, which is all we need.
+   ============================================================ */
+
+/* stagger index. Every element carries its own position so any list can
+   cascade without the markup knowing about motion. Capped at 9 so a long
+   roster does not take two seconds to land. */
+:nth-child(1)  { --m-i: 0; }
+:nth-child(2)  { --m-i: 1; }
+:nth-child(3)  { --m-i: 2; }
+:nth-child(4)  { --m-i: 3; }
+:nth-child(5)  { --m-i: 4; }
+:nth-child(6)  { --m-i: 5; }
+:nth-child(7)  { --m-i: 6; }
+:nth-child(8)  { --m-i: 7; }
+:nth-child(n+9) { --m-i: 8; }
+
+/* ---------- 1. the screen arrives ---------- */
+/* A screen used to appear with no origin. Now the header settles from above
+   and the content lands from below, once, in one 300ms move. */
+#app-header,
+.pd-header {
+  animation: m-drop calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) backwards;
+}
+#app-content > .tab-panel.active,
+#app-content > .tab-panel:not([hidden]),
+#root > .container,
+#root > main,
+.ki-screen,
+.k-screen {
+  animation: m-screen calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) backwards;
+}
+
+/* ---------- 2. lists and stacks land in sequence ---------- */
+:is(
+  #app-content .container,
+  #app-content .container > div:only-child,
+  #app-content .tab-panel > div:only-child,
+  .bt-col,
+  [class$="-list"],
+  [class*="-rows"],
+  [class*="-stack"]
+) > * {
+  animation: m-rise calc(var(--m-elem) * var(--m-scale)) var(--e-settle) backwards;
+  animation-delay: calc(var(--m-i, 0) * 42ms * var(--m-scale));
+}
+/* sticky bars and absolutely-placed furniture stay put — motion here would
+   read as a layout bug, not an entrance */
+:is(#app-content .container, #app-content .container > div:only-child) > :is(
+  [class*="watermark"], [class*="sticky"], [class*="-bar"][class*="fix"]
+) { animation: m-fade calc(var(--m-elem) * var(--m-scale)) var(--e-settle) backwards; }
+
+/* ---------- 3. the surface answers your finger ---------- */
+button,
+[role="button"],
+a[class],
+[class*="-row"],
+[class*="-act"],
+[class*="-cta"],
+[class*="-btn"],
+[class*="-chip"],
+[class*="-tab"],
+[class*="-step"],
+[class*="-node"] {
+  transition:
+    transform calc(var(--m-tap) * var(--m-scale)) var(--e-press),
+    box-shadow calc(var(--m-state) * var(--m-scale)) var(--e-settle),
+    background-color calc(var(--m-state) * var(--m-scale)) var(--e-settle),
+    border-color calc(var(--m-state) * var(--m-scale)) var(--e-settle),
+    color calc(var(--m-state) * var(--m-scale)) var(--e-settle),
+    opacity calc(var(--m-state) * var(--m-scale)) var(--e-settle);
+}
+button:active,
+[role="button"]:active {
+  transform: scale(.972);
+}
+/* a row is a big target: it dips, it does not shrink */
+a[class*="-row"]:active,
+[class*="-row"]:active:not(:has(button:active)),
+[class*="-node"]:active {
+  transform: scale(.994);
+}
+input,
+select,
+textarea {
+  transition:
+    box-shadow calc(var(--m-state) * var(--m-scale)) var(--e-settle),
+    border-color calc(var(--m-state) * var(--m-scale)) var(--e-settle),
+    background-color calc(var(--m-state) * var(--m-scale)) var(--e-settle);
+}
+:focus-visible { transition: box-shadow calc(var(--m-state) * var(--m-scale)) var(--e-settle); }
+
+/* the commit: the checkmark that replaces a face after one tap */
+.mgh-done:not([hidden]),
+[class*="-done"]:not([class*="is-done"]):not([hidden]),
+[class*="-tick"]:not([hidden]),
+[class*="-check"]:not([hidden]) {
+  animation: m-tick calc(var(--m-state) * 1.6 * var(--m-scale)) var(--e-press) backwards;
+}
+/* the registration confirmation opens and closes the space it takes, so it is
+   driven by a height transition, not a pop — no animation on top of that */
+.mgh-done.is-under { animation: none; }
+
+/* ---------- 4. surfaces: sheets, modals, menus, pickers ---------- */
+[class*="scrim"],
+[class*="backdrop"],
+[class*="-veil"] {
+  animation: m-fade calc(var(--m-surface) * var(--m-scale)) var(--e-settle) backwards;
+}
+[class*="-sheet"],
+[class*="-modal"],
+[class*="-dialog"],
+[class*="-pick"],
+[class*="-menu"],
+[class*="-pop"],
+[class*="dropdown"] {
+  animation: m-surface-in calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) backwards;
+}
+/* a menu grows out of the control that opened it */
+.mgh-pick,
+[class*="-menu"],
+[class*="dropdown"] {
+  transform-origin: top center;
+  animation-name: m-menu;
+}
+/* rows inside a just-opened surface arrive after it, not with it */
+:is(.mgh-pick, [class*="-menu"], [class*="-sheet"], [class*="-modal"]) > * {
+  animation: m-rise calc(var(--m-elem) * var(--m-scale)) var(--e-settle) backwards;
+  animation-delay: calc(var(--m-surface) * .45 * var(--m-scale) + var(--m-i, 0) * 34ms * var(--m-scale));
+}
+
+/* ---------- 5. state: a value changed and you should see it ---------- */
+.m-bump { animation: m-bump calc(var(--m-state) * 1.7 * var(--m-scale)) var(--e-press); }
+.m-pop  { animation: m-pop calc(var(--m-state) * 1.7 * var(--m-scale)) var(--e-press); }
+.m-in   { animation: m-rise calc(var(--m-elem) * var(--m-scale)) var(--e-settle) backwards; }
+.m-flash { animation: m-flash calc(var(--m-elem) * 2.2 * var(--m-scale)) var(--e-settle); }
+
+/* the live pulse — the only thing in the app allowed to loop, because the
+   fact it reports (this is happening now) is itself continuous */
+[class*="live"] [class*="dot"],
+[class*="-dot"].is-live,
+[class*="pulse"] {
+  animation: m-pulse 1600ms ease-in-out infinite;
+}
+
+/* ---------- 6. attention ---------- */
+[class*="toast"],
+[class*="-undo"]:not(button):not([hidden]) {
+  animation: m-toast calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) backwards;
+}
+[aria-invalid="true"],
+[class*="-err"]:not([hidden]) {
+  animation: m-shake calc(var(--m-elem) * 1.9 * var(--m-scale)) cubic-bezier(.36, .07, .19, .97);
+}
+
+/* ---------- 7. the one celebration a tournament earns ---------- */
+.pd-bk-champbar {
+  animation: m-cheer calc(var(--m-cheer) * var(--m-scale)) var(--e-press) backwards;
+}
+.pd-bk-champbar .pd-bk-cbic {
+  animation: m-trophy calc(var(--m-cheer) * 1.3 * var(--m-scale)) var(--e-press) backwards;
+  animation-delay: calc(var(--m-cheer) * .3 * var(--m-scale));
+}
+.pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
+  animation: m-rise calc(var(--m-elem) * var(--m-scale)) var(--e-settle) backwards;
+  animation-delay: calc(var(--m-cheer) * .45 * var(--m-scale));
+}
+
+@keyframes m-screen { from { opacity: 0; transform: translateY(10px); } }
+@keyframes m-drop   { from { opacity: 0; transform: translateY(-6px); } }
+@keyframes m-rise   { from { opacity: 0; transform: translateY(9px); } }
+@keyframes m-fade   { from { opacity: 0; } }
+@keyframes m-surface-in { from { opacity: 0; transform: translateY(10px) scale(.985); } }
+@keyframes m-menu   { from { opacity: 0; transform: scaleY(.88) translateY(-6px); } }
+@keyframes m-tick   { from { opacity: 0; transform: scale(.72); } }
+@keyframes m-bump   { 0% { transform: translateY(0); } 40% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
+@keyframes m-pop    { 0% { transform: scale(1); } 35% { transform: scale(1.28); } 100% { transform: scale(1); } }
+@keyframes m-pulse  { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.82); } }
+@keyframes m-flash  { 0% { background-color: oklch(0.96 0.04 150); } 100% { background-color: transparent; } }
+@keyframes m-toast  { from { opacity: 0; transform: translateY(14px) scale(.96); } }
+@keyframes m-shake  { 10%, 90% { transform: translateX(-2px); } 20%, 80% { transform: translateX(4px); } 30%, 50%, 70% { transform: translateX(-7px); } 40%, 60% { transform: translateX(7px); } }
+@keyframes m-cheer  { from { opacity: 0; transform: translateY(12px) scale(.96); } }
+@keyframes m-trophy { 0% { opacity: 0; transform: scale(.5) rotate(-14deg); } 60% { opacity: 1; transform: scale(1.16) rotate(4deg); } 100% { opacity: 1; transform: none; } }
+
+/* ---------- the off switch ---------- */
+body.no-motion *,
+body.no-motion *::before,
+body.no-motion *::after {
+  animation-duration: 1ms !important;
+  animation-delay: 0ms !important;
+  transition-duration: 1ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Manage - Player edit modal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_as.css">
+<link rel="stylesheet" href="../_shared.css">
+<link rel="stylesheet" href="../_motion-app.css">
+<script src="../_shared.js" defer></script>
+<script src="../_motion-app.js" defer></script>
+</head>
+<body class="pd-public-active">
+<div id="root">
+<div id="app-shell">
+  <img class="pd-watermark" src="https://athletic-specimen.com/logo-mark.png" alt="" aria-hidden="true" />
+  <header id="app-header" class="pd-header">
+    <span class="app-header-mode">PUBLIC</span>
+    <div class="pd-wordmark">
+      <div class="pd-wm-1">ATHLETIC SPECIMEN</div>
+      <div class="pd-wm-2">COLORADO</div>
+    </div>
+    <div class="pd-hgrp">
+      <button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">M</button>
+    </div>
+    <div id="js-sync-notice"><p class="small shared-sync-notice is-live">Updated 7:42 PM</p></div>
+  </header>
+  <div id="app-content">
+    <div id="tab-manage" class="tab-panel active">
+      <div class="container">
+<div class="pd-pagehdr"><button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button><div class="pd-htitle">Players</div><button type="button" class="mgp-selbtn" data-mgp-select>Select</button></div><div class="mgp-srch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="mg-player-search" type="text" placeholder="Search or add a player" value="" autocomplete="off" autocapitalize="words" spellcheck="false" aria-label="Search players" /></div><div class="mgp-meta"><span class="mgp-m"><b>8</b> players</span><span class="mgp-m"><b>6</b> checked in</span><button type="button" class="mgp-m mgp-mg" data-mgp-groups><b>3</b> groups</button></div><div id="mgp-list"><a class="mgp-row" data-mgp-id="id:3f9a1c"><span class="mgp-al">A</span><span class="mgp-pn">Avery Brooks<span class="mgp-gp">Regulars</span></span><span class="mgp-in">IN</span><span class="mgp-sk">7.0</span></a><a class="mgp-row" data-mgp-id="id:7b40e2"><span class="mgp-al">C</span><span class="mgp-pn">Casey Lin<span class="mgp-gp">Regulars</span></span><span class="mgp-in">IN</span><span class="mgp-sk">6.0</span></a><a class="mgp-row" data-mgp-id="id:c1d8a7"><span class="mgp-al">D</span><span class="mgp-pn">Devon Park<span class="mgp-gp">Newcomers</span></span><span class="mgp-sk">2.5</span></a><a class="mgp-row" data-mgp-id="id:22ef60"><span class="mgp-al">J</span><span class="mgp-pn">Jordan Reyes<span class="mgp-gp">Regulars</span></span><span class="mgp-in">IN</span><span class="mgp-sk">7.5</span></a><a class="mgp-row" data-mgp-id="id:9a05bb"><span class="mgp-al">M</span><span class="mgp-pn">Morgan Ellis<span class="mgp-gp">Newcomers</span></span><span class="mgp-in">IN</span><span class="mgp-sk n">&ndash;</span></a><a class="mgp-row" data-mgp-id="id:4d73c9"><span class="mgp-al">Q</span><span class="mgp-pn">Quinn Alvarez<span class="mgp-gp">Sunday</span></span><span class="mgp-sk">3.0</span></a><a class="mgp-row" data-mgp-id="id:e6142f"><span class="mgp-al">R</span><span class="mgp-pn">Riley Chen<span class="mgp-gp">Regulars</span></span><span class="mgp-in">IN</span><span class="mgp-sk">6.5</span></a><a class="mgp-row" data-mgp-id="id:518aa3"><span class="mgp-al">S</span><span class="mgp-pn">Sam Okafor<span class="mgp-gp">Sunday</span></span><span class="mgp-in">IN</span><span class="mgp-sk">8.0</span></a></div>
+      </div>
+    </div>
+  </div>
+  <nav id="bottom-nav">
+    <button class="nav-btn" data-nav-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="tournament">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>
+      <span>Tournament</span>
+    </button>
+    <button class="nav-btn active" data-nav-tab="manage" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
+      <span>Manage</span>
+    </button>
+  </nav>
+</div>
+<div id="player-edit-modal" class="popup-overlay" style="display: flex;" aria-hidden="false"><div class="popup-card card pe-card" role="dialog" aria-modal="true" aria-labelledby="player-edit-modal-title">
+    <div class="popup-header pe-head">
+      <span class="pe-av" aria-hidden="true">R</span>
+      <span class="pe-who"><h3 id="player-edit-modal-title">Riley Chen</h3></span>
+      <span class="mgp-in pe-in">IN</span>
+      <button type="button" class="pe-x secondary" data-role="close-popup" data-target="player-edit-modal" aria-label="Close">&times;</button>
+    </div>
+    <div class="popup-body pe-body" id="player-edit-modal-body">
+    <div class="edit-row show popup-edit-row" data-player-key="id:e6142f">
+      <div class="pe-f pe-2col">
+        <span class="pe-cell">
+          <label class="popup-edit-label" for="pe-first">First name</label>
+          <input id="pe-first" type="text" class="edit-name popup-edit-input" placeholder="First" value="Riley" autocapitalize="words" autocomplete="off" spellcheck="false" />
+        </span>
+        <span class="pe-cell">
+          <label class="popup-edit-label" for="pe-last">Last name</label>
+          <input id="pe-last" type="text" class="edit-lastname popup-edit-input" placeholder="Last" value="Chen" autocapitalize="words" autocomplete="off" spellcheck="false" />
+        </span>
+      </div>
+      <div class="pe-f">
+        <label class="popup-edit-label" for="pe-skill">Skill</label>
+        <div class="pe-skillrow">
+          <input id="pe-skill" type="number" class="edit-skill popup-edit-input pe-skillin" placeholder="Skill" step="0.5" min="0" max="10" value="6.5" />
+        </div>
+      </div>
+      <input type="hidden" class="edit-group"  value="Regulars" />
+      <input type="hidden" class="edit-groups" value="[&quot;Regulars&quot;,&quot;Sunday&quot;]" />
+    </div>
+    </div>
+    <div class="edit-actions pe-actions">
+      <button type="button" class="btn-save-edit success pe-save" data-player-key="id:e6142f" data-id="e6142f">Save changes</button>
+      <button type="button" class="btn-cancel-edit secondary pe-cancel" data-player-key="id:e6142f">Cancel</button>
+    </div>
+  </div></div>
+</div>
+</body>
+</html>

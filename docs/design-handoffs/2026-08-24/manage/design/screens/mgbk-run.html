@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tournament - Bracket &amp; scores (live)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_as.css">
+<link rel="stylesheet" href="../_shared.css">
+<link rel="stylesheet" href="../_rounds.css">
+<link rel="stylesheet" href="../_motion-app.css">
+<link rel="stylesheet" href="../_bracket-run.css">
+<script src="../_shared.js" defer></script>
+<script src="../_motion-app.js" defer></script>
+</head>
+<body class="pd-public-active">
+<div id="root">
+<div id="app-shell">
+  <img class="pd-watermark" src="https://athletic-specimen.com/logo-mark.png" alt="" aria-hidden="true" />
+  <header id="app-header" class="pd-header">
+    <span class="app-header-mode">PUBLIC</span>
+    <div class="pd-wordmark">
+      <div class="pd-wm-1">ATHLETIC SPECIMEN</div>
+      <div class="pd-wm-2">COLORADO</div>
+    </div>
+    <div class="pd-hgrp">
+      <button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">M</button>
+    </div>
+    <div id="js-sync-notice"><p class="small shared-sync-notice is-live">Updated 7:42 PM</p></div>
+  </header>
+  <div id="app-content">
+    <div id="tab-manage" class="tab-panel active">
+      <div class="container">
+<div class="pd-pagehdr"><button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button><div class="pd-htitle">Bracket &amp; scores</div></div>
+
+<div class="bkr-strip">
+  <div class="bkr-eye">Double elimination &middot; 8 teams &middot; 3 nets</div>
+  <div class="bkr-count" data-bkr-count>0 of 14 games in</div>
+  <div class="bkr-bar"><span data-bkr-fill style="width: 0%"></span></div>
+  <div class="bkr-now" data-bkr-now></div>
+</div>
+<div class="bkr-undo" data-bkr-undo hidden><span class="bkr-undot" data-bkr-undot></span><button type="button" class="bkr-undob" data-bkr-undobtn>Undo</button></div>
+<div class="bkr-champ" data-bkr-champ hidden>
+  <div class="bkr-champe">Champion</div>
+  <div class="bkr-champn" data-bkr-champn></div>
+  <div class="bkr-champs" data-bkr-champs></div>
+</div>
+
+<div data-bkr-rounds></div>
+
+<div class="pl-sect mgv-dsect" aria-hidden="true"></div>
+<button type="button" class="mgts-danger" data-bkr-reset>Clear every score</button>
+<div class="mgbk-note" data-bkr-resetnote>Puts all 14 games back to unplayed and rebuilds the tree from the pool seeds. Pool results are kept.</div>
+      </div>
+    </div>
+  </div>
+  <nav id="bottom-nav">
+    <button class="nav-btn" data-nav-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="tournament">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>
+      <span>Tournament</span>
+    </button>
+    <button class="nav-btn active" data-nav-tab="manage" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
+      <span>Manage</span>
+    </button>
+  </nav>
+</div>
+</div>
+
+<div id="mgss-sheet" class="popup-overlay" style="display: none" hidden><div class="popup-card card mgs-card" role="dialog" aria-modal="true" aria-labelledby="mgs-title" aria-label="Pick the winner">
+    <div class="mgs-head">
+      <span class="mgs-eyebrow" data-bkr-eyebrow>Winners bracket &middot; G1 &middot; Net 1</span>
+      <h3 id="mgs-title"><span data-bkr-ta>Team A</span> <span class="mgs-vs">vs</span> <span data-bkr-tb>Team B</span></h3>
+      <button type="button" class="mgs-x" data-bkr="close" aria-label="Close without picking">&times;</button>
+    </div>
+    <div class="mgs-body">
+      <div class="mgs-row" data-bkr-row="a"><button type="button" class="mgs-win" data-bkr-win="a" aria-pressed="false"><span class="mgs-wb"><span class="mgs-rname" data-bkr-na>Team A</span><span class="mgs-rsub" data-bkr-sa></span></span><span class="mgs-wpill">Winner</span></button></div>
+      <div class="mgs-row" data-bkr-row="b"><button type="button" class="mgs-win" data-bkr-win="b" aria-pressed="false"><span class="mgs-wb"><span class="mgs-rname" data-bkr-nb>Team B</span><span class="mgs-rsub" data-bkr-sb></span></span><span class="mgs-wpill">Winner</span></button></div>
+      <div class="mgs-err mgss-err" data-bkr-err hidden></div>
+      <div class="mgs-stake"><span class="mgs-stk" data-bkr-stakew></span><span class="mgs-stk" data-bkr-stakel></span></div>
+      <p class="mgs-hint" data-bkr-hint>Tap the team that won, score is optional</p>
+    </div>
+    <div class="mgs-foot"><button type="button" class="mgs-cta" data-bkr="final">Save winner</button></div>
+  </div></div>
+
+<script>
+(function () {
+  var T = [
+    { n: 'The Dawg House', s: 1, r: '3\u20130 in pools' },
+    { n: 'Net Gains', s: 2, r: '2\u20131 in pools' },
+    { n: 'Sand Sharks', s: 3, r: '2\u20131 in pools' },
+    { n: 'Spike Squad', s: 4, r: '2\u20131 in pools' },
+    { n: 'Block Party', s: 5, r: '1\u20132 in pools' },
+    { n: 'Dig Deep', s: 6, r: '1\u20132 in pools' },
+    { n: 'Bump Set Ace', s: 7, r: '1\u20132 in pools' },
+    { n: 'Setter Days', s: 8, r: '0\u20133 in pools' }
+  ];
+  // the whole bracket as data: who feeds each slot, and where the two teams go
+  var G = {
+    G1:  { a: { seed: 1 }, b: { seed: 8 }, w: 'G7',  l: 'G5' },
+    G2:  { a: { seed: 4 }, b: { seed: 5 }, w: 'G7',  l: 'G5' },
+    G3:  { a: { seed: 2 }, b: { seed: 7 }, w: 'G8',  l: 'G6' },
+    G4:  { a: { seed: 3 }, b: { seed: 6 }, w: 'G8',  l: 'G6' },
+    G5:  { a: { l: 'G1' }, b: { l: 'G2' }, w: 'G9',  l: null },
+    G6:  { a: { l: 'G3' }, b: { l: 'G4' }, w: 'G10', l: null },
+    G7:  { a: { w: 'G1' }, b: { w: 'G2' }, w: 'G11', l: 'G9' },
+    G8:  { a: { w: 'G3' }, b: { w: 'G4' }, w: 'G11', l: 'G10' },
+    G9:  { a: { w: 'G5' }, b: { l: 'G7' }, w: 'G12', l: null },
+    G10: { a: { w: 'G6' }, b: { l: 'G8' }, w: 'G12', l: null },
+    G11: { a: { w: 'G7' }, b: { w: 'G8' }, w: 'G14', l: 'G13' },
+    G12: { a: { w: 'G9' }, b: { w: 'G10' }, w: 'G13', l: null },
+    G13: { a: { l: 'G11' }, b: { w: 'G12' }, w: 'G14', l: null },
+    G14: { a: { w: 'G11' }, b: { w: 'G13' }, w: null, l: null }
+  };
+  var ROUNDS = [
+    { t: 'Winners bracket \u00b7 G1\u2013G4', g: ['G1', 'G2', 'G3', 'G4'] },
+    { t: 'Losers bracket \u00b7 G5\u2013G6', g: ['G5', 'G6'] },
+    { t: 'Winners bracket \u00b7 G7\u2013G8', g: ['G7', 'G8'] },
+    { t: 'Losers bracket \u00b7 G9\u2013G10', g: ['G9', 'G10'] },
+    { t: 'Winners semifinal \u00b7 G11', g: ['G11'] },
+    { t: 'Losers bracket \u00b7 G12', g: ['G12'] },
+    { t: 'Losers semifinal \u00b7 G13', g: ['G13'] },
+    { t: 'Championship \u00b7 G14', g: ['G14'] }
+  ];
+  var ids = Object.keys(G);
+  var results = {};      // id -> { win: 'a'|'b', a: n, b: n }
+  var lastSave = null;   // one step of undo, the score just entered
+
+  var root = document.querySelector('[data-bkr-rounds]');
+  var sheet = document.getElementById('mgss-sheet');
+  var open = null;       // id of the game the card is showing
+  var pick = null;       // 'a' | 'b' | null
+
+  function q(sel, scope) { return (scope || document).querySelector(sel); }
+  function team(name) { for (var i = 0; i < T.length; i++) if (T[i].n === name) return T[i]; return null; }
+
+  // a slot is a seed, or the winner/loser of a game that may not have been played
+  function slot(sl) {
+    if (sl.seed) return T[sl.seed - 1].n;
+    var src = sl.w || sl.l;
+    var res = results[src];
+    if (!res) return null;
+    var side = sl.w ? res.win : (res.win === 'a' ? 'b' : 'a');
+    return slot(G[src][side]);
+  }
+  function label(sl) {
+    if (sl.seed) return T[sl.seed - 1].n;
+    return (sl.w ? 'Winner of ' : 'Loser of ') + (sl.w || sl.l);
+  }
+  function feeds(id) {
+    var out = [];
+    ['a', 'b'].forEach(function (k) {
+      var sl = G[id][k];
+      if (!sl.seed && !results[sl.w || sl.l]) out.push(sl.w || sl.l);
+    });
+    return out;
+  }
+  function state(id) {
+    if (results[id]) return 'done';
+    return (slot(G[id].a) && slot(G[id].b)) ? 'ready' : 'tbd';
+  }
+  // ready games take the open nets in order; the rest are playable but waiting
+  function nets() {
+    var map = {}, n = 1;
+    ids.forEach(function (id) {
+      if (state(id) === 'ready' && n <= 3) { map[id] = n; n++; }
+    });
+    return map;
+  }
+  function roundOf(id) {
+    for (var i = 0; i < ROUNDS.length; i++) if (ROUNDS[i].g.indexOf(id) !== -1) return ROUNDS[i].t;
+    return '';
+  }
+  function where(id, side) {
+    var t = G[id][side];
+    if (!t) {
+      if (side === 'w') return 'Champion';
+      return id === 'G14' ? 'Runner-up' : id === 'G13' ? 'Third place' : 'Out \u2014 eliminated';
+    }
+    return roundOf(t).replace(/ \u00b7 .*/, '') + ' \u00b7 ' + t;
+  }
+
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+  function render() {
+    var net = nets(), html = '';
+    ROUNDS.forEach(function (R) {
+      var sts = R.g.map(state);
+      var head;
+      if (sts.every(function (s) { return s === 'done'; })) head = 'all done';
+      else if (R.g.some(function (id) { return net[id]; })) head = 'live now';
+      else if (sts.indexOf('ready') !== -1) head = 'up next';
+      else {
+        var need = [];
+        R.g.forEach(function (id) { feeds(id).forEach(function (f) { if (need.indexOf(f) === -1) need.push(f); }); });
+        head = need.length ? 'needs ' + need.join(', ') : 'waiting';
+      }
+      html += '<div class="mgv-bkr"><div class="mgv-bkrh"><span>' + R.t + '</span><span class="mgv-bkrs">' + head + '</span></div>';
+      R.g.forEach(function (id) {
+        var st = state(id), res = results[id], g = G[id];
+        var na = slot(g.a) || label(g.a), nb = slot(g.b) || label(g.b);
+        var cls = 'mgv-bkm' + (st === 'tbd' ? ' is-tbd' : net[id] ? ' is-live' : st === 'ready' ? ' is-queued' : '');
+        var netChip = st === 'ready'
+          ? (net[id] ? '<span class="mgv-bknet">Net ' + net[id] + '</span>' : '<span class="mgv-bknet is-wait">No net</span>')
+          : (res && res.net ? '<span class="mgv-bknet is-wait">Net ' + res.net + '</span>' : '');
+        var meta;
+        if (st === 'tbd') meta = label(g.a) + ' vs ' + label(g.b) + ' \u00b7 waiting';
+        else if (st === 'ready') meta = net[id] ? 'On Net ' + net[id] + ' now \u00b7 tap to score' : 'Playable \u2014 waiting for a net';
+        else if (id === 'G14') meta = 'Champion \u00b7 tap to fix the score';
+        else meta = 'Final \u00b7 ' + (res.win === 'a' ? na : nb) + ' \u2192 ' + G[id].w + (G[id].l ? ' \u00b7 loser \u2192 ' + G[id].l : ' \u00b7 loser out');
+        var pill = st === 'done' ? '<span class="mgv-bkpill is-done">Done</span>'
+          : net[id] ? '<span class="mgv-bkpill is-live">Live</span>'
+          : st === 'ready' ? '<span class="mgv-bkpill is-next">Up next</span>' : '';
+        function line(side, nm) {
+          var won = res && res.win === side;
+          var check = won ? '<svg class="mgv-bkw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 13 4 4 10-10"/></svg>' : '';
+          return '<div class="mgv-bkl' + (won ? ' is-win' : '') + '"><span class="mgv-bkn">' + esc(nm) + '</span>' + check + '</div>';
+        }
+        html += '<div class="' + cls + '"' + (st === 'tbd' ? '' : ' data-bkr-game="' + id + '" role="button" tabindex="0"') + '>' +
+          '<span class="mgv-bkidw"><span class="mgv-bkid">' + id + '</span>' + netChip + '</span>' +
+          '<div class="mgv-bkb">' + line('a', na) + line('b', nb) + '<div class="mgv-bkmeta">' + esc(meta) + '</div></div>' + pill + '</div>';
+      });
+      html += '</div>';
+    });
+    root.innerHTML = html;
+
+    var done = ids.filter(function (id) { return results[id]; }).length;
+    q('[data-bkr-count]').textContent = done + ' of 14 games in';
+    q('[data-bkr-fill]').style.width = Math.round(done / 14 * 100) + '%';
+
+    var live = ids.filter(function (id) { return net[id]; });
+    var champ = results.G14 ? (results.G14.win === 'a' ? slot(G.G14.a) : slot(G.G14.b)) : null;
+    q('[data-bkr-now]').innerHTML = champ
+      ? 'Every game is in. <b>' + esc(champ) + '</b> takes it.'
+      : live.length
+        ? 'On the nets now: <b>' + live.map(function (id) { return id + ' on Net ' + net[id]; }).join('</b>, <b>') + '</b>. Tap a game to pick its winner.'
+        : 'No game is playable \u2014 the next round needs results first.';
+
+    var cb = q('[data-bkr-champ]');
+    cb.hidden = !champ;
+    if (champ) {
+      q('[data-bkr-champn]').textContent = champ;
+      var t = team(champ);
+      q('[data-bkr-champs]').textContent = (t ? 'Seed ' + t.s + ' \u00b7 ' + t.r + ' \u00b7 ' : '') + 'won the championship, G14';
+    }
+  }
+
+  function openCard(id) {
+    open = id;
+    pick = results[id] ? results[id].win : null;
+    var g = G[id], na = slot(g.a), nb = slot(g.b);
+    var ta = team(na), tb = team(nb);
+    var net = nets();
+    q('[data-bkr-eyebrow]').textContent = roundOf(id) + (net[id] ? ' \u00b7 Net ' + net[id] : '');
+    q('[data-bkr-ta]').textContent = na;
+    q('[data-bkr-tb]').textContent = nb;
+    q('[data-bkr-na]').textContent = na;
+    q('[data-bkr-nb]').textContent = nb;
+    q('[data-bkr-sa]').textContent = ta ? 'Seed ' + ta.s + ' \u00b7 ' + ta.r : '';
+    q('[data-bkr-sb]').textContent = tb ? 'Seed ' + tb.s + ' \u00b7 ' + tb.r : '';
+    q('[data-bkr-stakew]').innerHTML = '<b>Winner</b> \u2192 ' + esc(where(id, 'w'));
+    q('[data-bkr-stakel]').innerHTML = '<b>Loser</b> \u2192 ' + esc(where(id, 'l'));
+    q('[data-bkr-err]').hidden = true;
+    paint();
+    sheet.hidden = false;
+    sheet.style.setProperty('display', 'flex', 'important');
+    document.body.classList.add('pd-noscroll');
+  }
+  function close() {
+    sheet.hidden = true;
+    sheet.style.setProperty('display', 'none', 'important');
+    document.body.classList.remove('pd-noscroll');
+    open = null;
+  }
+  // the pick is the whole card: the row washes accent and the pill comes up
+  function paint() {
+    ['a', 'b'].forEach(function (side) {
+      q('[data-bkr-row="' + side + '"]').classList.toggle('is-won', pick === side);
+      q('[data-bkr-win="' + side + '"]').setAttribute('aria-pressed', pick === side ? 'true' : 'false');
+    });
+    q('.mgs-cta', sheet).textContent = (results[open] ? 'Update' : 'Save') + ' winner';
+    q('[data-bkr-hint]').textContent = pick
+      ? (pick === 'a' ? q('[data-bkr-na]').textContent : q('[data-bkr-nb]').textContent) + ' advances \u2014 the loser moves on the same tap.'
+      : 'Tap the team that won, score is optional';
+  }
+
+  function commit() {
+    var side = pick;
+    var err = q('[data-bkr-err]');
+    if (!side) {
+      err.textContent = 'Tap the team that won.';
+      err.hidden = false;
+      return;
+    }
+    var net = nets();
+    lastSave = { id: open, prev: results[open] || null, name: side === 'a' ? slot(G[open].a) : slot(G[open].b) };
+    results[open] = { win: side, net: net[open] || null };
+    // anything downstream that depended on the old result is no longer true
+    dropStale();
+    var u = q('[data-bkr-undo]');
+    q('[data-bkr-undot]').textContent = lastSave.id + ' saved \u2014 ' + lastSave.name + ' advances to ' + (G[lastSave.id].w || 'the title');
+    u.hidden = false;
+    close();
+    render();
+  }
+  // clearing a result can orphan later games: drop any whose teams no longer resolve
+  function dropStale() {
+    var changed = true;
+    while (changed) {
+      changed = false;
+      ids.forEach(function (id) {
+        if (results[id] && (!slot(G[id].a) || !slot(G[id].b))) { delete results[id]; changed = true; }
+      });
+    }
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+
+    var g = t.closest('[data-bkr-game]');
+    if (g) { openCard(g.getAttribute('data-bkr-game')); return; }
+
+    var w = t.closest('[data-bkr-win]');
+    if (w) { pick = w.getAttribute('data-bkr-win'); q('[data-bkr-err]').hidden = true; paint(); return; }
+
+    var act = t.closest('[data-bkr]');
+    if (act) {
+      if (act.getAttribute('data-bkr') === 'close') close(); else commit();
+      return;
+    }
+    if (t === sheet) { close(); return; }
+
+    if (t.closest('[data-bkr-undobtn]')) {
+      if (lastSave) {
+        if (lastSave.prev) results[lastSave.id] = lastSave.prev; else delete results[lastSave.id];
+        dropStale();
+        lastSave = null;
+        q('[data-bkr-undo]').hidden = true;
+        render();
+      }
+      return;
+    }
+
+    var rs = t.closest('[data-bkr-reset]');
+    if (rs) {
+      if (rs.getAttribute('data-armed')) {
+        results = {};
+        lastSave = null;
+        q('[data-bkr-undo]').hidden = true;
+        rs.removeAttribute('data-armed');
+        rs.textContent = 'Clear every score';
+        q('[data-bkr-resetnote]').textContent = 'Puts all 14 games back to unplayed and rebuilds the tree from the pool seeds. Pool results are kept.';
+        render();
+      } else {
+        rs.setAttribute('data-armed', '1');
+        rs.textContent = 'Tap again to clear all 14 games';
+        q('[data-bkr-resetnote]').textContent = 'This cannot be undone. Tap anywhere else to keep the bracket.';
+      }
+      return;
+    }
+    var armed = q('[data-bkr-reset][data-armed]');
+    if (armed) {
+      armed.removeAttribute('data-armed');
+      armed.textContent = 'Clear every score';
+      q('[data-bkr-resetnote]').textContent = 'Puts all 14 games back to unplayed and rebuilds the tree from the pool seeds. Pool results are kept.';
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && open) close();
+    if ((e.key === 'Enter' || e.key === ' ') && e.target && e.target.getAttribute && e.target.getAttribute('data-bkr-game')) {
+      e.preventDefault();
+      openCard(e.target.getAttribute('data-bkr-game'));
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

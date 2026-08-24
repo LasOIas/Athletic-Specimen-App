@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>QR share modal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_as.css">
+<link rel="stylesheet" href="../_rounds.css">
+<link rel="stylesheet" href="../_shared.css">
+<link rel="stylesheet" href="../_motion-app.css">
+<script src="../_shared.js" defer></script>
+<script src="../_motion-app.js" defer></script>
+</head>
+<body class="pd-public-active">
+<div id="root">
+<div id="app-shell">
+<img class="pd-watermark" src="https://athletic-specimen.com/logo-mark.png" alt="" aria-hidden="true" />
+<header id="app-header" class="pd-header">
+<span class="app-header-mode">PUBLIC</span>
+<div class="pd-wordmark">
+<div class="pd-wm-1">ATHLETIC SPECIMEN</div>
+<div class="pd-wm-2">COLORADO</div>
+</div>
+<div class="pd-hgrp">
+<button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">M</button>
+</div>
+<div id="js-sync-notice"><p class="small shared-sync-notice is-live">Updated 7:42 PM</p></div>
+</header>
+<div id="app-content">
+<div id="tab-manage" class="tab-panel active">
+<div class="container">
+<div class="pd-pagehdr">
+<button type="button" class="pd-back" data-mg-area="pickup" aria-label="Back to pickup days"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+<div class="pd-htitle">Thursday, August 6</div>
+</div>
+<div class="pk-fld"><label class="pk-fl" for="pk-date">Date</label>
+<input class="pk-fv" id="pk-date" type="date" value="2026-08-06" /></div>
+<div class="pk-fld"><label class="pk-fl" for="pk-time">Time</label>
+<input class="pk-fv" id="pk-time" type="text" placeholder="7:00 PM" autocomplete="off" value="7:00 PM" /></div>
+<div class="pk-fld"><label class="pk-fl" for="pk-location">Location</label>
+<input class="pk-fv" id="pk-location" type="text" placeholder="Cherry Creek courts" autocomplete="off" value="Woodmen Valley Park" /></div>
+<button type="button" class="pk-cta" data-pk-save>Save</button>
+<div class="pk-savenote">The Check In tab appears for everyone that day</div>
+<p class="pk-msg" id="pk-msg" role="status" aria-live="polite"></p>
+<div class="pl-sect">On the day</div>
+<a class="pk-orow" data-pk-qr><div class="pk-ob"><div class="pk-on">Share the check-in QR</div><div class="pk-os">For the door. Players scan and tap their name</div></div><svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></a>
+<a class="pk-orow" data-pk-fresh><div class="pk-ob"><div class="pk-on">Start a fresh sheet</div><div class="pk-os">Rolls check-ins into history and starts clean</div></div><svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></a>
+<button type="button" class="pk-danger" data-pk-remove="pk-2026-08-06">Remove this pickup day</button>
+</div>
+</div>
+</div>
+<nav id="bottom-nav">
+<button class="nav-btn" data-nav-tab="home">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+<span>Home</span>
+</button>
+<button class="nav-btn" data-nav-tab="tournament">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>
+<span>Tournament</span>
+</button>
+<button class="nav-btn active" data-nav-tab="manage" aria-current="page">
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
+<span>Manage</span>
+</button>
+</nav>
+</div>
+<div id="qrModal" class="qr-modal">
+<div class="qr-modal-backdrop"></div>
+<div class="qr-modal-card">
+<button type="button" class="qr-modal-close" id="qrModalClose" aria-label="Close">×</button>
+<h2 class="qr-modal-title">Scan to Check In</h2>
+<p class="qr-modal-subtitle">Point your phone camera at the code below</p>
+<div id="qrCodeContainer" class="qr-code-container"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='294' height='294'%3E%3Crect width='294' height='294' fill='%23ffffff'/%3E%3Crect x='0.5' y='0.5' width='293' height='293' fill='none' stroke='%23000000'/%3E%3C/svg%3E" width="294" height="294" alt="" /></div>
+<div class="qr-modal-url" id="qrModalUrl">https://athletic-specimen-app.vercel.app/checkin.html</div>
+<div class="qr-modal-actions">
+<button type="button" class="btn btn-secondary" id="qrCopyBtn">Copy URL</button>
+<button type="button" class="btn btn-primary" id="qrCloseBottomBtn">Close</button>
+</div>
+</div>
+</div>
+</div>
+</body>
+</html>

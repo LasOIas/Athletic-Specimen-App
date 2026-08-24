@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Athletic Specimen - Account</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* Page chrome only - the harness AROUND the phone. Every pixel inside the frame is the app's
+     own shipped stylesheet, untouched. */
+  :root { --c-bg:oklch(0.985 0.003 75); --c-card:oklch(0.97 0.003 75); --c-line:oklch(0.90 0.005 75);
+    --c-ink:oklch(0.18 0.005 75); --c-mut:oklch(0.50 0.005 75); --c-acc:oklch(0.55 0.07 240); }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; background:var(--c-bg); color:var(--c-ink); font-family:'Inter',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; }
+  .tb { display:flex; align-items:center; gap:14px; padding:11px 20px; border-bottom:1px solid var(--c-line);
+    background:var(--c-card); flex-wrap:wrap; }
+  .tb-h { font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:15px;
+    letter-spacing:.09em; text-transform:uppercase; margin:0; white-space:nowrap; }
+  .tb-b { color:var(--c-mut); font-size:12px; }
+  .tb-sp { flex:1; }
+  .tb a { font-size:12px; color:var(--c-mut); text-decoration:none; border-bottom:1px solid var(--c-line);
+    white-space:nowrap; }
+  .tb a:hover, .tb a.on { color:var(--c-acc); border-color:var(--c-acc); }
+  select { font:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--c-line);
+    border-radius:8px; background:#fff; color:var(--c-ink); max-width:270px; }
+  .seg { display:flex; border:1px solid var(--c-line); border-radius:999px; overflow:hidden; background:#fff; }
+  .seg button { font-family:'Barlow Semi Condensed',sans-serif; font-weight:700; font-size:12px;
+    letter-spacing:.1em; text-transform:uppercase; padding:6px 15px; border:0; background:transparent;
+    color:var(--c-mut); cursor:pointer; }
+  .seg button.on { background:var(--c-acc); color:#fff; }
+  .stage { flex:1; display:flex; align-items:flex-start; justify-content:center; padding:24px 20px 40px; overflow:auto;
+    scrollbar-width: thin; scrollbar-color: oklch(0.70 0.01 75 / .5) transparent; overscroll-behavior: contain; }
+  .stage::-webkit-scrollbar { width: 11px; background: transparent; }
+  .stage::-webkit-scrollbar-thumb { background: oklch(0.70 0.01 75 / .5); background-clip: padding-box;
+    border: 3.5px solid transparent; border-radius: 999px; min-height: 44px; }
+  .dev { border:1px solid var(--c-line); border-radius:16px; overflow:hidden; background:var(--c-card);
+    box-shadow:0 1px 2px oklch(0.18 0.005 75 / .06), 0 6px 20px oklch(0.18 0.005 75 / .05); }
+  .dev iframe { display:block; border:0; width:390px; height:844px; background:var(--c-bg); }
+  body.wide .dev iframe { width:1280px; height:820px; }
+</style>
+</head>
+<body>
+  <div class="tb">
+    <h1 class="tb-h">Account</h1>
+    <span class="tb-b">Email in, password out, and every state in between. The forms really validate - submit one to move.</span>
+    <span class="tb-sp"></span>
+    <a href="home.html">Home</a>
+    <a href="check-in.html">Check In</a>
+    <a href="tournament.html">Tournament</a>
+    <a href="manage.html">Manage</a>
+    <a href="account.html" class="on">Account</a>
+    <a href="motion.html">Motion</a>
+    <select id="jump" aria-label="Jump to a state">
+      <optgroup label="Getting in">
+        <option value="auth-gate">The wall - signed out</option>
+        <option value="auth-signin">Sign in</option>
+        <option value="auth-signup">Create account</option>
+        <option value="auth-verify-banner">Home - confirm your email</option>
+      </optgroup>
+      <optgroup label="Forgot it">
+        <option value="auth-forgot">Reset your password</option>
+        <option value="auth-forgot-sent">Reset - check your email</option>
+        <option value="auth-reset">Set a new password</option>
+        <option value="auth-reset-done">Password changed</option>
+      </optgroup>
+      <optgroup label="Changing it">
+        <option value="account-hub">Account</option>
+        <option value="account-name">Your name</option>
+        <option value="account-email">Change email</option>
+        <option value="account-email-sent">Confirm new email</option>
+        <option value="account-password">Change password</option>
+        <option value="account-signout">Sign out?</option>
+      </optgroup>
+    </select>
+    <div class="seg"><button id="b390" class="on">Phone</button><button id="b1280">Desktop</button></div>
+  </div>
+  <div class="stage"><div class="dev"><iframe id="fr" title="Account"></iframe></div></div>
+<script src="_shared.js" defer></script>
+<script>
+(function () {
+  var IDS = ["auth-gate","auth-signin","auth-signup","auth-verify-banner","auth-forgot","auth-forgot-sent",
+    "auth-reset","auth-reset-done","account-hub","account-name","account-email","account-email-sent",
+    "account-password","account-signout"];
+  // The flow's own vocabulary: where a control says it goes, and the screen that is there.
+  var ROUTES = {
+    "auth:gate":"auth-gate", "auth:signin":"auth-signin", "auth:signup":"auth-signup",
+    "auth:verify":"auth-verify-banner", "auth:forgot":"auth-forgot", "auth:sent":"auth-forgot-sent",
+    "auth:reset":"auth-reset", "auth:done":"auth-reset-done",
+    "acct:hub":"account-hub", "acct:name":"account-name", "acct:email":"account-email",
+    "acct:emailsent":"account-email-sent", "acct:password":"account-password", "acct:signout":"account-signout"
+  };
+  var NAV_PAGE = {"home":"home.html","players":"check-in.html","tournament":"tournament.html","manage":"manage.html"};
+  var fr = document.getElementById('fr'), jump = document.getElementById('jump');
+  var STACK = [], CUR = null;
+
+  function show(id, back) {
+    if (IDS.indexOf(id) === -1) return false;
+    if (!back && CUR && CUR !== id) STACK.push(CUR);
+    CUR = id;
+    fr.src = 'screens/' + id + '.html';
+    if (jump.value !== id) jump.value = id;
+    if (location.hash.slice(1) !== id) history.replaceState(null, '', '#' + id);
+    return true;
+  }
+  function goBack() {
+    var prev = STACK.pop();
+    while (prev === CUR) prev = STACK.pop();
+    if (!prev) return false;
+    return show(prev, true);
+  }
+
+  function appClick(e) {
+    var t = e.target;
+    // Back: the overlay's close arrow, the account card's Close. Falls through to
+    // the control's own stated destination when you arrived here cold.
+    var backEl = t.closest && t.closest('.auth-back,.pd-back,[data-back]');
+    if (backEl && STACK.length) { e.preventDefault(); if (goBack()) return; }
+    // The header person icon is the account's front door.
+    if (t.closest && t.closest('#pd-account')) { e.preventDefault(); show('account-hub'); return; }
+    var el = t.closest && t.closest('[data-auth-view],[data-acct-view],[data-nav-tab]');
+    if (!el) return;
+    if (el.hasAttribute('data-nav-tab')) {
+      var dest = NAV_PAGE[el.getAttribute('data-nav-tab')];
+      if (dest) { e.preventDefault(); window.location.href = dest; }
+      return;
+    }
+    var key = el.hasAttribute('data-auth-view')
+      ? 'auth:' + el.getAttribute('data-auth-view')
+      : 'acct:' + el.getAttribute('data-acct-view');
+    var target = ROUTES[key];
+    if (target) { e.preventDefault(); show(target); }
+  }
+
+  fr.addEventListener('load', function () {
+    var doc;
+    try { doc = fr.contentDocument; } catch (e) { return; }
+    if (doc) doc.addEventListener('click', appClick, true);
+  });
+  window.__canvas = { show: show, appClick: appClick, back: goBack };
+
+  jump.addEventListener('change', function () { show(jump.value); });
+  window.addEventListener('hashchange', function () { show(location.hash.slice(1)); });
+  document.getElementById('b390').addEventListener('click', function () {
+    document.body.classList.remove('wide');
+    this.classList.add('on'); document.getElementById('b1280').classList.remove('on');
+  });
+  document.getElementById('b1280').addEventListener('click', function () {
+    document.body.classList.add('wide');
+    this.classList.add('on'); document.getElementById('b390').classList.remove('on');
+  });
+
+  if (!show(location.hash.slice(1))) show(IDS[0]);
+})();
+</script>
+<script src="_canvas-comment.js"></script>
+</body>
+</html>

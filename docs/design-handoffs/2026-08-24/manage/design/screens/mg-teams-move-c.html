@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Manage - Move players (compare tray)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_as.css">
+<link rel="stylesheet" href="../_rounds.css">
+<link rel="stylesheet" href="../_shared.css">
+<link rel="stylesheet" href="../_motion-app.css">
+<script src="../_shared.js" defer></script>
+<script src="../_motion-app.js" defer></script>
+</head>
+<body class="pd-public-active">
+<div id="root">
+<div id="app-shell">
+  <img class="pd-watermark" src="https://athletic-specimen.com/logo-mark.png" alt="" aria-hidden="true" />
+  <header id="app-header" class="pd-header">
+    <span class="app-header-mode">PUBLIC</span>
+    <div class="pd-wordmark">
+      <div class="pd-wm-1">ATHLETIC SPECIMEN</div>
+      <div class="pd-wm-2">COLORADO</div>
+    </div>
+    <div class="pd-hgrp">
+      <button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">M</button>
+    </div>
+    <div id="js-sync-notice"><p class="small shared-sync-notice is-live">Updated 7:42 PM</p></div>
+  </header>
+  <div id="app-content">
+    <div id="tab-manage" class="tab-panel active">
+      <div class="container">
+<div class="pd-pagehdr"><button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button><div class="pd-htitle">Teams</div></div><div class="pl-sect">Make teams &middot; 12 checked in</div><div class="pl-tabs mgt-chips"><button type="button" class="pl-tab" data-mgt-size="2">2s</button><button type="button" class="pl-tab" data-mgt-size="3">3s</button><button type="button" class="pl-tab pl-on" data-mgt-size="4">4s</button><button type="button" class="pl-tab" data-mgt-size="6">6s</button></div><button type="button" class="mgt-cta" data-mgt-generate>Generate balanced teams</button><div class="pl-sect">Today's teams</div><div class="mgv-note">Tap two team headers to compare them side by side.</div><div class="mgt-trow mgv-pin"><span class="mgt-tt">TEAM 1<b class="mgt-tsk">21.0</b></span><div class="mgt-names"><div class="mgt-nm" data-mgt-swap="id:518aa3" data-mgt-from="0"><span class="mgt-nmn">Sam Okafor</span><span class="mgt-nsk">8.0</span></div><div class="mgt-nm" data-mgt-swap="id:7b40e2" data-mgt-from="0"><span class="mgt-nmn">Casey Lin</span><span class="mgt-nsk">6.0</span></div><div class="mgt-nm" data-mgt-swap="id:b0c744" data-mgt-from="0"><span class="mgt-nmn">Skyler Hayes</span><span class="mgt-nsk">4.5</span></div><div class="mgt-nm" data-mgt-swap="id:c1d8a7" data-mgt-from="0"><span class="mgt-nmn">Devon Park</span><span class="mgt-nsk">2.5</span></div></div></div><div class="mgt-trow"><span class="mgt-tt">TEAM 2<b class="mgt-tsk">21.0</b></span><div class="mgt-names"><div class="mgt-nm" data-mgt-swap="id:22ef60" data-mgt-from="1"><span class="mgt-nmn">Jordan Reyes</span><span class="mgt-nsk">7.5</span></div><div class="mgt-nm" data-mgt-swap="id:e6142f" data-mgt-from="1"><span class="mgt-nmn">Riley Chen</span><span class="mgt-nsk">6.5</span></div><div class="mgt-nm" data-mgt-swap="id:6ac215" data-mgt-from="1"><span class="mgt-nmn">Taylor Nguyen</span><span class="mgt-nsk">4.0</span></div><div class="mgt-nm" data-mgt-swap="id:4d73c9" data-mgt-from="1"><span class="mgt-nmn">Quinn Alvarez</span><span class="mgt-nsk">3.0</span></div></div></div><div class="mgt-trow mgv-pin"><span class="mgt-tt">TEAM 3<b class="mgt-tsk">19.0</b></span><div class="mgt-names"><div class="mgt-nm" data-mgt-swap="id:3f9a1c" data-mgt-from="2"><span class="mgt-nmn">Avery Brooks</span><span class="mgt-nsk">7.0</span></div><div class="mgt-nm" data-mgt-swap="id:d92b18" data-mgt-from="2"><span class="mgt-nmn">Jamie Cruz</span><span class="mgt-nsk">6.5</span></div><div class="mgt-nm" data-mgt-swap="id:f70e33" data-mgt-from="2"><span class="mgt-nmn">Rowan Diaz</span><span class="mgt-nsk">5.5</span></div><div class="mgt-nm" data-mgt-swap="id:9a05bb" data-mgt-from="2"><span class="mgt-nmn">Morgan Ellis</span><span class="mgt-nsk n">&ndash;</span></div></div></div><div class="mgv-warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 2.4 18a1.8 1.8 0 0 0 1.6 2.7h16a1.8 1.8 0 0 0 1.6-2.7L13.7 3.9a1.8 1.8 0 0 0-3.4 0Z"/></svg><span>Team 1 and Team 3 are <b>3.5</b> apart on skill. One more swap evens them up.</span></div><div class="mgv-tray" role="group" aria-label="Compare teams"><div class="mgv-trayh">Compare &amp; swap<button type="button" class="mgv-trayx" data-mgt-cancel>Done</button></div><div class="mgv-tcols"><div class="mgv-tcol"><div class="mgv-tch">TEAM 1<b>21.0</b></div><button type="button" class="mgv-tn" data-mgt-swap="id:518aa3"><span>Sam Okafor</span><b>8.0</b></button><button type="button" class="mgv-tn is-sel" data-mgt-swap="id:7b40e2"><span>Casey Lin</span><b>6.0</b></button><button type="button" class="mgv-tn" data-mgt-swap="id:b0c744"><span>Skyler Hayes</span><b>4.5</b></button><button type="button" class="mgv-tn" data-mgt-swap="id:c1d8a7"><span>Devon Park</span><b>2.5</b></button></div><div class="mgv-tax"><button type="button" class="mgv-taxb" aria-label="Swap the two selected players"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4 4 8l4 4"/><path d="M4 8h13"/><path d="M16 20l4-4-4-4"/><path d="M20 16H7"/></svg></button><span class="mgv-taxl">3.5 apart</span></div><div class="mgv-tcol"><div class="mgv-tch">TEAM 3<b>19.0</b></div><button type="button" class="mgv-tn" data-mgt-swap="id:3f9a1c"><span>Avery Brooks</span><b>7.0</b></button><button type="button" class="mgv-tn is-sel" data-mgt-swap="id:d92b18"><span>Jamie Cruz</span><b>6.5</b></button><button type="button" class="mgv-tn" data-mgt-swap="id:f70e33"><span>Rowan Diaz</span><b>5.5</b></button><button type="button" class="mgv-tn" data-mgt-swap="id:9a05bb"><span>Morgan Ellis</span><b>&ndash;</b></button></div></div><div class="mgv-tfoot">Swapping <b>Casey Lin</b> and <b>Jamie Cruz</b> leaves both teams on <b>20.5</b>.</div></div><div class="mgv-undo"><span class="mgv-undo-t"><b>Jamie Cruz</b> and <b>Casey Lin</b> swapped</span><button type="button" class="mgv-undo-b" data-mgv-undo>Undo</button></div>
+      </div>
+    </div>
+  </div>
+  <nav id="bottom-nav">
+    <button class="nav-btn" data-nav-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="tournament">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>
+      <span>Tournament</span>
+    </button>
+    <button class="nav-btn active" data-nav-tab="manage" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
+      <span>Manage</span>
+    </button>
+  </nav>
+</div>
+</div>
+</body>
+</html>

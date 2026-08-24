@@ -1,0 +1,213 @@
+/* ============================================================
+   ATHLETIC SPECIMEN - standalone kiosk (checkin.html) stylesheet
+   ============================================================
+
+   The standalone kiosk is a SELF-CONTAINED page: it does not use styles.css and
+   does not share the .pd-/.hm- kit. This is its own <style> block, lifted verbatim
+   out of public/checkin.html so the four kiosk screens share one copy.
+   Owner: public/checkin.html in the repo.
+   ============================================================ */
+
+    /* C36 T6: direction-A light kiosk — mirrors the in-app Check In (T1) for consistency. */
+    :root {
+      --bg: oklch(0.985 0.003 75);
+      --surface: oklch(0.97 0.003 75);
+      --surface-2: oklch(0.95 0.004 75);
+      --border: oklch(0.90 0.005 75);
+      --text: oklch(0.18 0.005 75);
+      --text-dim: oklch(0.50 0.005 75);
+      --accent: oklch(0.55 0.07 240);      /* muted blue — the app accent */
+      --accent-dim: oklch(0.96 0.015 240); /* accent-soft */
+      --live: oklch(0.55 0.09 150);        /* muted green — success/checked-in */
+      --live-soft: oklch(0.96 0.03 150);
+      --live-ink: oklch(0.40 0.09 150);    /* live text on live-soft — checked-in hero state (app --live-ink) */
+      --accent-bd: oklch(0.86 0.03 240);   /* accent border — mirrors the in-app hero card (app --accent-bd) */
+      --danger: oklch(0.55 0.16 25);
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      font-size: 17px;
+      min-height: 100vh;
+      overscroll-behavior-y: none;
+    }
+    body {
+      padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+      max-width: 520px;
+      margin: 0 auto;
+    }
+    .header { margin-bottom: 24px; padding-top: 8px; text-align: center; }
+    .cik-logo { height: 130px; width: auto; display: block; margin: 0 auto 14px; }
+    .eyebrow {
+      font-size: 12px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    h1 { font-family: 'Sora', 'Inter', sans-serif; font-size: 28px; font-weight: 800; margin: 0; letter-spacing: -0.02em; }
+    .subtitle { color: var(--text-dim); margin-top: 6px; font-size: 15px; }
+    input[type="text"] {
+      width: 100%;
+      padding: 17px 18px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      color: var(--text);
+      font-size: 18px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    input[type="text"]:focus { border-color: var(--accent); background: var(--bg); }
+    input::placeholder { color: var(--text-dim); }
+    #suggestions { list-style: none; padding: 0; margin: 12px 0 0 0; }
+    #suggestions li {
+      padding: 16px 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      margin-bottom: 8px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.1s, border-color 0.1s, transform 0.05s;
+      user-select: none;
+    }
+    #suggestions li:active {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      transform: scale(0.98);
+    }
+    .no-match {
+      margin-top: 16px;
+      padding: 20px;
+      background: var(--surface);
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      text-align: center;
+    }
+    .no-match p { margin: 0 0 12px 0; color: var(--text-dim); font-size: 15px; }
+    .btn {
+      display: inline-block;
+      width: 100%;
+      padding: 16px 20px;
+      border-radius: 12px;
+      border: none;
+      font-size: 17px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: transform 0.05s, background 0.15s, opacity 0.15s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:active { transform: scale(0.98); background: oklch(0.48 0.08 240); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary {
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:active { transform: scale(0.98); background: var(--surface); }
+    /* C62: the register form now lives in a center-modal popup (reuses the locked .dialog-* pattern below). */
+    .dialog-card input[type="text"] { text-align: left; margin-bottom: 10px; }
+    .dialog-card .error { text-align: left; margin: 4px 0 10px; }
+    .success { text-align: center; padding: 60px 20px; }
+    .success-icon {
+      width: 96px;
+      height: 96px;
+      margin: 0 auto 24px;
+      border-radius: 50%;
+      background: var(--live-soft);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid var(--live);
+    }
+    .success-icon svg { width: 48px; height: 48px; stroke: var(--live); }
+    .success h2 { font-family: 'Sora', 'Inter', sans-serif; font-size: 24px; margin: 0 0 8px 0; font-weight: 800; }
+    .success .name {
+      font-family: 'Sora', 'Inter', sans-serif;
+      font-size: 28px;
+      font-weight: 800;
+      color: var(--live);
+      margin: 8px 0 32px;
+      word-break: break-word;
+    }
+    .success .btn { max-width: 280px; margin: 0 auto; }
+    .error {
+      margin-top: 12px;
+      padding: 12px 16px;
+      background: oklch(0.95 0.03 25);
+      border: 1px solid oklch(0.88 0.05 25);
+      border-radius: 10px;
+      color: var(--danger);
+      font-size: 14px;
+    }
+    .loading { text-align: center; padding: 40px 20px; color: var(--text-dim); }
+    [hidden] { display: none !important; }
+    /* C47: confirm-on-tap dialog (Option A center modal) — replaces native confirm()/alert() */
+    .dialog-overlay { position: fixed; inset: 0; background: oklch(0.18 0.005 75 / 0.42); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 50; }
+    .dialog-card { width: 100%; max-width: 360px; background: var(--bg); border: 1px solid var(--border); border-radius: 18px; padding: 26px 22px 22px; box-shadow: 0 18px 50px oklch(0.18 0.01 75 / 0.28); text-align: center; }
+    .dialog-avatar { width: 60px; height: 60px; border-radius: 50%; background: var(--accent-dim); color: var(--accent); font-family: 'Sora', sans-serif; font-weight: 800; font-size: 22px; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+    .dialog-name { font-family: 'Sora', 'Inter', sans-serif; font-size: 24px; font-weight: 800; letter-spacing: -0.01em; word-break: break-word; }
+    .dialog-q { color: var(--text-dim); font-size: 15px; margin: 6px 0 22px; }
+    .dialog-card .btn + .btn { margin-top: 10px; }
+    /* Round 2 (spec §12.3) — one-tap check-in hero. Mirrors the in-app .ckh-* system (styles.css,
+       Slice C) adapted to this page's tokens: app --accent-soft == --accent-dim, --ink == --text,
+       --muted == --text-dim, --r-lg==16px, --r-md==13px, --shadow inlined. Best-effort / additive:
+       hidden entirely unless a carried app session resolves an unambiguous claimed player. */
+    .ckh-card {
+      background: oklch(0.98 0.004 75 / 0.30);
+      -webkit-backdrop-filter: blur(3px) saturate(1.05);
+      backdrop-filter: blur(3px) saturate(1.05);
+      border: 1.5px solid var(--accent-bd);
+      border-radius: 16px;
+      box-shadow: 0 1px 2px oklch(0.18 0.005 75 / .06), 0 4px 14px oklch(0.18 0.005 75 / .05);
+      padding: 24px 18px 18px;
+      text-align: center;
+      width: 100%;
+      max-width: 400px;
+      margin: 4px auto 14px;
+    }
+    .ckh-av {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: var(--accent-dim); border: 1px solid var(--accent-bd); color: var(--accent);
+      font-family: 'Sora', 'Inter', sans-serif; font-weight: 800; font-size: 21px;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .ckh-eyebrow {
+      display: block; font-size: 11px; font-weight: 700; letter-spacing: .7px;
+      text-transform: uppercase; color: var(--text-dim); margin-top: 12px;
+    }
+    .ckh-name {
+      font-family: 'Sora', 'Inter', sans-serif; font-weight: 800; font-size: 23px;
+      color: var(--text); margin-top: 2px; word-break: break-word;
+    }
+    .ckh-btn {
+      width: 100%; margin-top: 16px; min-height: 52px; border: none; border-radius: 13px;
+      background: var(--accent); color: #fff; font-weight: 700; font-size: 17px;
+      font-family: inherit; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+      transition: transform 0.05s, background 0.15s;
+    }
+    .ckh-btn:active { transform: scale(0.98); background: oklch(0.48 0.08 240); }
+    .ckh-btn svg { width: 20px; height: 20px; }
+    .ckh-btn.is-in {
+      background: var(--live-soft); color: var(--live-ink);
+      border: 1px solid oklch(0.85 0.05 150); cursor: default;
+    }
+    .ckh-btn.is-in:active { transform: none; background: var(--live-soft); }
+    .ckh-alts { text-align: center; margin: 0 0 18px; }
+    .ckh-alt-label { font-size: 13px; font-weight: 600; color: var(--text-dim); }
+    /* Slice 5 (§13.8): widen the standalone kiosk card modestly on desktop; mobile unchanged. */
+    @media (min-width: 1024px) {
+      body { max-width: 640px; }
+      .cik-logo { height: 150px; }
+    }
+  

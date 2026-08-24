@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Moving players — drag</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root { --bd-bg:oklch(0.985 0.003 75); --bd-card:oklch(0.97 0.003 75); --bd-line:oklch(0.90 0.005 75);
+    --bd-ink:oklch(0.18 0.005 75); --bd-muted:oklch(0.50 0.005 75); --bd-accent:oklch(0.55 0.07 240); }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:26px 24px 44px; background:var(--bd-bg); color:var(--bd-ink);
+    font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  h1 { font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:19px; letter-spacing:.09em;
+    text-transform:uppercase; margin:0 0 5px; }
+  .sub { margin:0 0 24px; font-size:13px; color:var(--bd-muted); max-width:74ch; text-wrap:pretty; }
+  .row { display:flex; flex-wrap:wrap; gap:22px; align-items:flex-start; }
+  .opt { width:390px; }
+  .opt h2 { font-size:14px; margin:0 0 3px; }
+  .opt .badge { display:inline-block; margin-right:7px; padding:1px 7px; border-radius:999px;
+    background:var(--bd-accent); color:#fff; font-size:10px; font-weight:700; letter-spacing:.1em; vertical-align:2px; }
+  .opt p { margin:0 0 10px; font-size:12.5px; line-height:1.5; color:var(--bd-muted); text-wrap:pretty; }
+  .opt p b { color:var(--bd-ink); font-weight:600; }
+  .frame { border:1px solid var(--bd-line); border-radius:14px; overflow:hidden; background:var(--bd-card);
+    box-shadow:0 1px 2px oklch(0.18 0.005 75 / .06), 0 8px 22px oklch(0.18 0.005 75 / .06); }
+  .frame iframe { display:block; border:0; width:390px; height:800px; background:var(--bd-bg); }
+  .older { margin-top:34px; padding-top:16px; border-top:1px solid var(--bd-line); font-size:12.5px; color:var(--bd-muted); }
+  a { color:var(--bd-accent); }
+  a:hover { color:oklch(0.46 0.08 240); }
+</style>
+</head>
+<body>
+  <h1>Moving players &mdash; drag</h1>
+  <p class="sub">The direction you picked, built out. Every name carries a grip; drag it onto another team and the
+  player you land on trades places. Team totals update live while you hover, so the cost of the trade is visible
+  before you let go &mdash; and the two rails hold: Undo after every drop, and a warning when the swap leaves teams
+  apart on skill.</p>
+  <div class="row">
+    <div class="opt">
+      <h2><span class="badge">1</span>Resting</h2>
+      <p>Grips sit at the left of every name, one line of instruction, nothing else added. <b>Skill stays on the
+      right</b> so the roster still reads as a list at a glance.</p>
+      <div class="frame"><iframe src="screens/mg-teams-move-b.html" title="Resting"></iframe></div>
+    </div>
+    <div class="opt">
+      <h2><span class="badge">2</span>Mid-drag</h2>
+      <p>The name lifts and follows the finger, its old spot holds open as a dashed slot, and the team under it
+      highlights. <b>Both totals preview the trade</b> (&minus;6.5 / +6.5) and the row names who you'd swap with.</p>
+      <div class="frame"><iframe src="screens/mg-teams-move-b2.html" title="Mid-drag"></iframe></div>
+    </div>
+    <div class="opt">
+      <h2><span class="badge">3</span>Dropped</h2>
+      <p>Rosters and totals settle, an Undo strip sits under the list, and because this trade left Team&nbsp;2 and
+      Team&nbsp;3 <b>11.0 apart</b>, the drift warning fires with the fix suggested.</p>
+      <div class="frame"><iframe src="screens/mg-teams-move-b3.html" title="Dropped"></iframe></div>
+    </div>
+  </div>
+  <p class="older">Earlier exploration, still in the harness:
+    <a href="screens/mg-teams-move-a.html">A &middot; swap mode</a> &nbsp;
+    <a href="screens/mg-teams-move-c.html">C &middot; compare tray</a>
+  </p>
+</body>
+</html>

@@ -1,0 +1,871 @@
+/* ============================================================
+   ATHLETIC SPECIMEN — APP-WIDE CORRECTIONS
+   Round 2026-08-24
+
+   _rounds.css only reaches the screens a given round touched. Anything that has
+   to be true on EVERY screen lives here, and every screen loads it.
+   ============================================================ */
+
+/* "all headers everywhere need to be on the screen at all times even when
+   scrolling". The page header carries the two things you want most when you are
+   deep in a list: the way back, and what you are looking at. It sticks to the
+   top of the app's scroll region, spans the container gutters so rows pass
+   cleanly underneath, and casts almost nothing until content is behind it. */
+.pd-pagehdr,
+.ph-pagehdr {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  margin-inline: -8px;
+  padding-inline: 8px;
+  padding-top: 10px;
+  padding-bottom: 8px;
+  background: var(--bg, oklch(0.95 0.004 75));
+  box-shadow: 0 8px 10px -12px rgba(20, 20, 22, .55);
+}
+/* the app header above it stays put too */
+#app-header.pd-header {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+}
+
+/* Section heads, everywhere. The Manage hub set the pattern — accent label,
+   count if it has one, then a 2px rule running out to the right edge — and every
+   other screen was still drawing production's muted caption with a trailing
+   hairline the same weight as a row divider. One head style, app-wide. */
+.pl-sect {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 24px 0 5px;
+  padding-top: 0;
+  border-top: 0;
+  font-size: 13.5px;
+  letter-spacing: .12em;
+  color: var(--accent);
+}
+.pl-sect::after {
+  content: '';
+  display: block;
+  flex: 1;
+  min-width: 24px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.pl-sect:first-child { margin-top: 6px; }
+/* the legend is a caption, not a head */
+.pl-legend { color: var(--muted); font-size: 12px; letter-spacing: 0; margin-top: 6px; }
+.pl-legend::after { content: none; display: none; }
+
+/* "remove the line below payment" — the divider label on Add a team drew a
+   hairline out to both edges, which read as a section break in the middle of one
+   short form. It is a heading, so it looks like the form's other headings. */
+.rf-divlab { display: block; margin: 24px 2px 2px; }
+.rf-divlab::before,
+.rf-divlab::after { content: none; display: none; }
+.rf-divlab > span { font-size: 11px; letter-spacing: .12em; color: var(--muted); }
+
+
+/* Round 2026-08-24 — "for the score cards there needs to be a way to just click
+   a winner without having to put the score in". Most pool games at a Saturday
+   tournament are called, not scored: someone says "we got them" and the
+   organizer moves on. So each row of the card does both jobs — tap the team to
+   call the win, use the stepper only if a score was actually kept — and the
+   button says which one you are saving. No modes, no second screen. */
+.mgs-win {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.mgs-win:hover { background: none; }
+.mgs-dot {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid oklch(0.86 0.006 75);
+  background: #fff;
+  box-shadow: inset 0 1px 2px rgba(20, 20, 22, .06);
+  transition: background-color var(--m-state, 140ms) var(--e-settle, ease),
+              border-color var(--m-state, 140ms) var(--e-settle, ease),
+              box-shadow var(--m-state, 140ms) var(--e-settle, ease);
+}
+/* the card lives inside #mgss-sheet, whose own rules are id-scoped, so the
+   called-win state has to be too or it loses the cascade */
+.mgs-row.is-won,
+#mgss-sheet .mgs-row.is-won { background: var(--accent-soft); }
+.mgs-row.is-won .mgs-dot,
+#mgss-sheet .mgs-row.is-won .mgs-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 4px #fff;
+}
+.mgs-row.is-won .mgs-rname,
+#mgss-sheet .mgs-row.is-won .mgs-rname { font-weight: 700; color: var(--ink); }
+#mgss-sheet .mgs-win { flex: 1; display: flex; align-items: center; gap: 11px; min-height: 44px; border: 0; background: none; text-align: left; cursor: pointer; }
+#mgss-sheet .mgs-win:hover { background: none; }
+.mgs-hint { margin: 10px 2px 0; font-size: 12px; color: var(--muted); text-wrap: pretty; }
+
+
+/* "i dont want a check box … you just click a team and it highlights it" — on
+   the bracket card the team IS the control. The card keeps its plain divided
+   rows; the only change on pick is the faint accent wash. */
+#mgss-sheet .mgs-card[aria-label="Pick the winner"] .mgs-win {
+  width: 100%;
+  min-height: 52px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* the pair of teams reads as one bounded list, so it is closed top and bottom */
+#mgss-sheet .mgs-card[aria-label="Pick the winner"] .mgs-row:first-child { border-top: 1px solid var(--border); }
+#mgss-sheet .mgs-card[aria-label="Pick the winner"] .mgs-row + .mgs-row { border-bottom: 1px solid var(--border); }
+#mgss-sheet .mgs-card[aria-label="Pick the winner"] .mgs-row.is-won { background: var(--accent-soft); }
+#mgss-sheet .mgs-card[aria-label="Pick the winner"] .mgs-row.is-won .mgs-rname { font-weight: 700; color: var(--ink); }
+
+
+/* "its too bland" — a bracket game is the most consequential tap of the day and
+   the card said nothing about it. The teams now carry who they are and how they
+   got here, the stakes of the tap are stated under them, and the pick answers
+   with a WINNER pill next to the faint accent wash. Still two rows and three
+   hairlines: nothing moved, it just has something to say. */
+#mgss-sheet .mgs-card[aria-label="Pick the winner"] .mgs-win {
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 62px;
+  padding-right: 2px;
+}
+#mgss-sheet .mgs-wb { display: grid; gap: 3px; min-width: 0; }
+#mgss-sheet .mgs-card[aria-label="Pick the winner"] .mgs-rname { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+#mgss-sheet .mgs-rsub { font-size: 11.5px; color: var(--muted); }
+#mgss-sheet .mgs-wpill {
+  flex: none;
+  display: grid;
+  place-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 4px 10px -5px oklch(0.55 0.07 240 / .7), inset 0 1px 0 rgba(255, 255, 255, .18);
+  font-family: var(--font-display, 'Barlow Semi Condensed', sans-serif);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #fff;
+  opacity: 0;
+  transform: scale(.86);
+  transition: opacity var(--m-state, 140ms) var(--e-settle, ease),
+              transform var(--m-state, 140ms) var(--e-press, ease);
+}
+#mgss-sheet .mgs-row.is-won .mgs-wpill { opacity: 1; transform: none; }
+#mgss-sheet .mgs-stake {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 12px 2px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+#mgss-sheet .mgs-stake b { font-weight: 700; color: var(--ink); }
+
+
+/* .popup-overlay carries display:flex, which beats the [hidden] attribute, so a
+   card that starts closed has to be told twice */
+#mgss-sheet[hidden] { display: none !important; }
+
+
+/* the caption under a section head. .pl-legend is positioned against its head in
+   production, which throws it out of the content column on a wide window, so the
+   tap hint is its own plain block instead. */
+/* The pools content column is set per row by production, and it changes with
+   the window. Rather than guess it, the caption rides on .pl-sect — it gets the
+   same column at every width — with the head's type and rule turned back off. */
+.pl-tip {
+  margin: 4px 0 10px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.pl-tip::after { content: none; display: none; }
+
+
+/* ============================================================
+   Round 2026-08-24 — "this entire page looks awful, fix it" (Event settings).
+   It was eleven bare underlined inputs in a wall: shouting caps labels, "POOL
+   TO" and "POOL CAP" with no hint of what either means, and two switches
+   wedged into a field row. Nothing said what a setting DOES.
+
+   Now: three named groups on cards, one row per setting, every row a plain
+   label with a sentence under it, controls right-aligned and sized to their
+   job — and the scoring rules restated in the one line players will read.
+   ============================================================ */
+.set-intro {
+  margin: 2px 2px 4px;
+  font-size: 13px;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.set-card {
+  margin: 0 0 2px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .05), 0 0 0 1px oklch(0.91 0.005 75);
+  overflow: hidden;
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 14px;
+}
+.set-row + .set-row { border-top: 1px solid var(--border); }
+.set-row.is-stack { display: grid; gap: 8px; }
+.set-l {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.set-h {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.set-ctl { flex: none; display: flex; align-items: center; gap: 10px; }
+.set-pair { display: flex; align-items: center; gap: 6px; }
+.set-mini {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.set-in {
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 11px;
+  background: oklch(0.975 0.003 75);
+  box-shadow: inset 0 0 0 1px oklch(0.90 0.005 75);
+  font: 600 15px 'Inter', system-ui, sans-serif;
+  color: var(--ink);
+  transition: box-shadow var(--m-state, 140ms) var(--e-settle, ease),
+              background-color var(--m-state, 140ms) var(--e-settle, ease);
+}
+.set-in:focus {
+  outline: none;
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft);
+}
+.set-num {
+  width: 62px;
+  padding: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.set-num::-webkit-outer-spin-button,
+.set-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.set-wide { width: 100%; }
+.set-money { width: 148px; text-align: right; }
+.set-u { font-size: 12.5px; color: var(--muted); }
+.set-sum {
+  margin: 8px 2px 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.set-foot { display: grid; gap: 8px; margin-top: 22px; }
+.set-foot .mgr-status { margin: 0; text-align: center; }
+
+
+/* ============================================================
+   Round 2026-08-24 — "this page needs help, make it look like its editable,
+   right now its really bland" (Rules sheet). It was a plain bulleted document
+   with one 13px "Edit" link in the header: nothing on the page suggested the
+   organizer owned the words. Each section is now a card that says whose it is
+   and how to change it — its own Edit control, a hover state that lifts, and an
+   Add-a-section slot at the end. The rules text itself is untouched.
+   ============================================================ */
+.rlv-intro {
+  margin: 2px 2px 12px;
+  font-size: 13px;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.rlv-hedit,
+.rlv-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .06), inset 0 0 0 1px var(--accent-bd, oklch(0.86 0.03 240));
+  font: 700 12px 'Inter', system-ui, sans-serif;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background-color var(--m-state, 140ms) var(--e-settle, ease),
+              box-shadow var(--m-state, 140ms) var(--e-settle, ease),
+              transform var(--m-tap, 90ms) var(--e-press, ease);
+}
+.rlv-hedit svg,
+.rlv-edit svg { width: 13px; height: 13px; }
+.rlv-hedit:hover,
+.rlv-edit:hover { background: var(--accent-soft); }
+.rlv-edit:active { transform: scale(.97); }
+
+.rlv-card {
+  margin: 0 0 10px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .05), 0 0 0 1px oklch(0.91 0.005 75);
+  overflow: hidden;
+  transition: box-shadow var(--m-state, 140ms) var(--e-settle, ease);
+}
+.rlv-card:hover { box-shadow: 0 4px 14px -8px rgba(20, 20, 22, .3), 0 0 0 1px oklch(0.86 0.02 240); }
+.rlv-hd {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px 11px 14px;
+  border-bottom: 1px solid var(--border);
+  background: oklch(0.985 0.003 75);
+}
+.rlv-hd .rl-h { flex: 1; min-width: 0; margin: 0; border: 0; }
+/* production draws a rule after the section head; the card's own divider does
+   that job here */
+.rlv-hd .rl-h::after { content: none; display: none; }
+.rlv-lines { display: grid; gap: 9px; padding: 13px 14px 14px; }
+.rlv-lines .rl-li { margin: 0; }
+.rlv-lines .rl-p { margin: 0; }
+.rlv-card.is-note .rlv-lines { color: var(--muted); }
+
+.rlv-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 46px;
+  margin: 2px 0 0;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  box-shadow: inset 0 0 0 1.5px oklch(0.88 0.005 75);
+  font: 700 13.5px 'Inter', system-ui, sans-serif;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background-color var(--m-state, 140ms) var(--e-settle, ease),
+              box-shadow var(--m-state, 140ms) var(--e-settle, ease);
+}
+.rlv-add:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.rlv-plus { font-size: 17px; font-weight: 700; line-height: 1; }
+.rlv-foot { margin: 12px 2px 0; font-size: 12px; color: var(--muted); text-wrap: pretty; }
+
+
+/* a section being written: the same card, with the words still in fields */
+.rlv-card.is-new { box-shadow: 0 4px 14px -8px rgba(20, 20, 22, .3), 0 0 0 1.5px var(--accent); }
+.rlv-tin,
+.rlv-lin {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: oklch(0.975 0.003 75);
+  box-shadow: inset 0 0 0 1px oklch(0.90 0.005 75);
+  font: 600 14px 'Inter', system-ui, sans-serif;
+  color: var(--ink);
+}
+.rlv-tin {
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.rlv-lin { font-weight: 400; font-size: 14.5px; }
+.rlv-tin:focus,
+.rlv-lin:focus {
+  outline: none;
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft);
+}
+.rlv-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: start;
+  /* .rlv-lines is a grid, so the inline axis has to be pinned too or the pill
+     stretches the full card width */
+  justify-self: start;
+  width: fit-content;
+  height: 30px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  box-shadow: inset 0 0 0 1px oklch(0.89 0.005 75);
+  font: 700 12px 'Inter', system-ui, sans-serif;
+  color: var(--accent);
+  cursor: pointer;
+}
+.rlv-more:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.rlv-more span { font-size: 15px; line-height: 1; }
+
+
+/* ============================================================
+   Round 2026-08-24 — "i dont like the pools controls how they are, fix them".
+   They were a stray "Close controls" button, then two undifferentiated lists of
+   team names with chevrons that never said what tapping one would do, an
+   "Edit nets" button floating under each, and a red Reset sitting flush against
+   the last list. Now each pool is a card that states its nets and carries its
+   own Edit nets control, every team row says "Move", and the reset lives in the
+   same danger block the rest of the app uses.
+   ============================================================ */
+.pc-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 2px 12px;
+}
+.pc-note { flex: 1; min-width: 0; margin: 0; font-size: 12.5px; color: var(--muted); text-wrap: pretty; }
+.pc-done {
+  flex: none;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .06), inset 0 0 0 1px oklch(0.89 0.005 75);
+  font: 700 12.5px 'Inter', system-ui, sans-serif;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background-color var(--m-state, 140ms) var(--e-settle, ease),
+              box-shadow var(--m-state, 140ms) var(--e-settle, ease);
+}
+.pc-done:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
+
+.pc-card {
+  margin: 0 0 10px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .05), 0 0 0 1px oklch(0.91 0.005 75);
+  overflow: hidden;
+}
+.pc-hd {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 12px 11px 14px;
+  border-bottom: 1px solid var(--border);
+  background: oklch(0.985 0.003 75);
+}
+.pc-name { font-size: 14.5px; font-weight: 700; color: var(--ink); }
+.pc-nets {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display, 'Barlow Semi Condensed', sans-serif);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pc-nbtn {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .06), inset 0 0 0 1px var(--accent-bd, oklch(0.86 0.03 240));
+  font: 700 12px 'Inter', system-ui, sans-serif;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background-color var(--m-state, 140ms) var(--e-settle, ease);
+}
+.pc-nbtn:hover { background: var(--accent-soft); }
+
+.pc-team {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 12px 12px 14px;
+  border: 0;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--m-state, 140ms) var(--e-settle, ease);
+}
+.pc-team + .pc-team { border-top: 1px solid var(--border); }
+.pc-team:hover { background: oklch(0.98 0.004 240); }
+.pc-tn { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--ink); }
+.pc-move {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--accent);
+}
+.pc-team .mg-chev { flex: none; width: 17px; height: 17px; color: oklch(0.72 0.01 75); }
+
+
+/* the controls, working: a pool picker under the team you tapped, the nets label
+   as a field, and a reset that asks first */
+.pc-panel[hidden] { display: none; }
+.pc-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px 13px;
+  border-top: 1px solid var(--border);
+  background: var(--accent-soft);
+}
+.pc-pl { flex: 1 0 100%; font-size: 12px; font-weight: 700; color: var(--accent); }
+.pc-pbtn,
+.pc-pcancel {
+  height: 32px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .06), inset 0 0 0 1px var(--accent-bd, oklch(0.86 0.03 240));
+  font: 700 12.5px 'Inter', system-ui, sans-serif;
+  color: var(--accent);
+  cursor: pointer;
+}
+.pc-pcancel { box-shadow: inset 0 0 0 1px oklch(0.88 0.005 75); color: var(--muted); }
+.pc-pbtn:hover { background: var(--accent); color: #fff; }
+.pc-nin {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  font: 700 12px 'Inter', system-ui, sans-serif;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.pc-nin:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft); }
+.pc-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.pc-cin {
+  flex: 1 1 190px;
+  height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px oklch(0.88 0.05 25);
+  font: 500 14px 'Inter', system-ui, sans-serif;
+  color: var(--ink);
+}
+.pc-cin:focus { outline: none; box-shadow: inset 0 0 0 1.5px oklch(0.62 0.16 25), 0 0 0 4px oklch(0.62 0.16 25 / .14); }
+.pc-cgo {
+  height: 38px;
+  padding: 0 15px;
+  border: 0;
+  border-radius: 11px;
+  background: oklch(0.55 0.17 25);
+  box-shadow: 0 4px 10px -5px oklch(0.55 0.17 25 / .6), inset 0 1px 0 rgba(255, 255, 255, .16);
+  font: 700 13px 'Inter', system-ui, sans-serif;
+  color: #fff;
+  cursor: pointer;
+}
+.pc-cgo:hover { background: oklch(0.5 0.18 25); }
+
+
+/* the nets field and the team rows answer a press like everything else */
+.pc-team { transition: background-color var(--m-state, 140ms) var(--e-settle, ease), transform var(--m-tap, 90ms) var(--e-press, ease); }
+.pc-team:active { transform: scale(.995); }
+.pc-team[data-pc-open="1"] { background: var(--accent-soft); }
+.pc-team[data-pc-open="1"] .pc-move { color: var(--accent); }
+.pc-pbtn,
+.pc-pcancel,
+.pc-nbtn,
+.pc-done,
+.pc-cgo {
+  transition: background-color var(--m-state, 140ms) var(--e-settle, ease),
+              box-shadow var(--m-state, 140ms) var(--e-settle, ease),
+              color var(--m-state, 140ms) var(--e-settle, ease),
+              transform var(--m-tap, 90ms) var(--e-press, ease);
+}
+.pc-pbtn:active,
+.pc-pcancel:active,
+.pc-nbtn:active,
+.pc-done:active,
+.pc-cgo:active { transform: scale(.97); }
+
+
+/* the controls head carries its own toggle: closing the panel must never leave
+   a section head with nothing under it and no way back */
+.pc-head { gap: 10px; }
+.pc-toggle {
+  flex: none;
+  order: 2;
+  height: 28px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .06), inset 0 0 0 1px var(--accent-bd, oklch(0.86 0.03 240));
+  font: 700 11.5px 'Inter', system-ui, sans-serif;
+  letter-spacing: .04em;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background-color var(--m-state, 140ms) var(--e-settle, ease),
+              transform var(--m-tap, 90ms) var(--e-press, ease);
+}
+.pc-toggle:hover { background: var(--accent-soft); }
+.pc-toggle:active { transform: scale(.96); }
+.pc-head::after { order: 3; }
+
+
+/* Production sets a global button rule (min-height 38px, 16px type) that plain
+   class selectors lose to, so every compact pill on this page has to say its own
+   size out loud — the same treatment _rounds.css already gives .mgs-b and
+   friends. The team row also inherits white text from that rule; it is a row,
+   not a button face. */
+/* production's rule is button { font-size: 16px !important } (an iOS zoom
+   guard), so the type size has to be !important right back */
+.pc-toggle { min-height: 28px; height: 28px; font-size: 11.5px !important; }
+.pc-done { min-height: 32px; height: 32px; font-size: 12.5px !important; }
+.pc-nbtn { min-height: 30px; height: 30px; font-size: 12px !important; }
+.pc-pbtn,
+.pc-pcancel { min-height: 32px; height: 32px; font-size: 12.5px !important; }
+.pc-cgo { min-height: 38px; height: 38px; font-size: 13px !important; }
+.pc-team { min-height: 0; color: var(--ink); font-size: 15px !important; }
+.pc-team .pc-tn { color: var(--ink); font-size: 15px; }
+.pc-team .pc-move { color: var(--accent); font-size: 12px; }
+/* the rules-sheet pills and the settings switches ride the same production rule */
+.rlv-edit,
+.rlv-hedit,
+.rlv-more { min-height: 30px; height: 30px; font-size: 12px !important; }
+.rlv-add { min-height: 46px; height: 46px; font-size: 13.5px !important; }
+.rlv-tin { font-size: 12.5px !important; }
+.rlv-lin { font-size: 14.5px !important; }
+.mgs-win { font-size: 15px !important; }
+.set-in { font-size: 15px !important; }
+
+
+/* ============================================================
+   The logo mark is in the markup of every screen (.pd-watermark) but production
+   ships it display:none, so no page ever showed it. Bringing it back as what it
+   is: a quiet ghost behind the page, bottom-right, under every card and the nav.
+   ============================================================ */
+#app-shell > .pd-watermark {
+  display: block !important; /* production hides it with !important */
+  position: fixed;
+  width: 300px;
+  height: auto;
+  opacity: .075;
+  z-index: 0;
+  pointer-events: none;
+  user-select: none;
+}
+/* the canvas hosts pin it inside the phone frame instead of the browser window */
+#inline-app #app-shell > .pd-watermark { position: absolute; }
+#app-content { position: relative; z-index: 1; }
+
+/* the hub header carries the mark in its top-right corner - the one place the
+   brand reads as brand rather than as the ghost behind the page */
+.mgh-scope { position: relative; }
+.mgh-scope > .mgh-mark {
+  position: absolute;
+  top: -2px;
+  right: 0;
+  width: 62px;
+  height: auto;
+  opacity: .85;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ============================================================
+   APP HEADER — the title block owns the left, the account owns the right
+   "Updated 7:42 PM" was sitting off on its own beside the wordmark, competing
+   with it. It belongs to the wordmark: a third, quiet line under COLORADO. The
+   profile bubble goes to the far right of the bar, centred on the whole block,
+   which is where a thumb reaches for it.
+   ============================================================ */
+#app-header.pd-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 14px;
+  row-gap: 1px;
+}
+#app-header.pd-header > .app-header-mode { grid-area: 1 / 1; }
+#app-header.pd-header > .pd-wordmark { grid-area: 1 / 1 / span 2 / span 1; align-self: center; }
+/* the sync line belongs to the account corner: right-aligned, tucked under the
+   bubble, so the left column is title and nothing else */
+#app-header.pd-header > #js-sync-notice {
+  grid-area: 2 / 2;
+  position: static;
+  inset: auto;
+  margin: 0;
+  justify-self: end;
+  text-align: right;
+}
+/* a third line under a title reads as caption, not as a second headline */
+#app-header.pd-header > #js-sync-notice .shared-sync-notice {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted, oklch(0.55 0.012 75));
+}
+#app-header.pd-header > .pd-hgrp {
+  grid-area: 1 / 2;
+  position: static;
+  justify-self: end;
+  transform: none;
+  margin: 0;
+}
+
+/* ============================================================
+   SCROLLING
+   Every scroll surface in the app was drawing the operating system's default
+   bar: a chunky grey column with a boxed track, the one part of the screen the
+   design system never touched. One bar for the whole app instead - a 4px pill in
+   the app's own warm ink on a transparent track, wide enough to grab, quiet
+   enough to forget. Plus the manners: a scroll that starts inside a card stays
+   inside it, the page under an open card does not drift, and anything scrolled
+   to lands below the sticky header rather than under it.
+   ============================================================ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.66 0.012 75 / .5) transparent;
+}
+::-webkit-scrollbar { width: 11px; height: 11px; background: transparent; }
+::-webkit-scrollbar-track { background: transparent; border: 0; }
+::-webkit-scrollbar-thumb {
+  background: oklch(0.66 0.012 75 / .5);
+  background-clip: padding-box;
+  border: 3.5px solid transparent;   /* inset, so the pill floats off the edge */
+  border-radius: 999px;
+  min-height: 44px;
+}
+::-webkit-scrollbar-thumb:hover { background: oklch(0.52 0.014 75 / .66); background-clip: padding-box; }
+::-webkit-scrollbar-thumb:active { background: var(--accent, oklch(0.5 0.06 245)); background-clip: padding-box; }
+::-webkit-scrollbar-corner, ::-webkit-scrollbar-button { display: none; background: transparent; }
+
+/* the app's own scroll region: a scroll that reaches the end stops there instead
+   of dragging the host page with it, and a jump lands clear of the two sticky
+   headers rather than behind them */
+html, body, #app-content {
+  overscroll-behavior-y: contain;
+  scroll-padding-top: 108px;
+}
+#app-content { -webkit-overflow-scrolling: touch; }
+@media (prefers-reduced-motion: no-preference) {
+  html, #app-content { scroll-behavior: smooth; }
+}
+body.no-motion, body.no-motion #app-content { scroll-behavior: auto; }
+
+/* card and sheet bodies: contained, and the width never jumps when the bar
+   appears mid-list */
+.mgv-tbody, .mgv-scbody, .popup-body, .mgs-body {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* the page behind an open card holds still - nothing is more obviously broken
+   than a background that scrolls under a modal */
+body.pd-noscroll, body.pd-noscroll #app-content { overflow: hidden !important; }
+
+/* sideways scrollers - the bracket pan and the net strips - carry no bar at all;
+   the content is the affordance, and a horizontal bar across a bracket reads as
+   a line in the drawing */
+.bk-pv-pan, .bt-pan, .pl-hstrip, [data-hscroll] { scrollbar-width: none; }
+.bk-pv-pan::-webkit-scrollbar,
+.bt-pan::-webkit-scrollbar,
+.pl-hstrip::-webkit-scrollbar,
+[data-hscroll]::-webkit-scrollbar { height: 0; width: 0; }
+.bk-pv-pan, .bt-pan, [data-hscroll] { overscroll-behavior-x: contain; }
+
+
+/* The real bracket's canvas is absolutely positioned so production can pan and
+   zoom it from JS; without that JS the pane collapses to nothing and the drawing
+   disappears. Let the canvas flow instead, and the pane takes its height. */
+.bt-pan { overflow-x: auto; overflow-y: hidden; }
+.bt-pan > .bt-canvas { position: relative; inset: auto; }
+.bt-pan .bt-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.bt-pan .bt-links path { fill: none; stroke: oklch(0.86 0.006 75); stroke-width: 1.5; }
+
+
+/* Round 2026-08-24 — "add to the score card a way for live scoring that can be
+   saved". The card now has two exits: finish the game, or save the score it is
+   at right now. The live action is secondary — a game in progress is not a
+   result, so it never looks like the primary commit. */
+.mgs-foot { display: flex; flex-direction: column; gap: 8px; }
+.mgs-live {
+  width: 100%;
+  height: 42px;
+  border: 0;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .05), 0 0 0 1px var(--border);
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--ink);
+  cursor: pointer;
+  transition: box-shadow .15s var(--e-settle, ease), transform .12s var(--e-settle, ease);
+}
+.mgs-live:hover { transform: translateY(-1px); box-shadow: 0 2px 5px rgba(20, 20, 22, .08), 0 0 0 1px oklch(0.86 0.006 75); }
+.mgs-live:active { transform: none; }
+
+/* a running score on the schedule reads as provisional, not as a result */
+.pl-g .sc.is-live { color: var(--live-ink, oklch(0.52 0.13 152)); font-weight: 700; }
+
+/* bracket rows can carry the running score, right-aligned off the name */
+.bt-sc {
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.bt-node.pd-bk-live .bt-sc { color: var(--live-ink, oklch(0.52 0.13 152)); }
+.bt-row.win .bt-sc { color: var(--ink); }
+
+/* the bracket card's rows hold a stepper now, so the team button stops eating
+   the whole row */
+.mgs-card.has-live-score .mgs-row[data-mgss-row] { gap: 8px; }
+#mgss-sheet .mgs-card.has-live-score[aria-label="Pick the winner"] .mgs-win { width: auto; }

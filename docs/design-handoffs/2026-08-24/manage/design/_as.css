@@ -1,0 +1,21 @@
+/* ============================================================
+   ATHLETIC SPECIMEN — the canvas stylesheet
+   ============================================================
+
+   This file is ONE @import of the app's REAL shipped stylesheet, served live
+   from production. Athletic Specimen serves styles.css as a static file with
+   no build hash, so unlike a bundled app this line NEVER goes stale — a deploy
+   updates the canvas automatically on the next load.
+
+   Owner of every value: public/styles.css in the repo. Nothing is copied here.
+   ============================================================ */
+
+@import url("https://athletic-specimen.com/styles.css");
+
+/* The two rule blocks public/index.html carries INLINE (not in styles.css).
+   Tournament tables and badges depend on them, so the canvas needs them too.
+   Copied verbatim from public/index.html lines 32-35. */
+.table { width:100%; border-collapse:collapse; }
+.table thead th { text-align:left; font-weight:600; border-bottom:1px solid var(--border); padding:6px 8px; }
+.table tbody td { border-bottom:1px solid var(--border); padding:6px 8px; }
+.badge { display:inline-block; padding:2px 8px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:12px; }

@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tournament - Bracket &amp; scores (admin)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_as.css">
+<link rel="stylesheet" href="../_shared.css">
+<link rel="stylesheet" href="../_motion-app.css">
+<script src="../_shared.js" defer></script>
+<script src="../_motion-app.js" defer></script>
+</head>
+<body class="pd-public-active">
+<div id="root">
+<div id="app-shell">
+  <img class="pd-watermark" src="https://athletic-specimen.com/logo-mark.png" alt="" aria-hidden="true" />
+  <header id="app-header" class="pd-header">
+    <span class="app-header-mode">PUBLIC</span>
+    <div class="pd-wordmark">
+      <div class="pd-wm-1">ATHLETIC SPECIMEN</div>
+      <div class="pd-wm-2">COLORADO</div>
+    </div>
+    <div class="pd-hgrp">
+      <button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">M</button>
+    </div>
+    <div id="js-sync-notice"><p class="small shared-sync-notice is-live">Updated 7:42 PM</p></div>
+  </header>
+  <div id="app-content">
+    <div id="tab-manage" class="tab-panel active">
+      <div class="container">
+<div class="pd-pagehdr"><button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button><div class="pd-htitle">Bracket &amp; scores</div></div>
+<div class="pl-sect">Bracket controls</div>
+<button type="button" class="mgbk-players" data-mgbk-players><div class="mg-rb"><div class="mg-rn">Full bracket tree · the players' view</div><div class="mg-rs">Open the public bracket page</div></div><svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></button>
+<div class="mgv-bkr"><div class="mgv-bkrh"><span>Winners bracket · G7–G8</span><span class="mgv-bkrs">live now</span></div><div class="mgv-bkm is-live" data-mgbk-score="w2-1"><span class="mgv-bkidw"><span class="mgv-bkid">G7</span><span class="mgv-bknet">Net 1</span></span><div class="mgv-bkb"><div class="mgv-bkl"><span class="mgv-bkn">Net Gains</span><span class="mgv-bks">9</span></div><div class="mgv-bkl"><span class="mgv-bkn">The Dawg House</span><span class="mgv-bks">7</span></div><div class="mgv-bkmeta">Tap to score</div></div><span class="mgv-bkpill is-live">Live</span></div><div class="mgv-bkm" data-mgbk-score="w2-2"><span class="mgv-bkidw"><span class="mgv-bkid">G8</span><span class="mgv-bknet">Net 2</span></span><div class="mgv-bkb"><div class="mgv-bkl"><span class="mgv-bkn">Spike Squad</span></div><div class="mgv-bkl"><span class="mgv-bkn">Sand Sharks</span></div><div class="mgv-bkmeta">Winner of G3 vs winner of G4 · starts when Net 2 opens</div></div><span class="mgv-bkpill is-next">Up next</span></div></div>
+<div class="mgv-bkr"><div class="mgv-bkrh"><span>Losers bracket · G9–G10</span><span class="mgv-bkrs">needs G7, G8</span></div><div class="mgv-bkm is-tbd"><span class="mgv-bkid">G9</span><div class="mgv-bkb"><div class="mgv-bkl"><span class="mgv-bkn">Bump Set Ace</span></div><div class="mgv-bkl"><span class="mgv-bkn">Loser of G7</span></div></div></div><div class="mgv-bkm is-tbd"><span class="mgv-bkid">G10</span><div class="mgv-bkb"><div class="mgv-bkl"><span class="mgv-bkn">Dig Deep</span></div><div class="mgv-bkl"><span class="mgv-bkn">Loser of G8</span></div></div></div></div>
+<div class="mgv-bkr"><div class="mgv-bkrh"><span>Winners bracket · G11</span><span class="mgv-bkrs">needs G7, G8</span></div><div class="mgv-bkm is-tbd"><span class="mgv-bkid">G11</span><div class="mgv-bkb"><div class="mgv-bkl"><span class="mgv-bkn">Winner of G7</span></div><div class="mgv-bkl"><span class="mgv-bkn">Winner of G8</span></div></div></div></div>
+<div class="mgv-bkr"><div class="mgv-bkrh"><span>Losers bracket · G12</span><span class="mgv-bkrs">waiting</span></div><div class="mgv-bkm is-tbd"><span class="mgv-bkid">G12</span><div class="mgv-bkb"><div class="mgv-bkl"><span class="mgv-bkn">Winner of G9</span></div><div class="mgv-bkl"><span class="mgv-bkn">Winner of G10</span></div></div></div></div>
+<div class="mgv-bkr"><div class="mgv-bkrh"><span>Losers bracket · G13</span><span class="mgv-bkrs">waiting</span></div><div class="mgv-bkm is-tbd"><span class="mgv-bkid">G13</span><div class="mgv-bkb"><div class="mgv-bkl"><span class="mgv-bkn">Loser of G11</span></div><div class="mgv-bkl"><span class="mgv-bkn">Winner of G12</span></div></div></div></div>
+<div class="mgv-bkr"><div class="mgv-bkrh"><span>Championship · G14</span><span class="mgv-bkrs">waiting</span></div><div class="mgv-bkm is-tbd"><span class="mgv-bkid">G14</span><div class="mgv-bkb"><div class="mgv-bkl"><span class="mgv-bkn">Winner of G11</span></div><div class="mgv-bkl"><span class="mgv-bkn">Winner of G13</span></div></div></div></div>
+<button type="button" class="mgv-bkdone" data-mgbk-showdone><span>G1–G6 already done</span><span class="mgv-bkdonel">Show</span></button>
+<div class="pl-sect mgv-dsect" aria-hidden="true"></div>
+<button type="button" class="mgts-danger" data-mgbk-reset>Reset the bracket</button>
+<div class="mgbk-note">Clears the bracket and returns to pools. Pool games and scores are kept. Type the tournament name to confirm.</div>
+      </div>
+    </div>
+  </div>
+  <nav id="bottom-nav">
+    <button class="nav-btn" data-nav-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="tournament">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>
+      <span>Tournament</span>
+    </button>
+    <button class="nav-btn active" data-nav-tab="manage" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
+      <span>Manage</span>
+    </button>
+  </nav>
+
+</div>
+</div>
+</body>
+</html>

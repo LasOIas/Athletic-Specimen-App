@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Manage - Tournament sub-hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_as.css">
+<link rel="stylesheet" href="../_rounds.css">
+<link rel="stylesheet" href="../_shared.css">
+<link rel="stylesheet" href="../_motion-app.css">
+<script src="../_shared.js" defer></script>
+<script src="../_motion-app.js" defer></script>
+</head>
+<body class="pd-public-active">
+<div id="root">
+<div id="app-shell">
+  <img class="pd-watermark" src="https://athletic-specimen.com/logo-mark.png" alt="" aria-hidden="true" />
+  <header id="app-header" class="pd-header">
+    <span class="app-header-mode">PUBLIC</span>
+    <div class="pd-wordmark">
+      <div class="pd-wm-1">ATHLETIC SPECIMEN</div>
+      <div class="pd-wm-2">COLORADO</div>
+    </div>
+    <div class="pd-hgrp">
+      <button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">M</button>
+    </div>
+    <div id="js-sync-notice"><p class="small shared-sync-notice is-live">Updated 7:42 PM</p></div>
+  </header>
+  <div id="app-content">
+    <div id="tab-manage" class="tab-panel active">
+      <div class="container">
+<div class="pd-pagehdr"><button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button><div class="pd-htitle">August 2026 Tournament</div></div>
+        <div class="tv-when"><b>Sat Aug 22</b> · 10:00 AM · Washington Park · 4s co-ed · $80 a team</div>
+        <div class="mgh-track" aria-label="Where this tournament is"><span class="mgh-step is-done">Setup</span><span class="mgh-step is-now">Sign-ups</span><span class="mgh-step">Check-in</span><span class="mgh-step">Pools</span><span class="mgh-step">Bracket</span><span class="mgh-step">Done</span></div>
+        <div class="tv-stats">
+          <div class="tv-stat is-attn"><span class="tv-sn">6</span><span class="tv-sl">Teams in</span></div>
+          <div class="tv-stat"><span class="tv-sn">4<small>/6</small></span><span class="tv-sl">Paid</span></div>
+          <div class="tv-stat"><span class="tv-sn">3</span><span class="tv-sl">Nets</span></div>
+          <div class="tv-stat"><span class="tv-sn">0<small>/18</small></span><span class="tv-sl">Games</span></div>
+        </div>
+
+        <div class="tv-needs" data-tv-needs>
+          <div class="pl-sect">Needs you<span class="mgh-sectn">2</span></div>
+          <div class="mg-row mgh-nrow">
+            <div class="mgh-face"><button type="button" class="mgh-nbody" data-mgt-view="teams"><span class="mgh-nn">2 of 6 teams haven't paid</span><span class="mgh-ns">Block Party · Dig Deep — the other 4 are paid</span></button><button type="button" class="mgh-nact" data-mgt-view="teams"><span>See who paid</span></button></div>
+          </div>
+          <div class="mg-row mgh-nrow">
+            <div class="mgh-face"><button type="button" class="mgh-nbody" data-mgt-view="pools"><span class="mgh-nn">Pools aren't drawn</span><span class="mgh-ns">6 teams in, 3 nets ready — drawing takes a second</span></button><button type="button" class="mgh-nact is-go" data-mgt-view="pools"><span>Draw</span></button></div>
+          </div>
+        </div>
+
+        <div class="pl-sect">Sign-ups</div>
+        <a class="mg-row" data-mgt-view="registration">
+          <div class="mg-rb"><div class="mg-rn">Registration &amp; public page</div><div class="mg-rs"><span class="mgt-on">Open</span> · closes Fri Aug 21 · what players see</div></div>
+          <span class="mgv-rmeta">Open</span><svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        <a class="mg-row" data-mgt-view="teams">
+          <div class="mg-rb"><div class="mg-rn">Teams &amp; payment</div><div class="mg-rs">6 registered · 2 unpaid · rosters and buy-in</div></div>
+          <span class="mgv-rmeta">2 unpaid</span><svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        <a class="mg-row" data-mgt-view="teamadd">
+          <div class="mg-rb"><div class="mg-rn">Add a team</div><div class="mg-rs">For the pair who paid you at the net</div></div>
+          <svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+
+        <div class="pl-sect">Play</div>
+        <a class="mg-row" data-mgt-view="pools">
+          <div class="mg-rb"><div class="mg-rn">Pools &amp; schedule</div><div class="mg-rs">Not drawn · 2 pools of 6 across 3 nets</div></div>
+          <span class="mgv-rmeta">To do</span><svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        <a class="mg-row" data-mgt-view="scoresheet">
+          <div class="mg-rb"><div class="mg-rn">Score sheet</div><div class="mg-rs">Enter pool results as each game finishes</div></div>
+          <svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        <a class="mg-row" data-mgt-view="bracket">
+          <div class="mg-rb"><div class="mg-rn">Bracket &amp; scores</div><div class="mg-rs">Double elimination · opens when pool play finishes</div></div>
+          <span class="mgv-rmeta">Locked</span><svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        <a class="mg-row" data-mgt-view="rules">
+          <div class="mg-rb"><div class="mg-rn">Rules sheet</div><div class="mg-rs">First to 21, win by 2 (cap 25) · 4 sections live</div></div>
+          <svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+
+        <div class="pl-sect">The event</div>
+        <a class="mg-row" data-mgt-view="settings">
+          <div class="mg-rb"><div class="mg-rn">Event settings</div><div class="mg-rs">4s co-ed · $80 a team · 12-team cap · 3 nets</div></div>
+          <svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        <a class="mg-row" data-mgt-view="editor">
+          <div class="mg-rb"><div class="mg-rn">Announcement</div><div class="mg-rs">The note at the top of the public page</div></div>
+          <svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        <a class="mg-row" data-nav-tab="tournament">
+          <div class="mg-rb"><div class="mg-rn">Player view</div><div class="mg-rs">Open this tournament the way players see it</div></div>
+          <svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+
+        <div class="pl-sect">After it ends</div>
+        <a class="mg-row" data-mgt-view="closeout">
+          <div class="mg-rb"><div class="mg-rn">Close out</div><div class="mg-rs">Crowns the champion and archives the event</div></div>
+          <span class="mgv-rmeta">Not yet</span><svg class="mg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </a>
+        <button type="button" class="pk-add" data-mgtl-new><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>Create another tournament</button>
+        <p class="tv-note">Everything on this page edits August 2026 Tournament only. Switch tournaments from the title on Manage.</p>
+
+        <div class="pl-sect mgv-dsect" aria-hidden="true"></div>
+        <div class="mgv-danger"><div class="mgv-drow"><span class="mgv-dtxt"><span class="mgv-dt">Reset the whole tournament</span><span class="mgv-dd">Clears the pools, the schedule, every score and the bracket, and puts this back to setup. Registered teams and their payments are kept.</span></span><button type="button" class="mgts-danger mgv-dbtn" data-mgt-fullreset>Reset</button></div><div class="mgv-drow"><span class="mgv-dtxt"><span class="mgv-dt">Delete this tournament</span><span class="mgv-dd">Removes the event, its teams, their payments and every result. Players lose it too, and it cannot be undone.</span></span><button type="button" class="mgts-danger mgv-dbtn mgv-del" data-mgt-delete>Delete</button></div><div class="mgv-dnote">Both ask you to type the tournament name before anything happens.</div></div>
+      </div>
+    </div>
+  </div>
+  <nav id="bottom-nav">
+    <button class="nav-btn" data-nav-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="tournament">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>
+      <span>Tournament</span>
+    </button>
+    <button class="nav-btn active" data-nav-tab="manage" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
+      <span>Manage</span>
+    </button>
+  </nav>
+</div>
+</div>
+</body>
+</html>

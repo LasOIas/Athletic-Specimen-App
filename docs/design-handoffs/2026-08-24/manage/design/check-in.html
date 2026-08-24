@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Athletic Specimen - Check In</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* Page chrome only - the harness AROUND the phone. Every pixel inside the frame is the app's
+     own shipped stylesheet, untouched. Values mirror the AS tokens. */
+  :root { --c-bg:oklch(0.985 0.003 75); --c-card:oklch(0.97 0.003 75); --c-line:oklch(0.90 0.005 75);
+    --c-ink:oklch(0.18 0.005 75); --c-mut:oklch(0.50 0.005 75); --c-acc:oklch(0.55 0.07 240); }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; background:var(--c-bg); color:var(--c-ink); font-family:'Inter',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; }
+  .tb { display:flex; align-items:center; gap:14px; padding:11px 20px; border-bottom:1px solid var(--c-line);
+    background:var(--c-card); flex-wrap:wrap; }
+  .tb-h { font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:15px;
+    letter-spacing:.09em; text-transform:uppercase; margin:0; white-space:nowrap; }
+  .tb-b { color:var(--c-mut); font-size:12px; }
+  .tb-sp { flex:1; }
+  .tb a { font-size:12px; color:var(--c-mut); text-decoration:none; border-bottom:1px solid var(--c-line);
+    white-space:nowrap; }
+  .tb a:hover, .tb a.on { color:var(--c-acc); border-color:var(--c-acc); }
+  select { font:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--c-line);
+    border-radius:8px; background:#fff; color:var(--c-ink); max-width:250px; }
+  .seg { display:flex; border:1px solid var(--c-line); border-radius:999px; overflow:hidden; background:#fff; }
+  .seg button { font-family:'Barlow Semi Condensed',sans-serif; font-weight:700; font-size:12px;
+    letter-spacing:.1em; text-transform:uppercase; padding:6px 15px; border:0; background:transparent;
+    color:var(--c-mut); cursor:pointer; }
+  .seg button.on { background:var(--c-acc); color:#fff; }
+  .stage { flex:1; display:flex; align-items:flex-start; justify-content:center; padding:24px 20px 40px; overflow:auto; }
+
+  .stage { scrollbar-width: thin; scrollbar-color: oklch(0.70 0.01 75 / .5) transparent; overscroll-behavior: contain; }
+  .stage::-webkit-scrollbar { width: 11px; background: transparent; }
+  .stage::-webkit-scrollbar-track { background: transparent; }
+  .stage::-webkit-scrollbar-thumb { background: oklch(0.70 0.01 75 / .5); background-clip: padding-box;
+    border: 3.5px solid transparent; border-radius: 999px; min-height: 44px; }
+  .stage::-webkit-scrollbar-thumb:hover { background: oklch(0.56 0.012 75 / .66); background-clip: padding-box; }
+
+  .dev { border:1px solid var(--c-line); border-radius:16px; overflow:hidden; background:var(--c-card);
+    box-shadow:0 1px 2px oklch(0.18 0.005 75 / .06), 0 6px 20px oklch(0.18 0.005 75 / .05); }
+  .dev iframe { display:block; border:0; width:390px; height:844px; background:var(--c-bg); }
+  body.wide .dev iframe { width:1280px; height:820px; }
+</style>
+</head>
+<body>
+  <div class="tb">
+    <h1 class="tb-h">Check In</h1>
+    <span class="tb-b">Day-of check in. The in-app tab, and the standalone page behind the QR code.</span>
+    <span class="tb-sp"></span>
+    <a href="home.html">Home</a>
+    <a href="check-in.html" class="on">Check In</a>
+    <a href="tournament.html">Tournament</a>
+    <a href="manage.html">Manage</a>
+    <a href="account.html">Account</a>
+    <a href="motion.html">Motion</a>
+    <select id="jump" aria-label="Jump to a state"><option value="ci-kiosk-idle">Check In - idle</option><option value="ci-kiosk-results">Check In - search results</option><option value="ci-kiosk-confirm">Check In - tap confirm</option><option value="kiosk-search">Kiosk - search</option><option value="kiosk-nomatch">Kiosk - no match / I'm new</option><option value="kiosk-register">Kiosk - register dialog</option><option value="kiosk-success">Kiosk - checked in</option></select>
+    <div class="seg"><button id="b390" class="on">Phone</button><button id="b1280">Desktop</button></div>
+  </div>
+  <div class="stage"><div class="dev"><iframe id="fr" title="Check In"></iframe></div></div>
+<script src="_tournaments.js"></script>
+<script src="_shared.js" defer></script>
+<script>
+(function () {
+  var IDS = ["ci-kiosk-idle","ci-kiosk-results","ci-kiosk-confirm","kiosk-search","kiosk-nomatch","kiosk-register","kiosk-success"];
+  var ROUTES = {"tn:hub":"tn-hub","tn:register":"tn-register-form","tn:rules":"tn-rules","tn:pools":"pl-pools","tn:bracket":"bk-live","pools:seeding":"pl-seeding","pools:A":"pl-pools","pools:B":"pl-pools","mg:tournament":"mgts-hub","mg:tournaments":"mg-tournaments","mg:pickup":"mg-pickup-list","mg:checkin":"mg-checkin","mg:players":"mg-players","mg:teams":"mg-teams","mg:admins":"mg-admins","mg:lead":"mg-hub","mgt:registration":"mgts-registration","mgt:teams":"mgts-teams-pay","mgt:pools":"mgts-pools-live","mgt:bracket":"mgts-bracket","mgt:settings":"mgts-settings","mgt:rules":"mgts-rules-view","mgt:closeout":"mgts-closeout","mgtl:new":"mg-tournament-new"};
+  var NAV_PAGE = {"home":"home.html","players":"check-in.html","tournament":"tournament.html","manage":"manage.html"};
+  var MINE = "players";
+  var fr = document.getElementById('fr'), jump = document.getElementById('jump');
+
+  // Where you came from. Every screen the app opens is pushed here, so a back
+  // control returns to the screen you were actually on rather than the one its
+  // markup happens to name. Empty stack = you arrived here cold, so the back
+  // control's own destination stands.
+  var STACK = [], CUR = null;
+
+
+  // The picked tournament is app-wide state, not a label on one screen. It is
+  // remembered here and stamped into every screen the canvas renders, so the
+  // name (and the hub's status line) follow you into teams, pools, bracket and
+  // settings - and survive a page change.
+  var TKEY = 'as-canvas-tournament';
+  var PICK = null;
+  try { PICK = JSON.parse(localStorage.getItem(TKEY) || 'null'); } catch (e) {}
+  var TNAME = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\s+Tournament\b/g;
+
+
+  // Needs-you is per tournament: a finished event has nothing to do, one that
+  // has not opened has exactly one thing.
+  function stampNeeds(scope, T) {
+    var box = scope.querySelector ? scope.querySelector('[data-tv-needs]') : null;
+    if (!box || !T.needs) return;
+    if (!T.needs.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    var html = '<div class="pl-sect">Needs you<span class="mgh-sectn">' + T.needs.length + '</span></div>';
+    T.needs.forEach(function (nd) {
+      html += '<div class="mg-row mgh-nrow"><div class="mgh-face">' +
+        '<button type="button" class="mgh-nbody" data-mgt-view="' + nd.view + '">' +
+        '<span class="mgh-nn">' + nd.n + '</span><span class="mgh-ns">' + nd.s + '</span></button>' +
+        '<button type="button" class="mgh-nact' + (nd.go ? ' is-go' : '') + '" data-mgt-view="' + nd.view + '">' +
+        '<span>' + nd.act + '</span></button></div></div>';
+    });
+    box.innerHTML = html;
+  }
+
+  // and so is what each row says about itself
+  function stampRows(scope, T) {
+    if (!T.rows || !scope.querySelectorAll) return;
+    Object.keys(T.rows).forEach(function (key) {
+      var r = T.rows[key];
+      var el = scope.querySelector('.mg-row[data-mgt-view="' + key + '"]') ||
+               scope.querySelector('.mg-row[data-mg-area="' + key + '"]');
+      if (!el) return;
+      var sub = el.querySelector('.mg-rs');
+      if (sub && r.sub) sub.innerHTML = r.sub;
+      var meta = el.querySelector('.mgv-rmeta');
+      if (r.meta) {
+        if (!meta) {
+          meta = document.createElement('span');
+          meta.className = 'mgv-rmeta';
+          el.insertBefore(meta, el.querySelector('.mg-chev'));
+        }
+        meta.textContent = r.meta;
+      } else if (meta) {
+        meta.remove();
+      }
+    });
+  }
+
+  function applyTournament(scope) {
+    if (!scope || !PICK || !PICK.id) return;
+    var T = (window.AS_TOURNAMENTS || {})[PICK.id] || PICK;
+    PICK = {
+      id: PICK.id, name: T.name || PICK.name, meta: T.meta || PICK.meta,
+      when: T.when, stats: T.stats, phase: T.phase
+    };
+    if (!PICK.name) return;
+    stampNeeds(scope, T);
+    stampRows(scope, T);
+    var w = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, null, false), hits = [], n;
+    while ((n = w.nextNode())) {
+      TNAME.lastIndex = 0;
+      if (!TNAME.test(n.nodeValue)) continue;
+      // the picker lists the OTHER tournaments by name - it is the one place the
+      // names must stay as written
+      if (n.parentElement && n.parentElement.closest('[data-mgp-panel],[data-mgp-pick]')) continue;
+      hits.push(n);
+    }
+    hits.forEach(function (t) { TNAME.lastIndex = 0; t.nodeValue = t.nodeValue.replace(TNAME, PICK.name); });
+    var tn = scope.querySelector ? scope.querySelector('.mgh-tname') : null;
+    if (tn) tn.textContent = PICK.name;
+    var mt = scope.querySelector ? scope.querySelector('.mgh-meta') : null;
+    if (mt && PICK.meta) mt.innerHTML = PICK.meta;
+    var when = scope.querySelector ? scope.querySelector('.tv-when') : null;
+    if (when && PICK.when) when.innerHTML = PICK.when;
+    var note = scope.querySelector ? scope.querySelector('.tv-note') : null;
+    if (note) note.textContent = 'Everything on this page edits ' + PICK.name + ' only. Switch tournaments from the title on Manage.';
+    if (PICK.stats) {
+      var vals = String(PICK.stats).split('|');
+      var tiles = scope.querySelectorAll ? scope.querySelectorAll('.tv-stat .tv-sn') : [];
+      for (var s = 0; s < tiles.length && s < vals.length; s++) {
+        var parts = vals[s].split('/');
+        tiles[s].innerHTML = parts[0] + (parts[1] ? '<small>/' + parts[1] + '</small>' : '');
+      }
+    }
+    if (PICK.phase !== null && PICK.phase !== undefined && PICK.phase !== '') {
+      var ph = parseInt(PICK.phase, 10);
+      var steps = scope.querySelectorAll ? scope.querySelectorAll('.mgh-track .mgh-step') : [];
+      for (var q = 0; q < steps.length; q++) {
+        steps[q].classList.toggle('is-done', q < ph);
+        steps[q].classList.toggle('is-now', q === ph);
+      }
+    }
+    var rows = scope.querySelectorAll ? scope.querySelectorAll('[data-mgp-pick]') : [];
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].classList.toggle('is-on', rows[i].getAttribute('data-mgp-pick') === PICK.id);
+    }
+  }
+
+  function show(id, back) {
+    if (IDS.indexOf(id) === -1) return false;
+    if (!back && CUR && CUR !== id) STACK.push(CUR);
+    CUR = id;
+    fr.src = 'screens/' + id + '.html';
+    if (jump.value !== id) jump.value = id;
+    if (location.hash.slice(1) !== id) history.replaceState(null, '', '#' + id);
+    return true;
+  }
+
+  function goBack() {
+    var prev = STACK.pop();
+    while (prev === CUR) prev = STACK.pop();
+    if (!prev) return false;
+    return show(prev, true);
+  }
+
+  // Clicks INSIDE the phone: bind the app's own attributes so the canvas navigates like the app.
+  function appClick(e) {
+      // "there needs to be a way to just click a winner without having to put the
+      // score in": each row does both jobs. Tapping the team calls the win; the
+      // stepper is only for when someone actually kept score.
+      var mgWin = e.target.closest && e.target.closest('[data-mgss-win]');
+      if (mgWin) {
+        e.preventDefault();
+        var card = mgWin.closest('.mgs-card');
+        var myRow = mgWin.closest('.mgs-row');
+        var rws = card.querySelectorAll('.mgs-row');
+        for (var w = 0; w < rws.length; w++) {
+          var on = rws[w] === myRow;
+          rws[w].classList.toggle('is-won', on);
+          var wb = rws[w].querySelector('[data-mgss-win]');
+          if (wb) wb.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+        var av = card.querySelector('#mgss-a'), bv = card.querySelector('#mgss-b');
+        var kept = (parseInt(av && av.textContent, 10) || 0) + (parseInt(bv && bv.textContent, 10) || 0) > 0;
+        var cta = card.querySelector('.mgs-cta');
+        if (cta) cta.textContent = kept ? 'Save score' : 'Save winner';
+        var hint = card.querySelector('.mgs-hint');
+        // the name only - the button also contains the "Winner" sub-label
+        var wn = mgWin.querySelector('.mgs-rname');
+        var wname = (wn ? wn.textContent : mgWin.textContent).trim();
+        if (hint) hint.textContent = kept ? 'Saving ' + wname + ' as the winner, with the score.' : 'Saving ' + wname + ' as the winner';
+        return;
+      }
+      // Back, everywhere: the page header arrow, the auth/claim close, the
+      // "back to tournament" link under a confirmation.
+      var backEl = e.target.closest && e.target.closest('.pd-back,.auth-back,.pd-reg-backlink,[data-mgt-back],[data-back]');
+      if (backEl) {
+        if (STACK.length) {
+          e.preventDefault();
+          if (goBack()) return;
+        } else if (backEl.hasAttribute('data-mgt-back') && IDS.indexOf('mgts-hub') !== -1) {
+          e.preventDefault();
+          show('mgts-hub');
+          return;
+        }
+      }
+      var el = e.target.closest && e.target.closest('[data-nav-tab],[data-tn-view],[data-mg-area],[data-mgt-view],[data-mgtl-new],[data-pools-tab],[data-pl-tab]');
+      if (!el) return;
+      var key = null, navTab = null;
+      if (el.hasAttribute('data-nav-tab')) navTab = el.getAttribute('data-nav-tab');
+      else if (el.hasAttribute('data-mgtl-new')) key = 'mgtl:new';
+      else if (el.hasAttribute('data-pools-tab')) key = 'pools:' + el.getAttribute('data-pools-tab');
+      else if (el.hasAttribute('data-pl-tab')) key = 'pools:' + el.getAttribute('data-pl-tab');
+      else if (el.hasAttribute('data-tn-view')) key = 'tn:' + el.getAttribute('data-tn-view');
+      else if (el.hasAttribute('data-mgt-view')) key = 'mgt:' + el.getAttribute('data-mgt-view');
+      else if (el.hasAttribute('data-mg-area')) key = 'mg:' + el.getAttribute('data-mg-area');
+      // A nav tap leaves this page for the one that owns that tab - exactly like the app.
+      if (navTab) {
+        // The nav is absolute: wherever you are in the app, a tab tap lands on
+        // that tab's main page - never a sub-screen, and never nothing at all.
+        if (navTab === MINE) {
+          e.preventDefault();
+          STACK = [];
+          show(IDS[0]);
+          return;
+        }
+        var dest = NAV_PAGE[navTab];
+        if (dest) { e.preventDefault(); window.location.href = dest; }
+        return;
+      }
+      var target = ROUTES[key];
+      if (!target) return;
+      if (IDS.indexOf(target) !== -1) { e.preventDefault(); show(target); return; }
+      // the screen lives on another page of the app - go there and open it directly
+      var owner = /^(mg|mgt|mgp|mgb)/.test(target) ? 'manage.html'
+        : /^account-/.test(target) ? 'account.html'
+        : /^(ci-|kiosk-)/.test(target) ? 'check-in.html'
+        : 'tournament.html';
+      e.preventDefault();
+      window.location.href = owner + '#' + target;
+  }
+  fr.addEventListener('load', function () {
+    var doc;
+    try { doc = fr.contentDocument; } catch (e) { return; }
+    if (doc) {
+      doc.addEventListener('click', appClick, true);
+      applyTournament(doc.body);
+    }
+  });
+  window.__canvas = { show: show, appClick: appClick, back: goBack, onRender: applyTournament };
+
+  jump.addEventListener('change', function () { show(jump.value); });
+  window.addEventListener('hashchange', function () { show(location.hash.slice(1)); });
+  document.getElementById('b390').addEventListener('click', function () {
+    document.body.classList.remove('wide');
+    this.classList.add('on'); document.getElementById('b1280').classList.remove('on');
+  });
+  document.getElementById('b1280').addEventListener('click', function () {
+    document.body.classList.add('wide');
+    this.classList.add('on'); document.getElementById('b390').classList.remove('on');
+  });
+
+  if (!show(location.hash.slice(1))) show(IDS[0]);
+})();
+</script>
+<script src="_canvas-comment.js"></script>
+</body>
+</html>

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Manage - Check-in console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../_as.css">
+<link rel="stylesheet" href="../_shared.css">
+<link rel="stylesheet" href="../_motion-app.css">
+<script src="../_shared.js" defer></script>
+<script src="../_motion-app.js" defer></script>
+</head>
+<body class="pd-public-active">
+<div id="root">
+<div id="app-shell">
+  <img class="pd-watermark" src="https://athletic-specimen.com/logo-mark.png" alt="" aria-hidden="true" />
+  <header id="app-header" class="pd-header">
+    <span class="app-header-mode">PUBLIC</span>
+    <div class="pd-wordmark">
+      <div class="pd-wm-1">ATHLETIC SPECIMEN</div>
+      <div class="pd-wm-2">COLORADO</div>
+    </div>
+    <div class="pd-hgrp">
+      <button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">M</button>
+    </div>
+    <div id="js-sync-notice"><p class="small shared-sync-notice is-live">Updated 7:42 PM</p></div>
+  </header>
+  <div id="app-content">
+    <div id="tab-manage" class="tab-panel active">
+      <div class="container">
+<div class="pd-pagehdr">
+      <button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+      <div class="pd-htitle">Check-in</div>
+    </div>
+    <div class="mgck-meta" id="mgck-meta"><span class="mgck-m"><b>4</b> checked in</span><span class="mgck-m"><b>10</b> players</span></div>
+    <div class="pl-tabs"><button type="button" class="pl-tab pl-on" data-mgck-filter="all" aria-current="true">All</button><button type="button" class="pl-tab" data-mgck-filter="in">In</button><button type="button" class="pl-tab" data-mgck-filter="out">Out</button></div>
+    <div class="cik-search mgck-srch">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input id="mgck-search" type="text" placeholder="Search the roster" autocapitalize="words" autocomplete="off" spellcheck="false" aria-label="Search the roster" value="" />
+    </div>
+    <div class="mgck-strip" id="mgck-strip" hidden></div>
+    <div id="mgck-list"><div class="mgck-sect">Still out &middot; 6</div><button class="ckx-row" type="button" data-mgck-id="id:8f2c1a44-6b91-4d0e-9a37-2c5e11b0a771"><span class="ckx-nm">Blake Harmon<span class="ckx-gp">Athletic Specimen</span></span><span class="mgck-sk">6.0</span><span class="ckx-go">CHECK IN</span></button><button class="ckx-row" type="button" data-mgck-id="id:1b47d902-33ae-4c58-8b10-77f3aa20c114"><span class="ckx-nm">Devon Park<span class="ckx-gp">Thursday Crew</span></span><span class="mgck-sk">7.5</span><span class="ckx-go">CHECK IN</span></button><button class="ckx-row" type="button" data-mgck-id="id:c0d5e781-2f66-4a19-9d84-40b6e2c9a05f"><span class="ckx-nm">Morgan Ellis<span class="ckx-gp">Athletic Specimen</span></span><span class="mgck-sk n">–</span><span class="ckx-go">CHECK IN</span></button><button class="ckx-row" type="button" data-mgck-id="id:5a91b3cc-7d20-4e77-bb45-9e1c8f640d33"><span class="ckx-nm">Quinn Alvarez<span class="ckx-gp">Athletic Specimen</span></span><span class="mgck-sk">5.5</span><span class="ckx-go">CHECK IN</span></button><button class="ckx-row" type="button" data-mgck-id="id:e6f80a13-95bd-4c31-8a72-1d4b7c05e298"><span class="ckx-nm">Sam Okafor<span class="ckx-gp">Thursday Crew</span></span><span class="mgck-sk">8.0</span><span class="ckx-go">CHECK IN</span></button><button class="ckx-row" type="button" data-mgck-id="id:2d3c6b58-4a17-4f90-9c6e-8b02d5117ae4"><span class="ckx-nm">Taylor Nunez<span class="ckx-gp">Newcomers</span></span><span class="mgck-sk">4.5</span><span class="ckx-go">CHECK IN</span></button><div class="mgck-sect">Checked in &middot; 4</div><button class="ckx-row is-in" type="button" data-mgck-id="id:9c14f7e0-6b83-4d22-a017-3f59ab6c8d70"><span class="ckx-nm">Avery Brooks<span class="ckx-gp">Athletic Specimen</span></span><span class="mgck-sk">7.0</span><span class="ckx-go">IN</span></button><button class="ckx-row is-in" type="button" data-mgck-id="id:44b7a2d9-08cf-4e63-91a5-6c70d3e21b8a"><span class="ckx-nm">Casey Lin<span class="ckx-gp">Thursday Crew</span></span><span class="mgck-sk">6.5</span><span class="ckx-go">IN</span></button><button class="ckx-row is-in" type="button" data-mgck-id="id:7e05c318-b9a4-4f27-8d61-2a53cf94e076"><span class="ckx-nm">Jordan Reyes<span class="ckx-gp">Athletic Specimen</span></span><span class="mgck-sk">8.5</span><span class="ckx-go">IN</span></button><button class="ckx-row is-in" type="button" data-mgck-id="id:b382d5f6-1c47-4a08-95e3-70fb2c8d1149"><span class="ckx-nm">Riley Chen<span class="ckx-gp">Newcomers</span></span><span class="mgck-sk n">–</span><span class="ckx-go">IN</span></button></div>
+      </div>
+    </div>
+  </div>
+  <nav id="bottom-nav">
+    <button class="nav-btn" data-nav-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>
+      <span>Home</span>
+    </button>
+    <button class="nav-btn" data-nav-tab="tournament">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>
+      <span>Tournament</span>
+    </button>
+    <button class="nav-btn active" data-nav-tab="manage" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7"/><path d="M4 10V3"/><path d="M12 21v-9"/><path d="M12 8V3"/><path d="M20 21v-5"/><path d="M20 12V3"/><path d="M1 14h6"/><path d="M9 8h6"/><path d="M17 16h6"/></svg>
+      <span>Manage</span>
+    </button>
+  </nav>
+</div>
+</div>
+</body>
+</html>

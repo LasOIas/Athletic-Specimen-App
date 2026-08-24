@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Athletic Specimen - Tournament</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<style>
+  /* Page chrome only - the harness AROUND the phone. Every pixel inside the frame is the app's
+     own shipped stylesheet, untouched. Values mirror the AS tokens. */
+  :root { --c-bg:oklch(0.985 0.003 75); --c-card:oklch(0.97 0.003 75); --c-line:oklch(0.90 0.005 75);
+    --c-ink:oklch(0.18 0.005 75); --c-mut:oklch(0.50 0.005 75); --c-acc:oklch(0.55 0.07 240); }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; background:var(--c-bg); color:var(--c-ink); font-family:'Inter',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; }
+  .tb { display:flex; align-items:center; gap:14px; padding:11px 20px; border-bottom:1px solid var(--c-line);
+    background:var(--c-card); flex-wrap:wrap; }
+  .tb-h { font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:15px;
+    letter-spacing:.09em; text-transform:uppercase; margin:0; white-space:nowrap; }
+  .tb-b { color:var(--c-mut); font-size:12px; }
+  .tb-sp { flex:1; }
+  .tb a { font-size:12px; color:var(--c-mut); text-decoration:none; border-bottom:1px solid var(--c-line);
+    white-space:nowrap; }
+  .tb a:hover, .tb a.on { color:var(--c-acc); border-color:var(--c-acc); }
+  select { font:inherit; font-size:13px; padding:6px 10px; border:1px solid var(--c-line);
+    border-radius:8px; background:#fff; color:var(--c-ink); max-width:250px; }
+  .seg { display:flex; border:1px solid var(--c-line); border-radius:999px; overflow:hidden; background:#fff; }
+  .seg button { font-family:'Barlow Semi Condensed',sans-serif; font-weight:700; font-size:12px;
+    letter-spacing:.1em; text-transform:uppercase; padding:6px 15px; border:0; background:transparent;
+    color:var(--c-mut); cursor:pointer; }
+  .seg button.on { background:var(--c-acc); color:#fff; }
+  .stage { flex:1; display:flex; align-items:flex-start; justify-content:center; padding:24px 20px 40px; overflow:auto; }
+
+  .stage { scrollbar-width: thin; scrollbar-color: oklch(0.70 0.01 75 / .5) transparent; overscroll-behavior: contain; }
+  .stage::-webkit-scrollbar { width: 11px; background: transparent; }
+  .stage::-webkit-scrollbar-track { background: transparent; }
+  .stage::-webkit-scrollbar-thumb { background: oklch(0.70 0.01 75 / .5); background-clip: padding-box;
+    border: 3.5px solid transparent; border-radius: 999px; min-height: 44px; }
+  .stage::-webkit-scrollbar-thumb:hover { background: oklch(0.56 0.012 75 / .66); background-clip: padding-box; }
+
+  .dev { border:1px solid var(--c-line); border-radius:16px; overflow:hidden; background:var(--c-card);
+    box-shadow:0 1px 2px oklch(0.18 0.005 75 / .06), 0 6px 20px oklch(0.18 0.005 75 / .05); }
+  .dev iframe { display:block; border:0; width:390px; height:844px; background:var(--c-bg); }
+  body.wide .dev iframe { width:1280px; height:820px; }
+</style>
+</head>
+<body>
+  <div class="tb">
+    <h1 class="tb-h">Tournament</h1>
+    <span class="tb-b">The player side of an event: register, pools, bracket, your team.</span>
+    <span class="tb-sp"></span>
+    <a href="home.html">Home</a>
+    <a href="check-in.html">Check In</a>
+    <a href="tournament.html" class="on">Tournament</a>
+    <a href="manage.html">Manage</a>
+    <a href="account.html">Account</a>
+    <a href="motion.html">Motion</a>
+    <select id="jump" aria-label="Jump to a state"><option value="tn-hub">Tournament hub (signed in)</option><option value="tn-gate">Tournament - signed out gate</option><option value="tn-register-form">Team registration form</option><option value="tn-register-closed">Registration closed (route)</option><option value="tn-register-success">Registration success</option><option value="tn-register-success-signedout">Registration success - signed out</option><option value="tn-rules">Rules sheet (public)</option><option value="pl-pools">Pools &amp; schedule - pool A</option><option value="pl-seeding">Pools &amp; schedule - overall seeding</option><option value="pl-empty">Pools - not drawn yet</option><option value="bk-pre">Bracket - before pool play ends</option><option value="bk-live">Bracket - live</option><option value="bk-champion">Bracket - champion crowned</option><option value="pd-team-peek">Team peek popover</option><option value="mt-myteam">My Team</option><option value="mt-report-score">My Team - report a score</option><option value="mt-empty">My Team - not claimed yet</option><option value="ht-history">Past tournaments</option><option value="auth-signin">Sign in</option><option value="auth-signup">Create account</option><option value="claim-search">Claim your player - search</option><option value="claim-confirm">Claim your player - confirm</option><option value="claim-success">Claim your player - linked</option><option value="namefill">What's your name? overlay</option><option value="account-menu">Account menu</option></select>
+    <div class="seg"><button id="b390" class="on">Phone</button><button id="b1280">Desktop</button></div>
+  </div>
+  <div class="stage"><div class="dev"><iframe id="fr" title="Tournament"></iframe></div></div>
+<script src="_tournaments.js"></script>
+<script src="_shared.js" defer></script>
+<script>
+(function () {
+  var IDS = ["tn-hub","tn-gate","tn-register-form","tn-register-closed","tn-register-success","tn-register-success-signedout","tn-rules","pl-pools","pl-seeding","pl-empty","bk-pre","bk-live","bk-champion","pd-team-peek","mt-myteam","mt-report-score","mt-empty","ht-history","auth-signin","auth-signup","claim-search","claim-confirm","claim-success","namefill","account-menu"];
+  var ROUTES = {"tn:hub":"tn-hub","tn:register":"tn-register-form","tn:rules":"tn-rules","tn:pools":"pl-pools","tn:bracket":"bk-live","pools:seeding":"pl-seeding","pools:A":"pl-pools","pools:B":"pl-pools","mg:tournament":"mgts-hub","mg:pickup":"mg-pickup-list","mg:checkin":"mg-checkin","mg:players":"mg-players","mg:teams":"mg-teams","mg:admins":"mg-admins","mg:lead":"mg-hub","mgt:registration":"mgts-registration","mgt:teams":"mgts-teams-pay","mgt:pools":"mgts-pools-live","mgt:bracket":"mgts-bracket","mgt:settings":"mgts-settings","mgt:rules":"mgts-rules-view","mgt:closeout":"mgts-closeout","mgtl:new":"mg-tournament-new"};
+  var NAV_PAGE = {"home":"home.html","players":"check-in.html","tournament":"tournament.html","manage":"manage.html"};
+  // hub rows that point at a tab this canvas owns as a screen rather than a page
+  var TAB_SCREEN = {"myteam":"mt-myteam","history":"ht-history"};
+  var MINE = "tournament";
+  var fr = document.getElementById('fr'), jump = document.getElementById('jump');
+
+  // Where you came from. Every screen the app opens is pushed here, so a back
+  // control returns to the screen you were actually on rather than the one its
+  // markup happens to name. Empty stack = you arrived here cold, so the back
+  // control's own destination stands.
+  var STACK = [], CUR = null;
+
+
+  // The picked tournament is app-wide state, not a label on one screen. It is
+  // remembered here and stamped into every screen the canvas renders, so the
+  // name (and the hub's status line) follow you into teams, pools, bracket and
+  // settings - and survive a page change.
+  var TKEY = 'as-canvas-tournament';
+  var PICK = null;
+  try { PICK = JSON.parse(localStorage.getItem(TKEY) || 'null'); } catch (e) {}
+  var TNAME = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\s+Tournament\b/g;
+
+
+  // Needs-you is per tournament: a finished event has nothing to do, one that
+  // has not opened has exactly one thing.
+  function stampNeeds(scope, T) {
+    var box = scope.querySelector ? scope.querySelector('[data-tv-needs]') : null;
+    if (!box || !T.needs) return;
+    if (!T.needs.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    var html = '<div class="pl-sect">Needs you<span class="mgh-sectn">' + T.needs.length + '</span></div>';
+    T.needs.forEach(function (nd) {
+      html += '<div class="mg-row mgh-nrow"><div class="mgh-face">' +
+        '<button type="button" class="mgh-nbody" data-mgt-view="' + nd.view + '">' +
+        '<span class="mgh-nn">' + nd.n + '</span><span class="mgh-ns">' + nd.s + '</span></button>' +
+        '<button type="button" class="mgh-nact' + (nd.go ? ' is-go' : '') + '" data-mgt-view="' + nd.view + '">' +
+        '<span>' + nd.act + '</span></button></div></div>';
+    });
+    box.innerHTML = html;
+  }
+
+  // and so is what each row says about itself
+  function stampRows(scope, T) {
+    if (!T.rows || !scope.querySelectorAll) return;
+    Object.keys(T.rows).forEach(function (key) {
+      var r = T.rows[key];
+      var el = scope.querySelector('.mg-row[data-mgt-view="' + key + '"]') ||
+               scope.querySelector('.mg-row[data-mg-area="' + key + '"]');
+      if (!el) return;
+      var sub = el.querySelector('.mg-rs');
+      if (sub && r.sub) sub.innerHTML = r.sub;
+      var meta = el.querySelector('.mgv-rmeta');
+      if (r.meta) {
+        if (!meta) {
+          meta = document.createElement('span');
+          meta.className = 'mgv-rmeta';
+          el.insertBefore(meta, el.querySelector('.mg-chev'));
+        }
+        meta.textContent = r.meta;
+      } else if (meta) {
+        meta.remove();
+      }
+    });
+  }
+
+  function applyTournament(scope) {
+    if (!scope || !PICK || !PICK.id) return;
+    var T = (window.AS_TOURNAMENTS || {})[PICK.id] || PICK;
+    PICK = {
+      id: PICK.id, name: T.name || PICK.name, meta: T.meta || PICK.meta,
+      when: T.when, stats: T.stats, phase: T.phase
+    };
+    if (!PICK.name) return;
+    stampNeeds(scope, T);
+    stampRows(scope, T);
+    var w = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, null, false), hits = [], n;
+    while ((n = w.nextNode())) {
+      TNAME.lastIndex = 0;
+      if (!TNAME.test(n.nodeValue)) continue;
+      // the picker lists the OTHER tournaments by name - it is the one place the
+      // names must stay as written
+      if (n.parentElement && n.parentElement.closest('[data-mgp-panel],[data-mgp-pick]')) continue;
+      hits.push(n);
+    }
+    hits.forEach(function (t) { TNAME.lastIndex = 0; t.nodeValue = t.nodeValue.replace(TNAME, PICK.name); });
+    var tn = scope.querySelector ? scope.querySelector('.mgh-tname') : null;
+    if (tn) tn.textContent = PICK.name;
+    var mt = scope.querySelector ? scope.querySelector('.mgh-meta') : null;
+    if (mt && PICK.meta) mt.innerHTML = PICK.meta;
+    var when = scope.querySelector ? scope.querySelector('.tv-when') : null;
+    if (when && PICK.when) when.innerHTML = PICK.when;
+    var note = scope.querySelector ? scope.querySelector('.tv-note') : null;
+    if (note) note.textContent = 'Everything on this page edits ' + PICK.name + ' only. Switch tournaments from the title on Manage.';
+    if (PICK.stats) {
+      var vals = String(PICK.stats).split('|');
+      var tiles = scope.querySelectorAll ? scope.querySelectorAll('.tv-stat .tv-sn') : [];
+      for (var s = 0; s < tiles.length && s < vals.length; s++) {
+        var parts = vals[s].split('/');
+        tiles[s].innerHTML = parts[0] + (parts[1] ? '<small>/' + parts[1] + '</small>' : '');
+      }
+    }
+    if (PICK.phase !== null && PICK.phase !== undefined && PICK.phase !== '') {
+      var ph = parseInt(PICK.phase, 10);
+      var steps = scope.querySelectorAll ? scope.querySelectorAll('.mgh-track .mgh-step') : [];
+      for (var q = 0; q < steps.length; q++) {
+        steps[q].classList.toggle('is-done', q < ph);
+        steps[q].classList.toggle('is-now', q === ph);
+      }
+    }
+    var rows = scope.querySelectorAll ? scope.querySelectorAll('[data-mgp-pick]') : [];
+    for (var i = 0; i < rows.length; i++) {
+      rows[i].classList.toggle('is-on', rows[i].getAttribute('data-mgp-pick') === PICK.id);
+    }
+  }
+
+  function show(id, back) {
+    if (IDS.indexOf(id) === -1) return false;
+    if (!back && CUR && CUR !== id) STACK.push(CUR);
+    CUR = id;
+    fr.src = 'screens/' + id + '.html';
+    if (jump.value !== id) jump.value = id;
+    if (location.hash.slice(1) !== id) history.replaceState(null, '', '#' + id);
+    return true;
+  }
+
+  function goBack() {
+    var prev = STACK.pop();
+    while (prev === CUR) prev = STACK.pop();
+    if (!prev) return false;
+    return show(prev, true);
+  }
+
+  // Clicks INSIDE the phone: bind the app's own attributes so the canvas navigates like the app.
+  // The bracket's connector lines: production draws them from match data into the
+  // .bt-links svg. The sample bracket is static markup, so the canvas measures the
+  // rendered nodes and draws the same elbows - once per visible pane, in whichever
+  // document the bracket is living in (iframe or inline host).
+  function drawLinks(scope) {
+    if (window.__btLinks) window.__btLinks(scope);
+    try {
+      var w = scope && scope.defaultView;
+      if (w && w !== window && w.__btLinks) w.__btLinks(scope);
+    } catch (e) {}
+  }
+
+  function appClick(e) {
+      // "there needs to be a way to just click a winner without having to put the
+      // score in": each row does both jobs. Tapping the team calls the win; the
+      // stepper is only for when someone actually kept score.
+      var mgWin = e.target.closest && e.target.closest('[data-mgss-win]');
+      if (mgWin) {
+        e.preventDefault();
+        var card = mgWin.closest('.mgs-card');
+        var myRow = mgWin.closest('.mgs-row');
+        var rws = card.querySelectorAll('.mgs-row');
+        for (var w = 0; w < rws.length; w++) {
+          var on = rws[w] === myRow;
+          rws[w].classList.toggle('is-won', on);
+          var wb = rws[w].querySelector('[data-mgss-win]');
+          if (wb) wb.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+        var av = card.querySelector('#mgss-a'), bv = card.querySelector('#mgss-b');
+        var kept = (parseInt(av && av.textContent, 10) || 0) + (parseInt(bv && bv.textContent, 10) || 0) > 0;
+        var cta = card.querySelector('.mgs-cta');
+        if (cta) cta.textContent = kept ? 'Save score' : 'Save winner';
+        var hint = card.querySelector('.mgs-hint');
+        // the name only - the button also contains the "Winner" sub-label
+        var wn = mgWin.querySelector('.mgs-rname');
+        var wname = (wn ? wn.textContent : mgWin.textContent).trim();
+        if (hint) hint.textContent = kept ? 'Saving ' + wname + ' as the winner, with the score.' : 'Saving ' + wname + ' as the winner';
+        return;
+      }
+      // Back, everywhere: the page header arrow, the auth/claim close, the
+      // "back to tournament" link under a confirmation.
+      var backEl = e.target.closest && e.target.closest('.pd-back,.auth-back,.pd-reg-backlink,[data-mgt-back],[data-back]');
+      if (backEl) {
+        if (STACK.length) {
+          e.preventDefault();
+          if (goBack()) return;
+        } else if (backEl.hasAttribute('data-mgt-back') && IDS.indexOf('mgts-hub') !== -1) {
+          e.preventDefault();
+          show('mgts-hub');
+          return;
+        }
+      }
+      // Bracket side tabs: production owns this in JS, so the canvas mirrors it here
+      // rather than in the screen file - inline mode copies #root only and never runs
+      // an in-screen <script>, so this is the one path both modes share.
+      var side = e.target.closest && e.target.closest('[data-role="tv2-bracket-side"]');
+      if (side) {
+        e.preventDefault();
+        var doc = side.ownerDocument, want = side.getAttribute('data-side');
+        var tabs = doc.querySelectorAll('[data-role="tv2-bracket-side"]');
+        for (var i = 0; i < tabs.length; i++) {
+          if (tabs[i] === side) tabs[i].classList.add('on'); else tabs[i].classList.remove('on');
+        }
+        var panes = doc.querySelectorAll('[data-pv-side]');
+        for (var j = 0; j < panes.length; j++) panes[j].hidden = panes[j].getAttribute('data-pv-side') !== want;
+        drawLinks(side.closest('#root') || doc);
+        return;
+      }
+      // Manage's tournament picker: an inline dropdown, so the canvas owns the open/
+      // close and the pick the way production would - and inline comment mode never
+      // runs a screen's own <script>, so it has to live here.
+      // Needs-you fixes and the phase action: one tap does it in place and leaves an
+      // undo. Same reason as the picker - inline comment mode never runs a screen's
+      // own <script>, so the canvas owns the behaviour production would.
+      // The registration action is a two-state switch, not a one-way commit: it
+      // only ever flips its own label, open <-> close.
+      var mghSwap = e.target.closest && e.target.closest('[data-mgh-swap]');
+      if (mghSwap) {
+        e.preventDefault();
+        var lab = mghSwap.querySelector('span') || mghSwap;
+        var next = mghSwap.getAttribute('data-mgh-swap');
+        mghSwap.setAttribute('data-mgh-swap', lab.textContent);
+        lab.textContent = next;
+        // the switch stays a switch, and says in green what it just did. The line
+        // opens and closes the space it occupies, so the rows under it glide
+        // instead of jumping - height and padding, the one place this app animates
+        // layout, because a confirmation that snaps shut moves the whole page.
+        var sCell = mghSwap.closest('[data-mgh-cell]');
+        var sStrip = sCell && sCell.querySelector('.mgh-done');
+        if (sStrip) {
+          var doneNow = mghSwap.getAttribute('data-mgh-done');
+          var doneNext = mghSwap.getAttribute('data-mgh-done-next');
+          mghSwap.setAttribute('data-mgh-done', doneNext || '');
+          mghSwap.setAttribute('data-mgh-done-next', doneNow || '');
+          sStrip.querySelector('.mgh-donetxt').textContent = doneNow || '';
+          var sUndo = sStrip.querySelector('.mgh-undo');
+          if (sUndo) sUndo.hidden = true;
+          sStrip.classList.add('is-under');
+          clearTimeout(sStrip._mgTimer);
+          clearTimeout(sStrip._mgTimer2);
+          clearTimeout(sStrip._mgTimer3);
+          sStrip.removeAttribute('style');
+          sStrip.hidden = false;
+          var full = sStrip.offsetHeight;
+          sStrip.style.overflow = 'hidden';
+          sStrip.style.height = '0px';
+          sStrip.style.paddingTop = '0px';
+          sStrip.style.paddingBottom = '0px';
+          sStrip.style.opacity = '0';
+          void sStrip.offsetWidth;
+          sStrip.style.transition = 'height 200ms var(--e-settle, ease), padding 200ms var(--e-settle, ease), opacity 140ms var(--e-settle, ease)';
+          sStrip.style.height = full + 'px';
+          sStrip.style.paddingTop = '';
+          sStrip.style.paddingBottom = '';
+          sStrip.style.opacity = '1';
+          sStrip._mgTimer3 = setTimeout(function () {
+            sStrip.style.height = '';
+            sStrip.style.overflow = '';
+            sStrip.style.transition = '';
+          }, 240);
+          // a confirmation is news, not state: it says its piece and leaves
+          sStrip._mgTimer = setTimeout(function () {
+            var h = sStrip.offsetHeight;
+            sStrip.style.overflow = 'hidden';
+            sStrip.style.height = h + 'px';
+            void sStrip.offsetWidth;
+            sStrip.style.transition = 'height 200ms var(--e-leave, ease), padding 200ms var(--e-leave, ease), opacity 140ms var(--e-leave, ease)';
+            sStrip.style.height = '0px';
+            sStrip.style.paddingTop = '0px';
+            sStrip.style.paddingBottom = '0px';
+            sStrip.style.opacity = '0';
+            sStrip._mgTimer2 = setTimeout(function () {
+              sStrip.hidden = true;
+              sStrip.removeAttribute('style');
+            }, 220);
+          }, 2400);
+        }
+        return;
+      }
+      var mghDo = e.target.closest && e.target.closest('[data-mgh-do]');
+      if (mghDo) {
+        e.preventDefault();
+        var cell = mghDo.closest('[data-mgh-cell]');
+        cell.querySelector('.mgh-face').hidden = true;
+        var strip = cell.querySelector('.mgh-done');
+        strip.querySelector('.mgh-donetxt').textContent = mghDo.getAttribute('data-mgh-do');
+        strip.hidden = false;
+        return;
+      }
+      var mghUndo = e.target.closest && e.target.closest('[data-mgh-undo]');
+      if (mghUndo) {
+        e.preventDefault();
+        var c2 = mghUndo.closest('[data-mgh-cell]');
+        c2.querySelector('.mgh-done').hidden = true;
+        c2.querySelector('.mgh-face').hidden = false;
+        return;
+      }
+      var mgpT = e.target.closest && e.target.closest('[data-mgp-toggle]');
+      if (mgpT) {
+        e.preventDefault();
+        var mgpP = mgpT.parentNode.querySelector('[data-mgp-panel]');
+        var opening = mgpP.hidden;
+        mgpP.hidden = !opening;
+        mgpT.setAttribute('aria-expanded', opening ? 'true' : 'false');
+        return;
+      }
+      var mgpK = e.target.closest && e.target.closest('[data-mgp-pick]');
+      if (mgpK) {
+        e.preventDefault();
+        var sc = mgpK.closest('.mgh-scope');
+        var rows = sc.querySelectorAll('[data-mgp-pick]');
+        for (var r = 0; r < rows.length; r++) rows[r].classList.toggle('is-on', rows[r] === mgpK);
+        sc.querySelector('.mgh-tname').textContent = mgpK.getAttribute('data-mgp-name');
+        sc.querySelector('.mgh-meta').innerHTML = mgpK.getAttribute('data-mgp-meta');
+        sc.querySelector('[data-mgp-panel]').hidden = true;
+        sc.querySelector('[data-mgp-toggle]').setAttribute('aria-expanded', 'false');
+        PICK = {
+          id: mgpK.getAttribute('data-mgp-pick'),
+          name: mgpK.getAttribute('data-mgp-name'),
+          meta: mgpK.getAttribute('data-mgp-meta'),
+          when: mgpK.getAttribute('data-mgp-when'),
+          stats: mgpK.getAttribute('data-mgp-stats'),
+          phase: mgpK.getAttribute('data-mgp-phase')
+        };
+        try { localStorage.setItem(TKEY, JSON.stringify(PICK)); } catch (err) {}
+        applyTournament(mgpK.closest('#root') || sc.ownerDocument.body);
+        return;
+      }
+      var mtClose = e.target.closest && e.target.closest('[data-mt-report-close],[data-mgss="close"]');
+      if (mtClose) {
+        // The pop-up score cards (pools, bracket) close themselves in place — only
+        // the standalone report-score SCREEN is a place you navigate away from.
+        if (!mtClose.closest('#mgss-sheet[data-mgss-auto]')) { e.preventDefault(); show('mt-myteam'); }
+        return;
+      }
+      if (e.target.closest && e.target.closest('[data-mt-report]')) { e.preventDefault(); show('mt-report-score'); return; }
+      var el = e.target.closest && e.target.closest('[data-nav-tab],[data-tn-view],[data-mg-area],[data-mgt-view],[data-mgtl-new],[data-pools-tab],[data-pl-tab]');
+      if (!el) return;
+      var key = null, navTab = null;
+      if (el.hasAttribute('data-nav-tab')) navTab = el.getAttribute('data-nav-tab');
+      else if (el.hasAttribute('data-mgtl-new')) key = 'mgtl:new';
+      else if (el.hasAttribute('data-pools-tab')) key = 'pools:' + el.getAttribute('data-pools-tab');
+      else if (el.hasAttribute('data-pl-tab')) key = 'pools:' + el.getAttribute('data-pl-tab');
+      else if (el.hasAttribute('data-tn-view')) key = 'tn:' + el.getAttribute('data-tn-view');
+      else if (el.hasAttribute('data-mgt-view')) key = 'mgt:' + el.getAttribute('data-mgt-view');
+      else if (el.hasAttribute('data-mg-area')) key = 'mg:' + el.getAttribute('data-mg-area');
+      // A nav tap leaves this page for the one that owns that tab - exactly like the app.
+      if (navTab) {
+        if (TAB_SCREEN[navTab] && IDS.indexOf(TAB_SCREEN[navTab]) !== -1) { e.preventDefault(); STACK = []; show(TAB_SCREEN[navTab]); return; }
+        // The nav is absolute: wherever you are in the app, a tab tap lands on
+        // that tab's main page - never a sub-screen, and never nothing at all.
+        if (navTab === MINE) {
+          e.preventDefault();
+          STACK = [];
+          show(IDS[0]);
+          return;
+        }
+        var dest = NAV_PAGE[navTab];
+        if (dest) { e.preventDefault(); window.location.href = dest; }
+        return;
+      }
+      var target = ROUTES[key];
+      if (!target) return;
+      if (IDS.indexOf(target) !== -1) { e.preventDefault(); show(target); return; }
+      // the screen lives on another page of the app - go there and open it directly
+      var owner = /^(mg|mgt|mgp|mgb)/.test(target) ? 'manage.html'
+        : /^account-/.test(target) ? 'account.html'
+        : /^(ci-|kiosk-)/.test(target) ? 'check-in.html'
+        : 'tournament.html';
+      e.preventDefault();
+      window.location.href = owner + '#' + target;
+  }
+  fr.addEventListener('load', function () {
+    var doc;
+    try { doc = fr.contentDocument; } catch (e) { return; }
+    if (doc) {
+      doc.addEventListener('click', appClick, true);
+      applyTournament(doc.body);
+      setTimeout(function () { drawLinks(doc); }, 60);
+    }
+  });
+  var rt;
+  window.addEventListener('resize', function () {
+    clearTimeout(rt);
+    rt = setTimeout(function () {
+      var host = document.getElementById('inline-app');
+      if (host && !host.hidden) drawLinks(host);
+      try { if (fr.contentDocument) drawLinks(fr.contentDocument); } catch (e) {}
+    }, 120);
+  });
+  window.__canvas = { show: show, appClick: appClick, onRender: function (host) { setTimeout(function () { drawLinks(host); }, 60); } };
+
+  jump.addEventListener('change', function () { show(jump.value); });
+  window.addEventListener('hashchange', function () { show(location.hash.slice(1)); });
+  document.getElementById('b390').addEventListener('click', function () {
+    document.body.classList.remove('wide');
+    this.classList.add('on'); document.getElementById('b1280').classList.remove('on');
+  });
+  document.getElementById('b1280').addEventListener('click', function () {
+    document.body.classList.add('wide');
+    this.classList.add('on'); document.getElementById('b390').classList.remove('on');
+  });
+
+  if (!show(location.hash.slice(1))) show(IDS[0]);
+})();
+</script>
+<script src="_canvas-comment.js"></script>
+</body>
+</html>

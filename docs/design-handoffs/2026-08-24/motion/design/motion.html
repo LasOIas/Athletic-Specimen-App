@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Athletic Specimen - Motion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Sora:wght@600;700;800&family=Barlow+Semi+Condensed:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_as.css">
+<link rel="stylesheet" href="_motion.css">
+<style>
+  /* the same harness bar the other canvas pages carry, so the page links keep
+     working once you land here */
+  :root { --c-card:oklch(0.97 0.003 75); --c-line:oklch(0.90 0.005 75);
+    --c-ink:oklch(0.18 0.005 75); --c-mut:oklch(0.50 0.005 75); --c-acc:oklch(0.55 0.07 240); }
+  body { background: #faf9f7; margin: 0; }
+  .tb { display:flex; align-items:center; gap:14px; padding:11px 20px; border-bottom:1px solid var(--c-line);
+    background:var(--c-card); flex-wrap:wrap; font-family:'Inter',system-ui,sans-serif; }
+  .tb-h { font-family:'Barlow Semi Condensed',sans-serif; font-weight:800; font-size:15px;
+    letter-spacing:.09em; text-transform:uppercase; margin:0; white-space:nowrap; color:var(--c-ink); }
+  .tb-b { color:var(--c-mut); font-size:12px; }
+  .tb-sp { flex:1; }
+  .tb a { font-size:12px; color:var(--c-mut); text-decoration:none; border-bottom:1px solid var(--c-line);
+    white-space:nowrap; }
+  .tb a:hover, .tb a.on { color:var(--c-acc); border-color:var(--c-acc); }
+</style>
+</head>
+<body>
+<div class="tb">
+  <h1 class="tb-h">Motion</h1>
+  <span class="tb-b">The motion system, and every app action expressed in it.</span>
+  <span class="tb-sp"></span>
+  <a href="home.html">Home</a>
+  <a href="check-in.html">Check In</a>
+  <a href="tournament.html">Tournament</a>
+  <a href="manage.html">Manage</a>
+  <a href="motion.html" class="on">Motion</a>
+</div>
+<div class="mo">
+  <div class="mo-eye">Athletic Specimen &middot; 30 plates</div>
+  <div class="mo-h">Motion</div>
+  <p class="mo-sub">Every state in the app swaps instantly today: a score lands with no acknowledgement, a screen appears with no origin, a number changes and nobody sees it. This is the system that fixes it &mdash; <b>five durations, four curves</b>, and every action in the app expressed in them. Transform and opacity only, micro-moves under 10px, nothing past 200ms except the one celebration a tournament earns.</p>
+
+  <p class="mo-sub"><b>Now shipped.</b> Every screen in the app loads this system: the screen arrives, lists land in sequence, buttons and rows answer a press, sheets and menus grow from what opened them, changed values bump, and the championship bar is the one place allowed to celebrate. Nothing here is per-screen &mdash; it hangs off the patterns the screens already have, so the next screen inherits it for free.</p>
+
+  <div class="mo-bar">
+    <span class="mo-blab">Speed</span>
+    <div class="mo-seg" data-speed>
+      <button type="button" data-s="4"><span>&frac12;&times;</span></button>
+      <button type="button" data-s="2" class="on"><span>1&times;</span></button>
+      <button type="button" data-s="1"><span>2&times;</span></button>
+    </div>
+    <span class="mo-blab">Reduced motion</span>
+    <div class="mo-seg" data-rm>
+      <button type="button" data-r="0" class="on"><span>Off</span></button>
+      <button type="button" data-r="1"><span>On</span></button>
+    </div>
+    <button type="button" class="mo-playall" data-playall><span>Play everything</span></button>
+  </div>
+
+  <div class="mo-scale">
+    <div class="mo-sc" data-card style="--d:90ms;--e:var(--e-press)"><div class="mo-scn">Tap</div><div class="mo-scv">90ms &middot; press</div><div class="mo-scj">The surface answering your finger</div><div class="mo-sct"></div></div>
+    <div class="mo-sc" data-card style="--d:140ms;--e:var(--e-settle)"><div class="mo-scn">State</div><div class="mo-scv">140ms &middot; settle</div><div class="mo-scj">A value or colour changing in place</div><div class="mo-sct"></div></div>
+    <div class="mo-sc" data-card style="--d:200ms;--e:var(--e-settle)"><div class="mo-scn">Element</div><div class="mo-scv">200ms &middot; settle</div><div class="mo-scj">Something entering or leaving</div><div class="mo-sct"></div></div>
+    <div class="mo-sc" data-card style="--d:300ms;--e:var(--e-arrive)"><div class="mo-scn">Surface</div><div class="mo-scv">300ms &middot; arrive</div><div class="mo-scj">A sheet, a screen, a menu</div><div class="mo-sct"></div></div>
+    <div class="mo-sc" data-card style="--d:460ms;--e:var(--e-press)"><div class="mo-scn">Cheer</div><div class="mo-scv">460ms &middot; press</div><div class="mo-scj">Once a tournament, and only then</div><div class="mo-sct"></div></div>
+  </div>
+
+  <div class="mo-g">
+    <div class="mo-gh"><div class="mo-gn">Tap &amp; commit</div><div class="mo-gd">The surface answers your finger, and a finished action says so without a screen</div></div>
+    <div class="mo-grid">
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp a1"><button type="button" class="sp-btn"><span>Report score</span></button></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Button press</div><div class="mo-cm">90ms &middot; press &middot; scale .955</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp a2"><div class="f"><span class="sp-nm">Pools aren’t drawn</span><span class="sp-chip">Draw</span></div><div class="d"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Pools drawn</div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">One-tap fix &rarr; done</div><div class="mo-cm">200ms &middot; settle &middot; swap on y, 55% overlap</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp a3"><div class="d"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Nudged both teams</div><div class="f"><span class="sp-nm">2 teams haven’t paid</span><span class="sp-chip">Nudge</span></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Undo returns the row</div><div class="mo-cm">140ms out, 200ms back &middot; the same move reversed</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp a4"><div class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Mark paid</div><div class="mo-cm">140ms box, 200ms tick draw</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp a5"><div class="sw"><div class="kn"></div></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Registration toggle</div><div class="mo-cm">140ms &middot; knob squashes into the move</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp a6"><div class="f">Copy address</div><div class="d"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Address copied</div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Copy address</div><div class="mo-cm">140ms &middot; crossfade in place, no layout shift</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+    </div>
+  </div>
+  <div class="mo-g">
+    <div class="mo-gh"><div class="mo-gn">Scoring</div><div class="mo-gd">The numbers organizers touch most &mdash; every change has to be felt, never guessed</div></div>
+    <div class="mo-grid">
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp b1"><div class="stp">&minus;</div><div class="num">21</div><div class="stp p">+</div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Stepper bump</div><div class="mo-cm">140ms &middot; press &middot; digit lifts 6px</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp b2"><div class="sp-row"><span><span class="sp-nm">Net Gains vs Block Party</span><br><span class="sp-sub">Pool A &middot; G12</span></span><span class="sp-r">21&ndash;18</span></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Score commits</div><div class="mo-cm">320ms &middot; green wash recedes, result lands</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp b3"><div class="w">Net Gains</div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Winner takes green</div><div class="mo-cm">200ms &middot; colour only, no movement</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp b4"><span class="live"><span class="dot"></span>LIVE</span></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Live pill</div><div class="mo-cm">1600ms loop &middot; the one thing allowed to repeat</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+    </div>
+  </div>
+  <div class="mo-g">
+    <div class="mo-gh"><div class="mo-gn">Getting around</div><div class="mo-gd">Where a screen came from, so nobody loses their place mid-tournament</div></div>
+    <div class="mo-grid">
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp c1"><div class="sp-mini b"><div class="sp-mtop"></div><div class="sp-mline"></div><div class="sp-mline s"></div></div><div class="sp-mini t"><div class="sp-mtop"></div><div class="sp-mline"></div><div class="sp-mline s"></div></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Screen push</div><div class="mo-cm">300ms &middot; arrive &middot; incoming full, outgoing 22%</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp c2"><div class="sp-mini b"><div class="sp-mtop"></div><div class="sp-mline"></div><div class="sp-mline s"></div></div><div class="sp-mini t"><div class="sp-mtop"></div><div class="sp-mline"></div><div class="sp-mline s"></div></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Screen back</div><div class="mo-cm">300ms &middot; the push, run backwards</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp c3"><div class="tabs"><div class="tb t1 on">Winners</div><div class="tb t2">Losers</div><div class="tb">Championship</div><div class="ink"></div></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Bracket side tabs</div><div class="mo-cm">200ms &middot; the underline travels, it never jumps</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp c4"><div class="men"><div class="mi on">August 2026</div><div class="mi">September 2026</div><div class="mi">July 2026</div></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Tournament picker</div><div class="mo-cm">300ms &middot; scales from the title, rows stagger 40ms</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp c5"><div class="bg"><span></span><span></span><span></span></div><div class="scrim"></div><div class="sheet"><div class="grab"></div></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Sheet opens</div><div class="mo-cm">300ms &middot; arrive &middot; scrim and sheet together</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+    </div>
+  </div>
+  <div class="mo-g">
+    <div class="mo-gh"><div class="mo-gn">Lists that change</div><div class="mo-gd">Pools, teams and brackets rearrange constantly &mdash; the movement is the explanation</div></div>
+    <div class="mo-grid">
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp d1"><div class="sp-stack"><div class="sp-row"><span class="sp-nm">Net Gains</span><span class="sp-r">Pool A</span></div><div class="sp-row"><span class="sp-nm">Block Party</span><span class="sp-r">Pool A</span></div><div class="sp-row"><span class="sp-nm">Dig Deep</span><span class="sp-r">Pool B</span></div></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Rows arrive</div><div class="mo-cm">200ms &middot; 45ms stagger &middot; up to 3 rows</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp d2"><div class="sp-stack"><div class="sp-row go"><span class="sp-nm">Spike Squad</span><span class="sp-r">withdrawn</span></div><div class="sp-row"><span class="sp-nm">Dig Deep</span><span class="sp-r">Pool B</span></div></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Row leaves</div><div class="mo-cm">260ms &middot; slides out, then the gap closes</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp d3"><div class="sp-stack"><div class="sp-row r1"><span class="sp-nm">The Dawg House</span><span class="sp-r">Seed 3</span></div><div class="sp-row r2"><span class="sp-nm">Sets on the Beach</span><span class="sp-r">Seed 4</span></div></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Two rows swap</div><div class="mo-cm">280ms &middot; both move, so the trade is legible</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp d4"><div class="sp-stack"><div class="sp-row"><span><span class="sp-nm">Pool A &middot; Net Gains</span></span></div><div class="sp-row"><span><span class="sp-nm">Pool A &middot; Block Party</span></span></div><div class="sp-row"><span><span class="sp-nm">Pool B &middot; Dig Deep</span></span></div></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Pools deal in</div><div class="mo-cm">300ms &middot; 70ms stagger &middot; teams land in their pool</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp d5"><div class="node">Net Gains</div><div class="node next">Winner of G7</div><div class="fly">Net Gains</div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Bracket advances</div><div class="mo-cm">360ms &middot; the winner travels to the next slot</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+    </div>
+  </div>
+  <div class="mo-g">
+    <div class="mo-gh"><div class="mo-gn">State, changing</div><div class="mo-gd">The quiet ones. A number that changes without motion is a number nobody notices</div></div>
+    <div class="mo-grid">
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp e1"><div class="st done"></div><div class="st done"></div><div class="st now"></div><div class="st"></div><div class="st"></div><div class="st"></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Phase advances</div><div class="mo-cm">300ms &middot; the new segment grows from its left edge</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp e2"><div class="bdg">2</div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Badge count</div><div class="mo-cm">220ms &middot; press &middot; 1.32 overshoot</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp e3"><div class="net"><span class="nn">4</span><span class="lbl">G14 &middot; starting</span></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Net goes live</div><div class="mo-cm">200ms &middot; dashed idle fills in solid</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp e4"><div class="sk"></div><div class="sk s"></div><div class="real"><span class="sp-nm">Net Gains vs Block Party</span><span class="sp-sub">Pool A &middot; net 2 &middot; 21&ndash;18</span></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Skeleton to content</div><div class="mo-cm">1100ms shimmer &middot; 200ms handoff</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+    </div>
+  </div>
+  <div class="mo-g">
+    <div class="mo-gh"><div class="mo-gn">Getting attention</div><div class="mo-gd">Used sparingly &mdash; an app that shouts on every action is noise by noon</div></div>
+    <div class="mo-grid">
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp f1"><div class="toast"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Score saved to G12</div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Toast</div><div class="mo-cm">2300ms total &middot; 200ms in, holds, 200ms out</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp f2"><div class="fld">Score can’t be 0&ndash;0</div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Wrong entry</div><div class="mo-cm">380ms &middot; shake, and only on a real error</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp f3"><span class="sp-chip">Mark paid</span><span class="sp-nm">Block Party</span><span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Marked paid</span></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Payment marked</div><div class="mo-cm">300ms &middot; the chip leaves, the confirmation lands</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp f4"><div class="sp-row"><span><span class="sp-nm">2 teams haven’t paid</span></span></div><div class="sp-row"><span><span class="sp-nm">Pools aren’t drawn</span></span></div><span class="clear"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Nothing needs you</span></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Needs you clears</div><div class="mo-cm">260ms &middot; last item out, all-clear in</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+    </div>
+  </div>
+  <div class="mo-g">
+    <div class="mo-gh"><div class="mo-gn">Once a tournament</div><div class="mo-gd">The only place the system spends real time. Restraint is what makes it land</div></div>
+    <div class="mo-grid">
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp g1"><div class="crown"><div class="cup"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg></div><div class="nm">Net Gains</div></div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Champion</div><div class="mo-cm">460ms &middot; press &middot; the one big move in the app</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+      <div class="mo-c">
+        <div class="mo-cs"><div class="sp g2"><span class="pc p1"></span><span class="pc p2"></span><span class="pc p3"></span><span class="pc p4"></span><span class="pc p5"></span><div class="word">Champions</div></div></div>
+        <div class="mo-cf"><div class="mo-cb"><div class="mo-cn">Title confetti</div><div class="mo-cm">1000ms &middot; five pieces, never more</div></div><button type="button" class="mo-rep" data-replay aria-label="Replay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mo-note">
+    <div class="mo-noteh">If only six ship</div>
+    <ol class="mo-notel">
+      <li><b>Button press</b> &mdash; every tap in the app, one line of CSS, the biggest felt difference.</li>
+      <li><b>One-tap fix &rarr; done, and undo</b> &mdash; the Manage hub already works this way; the motion is what makes it trustworthy.</li>
+      <li><b>Screen push and back</b> &mdash; kills the "where am I" that costs organizers time mid-game.</li>
+      <li><b>Score commits</b> &mdash; the single most repeated action on tournament day.</li>
+      <li><b>Rows arrive / leave</b> &mdash; pools and teams change constantly and currently teleport.</li>
+      <li><b>Toast</b> &mdash; one confirmation pattern, so nothing else has to interrupt.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+(function () {
+  var body = document.body, root = document.documentElement;
+  // each plate's playhead runs the demo's real duration, taken from its spec line
+  document.querySelectorAll('.mo-c').forEach(function (c) {
+    var m = /([\d.]+)\s*ms/.exec(c.querySelector('.mo-cm').textContent);
+    if (m) c.style.setProperty('--d', m[1] + 'ms');
+  });
+  function play(el) {
+    var t = el.classList.contains('mo-sc') ? el : el.querySelector('.sp');
+    if (!t) return;
+    t.classList.remove('run');
+    el.classList.remove('playing');
+    void t.offsetWidth;              // reflow, so the animation restarts
+    t.classList.add('run');
+    if (el.classList.contains('mo-c')) el.classList.add('playing');
+  }
+  document.querySelectorAll('.mo-c').forEach(function (c) {
+    c.addEventListener('mouseenter', function () { play(c); });
+  });
+  document.addEventListener('click', function (e) {
+    var rep = e.target.closest('[data-replay]');
+    if (rep) { play(rep.closest('.mo-c')); return; }
+    var sc = e.target.closest('.mo-sc');
+    if (sc) { play(sc); return; }
+    var sp = e.target.closest('[data-speed] button');
+    if (sp) {
+      root.style.setProperty('--m-scale', sp.getAttribute('data-s'));
+      sp.parentNode.querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b === sp); });
+      return;
+    }
+    var rm = e.target.closest('[data-rm] button');
+    if (rm) {
+      body.classList.toggle('no-motion', rm.getAttribute('data-r') === '1');
+      rm.parentNode.querySelectorAll('button').forEach(function (b) { b.classList.toggle('on', b === rm); });
+      return;
+    }
+    if (e.target.closest('[data-playall]')) {
+      document.querySelectorAll('.mo-c').forEach(function (c, i) { setTimeout(function () { play(c); }, i * 90); });
+      document.querySelectorAll('.mo-sc').forEach(function (c, i) { setTimeout(function () { play(c); }, i * 90); });
+    }
+  });
+  // Play each card once when it first comes into view. IntersectionObserver does
+  // not fire inside every preview host, so this is a plain scroll check - the page
+  // has to be alive whether or not the observer is.
+  var seen = [];
+  function sweep() {
+    var vh = window.innerHeight || document.documentElement.clientHeight;
+    document.querySelectorAll('.mo-c, .mo-sc').forEach(function (c) {
+      if (seen.indexOf(c) !== -1) return;
+      var r = c.getBoundingClientRect();
+      if (r.top > vh - 40 || r.bottom < 40) return;
+      seen.push(c);
+      play(c);
+    });
+  }
+  var tick;
+  function queue() { clearTimeout(tick); tick = setTimeout(sweep, 90); }
+  window.addEventListener('scroll', queue, { passive: true });
+  window.addEventListener('resize', queue);
+  document.addEventListener('scroll', queue, { passive: true, capture: true });
+  ['wheel', 'touchmove', 'keydown', 'pointerdown'].forEach(function (ev) {
+    document.addEventListener(ev, queue, { passive: true });
+  });
+  // hosts differ on which element actually scrolls, so a slow poll backs the
+  // listeners up and stops once every card has had its turn
+  var poll = setInterval(function () {
+    sweep();
+    if (seen.length >= document.querySelectorAll('.mo-c, .mo-sc').length) clearInterval(poll);
+  }, 300);
+  setTimeout(sweep, 140);
+})();
+</script>
+</body>
+</html>
