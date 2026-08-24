@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.24.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.24.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -4876,6 +4876,32 @@ async function flushOutbox() {
 
 // Lightweight floating toast whose text reflects the real async-save outcome
 // (honest status) — created with a neutral "Saving…" then settled to a result.
+// ── Motion system (design round 2026-08-24) — the three things CSS cannot see ──────────────────────
+// The handoff shipped a MutationObserver that watched #app-content; in a template-literal app every
+// list, card and panel is rebuilt via innerHTML, so "a row was inserted" and "the poll repainted the
+// screen" are indistinguishable to an observer and the whole app would play its entrance every 15s.
+// So: (1) mEnter() opens a 700ms window (300ms surface + the longest stagger) during which the CSS
+// entrance rules apply — set ONLY from activateMainTab and the Tournament sub-page push, never from
+// partialRender; (2) mPlay() is called explicitly where a value or state changes in place.
+function mReduced() {
+  return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+function mEnter() {
+  try {
+    document.body.classList.add('m-enter');
+    clearTimeout(mEnter._t);
+    mEnter._t = setTimeout(() => { document.body.classList.remove('m-enter'); }, 700);
+  } catch {}
+}
+function mPlay(el, cls, ms) {
+  if (!el || mReduced() || (el.dataset && el.dataset.mPlaying)) return;
+  try {
+    el.dataset.mPlaying = '1';
+    el.classList.add(cls);
+    setTimeout(() => { el.classList.remove(cls); delete el.dataset.mPlaying; }, ms);
+  } catch {}
+}
+
 function makeSaveToast(text) {
   try {
     const t = document.createElement('div');
@@ -9974,13 +10000,17 @@ function openMgScoreSheet(matchId) {
   const fail = (msg) => { const e = errEl(); if (e) { e.textContent = msg; e.hidden = false; } };
   const sync = () => {
     const ea = document.getElementById('mgss-a'), eb = document.getElementById('mgss-b');
-    if (ea) ea.textContent = String(a);
-    if (eb) eb.textContent = String(b);
+    if (ea && ea.textContent !== String(a)) { ea.textContent = String(a); mPlay(ea, 'm-bump', 240); }
+    if (eb && eb.textContent !== String(b)) { eb.textContent = String(b); mPlay(eb, 'm-bump', 240); }
     scrim.querySelectorAll('[data-mgss-winner]').forEach((wb) => {
       const on = wb.getAttribute('data-mgss-winner') === pick;
       wb.setAttribute('aria-pressed', on ? 'true' : 'false');
       const row = wb.closest('.mgv-scrow');
-      if (row) row.classList.toggle('is-won', on);
+      if (row) {
+        const was = row.classList.contains('is-won');
+        row.classList.toggle('is-won', on);
+        if (on && !was) mPlay(row, 'm-flash', 440); // motion (2026-08-24): the score commits, the row washes green
+      }
     });
     const btn = scrim.querySelector('.mgv-scfinal');
     if (btn) {
@@ -11335,6 +11365,7 @@ function activateMainTab(tab) {
   if (tab === 'players' && !checkinNavVisible()) tab = 'home';
   activeMainTab = tab;
   sessionStorage.setItem(currentTabKey(), tab);
+  mEnter(); // motion (2026-08-24): a tab change is a real navigation — the screen may arrive
   // e2e catch 2026-07-11: entering Manage glues the loaded tournament data to the resolved tournament
   // (activeTournamentId only ever followed the old shell's select flow before this).
   if (tab === 'manage' && state.isAdmin) mgSyncActiveTournament();
@@ -11517,6 +11548,7 @@ function attachHandlers() {
         if (activeMainTab !== 'tournament') activateMainTab('tournament');
         const c = document.querySelector('#tab-tournament .container');
         if (c) c.innerHTML = buildPublicTournamentRootHTML();
+        mEnter(); // motion (2026-08-24): a sub-page push is a real navigation
         if (pdTournamentView === 'bracket') layoutBracketTree(); // the Bracket page shows the real bt-* tree
         const panel = document.getElementById('tab-tournament');
         if (panel) panel.scrollTop = 0; // a sub-page open/back is an explicit user action — top is correct
