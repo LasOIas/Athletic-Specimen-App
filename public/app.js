@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.24.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.24.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3995,6 +3995,63 @@ function buildJoinSheetFormHTML(show) {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19"/></svg>
       <span>Pay <b>$20 each</b> at check-in, cash or Venmo</span>
     </div>`;
+}
+
+// ── Home Details card actions (design round 2026-08-24) ─────────────────────────────────────────────
+// The rules SHEET: the shipped tournaments.rules text (the same escape-first rulesToHTML the Rules page
+// uses — one column, one formatter, so the sheet shows the WHOLE document) in the production
+// .popup-overlay/.popup-card kit. Body-appended like every other prod modal: partialRender rebuilds
+// #tab-home .container wholesale on every background sync, so anything inside .hm dies mid-read.
+// Mike's call (2026-08-24): the sheet is Home's surface; the Tournament hub row and the register form
+// keep the full Rules PAGE and its rulesReturnView back-stack. No rules text → '' (and the row renders
+// no Rules action) — never a stub on the front door.
+function hmRulesModalHTML(t) {
+  const body = rulesToHTML(t && typeof t.rules === 'string' ? t.rules : '');
+  if (!body) return '';
+  const name = escapeHTML((t && t.name) || 'Tournament');
+  return `<div class="popup-card card" role="dialog" aria-modal="true" aria-labelledby="hm-rules-title">
+  <div class="popup-header">
+    <div class="hmv-rtitles"><span class="hmv-reyebrow">${name}</span><h3 class="hmv-rtitle" id="hm-rules-title">Rules</h3></div>
+    <button type="button" class="hmv-rx" data-hm-rules-close aria-label="Close the rules"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <div class="popup-body"><div class="rl-body">${body}</div></div>
+  <div class="hmv-rfoot"><button type="button" class="hmv-rdone" data-hm-rules-close>Got it</button></div>
+</div>`;
+}
+function hmRulesEscape(ev) { if (ev.key === 'Escape') closeHomeRules(); }
+function closeHomeRules() {
+  const el = document.getElementById('hm-rules-modal');
+  if (el) el.remove();
+  document.removeEventListener('keydown', hmRulesEscape);
+}
+function openHomeRules() {
+  const html = hmRulesModalHTML(publicHomeRegTournament()); // the SAME row the card was built from
+  if (!html) return;
+  closeHomeRules();
+  const scrim = document.createElement('div');
+  scrim.id = 'hm-rules-modal';
+  scrim.className = 'popup-overlay';
+  scrim.style.display = 'flex';
+  scrim.innerHTML = html;
+  document.body.appendChild(scrim);
+  // The sheet lives on document.body (outside #app-content's delegated listeners), so its closers bind here.
+  scrim.addEventListener('click', (ev) => {
+    if (ev.target === scrim || ev.target.closest('[data-hm-rules-close]')) closeHomeRules();
+  });
+  document.addEventListener('keydown', hmRulesEscape);
+}
+// Copy address: writes data-hm-copy (venue + address, built by hmVenueRowHTML from migration 0058's
+// columns) to the clipboard and holds the green "Address copied" state ~2s. A background repaint during
+// those 2s rebuilds the row without .is-done — acceptable, the copy already happened. No clipboard API
+// (a very old in-app browser) → nothing happens and nothing claims it did.
+function hmCopyAddress(btn) {
+  const text = btn.getAttribute('data-hm-copy') || '';
+  if (!text || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') return;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.classList.add('is-done');
+    clearTimeout(hmCopyAddress._t);
+    hmCopyAddress._t = setTimeout(() => { btn.classList.remove('is-done'); }, 2000);
+  }).catch(() => {});
 }
 
 function closeJoinSheet() {
@@ -11437,6 +11494,11 @@ function attachHandlers() {
       }
       // Round 2 (spec §12.4) / Slice 2 (§13.3): the public Tournament hub tiles/back toggle the hub<->sub-page
       // views (pools / bracket / register — the shared 'board' is retired from the public path).
+      // Home Details card (design round 2026-08-24): Copy address + the Rules sheet. Checked before the
+      // Tournament view machinery — both live on Home and neither navigates.
+      const hmCopyBtn = e.target.closest('[data-hm-copy]');
+      if (hmCopyBtn) { hmCopyAddress(hmCopyBtn); return; }
+      if (e.target.closest('[data-hm-rules]')) { openHomeRules(); return; }
       const tnBtn = e.target.closest('[data-tn-view]');
       // Mike (2026-07-11): the Tournament tab is the SAME public page for admins — the old `!state.isAdmin`
       // guard (from the admin-tab era) left admins unable to navigate it (or reach the register form).
