@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.27'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.28'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6205,6 +6205,10 @@ const AUTH_EMAIL_RE = /^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/;
 // like a bug report. Both roads to that cap read the same: the Resend controls below, and
 // friendlyAuthError, which is where a signUp, a reset and an email change land.
 const AUTH_RATE_LIMIT = 'Too many emails just now. Wait a minute, then try again.';
+// The short-password refusal for a password being SET, in one place (review, fix round 1): the reset
+// screen and the change-password screen both say it, so the number and the wording can never drift
+// apart. Sign-in and create-account keep their own sentence, which has no "new" in it: nothing there is.
+const AUTH_NEW_PASSWORD_SHORT = 'Your new password needs at least ' + AUTH_PASSWORD_MIN + ' characters.';
 let authSentEmail = '';                  // the address a sent screen resends to (memory only; a reload loses it)
 let authResendUntil = 0;                 // cooldown deadline (ms) shared by every Resend control
 // The one back chevron every .auth-page overlay wears. Declared once so the wall and the auth page can
@@ -6281,8 +6285,9 @@ function authFieldHTML(id, attrs, withMeter) {
 
 function authMeterUpdate(input) {
   if (!input) return;
-  // The reset and change-password screens put the field OUTSIDE a <form>, so input.form is null there.
-  // Fall back to the overlay wrapper, then the document (review, fix round 1).
+  // Every screen that ships a meter puts its field INSIDE a <form>, so input.form is normally the scope.
+  // The fallbacks are for a field with no form association at all (a detached node, and the test
+  // harness's stub inputs, which have no form to associate with): the overlay wrapper, then the document.
   const scope = input.form || (input.closest && input.closest('.auth-inner')) || document;
   const box = scope && scope.querySelector('[data-sbox]');
   if (!box) return;
@@ -6329,12 +6334,19 @@ function renderAuthPageInner() {
   // Both sent screens are the same design part with a different sentence: the mark, the title, the
   // error line the design forgot to draw, the Resend and the way back. The typed address lives in
   // memory only, so a reload lands on sign-in, which is what both sentences tell people to do anyway.
+  // Review, fix round 1: the Password screen's "Forgot your current one?" opens this overlay for someone
+  // who IS signed in, and every way out of the forgot pair was written for someone who is not. Stepping
+  // back to 'signin' would paint a sign-in form over a signed-in app with the account card already torn
+  // down, and submitting it could switch accounts. While a session is open, both exits from the forgot
+  // pair return to the account card instead. Signed out, every one of them behaves exactly as before.
+  const signedIn = !!state.authSession;
+  const altLabel = (forgotSent && signedIn) ? 'Back to account' : 'Back to sign in';
   const sentScreenHTML = (subHTML) => `<div class="au-mark is-mail">${AUTH_MAIL_SVG}</div>
       <h2 class="auth-title">Check your email</h2>
       <p class="auth-sub">${subHTML}</p>
       <div class="auth-err" id="auth-err" role="alert" hidden></div>
       <button type="button" class="auth-alt" id="auth-resend">Didn't get it? Resend</button>
-      <button type="button" class="au-alt2" id="auth-alt">Back to sign in</button>`;
+      <button type="button" class="au-alt2" id="auth-alt">${altLabel}</button>`;
   // signup-sent is the branch signUp takes when it comes back with no session, i.e. when the project
   // has Confirm email ON. It is dormant while that setting is OFF, and correct the moment Mike flips it.
   const sentInner = sentScreenHTML(`We sent a link to <span class="au-em">${escapeHTML(authSentEmail)}</span>. Tap it, then sign in.`);
@@ -6371,8 +6383,11 @@ function renderAuthPageInner() {
       </form>`;
   // The forgot screens are steps INSIDE this overlay, so their chevron walks one step back instead of
   // closing it (the design's data-auth-view on each back control).
-  const backStep = forgot ? 'signin' : (forgotSent ? 'forgot' : '');
-  const backLabel = forgot ? 'Back to sign in' : (forgotSent ? 'Back' : 'Close sign in');
+  // The forgot chevron keeps its step back to sign-in ONLY for someone who is signed out; with a session
+  // open it carries no step at all and the handler below sends it to the account card. The forgot-sent
+  // chevron still walks to 'forgot', which is inside the pair and therefore correct either way.
+  const backStep = (forgot && !signedIn) ? 'signin' : (forgotSent ? 'forgot' : '');
+  const backLabel = forgot ? (signedIn ? 'Back to account' : 'Back to sign in') : (forgotSent ? 'Back' : 'Close sign in');
   el.innerHTML = `
     <button type="button" class="auth-back" id="auth-back" aria-label="${backLabel}">${AUTH_BACK_SVG}</button>
     <div class="auth-inner">
@@ -6380,11 +6395,16 @@ function renderAuthPageInner() {
     </div>`;
   el.querySelector('#auth-back').addEventListener('click', () => {
     if (backStep) { authMode = backStep; renderAuthPageInner(); return; }
+    // A signed-in person reached the forgot screen from the account card, so the card is where back goes.
+    if (forgot && signedIn) { closeAuthPage(); openAccountMenu(); return; }
     claimIntent = false; // dismissing sign-in abandons a pending claim intent (review: it leaked into a later sign-in)
     closeAuthPage();
   });
   const altBtn = el.querySelector('#auth-alt');
   if (altBtn) altBtn.addEventListener('click', () => {
+    // Same rule as the chevron: the sent screen's alt reads "Back to account" for a signed-in person and
+    // takes them there, instead of dropping them on a sign-in form they do not need.
+    if (forgotSent && signedIn) { closeAuthPage(); openAccountMenu(); return; }
     authMode = authMode === 'signin' ? 'signup' : 'signin';   // every other state's alt is "Back to sign in"
     renderAuthPageInner();
   });
@@ -6837,7 +6857,7 @@ async function onResetSave(e) {
   if (errEl) errEl.hidden = true;
   // The design's order: empty, then length, then match.
   if (!password || !again) { showErr(AUTH_FILL_ALL); return; }
-  if (password.length < AUTH_PASSWORD_MIN) { showErr('Your new password needs at least ' + AUTH_PASSWORD_MIN + ' characters.'); return; }
+  if (password.length < AUTH_PASSWORD_MIN) { showErr(AUTH_NEW_PASSWORD_SHORT); return; }
   if (password !== again) { showErr("Those two passwords don't match."); return; }
   if (!supabaseClient) { showErr('Saving is unavailable right now.'); return; }
   const orig = btn ? btn.textContent : '';
@@ -7447,6 +7467,21 @@ async function onAcctNameSave(e) {
   }
 }
 
+// The ONE current-password check both edit screens make (review, fix round 1). GoTrue has no
+// verify-my-password endpoint, so proving a password means signing in with it again, against the account
+// that is already signed in - and that spends an auth rate-limit slot. Answering a throttle with "That
+// password is wrong." would send someone hunting for a typo that is not the problem, so the limit gets
+// its own sentence. Returns '' when the password is right and the line to show when it is not. It
+// deliberately does NOT catch: a thrown error propagates to the caller's own catch, which is where a dead
+// network is already handled, and where nothing typed is ever logged.
+async function checkCurrentPassword(password) {
+  const chk = await supabaseClient.auth.signInWithPassword({ email: state.account.email, password });
+  if (!(chk && chk.error)) return '';
+  // Everything else reads the same to the person holding the phone: the password they typed is not the
+  // one on the account. The server's own words stay out of it (they name the email too).
+  return /rate|limit/i.test((chk.error && chk.error.message) || '') ? AUTH_RATE_LIMIT : 'That password is wrong.';
+}
+
 // The Email screen's save (Account handoff 2026-08-25, spec §5). Two calls, in this order and no other:
 // the current password is PROVEN with a second signInWithPassword against the account that is already
 // signed in (GoTrue has no "verify my password" endpoint, and Secure email change is OFF so updateUser
@@ -7479,10 +7514,8 @@ async function onAcctEmailSave(e) {
     if (btn) { btn.disabled = false; btn.textContent = orig; }
   };
   try {
-    const chk = await supabaseClient.auth.signInWithPassword({ email: current, password });
-    // Every reason this can fail reads the same to the person holding the phone: the password they typed
-    // is not the one on the account. The server's own words stay out of it (they name the email too).
-    if (chk && chk.error) { failed('That password is wrong.'); return; }
+    const wrong = await checkCurrentPassword(password);
+    if (wrong) { failed(wrong); return; }
     const res = await supabaseClient.auth.updateUser({ email: newEmail }, { emailRedirectTo: location.origin });
     if (res && res.error) {
       failed(/already/i.test(res.error.message || '')
@@ -7529,7 +7562,7 @@ async function onAcctPasswordSave(e) {
   // one refusal only this screen can make: GoTrue accepts a re-save of the password already on the
   // account and answers "saved", which would be a lie about what changed.
   if (!current || !next || !again) { showErr(AUTH_FILL_ALL); return; }
-  if (next.length < AUTH_PASSWORD_MIN) { showErr('Your new password needs at least ' + AUTH_PASSWORD_MIN + ' characters.'); return; }
+  if (next.length < AUTH_PASSWORD_MIN) { showErr(AUTH_NEW_PASSWORD_SHORT); return; }
   if (next !== again) { showErr("Those two passwords don't match."); return; }
   if (next === current) { showErr("Pick a password you haven't used here."); return; }
   if (!supabaseClient || !state.account) { showErr(ACCT_SAVE_FAIL); return; }
@@ -7540,10 +7573,8 @@ async function onAcctPasswordSave(e) {
     if (btn) { btn.disabled = false; btn.textContent = orig; }
   };
   try {
-    const chk = await supabaseClient.auth.signInWithPassword({ email: state.account.email, password: current });
-    // Every reason this can fail reads the same to the person holding the phone: the password they typed
-    // is not the one on the account. The server's own words stay out of it.
-    if (chk && chk.error) { failed('That password is wrong.'); return; }
+    const wrong = await checkCurrentPassword(current);
+    if (wrong) { failed(wrong); return; }
     const res = await supabaseClient.auth.updateUser({ password: next });
     if (res && res.error) { failed(friendlyAuthError(res.error)); return; }
     // Nothing to cache and nothing to repaint: the card shows "Change" on this row either way, and a

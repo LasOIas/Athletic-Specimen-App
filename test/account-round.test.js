@@ -249,6 +249,9 @@ function loadApp() {
       },
       // Task 3: the account card reads the cached name for its initial, its title and its Name row.
       openMenu: () => openAccountMenu(),
+      // Task 6 review: which state #auth-page is in, so a case can prove that a way OUT of the forgot
+      // pair never repainted the overlay into the sign-in form on its way.
+      authModeNow: () => authMode,
       setAccountName: (n) => { accountName = n; },
       authInitial: () => authInitial(),
       nameFill: () => promptNameFillIfNeeded(),
@@ -1284,6 +1287,20 @@ describe('Account round Task 5 - Change email and the pending screen', () => {
     expect(bridge.errors()).toEqual([]);
   });
 
+  it('a throttled current-password check reads as the limit here too, and never sends the link', async () => {
+    // The check is a real signInWithPassword, so a few wrong tries spend the auth cap. Task 6's review
+    // moved both screens onto one helper that tells the two failures apart.
+    openEmail();
+    type(NEW, SECRET);
+    bridge.supaNext('signInWithPassword', { data: {}, error: { message: 'Request rate limit reached' } });
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('Too many emails just now. Wait a minute, then try again.');
+    expect(bridge.registry['acct-err'].textContent).not.toBe('That password is wrong.');
+    expect(bridge.supaCalls().map((c) => c[0])).toEqual(['signInWithPassword']);
+    expect(bridge.getState().account.pendingEmail).toBe(null);
+    expect(bridge.registry['acct-save'].disabled).toBe(false);
+  });
+
   it('a right password sends updateUser to the root redirect and paints the pending screen', async () => {
     const page = openEmail();
     type('  m@work.com  ', SECRET);   // the address is trimmed; the password never is
@@ -1486,7 +1503,8 @@ describe('Account round Task 5 - Change email and the pending screen', () => {
 
     // One copy of the sentence: the Resend controls and the error map read the same const.
     expect(count(appSrc, "'Too many emails just now. Wait a minute, then try again.'")).toBe(1);
-    expect(count(appSrc, 'AUTH_RATE_LIMIT')).toBe(3);   // the declaration, friendlyAuthError, authResend
+    // Task 6 review adds the fourth: the shared current-password check answers a throttle with it too.
+    expect(count(appSrc, 'AUTH_RATE_LIMIT')).toBe(4);   // the declaration, friendlyAuthError, authResend, checkCurrentPassword
   });
 
   it('the SIGNED_IN the password check emits for the same account runs nothing', async () => {
@@ -1617,6 +1635,9 @@ describe('Account round Task 6 - Change password', () => {
     expect(bridge.supaCalls().length).toBe(0);
     expect(bridge.registry['acct-page']).toBeTruthy();
     expect(bridge.errors()).toEqual([]);
+    // One copy of the sentence: the reset screen refuses a short new password in the same words and
+    // reads the same const, so the number and the wording cannot drift apart (review, fix round 1).
+    expect(count(appSrc, "'Your new password needs at least '")).toBe(1);
   });
 
   it('a wrong current password stops before updateUser and hands the button back', async () => {
@@ -1738,7 +1759,7 @@ describe('Account round Task 6 - Change password', () => {
     bridge.hook('.au-slab', lab);
     const inp = bridge.registry['ap-new'];
     inp.setAttribute('data-strength', '');
-    inp.form = bridge.registry['acct-form'];   // unlike the reset screen, this field IS inside a form
+    inp.form = bridge.registry['acct-form'];   // the shipped field sits in this form; a stub node has none
     const key = (v) => { inp.value = v; page.listeners.input[0]({ target: inp }); };
 
     key('abc');
@@ -1756,5 +1777,65 @@ describe('Account round Task 6 - Change password', () => {
     expect(box.classList.contains('is-3')).toBe(true);
     // Never "Strong": the meter reads length and variety, and neither one knows whether a password is.
     expect(lab.textContent).not.toBe('Strong');
+  });
+
+  // ── Fix round 1 ──────────────────────────────────────────────────────────────────────────────────
+  it('a signed-in person who taps Forgot your current one? gets the chevron back to the account', () => {
+    openPassword();
+    bridge.registry['ap-forgot'].listeners.click[0]();
+    const auth = bridge.registry['auth-page'];
+    expect(auth.innerHTML).toContain('Reset your password');
+    // This chevron was written to step back to sign-in. For someone who IS signed in that paints a
+    // sign-in form over a signed-in app with the account card already torn down, and submitting it
+    // could switch accounts. With a session open it goes to the card instead.
+    expect(auth.innerHTML).toContain('aria-label="Back to account"');
+    expect(auth.innerHTML).not.toContain('aria-label="Back to sign in"');
+
+    bridge.registry['auth-back'].listeners.click[0]();
+    expect(bridge.registry['auth-page']).toBeFalsy();
+    expect(bridge.registry['account-menu']).toBeTruthy();
+    expect(bridge.registry['account-menu'].innerHTML).toContain('morgan@email.com');
+    // The overlay was never repainted into the sign-in form on the way out, and the mode is untouched.
+    expect(auth.innerHTML).toContain('Reset your password');
+    expect(auth.innerHTML).not.toContain('New here? Create an account');
+    expect(auth.innerHTML).not.toContain('>Sign in<');
+    expect(bridge.authModeNow()).toBe('forgot');
+  });
+
+  it('the sent screen sends a signed-in person back to the account too, and says so', async () => {
+    openPassword();
+    bridge.registry['ap-forgot'].listeners.click[0]();
+    bridge.registry['fg-email'].value = 'morgan@email.com';
+    bridge.supaNext('resetPasswordForEmail', { data: {}, error: null });
+    await bridge.authSubmit();
+
+    const auth = bridge.registry['auth-page'];
+    expect(auth.innerHTML).toContain('Check your email');
+    expect(labelOf(auth.innerHTML, 'auth-alt')).toBe('Back to account');
+
+    bridge.registry['auth-alt'].listeners.click[0]();
+    expect(bridge.registry['auth-page']).toBeFalsy();
+    expect(bridge.registry['account-menu']).toBeTruthy();
+    expect(auth.innerHTML).toContain('Check your email');
+    expect(auth.innerHTML).not.toContain('New here? Create an account');
+    expect(bridge.authModeNow()).toBe('forgot-sent');
+  });
+
+  it('a throttled current-password check says the limit, not the password, and never reaches updateUser', async () => {
+    openPassword();
+    type(CUR, NEXT, NEXT);
+    bridge.supaNext('signInWithPassword', { data: {}, error: { message: 'Request rate limit reached' } });
+    await submit();
+
+    expect(bridge.registry['acct-err'].textContent).toBe('Too many emails just now. Wait a minute, then try again.');
+    expect(bridge.registry['acct-err'].textContent).not.toBe('That password is wrong.');
+    expect(bridge.supaCalls().map((c) => c[0])).toEqual(['signInWithPassword']);
+    expect(bridge.registry['acct-save'].disabled).toBe(false);
+    expect(toasts().length).toBe(0);
+
+    // ONE current-password check for both edit screens: the only other signInWithPassword left in the
+    // file is the sign-in form's own submit, and the wrong-password sentence has exactly one home.
+    expect(count(appSrc, 'signInWithPassword(')).toBe(2);
+    expect(count(appSrc, "'That password is wrong.'")).toBe(1);
   });
 });
