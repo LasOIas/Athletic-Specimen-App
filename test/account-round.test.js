@@ -334,7 +334,7 @@ describe('Account round Task 1 - the auth page and the wall', () => {
     // copy and told people the wrong thing to fix (review, fix round 1).
     const charClass = { message: 'Password should contain at least one character of each: abcdefghijklmnopqrstuvwxyz, 0123456789.' };
     expect(f(charClass)).toBe(charClass.message);
-    expect(appSrc).not.toContain('/(characters|short|\d)/i');
+    expect(appSrc).not.toContain('/(characters|short|\\d)/i');
   });
 
   it('AUTH_PASSWORD_MIN is the only place 8 lives', () => {
