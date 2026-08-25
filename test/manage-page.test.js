@@ -1022,7 +1022,7 @@ describe('buildMgTeamsHTML — Teams & payment list (pick R8, mockup tp-a)', () 
   it('offers the dashed "Add a team yourself" affordance', () => {
     setTeamsFixture();
     const html = bridge.buildMgTeams();
-    expect(html).toContain('data-mgtp-add');
+    expect(html).toContain('data-mgt-view="teamadd"');
     expect(html).toContain('Add a team yourself');
   });
 
@@ -1030,7 +1030,7 @@ describe('buildMgTeamsHTML — Teams & payment list (pick R8, mockup tp-a)', () 
     setTeamsFixture({ tournamentTeams: [] });
     const html = bridge.buildMgTeams();
     expect(html).toContain('No teams yet');
-    expect(html).toContain('data-mgtp-add'); // can still add one by hand
+    expect(html).toContain('data-mgt-view="teamadd"'); // can still add one by hand
     expect(html).not.toContain('data-mgtp-team');
   });
 });

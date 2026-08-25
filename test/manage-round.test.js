@@ -10,7 +10,7 @@
 // with browser stubs; pure.js loads first into the same context). ONE deliberate difference: the
 // buildScoreSheet bridge forwards the optional winner argument, because openMgScoreSheet seeds the pick
 // from winner_team_id on a finished game and the scoreless guard is only reachable with a pick in hand.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
@@ -132,10 +132,33 @@ function loadApp() {
       },
       // Task 12 (Co-pilot, Mike §6): the admin-only floating bubble + chat-on-stone shell fragment.
       copilotShell: () => copilotShellHTML(),
+      // Task 5 (Add a team): the screen's submit path, its typeahead and its dirty guard. mockTeamAdd
+      // swaps the three writes and the success tail for recorders — this suite is offline, so no write
+      // is ever real; each option may throw to drive that step's failure branch.
+      teamAddSubmit: () => mgTeamAddSubmit(),
+      teamAddDirty: () => manageTeamAddDirty(),
+      teamAddMatches: (q) => mgTeamAddMatches(q),
+      teamAddMenu: (q) => mgTeamAddMenuHTML(mgTeamAddMatches(q)),
+      setMgtView: (v) => { manageView = 'tournament'; mgtView = (v === undefined ? null : v); },
+      mgtViewNow: () => mgtView,
+      mockTeamAdd: (o) => {
+        o = o || {};
+        const calls = [];
+        tdbAddTeam = async (id, nm) => { calls.push(['add', id, nm]); return o.add ? o.add(id, nm) : { id: 'newteam', name: nm }; };
+        tdbSetTeamRoster = async (id, r) => { calls.push(['roster', id, r]); if (o.roster) return o.roster(id, r); };
+        tdbSetTeamPaid = async (id, v) => { calls.push(['paid', id, v]); if (o.paid) return o.paid(id, v); };
+        tdbRefreshTournaments = async () => { calls.push(['refresh']); };
+        repaintManage = () => { calls.push(['repaint', mgtView]); };
+        return calls;
+      },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
   vm.runInContext(appSrc + epilogue, context, { filename: 'app.js' });
+  // Task 5: the Add-a-team submit path and its dirty guard read REAL elements (#mgta-name, the
+  // .rf-pinput rows, the paid switch, #tab-manage, the status line), so their tests install their own
+  // behind this stub and restore it afterwards.
+  sandbox.__bridge.doc = documentStub;
   return sandbox.__bridge;
 }
 
@@ -700,5 +723,246 @@ describe('Task 4 the tournament page', () => {
     ['.tv-when {', '.tv-stats {', '.tv-stat {', '.tv-sn {', '.tv-sl {', '.tv-note {',
       '.tv-stat.is-attn .tv-sn', '.tv-stat.is-live .tv-sn'].forEach((sel) => expect(css).toContain(sel));
     expect(css.replace(/\/\*[\s\S]*?\*\//g, '')).not.toContain('.mgt-stage');
+  });
+});
+
+// ── Task 5: Add a team (screen 31, mgts-team-add) ─────────────────────────────────────────────────────
+// The organizer's own roster form, built on the SAME .rf-* kit the public registration page uses so the
+// two screens read as one form. Three things are new: a typeahead under each player slot (the club
+// players already on file), a Marked-paid switch where the public form carries the Venmo CTA, and a
+// submit that is three writes deep — add the team, set its roster, mark it paid — each able to fail on
+// its own and each with its own honest line. Nothing here claims an activity-log entry.
+
+// A minimal element the submit path can read and write: a value, attributes, a status line's text.
+function mkEl(extra) {
+  return Object.assign({
+    tagName: 'INPUT', value: '', textContent: '',
+    attrs: {},
+    getAttribute(k) { return (k in this.attrs) ? this.attrs[k] : null; },
+    setAttribute(k, v) { this.attrs[k] = String(v); },
+    classList: { add() {}, remove() {}, contains: () => false, toggle() {} },
+  }, extra || {});
+}
+const docOrig = { getElementById: bridge.doc.getElementById, querySelector: bridge.doc.querySelector, querySelectorAll: bridge.doc.querySelectorAll };
+
+// Install a live Add-a-team form behind the vm's document stub: the name field, the player slots, the
+// paid switch and the status line, exactly as mgTeamAddSubmit reaches for them.
+function installTeamAddForm(opts) {
+  const o = opts || {};
+  const name = mkEl({ value: o.name == null ? '' : o.name });
+  const status = mkEl({ tagName: 'P' });
+  const paid = mkEl({ tagName: 'BUTTON', attrs: { 'aria-checked': o.paid ? 'true' : 'false' } });
+  const rows = (o.roster || []).map((v) => mkEl({ value: v }));
+  bridge.doc.getElementById = (id) => (id === 'mgta-name' ? name : (id === 'mgta-status' ? status : null));
+  bridge.doc.querySelectorAll = (sel) => (sel === '#tab-manage .rf-pinput' ? rows.slice() : []);
+  bridge.doc.querySelector = (sel) => (sel === '[data-mgta-paid]' ? paid : null);
+  return { name, status, paid, rows };
+}
+
+// Install #tab-manage carrying N text fields, optionally with the caret in the first one.
+function installTeamAddPanel(values, focused) {
+  const fields = (values || []).map((v) => mkEl({ value: v }));
+  const panel = { contains: (n) => fields.indexOf(n) >= 0, querySelectorAll: () => fields.slice() };
+  bridge.doc.getElementById = (id) => (id === 'tab-manage' ? panel : null);
+  bridge.doc.activeElement = focused ? fields[0] : null;
+  return fields;
+}
+
+describe('Task 5 add a team', () => {
+  afterEach(() => { Object.assign(bridge.doc, docOrig); bridge.doc.activeElement = null; });
+
+  it('Add a team: name, team_size rows, the paid switch, no log claim', () => {
+    seedHub(bridge, { status: 'setup', registration_open: false, name: 'A', team_size: 4, buy_in: '$80 a team' });
+    const html = bridge.mgtContainer('teamadd');
+    expect(html).toContain('class="pd-htitle">Add a team<');
+    expect(count(html, 'class="rf-pinput')).toBe(4);
+    expect(html).toContain('4 per team');
+    expect(html).toContain('data-mgta-paid');
+    expect(html).toContain('$80 a team · no Venmo record for teams you add');
+    expect(html).toContain('data-mgta-save');
+    expect(html).not.toMatch(/activity log/i);
+  });
+
+  // The kit is the public register form's, so the two screens read as one: the same page section, the same
+  // field, the same numbered rows, the same divider and the same full-width CTA. Only the payment block
+  // and the typeahead hooks differ.
+  it('the screen is the register kit, sized by team_size, with a back button and a status line', () => {
+    seedHub(bridge, { status: 'setup', registration_open: false, name: 'A', team_size: 6, buy_in: '' });
+    const html = bridge.mgtContainer('teamadd');
+    expect(html).toContain('data-mgt-back');
+    expect(html).toContain('class="rf-page mgv-taform"');
+    expect(html).toContain('class="rf-tinput" id="mgta-name"');
+    expect(count(html, 'class="rf-prow mgv-tarow"')).toBe(6);
+    expect(html).toContain('6 per team · at least 1 guy + 1 girl');
+    expect(html).toContain('First and Last Name');
+    expect(html).toContain('class="rf-cta" data-mgta-save>Add team<');
+    expect(html).toContain('class="mgr-status" id="mgta-status"');
+    // blank buy_in falls back to the league default rather than printing an empty sentence
+    expect(html).toContain('$80 a team · no Venmo record for teams you add');
+    expect(html).toContain('role="switch" aria-checked="false"');
+    expect(html).not.toContain('Coming in the next slices');
+    expect(html).not.toMatch(/—|&mdash;/);
+  });
+
+  it('no tournament: an honest empty state instead of a form that writes nowhere', () => {
+    const st = bridge.getState();
+    Object.assign(st, { tournaments: [], activeTournamentId: null, tournamentTeams: [], tournamentPools: [], tournamentMatches: [], players: [], checkedIn: [], pickupDays: [], isAdmin: true });
+    const html = bridge.mgtContainer('teamadd');
+    expect(html).toContain('class="pd-htitle">Add a team<');
+    expect(html).toContain('class="pd-empty"');
+    expect(html).not.toContain('data-mgta-save');
+  });
+
+  // The typeahead is the organizer typing against players already on file. Prefix, case-insensitive, six
+  // at most, and the menu prints a name and its initials — never a skill rating (admin-only data that has
+  // no business on a roster form).
+  it('the typeahead matches club players by name prefix, six at most, and never prints a skill', () => {
+    seedHub(bridge, { status: 'setup', registration_open: false, name: 'A', team_size: 4 }, { players: [
+      { id: 1, name: 'Harper Ellis', skill: 9 }, { id: 2, name: 'Harper Quinn', skill: 3 },
+      { id: 3, name: 'harper zane', skill: 5 }, { id: 4, name: 'Harper Ackley', skill: 5 },
+      { id: 5, name: 'Harper Bly', skill: 5 }, { id: 6, name: 'Harper Cole', skill: 5 },
+      { id: 7, name: 'Harper Dove', skill: 5 }, { id: 8, name: 'Sam Reed', skill: 7 },
+    ] });
+    expect(bridge.teamAddMatches('harp').length).toBe(6);
+    expect(Array.from(bridge.teamAddMatches('HARPER E'))).toEqual(['Harper Ellis']);
+    expect(Array.from(bridge.teamAddMatches('reed'))).toEqual([]);   // a prefix, never a substring
+    expect(Array.from(bridge.teamAddMatches('   '))).toEqual([]);
+    const menu = bridge.teamAddMenu('harper e');
+    expect(menu).toContain('class="mgv-taitem" data-mgta-pick="Harper Ellis"');
+    expect(menu).toContain('class="mgv-tan">Harper Ellis<');
+    expect(menu).toContain('class="mgv-tainit">HE<');
+    expect(menu).not.toMatch(/skill/i);
+    expect(menu).not.toMatch(/[79]/);
+  });
+
+  // The Teams & payment list's dashed row was a name-only appPrompt. It opens the real screen now, and the
+  // prompt is gone rather than left behind as a second, weaker way to do the same thing.
+  it('the Teams and payment list opens this screen, and the name-only prompt is retired', () => {
+    seedHub(bridge, { status: 'setup', registration_open: false, name: 'A' }, { teams: [] });
+    const list = bridge.buildMgTeams();
+    expect(list).toContain('class="pk-add" data-mgt-view="teamadd"');
+    expect(list).toContain('Add a team yourself');
+    expect(list).not.toContain('data-mgtp-add');
+    expect(appSrc).not.toContain('mgTeamAddPrompt');
+  });
+
+  // The 15s poll repaints the Manage container. A half-typed roster sitting in it must survive.
+  it('the poll never clobbers a half-typed form', () => {
+    bridge.setMgtView('teams');
+    installTeamAddPanel(['Dig Deep', 'Harper Ellis'], false);
+    expect(bridge.teamAddDirty()).toBe(false);        // wrong view: nothing to protect
+    bridge.setMgtView('teamadd');
+    installTeamAddPanel(['', '', '', ''], false);
+    expect(bridge.teamAddDirty()).toBe(false);        // untouched form: the poll may repaint
+    installTeamAddPanel(['', 'Harper Ellis', '', ''], false);
+    expect(bridge.teamAddDirty()).toBe(true);         // typed but unfocused still blocks it
+    installTeamAddPanel(['', '', '', ''], true);
+    expect(bridge.teamAddDirty()).toBe(true);         // the caret alone blocks it
+    expect(appSrc).toContain("mgtView === 'teamadd' && manageTeamAddDirty()");
+  });
+
+  it('submit: the team, then its roster, then the paid flag, then back to Teams and payment', async () => {
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    const calls = bridge.mockTeamAdd({});
+    const form = installTeamAddForm({ name: '  Dig Deep  ', roster: ['Harper Ellis', '', ' Sam Reed '], paid: true });
+    await bridge.teamAddSubmit();
+    expect(Array.from(calls, (c) => c[0])).toEqual(['add', 'roster', 'paid', 'refresh', 'repaint']);
+    expect(calls[0][1]).toBe('T');
+    expect(calls[0][2]).toBe('Dig Deep');             // trimmed before it reaches the write
+    expect(calls[1][1]).toBe('newteam');
+    expect(Array.from(calls[1][2])).toEqual(['Harper Ellis', 'Sam Reed']);   // blanks dropped, names trimmed
+    expect(calls[2][2]).toBe(true);
+    expect(bridge.mgtViewNow()).toBe('teams');
+    expect(form.status.textContent).toBe('Adding…');
+  });
+
+  it('submit: an empty name writes nothing and says so', async () => {
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    const calls = bridge.mockTeamAdd({});
+    const form = installTeamAddForm({ name: '   ', roster: ['Harper Ellis'], paid: true });
+    await bridge.teamAddSubmit();
+    expect(calls.length).toBe(0);
+    expect(form.status.textContent).toBe('Give the team a name first.');
+    expect(bridge.mgtViewNow()).toBe('teamadd');
+  });
+
+  // tdbAddTeam throws its own player-readable line on a duplicate name (the data-layer guard). It is shown
+  // verbatim: a generic "could not add" would hide the one fact that tells the organizer what to do.
+  it('submit: a duplicate name surfaces the write helper own message and stops', async () => {
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    const calls = bridge.mockTeamAdd({ add: () => { throw new Error('A team named "Dig Deep" is already in this tournament.'); } });
+    const form = installTeamAddForm({ name: 'Dig Deep', roster: ['Harper Ellis'], paid: true });
+    await bridge.teamAddSubmit();
+    expect(Array.from(calls, (c) => c[0])).toEqual(['add']);
+    expect(form.status.textContent).toBe('A team named "Dig Deep" is already in this tournament.');
+    expect(bridge.mgtViewNow()).toBe('teamadd');
+    expect(form.name.value).toBe('Dig Deep');          // the form is left filled
+  });
+
+  it('submit: a silent insert (no row back) never claims success', async () => {
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    const calls = bridge.mockTeamAdd({ add: () => null });
+    const form = installTeamAddForm({ name: 'Dig Deep', roster: [], paid: false });
+    await bridge.teamAddSubmit();
+    expect(Array.from(calls, (c) => c[0])).toEqual(['add']);
+    expect(form.status.textContent).toBe('That did not save. Check you are signed in as an admin, then try again.');
+    expect(bridge.mgtViewNow()).toBe('teamadd');
+  });
+
+  // A failure AFTER the insert is not a failed add: the team is in. The line says so, the form stays put,
+  // and the collections are refreshed so the new team is visible under Teams & payment.
+  it('submit: a roster failure says the team is in and refreshes anyway', async () => {
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    const calls = bridge.mockTeamAdd({ roster: () => { throw new Error('sync_team_roster failed'); } });
+    const form = installTeamAddForm({ name: 'Dig Deep', roster: ['Harper Ellis'], paid: true });
+    await bridge.teamAddSubmit();
+    expect(Array.from(calls, (c) => c[0])).toEqual(['add', 'roster', 'refresh']);
+    expect(form.status.textContent).toBe('The team is in, but its roster did not save. Open it under Teams & payment to add the names.');
+    expect(bridge.mgtViewNow()).toBe('teamadd');
+    expect(form.name.value).toBe('Dig Deep');
+  });
+
+  it('submit: a paid failure says the team is in and refreshes anyway', async () => {
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    const calls = bridge.mockTeamAdd({ paid: () => { throw new Error('rls'); } });
+    const form = installTeamAddForm({ name: 'Dig Deep', roster: ['Harper Ellis'], paid: true });
+    await bridge.teamAddSubmit();
+    expect(Array.from(calls, (c) => c[0])).toEqual(['add', 'roster', 'paid', 'refresh']);
+    expect(form.status.textContent).toBe('The team is in, but it could not be marked paid. Open it under Teams & payment.');
+    expect(bridge.mgtViewNow()).toBe('teamadd');
+  });
+
+  it('submit: no names typed skips the roster write, the switch off skips the paid write', async () => {
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    const calls = bridge.mockTeamAdd({});
+    installTeamAddForm({ name: 'Solo', roster: ['', '   '], paid: false });
+    await bridge.teamAddSubmit();
+    expect(Array.from(calls, (c) => c[0])).toEqual(['add', 'refresh', 'repaint']);
+    expect(bridge.mgtViewNow()).toBe('teams');
+  });
+
+  // The switch is LOCAL until submit — no team exists yet, so there is nothing to write to.
+  it('the paid switch flips in place and never writes on tap', () => {
+    expect(appSrc).toContain('function mgTeamAddTogglePaid');
+    expect(appSrc).toMatch(/function mgTeamAddTogglePaid\(btn\)[\s\S]{0,420}aria-checked/);
+    expect(appSrc).not.toMatch(/function mgTeamAddTogglePaid\(btn\)[\s\S]{0,420}tdbSetTeamPaid/);
+    expect(appSrc).toContain("if (taPaid) { mgTeamAddTogglePaid(taPaid); return; }");
+    expect(appSrc).toContain("data-mgta-save]')) { void mgTeamAddSubmit(); return; }");
+  });
+
+  it('the Add a team CSS ships', () => {
+    ['.mgv-taform {', '.mgv-tarow {', '.mgv-tamenu {', '.mgv-taitem {', '.mgv-tainit {', '.mgv-tab {', '.mgv-tan {', '.mgv-tapay {']
+      .forEach((sel) => expect(css).toContain(sel));
+    // ported ONCE — a second copy would mean the block was appended twice
+    expect(count(css, '.mgv-taform {')).toBe(1);
+    expect(count(css, '.mgv-tamenu {')).toBe(1);
+    expect(css).toContain('Round 2026-08-05 - organizer "Add a team"');
   });
 });

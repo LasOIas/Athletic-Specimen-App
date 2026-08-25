@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.9'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -835,6 +835,13 @@ function partialRender() {
       return;
     }
     if (manageView === 'tournament' && mgtView === 'rules' && manageRulesDirty()) {
+      if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
+      return;
+    }
+    // Task 5 of the 2026-08-25 round EXCEPTION: Add a team is a whole unsaved form (team name + a roster
+    // row per player). Nothing on it has been written yet, so ANY typed character is work a background
+    // repaint would destroy — bail (sync notice only) while it is dirty or focused.
+    if (manageView === 'tournament' && mgtView === 'teamadd' && manageTeamAddDirty()) {
       if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
       return;
     }
@@ -8858,6 +8865,7 @@ function mgtSubPlaceholderHTML(view) {
 function buildManageTournamentContainerHTML() {
   if (mgtView === 'registration') return buildMgRegistrationHTML();
   if (mgtView === 'teams') return buildMgTeamsHTML();
+  if (mgtView === 'teamadd') return buildMgTeamAddHTML();
   if (mgtView === 'pools') return buildMgPoolsHTML();
   if (mgtView === 'bracket') return buildMgBracketHTML();
   if (mgtView === 'settings') return buildMgSettingsHTML();
@@ -9855,7 +9863,7 @@ function buildMgTeamsHTML() {
   const header = `<div class="pd-pagehdr">`
     + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
     + `<div class="pd-htitle">${escapeHTML(MGT_SUB_TITLES.teams)}</div></div>`;
-  const add = `<button type="button" class="pk-add" data-mgtp-add>${PK_PLUS_SVG}Add a team yourself</button>`;
+  const add = `<button type="button" class="pk-add" data-mgt-view="teamadd">${PK_PLUS_SVG}Add a team yourself</button>`;
   if (!teams.length) {
     return header + `<div class="pd-empty">No teams yet. Teams land here as they register.</div>` + add;
   }
@@ -9987,20 +9995,176 @@ async function mgtpWithdraw(teamId) {
   closeMgTeamPayModal();
   repaintManage();
 }
-// The dashed "Add a team yourself" — a house text-input dialog (never window.prompt), then tdbAddTeam.
-async function mgTeamAddPrompt() {
+// ── Manage › Tournament › Add a team (round 2026-08-25, screen 31 mgts-team-add) ─────────────────────
+// The organizer's own roster form, replacing the name-only appPrompt this dashed row used to open. It is
+// the PUBLIC registration kit (.rf-*) re-used on the manage side so the two screens read as the same
+// form; only three things differ: a typeahead under each player slot (the organizer types against players
+// already on file), a "Marked paid" switch where the public form carries the Venmo CTA, and a submit that
+// runs three writes. NOTHING here claims an activity-log entry: teams.paid is a direct UPDATE and
+// action_log only takes writes from DEFINER RPCs (the 2026-08-03 finding), so the design's log line would
+// have been a promise the database does not keep.
+function buildMgTeamAddHTML() {
+  const t = mgActiveTournament();
+  const header = `<div class="pd-pagehdr">`
+    + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
+    + `<div class="pd-htitle">${escapeHTML(MGT_SUB_TITLES.teamadd)}</div></div>`;
+  if (!t) return header + `<div class="pd-empty">No tournament to add a team to yet.</div>`;
+  const size = Math.max(1, Number(t.team_size) || 4);
+  // The fee sentence is the tournament's own buy-in when it has one, the league default when it does not —
+  // an empty buy_in would otherwise print a sentence that starts with nothing.
+  const buyIn = (t.buy_in == null ? '' : String(t.buy_in).trim()) || '$80 a team';
+  const rows = Array.from({ length: size }, (_, i) => `<div class="rf-prow mgv-tarow">`
+    + `<span class="rf-pnum">${i + 1}</span>`
+    + `<input class="rf-pinput" id="mgta-p${i + 1}" type="text" placeholder="First and Last Name"`
+    + ` autocomplete="off" autocapitalize="words" spellcheck="false" aria-label="Player ${i + 1}" /></div>`).join('');
+  return header + `<section class="rf-page mgv-taform">`
+    + `<div class="rf-sect">Team name</div>`
+    + `<div class="rf-fld"><input class="rf-tinput" id="mgta-name" type="text" placeholder="Pick a team name"`
+      + ` autocomplete="off" autocapitalize="words" spellcheck="false" /></div>`
+    + `<div class="rf-plhead"><span class="rf-sect">Players</span>`
+      + `<span class="rf-plhint">${size} per team · at least 1 guy + 1 girl</span></div>`
+    + `<div class="rf-pllist">${rows}</div>`
+    + `<div class="rf-divlab"><span>Payment</span></div>`
+    + `<div class="mgr-tog mgv-tapay"><div class="mg-rb"><div class="mg-rn">Marked paid</div>`
+      + `<div class="mg-rs">${escapeHTML(buyIn)} · no Venmo record for teams you add</div></div>`
+      + `<button type="button" class="mg-sw" data-mgta-paid role="switch" aria-checked="false" aria-label="Marked paid"></button></div>`
+    + `<button type="button" class="rf-cta" data-mgta-save>Add team</button>`
+    + `<p class="mgr-status" id="mgta-status" role="status" aria-live="polite"></p>`
+    + `</section>`;
+}
+
+// The typeahead's matcher. Club players only (state.players), on a case-insensitive NAME prefix, capped at
+// six so the menu never buries the rows below it. Duplicated names collapse to one row. The menu prints a
+// name and its initials and NOTHING else — skill ratings are admin-only data with no business on a roster
+// form, and the design's own note says so.
+function mgTeamAddMatches(q) {
+  const s = String(q == null ? '' : q).trim().toLowerCase();
+  if (!s) return [];
+  const seen = Object.create(null);
+  const out = [];
+  const list = Array.isArray(state.players) ? state.players : [];
+  for (let i = 0; i < list.length && out.length < 6; i++) {
+    const nm = String((list[i] && list[i].name) || '').trim();
+    if (!nm) continue;
+    const key = nm.toLowerCase();
+    if (key.indexOf(s) !== 0 || seen[key]) continue;
+    seen[key] = 1;
+    out.push(nm);
+  }
+  return out;
+}
+function mgTeamAddInitials(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  return (parts[0].charAt(0) + (parts.length > 1 ? parts[parts.length - 1].charAt(0) : '')).toUpperCase();
+}
+function mgTeamAddMenuHTML(names) {
+  return (names || []).map((n) => `<button type="button" class="mgv-taitem" data-mgta-pick="${escapeHTMLText(n)}">`
+    + `<span class="mgv-tainit">${escapeHTML(mgTeamAddInitials(n))}</span>`
+    + `<span class="mgv-tab"><span class="mgv-tan">${escapeHTML(n)}</span></span></button>`).join('');
+}
+// Only one menu is ever open: typing rebuilds it, a pick / a blur / Escape drops it.
+function mgTeamAddCloseMenus() {
+  const menus = document.querySelectorAll('#tab-manage .mgv-tamenu');
+  if (menus && menus.forEach) menus.forEach((m) => { if (m && m.remove) m.remove(); });
+}
+// Typing in a player slot re-renders the menu UNDER that row only. The input itself is never rebuilt, so
+// the caret is never disturbed (the same rule the Players search and the check-in search follow).
+function mgTeamAddType(input) {
+  mgTeamAddCloseMenus();
+  const row = input && input.closest ? input.closest('.mgv-tarow') : null;
+  if (!row) return;
+  if (row.classList) row.classList.remove('is-picked');
+  const names = mgTeamAddMatches(input.value);
+  if (!names.length) return;
+  const menu = document.createElement('div');
+  menu.className = 'mgv-tamenu';
+  menu.innerHTML = mgTeamAddMenuHTML(names);
+  row.appendChild(menu);
+}
+function mgTeamAddPick(btn) {
+  const row = btn && btn.closest ? btn.closest('.mgv-tarow') : null;
+  const input = row && row.querySelector ? row.querySelector('.rf-pinput') : null;
+  if (input) input.value = btn.getAttribute('data-mgta-pick') || '';
+  if (row && row.classList) row.classList.add('is-picked');
+  mgTeamAddCloseMenus();
+  if (input && input.focus) { try { input.focus(); } catch (_) {} }
+}
+// The paid switch is LOCAL until submit: no team exists yet, so there is nothing to write to. It records
+// the organizer's intent and mgTeamAddSubmit reads it back off aria-checked.
+function mgTeamAddTogglePaid(btn) {
+  if (!btn) return;
+  const on = btn.getAttribute('aria-checked') === 'true';
+  btn.setAttribute('aria-checked', on ? 'false' : 'true');
+  if (btn.classList) { if (on) btn.classList.remove('on'); else btn.classList.add('on'); }
+}
+
+// True when the Add a team form holds work the background poll must not throw away: a focused field in
+// #tab-manage, or any team-name / player value typed but not yet submitted. Same shape as manageRegDirty /
+// manageSettingsDirty, minus their saved-value comparison — nothing here has been written yet, so ANY
+// typed character is unsaved work.
+function manageTeamAddDirty() {
+  if (mgtView !== 'teamadd') return false;
+  const panel = document.getElementById('tab-manage');
+  if (!panel) return false;
+  const ae = document.activeElement;
+  if (ae && panel.contains && panel.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return true;
+  const fields = panel.querySelectorAll ? panel.querySelectorAll('.rf-tinput, .rf-pinput') : null;
+  let dirty = false;
+  if (fields && fields.forEach) fields.forEach((el) => { if (String((el && el.value) || '').trim() !== '') dirty = true; });
+  return dirty;
+}
+
+// Add the team. THREE writes, in the order a failure can be reported honestly: the insert first (nothing
+// exists until it lands), then the roster, then the paid flag. Once the insert has succeeded the team IS
+// in, so a later failure never says "could not add" — it says what did not follow and where to finish it,
+// leaves the form filled, and refreshes the collections so the new team is already visible under Teams &
+// payment. tdbAddTeam throws its own player-readable line on a duplicate name (its data-layer guard), and
+// that line is surfaced verbatim; only a message-less throw falls back to the house copy.
+async function mgTeamAddSubmit() {
   if (!state.isAdmin) return;
   const t = mgActiveTournament();
-  if (!t) { appNotice({ title: 'No tournament', message: 'Create a tournament first, then add teams.' }); return; }
-  const name = await appPrompt({ title: 'Add a team', message: 'Enter the team name.', confirmText: 'Add team', placeholder: 'Team name' });
-  if (name == null) return;                       // cancelled
-  const nm = String(name).trim();
-  if (!nm) return;
+  if (!t) return;
+  const note = (msg, bad) => mgNoteStatus('mgta-status', msg, bad);
+  const nameEl = document.getElementById('mgta-name');
+  const name = String((nameEl && nameEl.value) || '').trim();
+  if (!name) { note('Give the team a name first.', true); return; }
+  const roster = [...document.querySelectorAll('#tab-manage .rf-pinput')]
+    .map((i) => String((i && i.value) || '').trim()).filter(Boolean);
+  const paidBtn = document.querySelector('[data-mgta-paid]');
+  const paid = !!(paidBtn && paidBtn.getAttribute && paidBtn.getAttribute('aria-checked') === 'true');
+  note('Adding…');
+  let team;
   try {
-    await tdbAddTeam(t.id, nm);
-    await tdbRefreshTournaments();
-    repaintManage();
-  } catch (err) { appNotice({ title: 'Could not add team', message: (err && err.message) || 'Try again.' }); }
+    team = await tdbAddTeam(t.id, name);
+  } catch (err) {
+    note((err && err.message) ? String(err.message) : ('Could not add the team. ' + MG_SAVE_FAILED), true);
+    return;
+  }
+  // A write that comes back with no row is the silent-refusal shape this project has been burned by
+  // (RLS filters rather than raises), so it is never reported as a success.
+  if (!team || !team.id) { note(MG_SAVE_FAILED, true); return; }
+  if (roster.length) {
+    try {
+      await tdbSetTeamRoster(team.id, roster);
+    } catch (err) {
+      note('The team is in, but its roster did not save. Open it under Teams & payment to add the names.', true);
+      await tdbRefreshTournaments();
+      return;
+    }
+  }
+  if (paid) {
+    try {
+      await tdbSetTeamPaid(team.id, true);
+    } catch (err) {
+      note('The team is in, but it could not be marked paid. Open it under Teams & payment.', true);
+      await tdbRefreshTournaments();
+      return;
+    }
+  }
+  await tdbRefreshTournaments();
+  mgtView = 'teams';
+  repaintManage();
 }
 
 // ── The body-level team sheet ────────────────────────────────────────────────────────────────────────
@@ -12049,6 +12213,9 @@ function attachHandlers() {
       // 2026-08-04: arm the tournament-edit Save BEFORE the focused field blurs (pointerdown lands first), so
       // the focusout safety net stands down and the batch stays ONE write. See mgArmSaveTap.
       if (e.target && typeof e.target.closest === 'function' && e.target.closest('[data-mg-save]')) mgArmSaveTap();
+      // Add a team (2026-08-25): a tap on a typeahead suggestion keeps the caret in the player slot, so the
+      // menu is not dropped by the blur a beat before the click that fills the input lands.
+      if (e.target && typeof e.target.closest === 'function' && e.target.closest('[data-mgta-pick]') && e.preventDefault) e.preventDefault();
     });
     // Task 3: the Players directory search is a live filter. Delegated on the stable #app-content ancestor so
     // it survives the container-swap repaints (the input element is re-created on each swap). Re-renders ONLY
@@ -12065,6 +12232,10 @@ function attachHandlers() {
       // Draw setup: typing straight into a count input re-states the hint line under the box. Text only —
       // the input itself is never touched, so focus and caret survive.
       if (e.target && (e.target.id === 'mgps-poolcount' || e.target.id === 'mgps-nets')) { mgpSyncDrawHint(); return; }
+      // Add a team (2026-08-25): typing in a player slot filters the club roster into a menu under THAT row.
+      // Only the row is touched, so the input and its caret are never rebuilt.
+      if (manageView === 'tournament' && mgtView === 'teamadd' && e.target && e.target.classList
+          && e.target.classList.contains && e.target.classList.contains('rf-pinput')) { mgTeamAddType(e.target); return; }
       // Registration / Event settings: typing wakes the Save button the moment a value differs from the
       // loaded tournament (and quiets it again if the value is typed back). Touches ONLY the button — the
       // input and its caret are never rebuilt.
@@ -12080,12 +12251,23 @@ function attachHandlers() {
     appContent.addEventListener('focusout', (e) => {
       const t = e.target;
       if (!t || !t.id) return;
+      // Add a team: leaving a player slot drops its typeahead menu. A tap on a suggestion holds the caret
+      // (the pointerdown guard above), so this never fires between the tap and the fill.
+      if (manageView === 'tournament' && mgtView === 'teamadd' && t.classList && t.classList.contains
+          && t.classList.contains('rf-pinput')) { mgTeamAddCloseMenus(); return; }
       // 2026-08-04: a tap on Save blurs the field a beat before its click lands. Standing down here keeps the
       // batch to ONE write; the button is about to save this field along with every other dirty one.
       if (mgSaveTapArmed) return;
       if (t.id === 'mgr-venmo' || t.id === 'mgr-buyin' || t.id === 'mgr-teamsize') { void mgrSaveField(t.id); return; }
       // Task 9: every Event-settings field (mges-*) saves on blur through tdbSetTournamentFields.
       if (t.id.indexOf('mges-') === 0) { void mgSaveSettingsField(t.id); return; }
+    });
+    // Add a team (2026-08-25): Escape drops the typeahead menu without leaving the player slot.
+    appContent.addEventListener('keydown', (e) => {
+      if (!e || e.key !== 'Escape') return;
+      if (manageView !== 'tournament' || mgtView !== 'teamadd') return;
+      const t = e.target;
+      if (t && t.classList && t.classList.contains && t.classList.contains('rf-pinput')) mgTeamAddCloseMenus();
     });
     appContent.addEventListener('click', (e) => {
       // Slice 3b: "claim your team" — signed-in → the claim page; signed-out → sign in first
@@ -12293,12 +12475,23 @@ function attachHandlers() {
         }
         // Teams & payment (Task 6, pick R8; re-cut by the 2026-08-03 round): the row-level PAID toggle is
         // gone — the row only reports state — and tapping a team opens the body-level #team-pay-modal, which
-        // binds its own listeners (poll-clobber-immune). The dashed row still adds a team by name. The
-        // teams-list header's back button carries data-mgt-back (handled below → returns to the sub-hub).
+        // binds its own listeners (poll-clobber-immune). The dashed row carries data-mgt-view="teamadd" now
+        // (round 2026-08-25) and is opened by the generic sub-view handler below, so there is no add branch
+        // here any more. The teams-list header's back button carries data-mgt-back (handled below).
         if (mgtView === 'teams') {
-          if (e.target.closest('[data-mgtp-add]')) { void mgTeamAddPrompt(); return; }
           const teamRow = e.target.closest('[data-mgtp-team]');
           if (teamRow) { openMgTeamPayModal(teamRow.getAttribute('data-mgtp-team')); return; }
+        }
+        // Add a team (round 2026-08-25, screen 31): a typeahead suggestion fills its player slot, the paid
+        // switch flips LOCALLY (no team exists yet to write to), and Add team runs the three writes.
+        // Checked BEFORE the generic sub-view rows so a tap never falls through; the header back button
+        // carries data-mgt-back (handled below).
+        if (mgtView === 'teamadd') {
+          const taPick = e.target.closest('[data-mgta-pick]');
+          if (taPick) { mgTeamAddPick(taPick); return; }
+          const taPaid = e.target.closest('[data-mgta-paid]');
+          if (taPaid) { mgTeamAddTogglePaid(taPaid); return; }
+          if (e.target.closest('[data-mgta-save]')) { void mgTeamAddSubmit(); return; }
         }
         // Pools & schedule (Task 7, pick R9): tab switch + score-sheet open + the two-step draw/start + Pool
         // controls (move team → the T6 sheet, edit nets, reset). Checked BEFORE the generic hub rows so a tab
