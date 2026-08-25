@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- `APP_VERSION` (`public/app.js` line 28) continues `'2026.08.25.N'` from `.15` (Task 1 = `.16`); a new local day restarts at `.1`.
+- `APP_VERSION` (near the top of `public/app.js`; grep `APP_VERSION`, it drifts every round) continues `'2026.08.25.N'` from `.15` (Task 1 = `.16`); a new local day restarts at `.1`.
 - `node --check public/app.js && node --check public/pure.js` after every edit; commit + push per task; every chain gates on vitest's EXIT code.
 - Line endings: `app.js` LF; `pure.js` + `styles.css` CRLF (count `\r\n` vs `\n` before and after). Never `git stash` a `public/` file.
 - No em dashes; never "night"; no neon; skill never public; passwords never trimmed, logged, echoed or placed in `state`; a drive never types a real password; no Supabase write in a drive.
@@ -355,7 +355,7 @@ with `function accRow(view, label, value, tag) { return '<button type="button" c
   ternary at `:6358`; the per-paint id bind beside `#auth-alt` in `renderAuthPageInner` `:6375`; the
   claim-intent helpers immediately ABOVE `let claimIntent = false;` `:6395` and the boot call immediately
   BELOW it; the three clear sites `:6372`, `:7080`, `:7099`; `onGoogleSignIn` beside `onAuthSubmit`
-  `:6665`; `googleNameFromSession` beside `promptNameFillIfNeeded` `:6905`, the fall-through at `:6931`,
+  `:6665`; `nameFromSessionMetadata` beside `promptNameFillIfNeeded` `:6905`, the fall-through at `:6931`,
   and `openNameFillOverlay` `:6934`)
 - Modify: `public/styles.css` (append `.au-google` and `.au-or` at the END of the file, inside the
   `ACCOUNT DESIGN ROUND - 2026-08-25` banner opened at `:6037`; the file ends at 6141 today)
@@ -364,9 +364,8 @@ with `function accRow(view, label, value, tag) { return '<button type="button" c
   block appended after the last one)
 - Create: nothing.
 
-Every line number here is as of `a248410` (Task 4 landed, `APP_VERSION = '2026.08.25.23'`). Tasks 5 and 6
-move everything below `renderAcctPageInner`; every anchor above is NAMED, so find the name first and read
-the number as a hint.
+Line numbers are from `a248410` and they drift with every task that lands before this one. GREP EACH ANCHOR
+BY NAME and treat the number as a hint, never as the target.
 
 **Interfaces:**
 - Consumes (Tasks 1 to 3): `renderAuthPageInner`'s one `formInner` template, which already serves both
@@ -382,14 +381,18 @@ the number as a hint.
 - Produces (app): `AUTH_GOOGLE_SVG`, `AUTH_GOOGLE_LABEL` (`'Continue with Google'`),
   `AUTH_CLAIM_INTENT_KEY` (`'athletic_specimen_claim_intent'`), `authGoogleButtonHTML()`,
   `async function onGoogleSignIn()`, `authPersistClaimIntent()`, `authRestoreClaimIntent()`,
-  `authForgetClaimIntent()`, `authClearClaimIntent()`, `googleNameFromSession(session)`, and
+  `authForgetClaimIntent()`, `authClearClaimIntent()`, `nameFromSessionMetadata(session)`,
+  `onAuthPageShow(event)` plus its module-scope `window.addEventListener('pageshow', onAuthPageShow)`, and
   `openNameFillOverlay(prefill)` gaining ONE optional argument (its other caller, the register success
   screen at `public/app.js:299`, passes nothing and is untouched).
 - Produces (pure): `splitFullName(full)`.
-- Produces (test): `bridge.session`, `bridge.assigns()`, `bridge.oauth()`, `bridge.restoreClaimIntent()`,
-  `bridge.getAccountName()`, `bridge.connectRuns()`, `bridge.setConnectAttempted(v)`.
-- `onGoogleSignIn`, `authPersistClaimIntent`, `authRestoreClaimIntent`, `authForgetClaimIntent`,
-  `authClearClaimIntent` and `googleNameFromSession` MUST be top level `function` declarations: the bridge
+- Produces (test): `bridge.session`, `bridge.assigns()`, `bridge.restoreClaimIntent()`,
+  `bridge.getAccountName()`, `bridge.connectRuns()`, `bridge.resetConnects()`,
+  `bridge.setConnectAttempted(v)`, `bridge.splitName(v)`, `bridge.pageshow(persisted)`, and
+  `bridge.openAcct(view)` if the harness does not already expose one by the time this task runs.
+- `onGoogleSignIn`, `onAuthPageShow`, `authPersistClaimIntent`, `authRestoreClaimIntent`,
+  `authForgetClaimIntent`, `authClearClaimIntent` and `nameFromSessionMetadata` MUST be top level
+  `function` declarations: the bridge
   epilogue is a template string concatenated onto `app.js` inside the same vm context, so it can only
   close over top level names.
 
@@ -418,7 +421,31 @@ the number as a hint.
    PORT NOTE naming Google's branding rules for the hardcoded white and the mark. No new `!important`, no
    wildcard motion selectors, no em dashes.
 4. **Confirm email stays OFF.** No warning copy on the button, and no handling of the obfuscated
-   fake-success signup (HAZARD H3) in this task. Step 11 carries the standing note instead.
+   fake-success signup (HAZARD H3) in this task. Step 12 carries the standing note instead.
+
+**Hazards this task honors,** numbered as in the recon digest
+(`C:\Ai Master\Projects\Athletic Specimen\12-history\assets\2026-08-25-google-signin-recon-digest.md`),
+so the numbering stays auditable:
+
+| # | The failure | Where it is answered |
+| --- | --- | --- |
+| H1 | `claimIntent` dies in the redirect and the person lands on the hub with no explanation | Step 4 |
+| H4 | a signed-in person who taps Google and backs out is silently signed out | Mike's call 1, Step 2 (the button is emitted from `formInner` only) |
+| H5 | a test that pins the four outdated hexes ships a logo the guidelines list under Don't | Steps 1, 9, 10 |
+| H6 | a delegate bind would duplicate the `data-auth-view` namespace and break the listener count | Step 3 |
+| H7 | an unguarded bind throws on forgot and both sent screens | Step 3 |
+| H9 | the harness's inert `sessionStorage` makes every intent assertion vacuously true | Step 8 |
+| H10 | `authRestoreClaimIntent()` above the declaration hits the temporal dead zone and kills the app at parse | Step 4, plus the source assertion in Step 9 |
+| H11 | `sessionStorage` throws outright in Safari private mode and several in-app browsers | Step 4 (every access wrapped) |
+| H12 | the register-then-Google path loses its payoff and its auto-attach | Step 12, accepted and recorded |
+| H13 | Google's mark is the most saturated object on a deliberately matte screen | Step 10 (18px on white, the only two levers we have) |
+| H14 | the gradient mark is untested on WebKit, which is every iPhone at the tournament | Step 1 (the fallback rule) and Task 7's drive |
+| H16 | switching `flowType` to pkce would put a `?code=` in the query this build never exchanges | Step 5 (the client is left alone) |
+| **H17** | **NEW. iOS bfcache: tap Google, press Back at the consent screen, and the page restores WITHOUT re-evaluating `app.js`, so `#auth-google` is still disabled and there is no error line to explain it** | **Step 6** |
+
+H2 and H3 are armed only by the Confirm email toggle and are the standing note in Step 12. H15 (the wall
+can flash for a frame on return) needs no code: the identical ordering already exists for a persisted
+session reload.
 
 - [ ] **Step 1: The mark and the two strings.** Add beside `AUTH_MAIL_SVG` (`public/app.js:6203`).
 
@@ -428,8 +455,10 @@ Provenance: Google's own bundle, `developers.google.com/static/identity/images/s
 two button chrome paths removed, the `viewBox` cropped to `10 10 20 20` and the Figma ids renamed to `g`.
 No path data, no color and no gradient stop was touched, which is the route the guidelines sanction ("If
 you need to create your own custom size Google logo, start with any of the logo sizes included in the
-download bundle"). The same extract is saved at `scratchpad/g-mark-gradient.svg` (10338 bytes, 65 lines)
-and is reproduced in full at the end of this step so the task does not depend on a temp folder surviving.
+download bundle"). The extraction and its provenance are recorded in the vault at
+`C:\Ai Master\Projects\Athletic Specimen\12-history\assets\2026-08-25-google-signin-design-options.md`
+(the recon digest that adjudicated it is beside it as `...-google-signin-recon-digest.md`), and the mark
+itself is reproduced IN FULL at the end of this step, so nothing here depends on a temp folder surviving.
 Verified safe for a single-quoted JS string literal: 0 single quotes, 0 backticks, 0 `${`, 0 backslashes,
 0 em dashes, and 0 of the four outdated hexes.
 
@@ -439,13 +468,41 @@ Verified safe for a single-quoted JS string literal: 0 single quotes, 0 backtick
 // guidelines list under Don't, and it appears in ZERO of the 24 SVGs in the official bundle. Do not swap
 // it for a hand-drawn one: the size and the color of the G are the two things the guidelines say outright
 // may not be changed, and a monochrome G is listed under Don't as well.
-const AUTH_GOOGLE_SVG = '[the mark below, its 65 lines joined with no separator]';
+const AUTH_GOOGLE_SVG = '<svg viewBox="10 10 20 20" ... </svg>';   // see the joining rule below
 // One of Google's three approved strings ("Sign in with Google" / "Sign up with Google" / "Continue with
 // Google"). "Continue" is the only one that is honest on BOTH screens: a Supabase OAuth redirect has no
 // separate sign-up, the first redirect creates the user, so a button that said "Sign up with Google" on
 // one screen would lie to the returning player who taps it and lands in their existing account.
 const AUTH_GOOGLE_LABEL = 'Continue with Google';
 ```
+
+**If WebKit does not paint it (H14), the decision rule, decided here so the drive does not have to
+improvise.** The mark paints its gradient through a `foreignObject` holding a CSS `conic-gradient`. That
+was verified in Chrome inline, as `<img src>` and as a CSS `background-image`; Safari, and therefore every
+iPhone at the tournament, was not tested. Task 7's drive looks at it on Mike's real phone. If it does not
+render there, the substitute is the official PNG from the same bundle,
+`Android + Web/PNG @2x/Light/Theme=Light, Show text=No, Shape=Square, Platform=Android+Web@2x.png`
+(80 by 80, 2947 bytes), inlined as a `data:image/png;base64,` URI in an `<img>` inside the SAME button, in
+the same 18px box, with `alt=""` and `aria-hidden="true"`. Never a flat four-color G, never a monochrome
+one, never a redrawn one: those are the three things the guidelines list under Don't, and a broken gradient
+is a rendering bug while an outdated G is a compliance one.
+
+One honest caveat to weigh at the drive rather than discover after it: that PNG is the COMPLETE icon-only
+button, its white fill and its 1px `#747775` stroke included, and there is no bare-G asset in the bundle at
+any size or in any format. At 18px inside our labelled button its stroke reads as a thin ring around the
+mark. The alternative Google documents for that asset is to use it AS the complete 40px icon-only button,
+which is a different button from the one Mike picked. Default to the 18px `<img>`; if the ring looks wrong
+on the phone, that is Mike's call in the moment, and either way the label and the layout do not move.
+
+The test assertion that changes with it: the structural pin in the first case becomes either/or
+(`conic-gradient(` OR `data:image/png;base64,`), while the negative assertion on the four outdated hexes
+stays absolute and unconditional.
+
+**How to build that string:** take the 65 lines of the mark below and join them with NO separator (the line
+breaks are whitespace between tags and carry no meaning), then wrap the result in single quotes. The joined
+string is exactly 10208 characters. Do not reflow it, do not pretty-print it, do not let an editor wrap it.
+`node --check public/app.js` catches a bad join immediately, and the structural test pins `conic-gradient(`
+and `mask0_g`, which a truncated paste loses.
 
 The mark, verbatim:
 
@@ -542,7 +599,10 @@ public/app.js:6359   <button type="button" class="auth-alt" id="auth-alt">${sign
 One insertion serves both screens by construction, which is Mike's call 1. `type="button"` is not
 optional: the control sits inside `#auth-form` and a submit would fire `onAuthSubmit`. The markup goes in
 `formInner` ONLY, so `sentInner`, `forgotInner` and `forgotSentInner` never carry it, and `#gate-page`
-(`openGatePage`, `:6855`) is not touched at all.
+(`openGatePage`, `:6855`) is not touched at all. `authGoogleButtonHTML()` is called on every paint of
+`formInner` and its result is used by two of the five states, which is how the whole function already works
+(the template is built, then one branch is chosen); it is a string concat with no DOM and no cost worth
+restructuring for.
 
 - [ ] **Step 3: The bind. Per paint, BY ID, guarded.** Beside the `#auth-alt` bind at
 `public/app.js:6375-6379`.
@@ -649,7 +709,7 @@ async function onGoogleSignIn() {
     const res = await supabaseClient.auth.signInWithOAuth({
       provider: 'google',
       options: { redirectTo: location.origin },   // the round's law, and the only value the allow-list
-                                                  // accepts beside the Site URL (Step 11, item 3)
+                                                  // accepts beside the Site URL (Step 12, item 3)
     });
     if (res && res.error) fail();
   } catch (_) { fail(); }
@@ -658,7 +718,40 @@ async function onGoogleSignIn() {
 
 The button is deliberately left DISABLED on the success path: the page is leaving.
 
-- [ ] **Step 6: The name, prefilled (Mike's call 2).** The split is PURE and lives in `public/pure.js`
+- [ ] **Step 6: The bfcache dead button (H17).** Top level, immediately after `onGoogleSignIn`.
+
+On iOS Safari the tap does not unload the page, it FREEZES it. The person taps Continue with Google, sees
+the consent screen, presses Back, and the page is restored from the back/forward cache: `app.js` is not
+re-evaluated, every module `let` is exactly as they left it, and `#auth-google` is still disabled with no
+error line to explain it. The app's existing `pageshow` hook (`ensureAuthorityRefreshHooks`,
+`public/app.js:1503-1507`) only calls `triggerRefresh('pageshow')`, which never touches the overlay. This
+is the one path where the failure is invisible: nothing errored, so nothing is shown, and the button is
+simply dead.
+
+```js
+// H17. A bfcache restore is the one way back from Google that does NOT re-evaluate app.js, so the module
+// state the redirect was supposed to destroy is all still here, including the disabled button. Repaint
+// the overlay, which hands back a fresh enabled control and clears any stale error line. The button is
+// re-enabled explicitly as well, because in a real browser the repaint replaces the node while the test
+// harness reuses one registry node per id, and the assertion has to see the same thing in both.
+// The key goes too: no redirect completed, so nothing should be waiting in storage for the next boot.
+// The in-memory flag stays, exactly as on the failure path in onGoogleSignIn.
+function onAuthPageShow(event) {
+  if (!event || !event.persisted) return;
+  authForgetClaimIntent();
+  const btn = document.getElementById('auth-google');
+  if (btn) btn.disabled = false;
+  if (document.getElementById('auth-page')) renderAuthPageInner();
+}
+window.addEventListener('pageshow', onAuthPageShow);
+```
+
+The registration is at module scope on purpose: `ensureAuthorityRefreshHooks` runs from init, which
+`readyState: 'loading'` keeps from running in the harness, so a listener added there could not be reached
+by a test. The bridge calls `onAuthPageShow` directly and one source assertion proves the app registers
+it, the same split the boot restore uses.
+
+- [ ] **Step 7: The name, prefilled (Mike's call 2).** The split is PURE and lives in `public/pure.js`
 beside `splitFullNameParts` (`:677`), with an entry in `module.exports`; the session read and the prefill
 live in `app.js`.
 
@@ -680,7 +773,7 @@ function splitFullName(full) {
 // provider paths carry (provider/google.go:120-131 and oidc.go:107-117); given_name and family_name are
 // carried by NEITHER. The halves run through the app's own splitFullNameParts so a prefill can never seed
 // something the Save button would then refuse.
-function googleNameFromSession(session) {
+function nameFromSessionMetadata(session) {
   const md = (session && session.user && session.user.user_metadata) || {};
   const nm = splitFullName(md.full_name || md.name || '');
   if (!nm) return null;
@@ -688,6 +781,11 @@ function googleNameFromSession(session) {
   return parts.ok ? { first: parts.first, last: parts.last } : null;
 }
 ```
+
+The name is `nameFromSessionMetadata` and not `googleNameFromSession` because that is what it does: it
+reads `user_metadata`, and it fires for ANY session that reaches the ask, which includes an older password
+account whose `signUp` wrote `full_name` but never `first_name` / `last_name`. That is intended, not a leak:
+the prefill is just as right for them, and it only ever runs on the branch that was already going to ask.
 
 `openNameFillOverlay` (`:6934`) takes an optional seed and writes it into the two `value` attributes,
 escaped. The no-stack guard at `:6935` stays, the ids stay `namefill-first` / `namefill-last`, and there is
@@ -716,13 +814,13 @@ and the fall-through at `public/app.js:6931` becomes:
   // display_name from raw_user_meta_data->>'full_name' but first_name / last_name ONLY from the
   // first_name / last_name keys the app's own signUp writes (0053_tournament_identity.sql:58-68), and
   // Google sends neither. So the prompt is unavoidable; prefilling it is what makes it one tap.
-  openNameFillOverlay(googleNameFromSession(state.authSession)); // either name missing, ask once
+  openNameFillOverlay(nameFromSessionMetadata(state.authSession)); // either name missing, ask once
 ```
 
 `onNameFillSave` is UNCHANGED. Nothing reaches `profiles` and no `player_claims` row is written until the
 person taps Save, which is the whole point of the call.
 
-- [ ] **Step 7: The harness, additively.** Nothing below renames an existing bridge key or changes an
+- [ ] **Step 8: The harness, additively.** Nothing below renames an existing bridge key or changes an
 existing stub's shape for an existing caller. Find each anchor by NAME: Tasks 5 and 6 will have moved the
 line numbers.
 
@@ -776,8 +874,8 @@ The two storages. sessionStorage becomes REAL for the Task 8 half; localStorage 
 ```
 then in the sandbox: `localStorage: storageStub(), sessionStorage: sessionStorageStub,`.
 
-The bridge epilogue (the template string), four additions plus one spy in the shape the file already uses
-for `runPostSignInWork` and `render`:
+The bridge epilogue (the template string), SEVEN bridge keys plus one spy, the spy in the shape the file
+already uses for `runPostSignInWork` and `render`:
 ```js
     // Task 8 spy: nothing may be claimed on a roster until the person taps Save, and
     // connect_profile_by_name is the call that would do it. The real function still runs; this counts.
@@ -786,8 +884,14 @@ for `runPostSignInWork` and `render`:
     connectProfileByName = async function (...a) { __connects += 1; return __connect(...a); };
 ```
 ```js
-      oauth: () => onGoogleSignIn(),
       restoreClaimIntent: () => authRestoreClaimIntent(),
+      // H17: the handler is called DIRECTLY, because windowStub.addEventListener is a noop and a
+      // recording window stub would be a bigger change than this task needs. One source assertion in the
+      // next step proves the app actually subscribes.
+      pageshow: (persisted) => onAuthPageShow({ persisted: !!persisted }),
+      // Only if the harness does not already expose an opener by the time this task runs (Tasks 5 and 6
+      // may add one): the never-on-a-signed-in-surface case renders all three edit views for real.
+      openAcct: (view) => openAcctPage(view),
       getAccountName: () => accountName,
       connectRuns: () => __connects,
       splitName: (v) => splitFullName(v),   // the pure helper, the way bridge.meter exposes passwordMeterScore
@@ -816,11 +920,12 @@ and after load: `bridge.assigns = () => assigns;` plus
     bridge.setConnectAttempted(false);
 ```
 
-- [ ] **Step 8: The vitest cases.** A new `describe('Account round Task 8 - Continue with Google', ...)`
+- [ ] **Step 9: The vitest cases.** A new `describe('Account round Task 8 - Continue with Google', ...)`
 appended after the last block, with `beforeEach(() => bridge.reset())`. The module-scope helpers `count`,
 `fillSignup`, `css` and `appSrc` are already there. One spelling note: the copy guard below is written
-`/\u2014|&mdash;|night/i` so this plan carries no em dash of its own; the existing blocks spell the same
-regex with the literal character. Either form works, so match whichever the file uses when you paste.
+`/\u2014|&mdash;|night/i`, with the ESCAPE and not the character. Write yours that way: the literal em
+dashes already in the file are pre-existing test regexes from Tasks 1 to 3, and nothing new in this round
+adds one.
 
 ```js
 it('splitFullName splits on the LAST space and refuses a single word', () => {
@@ -847,8 +952,10 @@ it('the Google button renders once on sign in and once on create account, with t
     expect(html.indexOf('id="auth-submit"')).toBeLessThan(html.indexOf('id="auth-google"'));
     // The mark is Google's CURRENT asset, a masked conic gradient. The flat four-color G is the
     // "outdated Google G" their guidelines list under Don't, and it is in none of the 24 official SVGs.
-    expect(html).toContain('conic-gradient(');
-    expect(html).toContain('mask0_g');
+    // Either the gradient SVG or, if WebKit forced the documented fallback, the official PNG. The
+    // negative below is NOT either/or: the outdated G is never allowed, on any platform.
+    expect(html.includes('conic-gradient(') || html.includes('data:image/png;base64,')).toBe(true);
+    if (html.includes('conic-gradient(')) expect(html).toContain('mask0_g');
     for (const dead of ['#4285F4', '#34A853', '#FBBC05', '#EA4335']) expect(html).not.toContain(dead);
     expect(html).not.toMatch(/\u2014|&mdash;|night/i);          // the round's standing copy guard
   }
@@ -871,14 +978,50 @@ it('the Google button never appears on forgot, forgot-sent or signup-sent', asyn
   expect(bridge.registry['auth-page'].innerHTML).not.toContain('id="auth-google"');
 });
 
-it('the wall and the signed-in surfaces never carry it', () => {
+it('no signed-in surface carries it, and the wall does not either', () => {
   bridge.setSignedOut();
   bridge.openGate();
   expect(bridge.registry['gate-page'].innerHTML).not.toContain('auth-google');
-  // Not on a signed-in surface either: signInWithOAuth removes the session before it builds a URL, and
-  // that removal notifies nobody, so a signed-in person who backs out at Google would look signed in
-  // until their next reload.
-  expect(appSrc).not.toMatch(/acct-google|acc-google/);
+  // The real reason, not a style rule: signInWithOAuth removes the session before it builds a URL and
+  // that removal notifies nobody, so a signed-in person who taps it and backs out at Google looks signed
+  // in until their next reload (H4). So this asserts the RENDERED signed-in surfaces, not the source.
+  bridge.reset();
+  bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, { first: 'Morgan', last: 'Blake' });
+  bridge.openMenu();
+  expect(bridge.registry['account-menu'].innerHTML).not.toContain('auth-google');
+  for (const view of ['name', 'email', 'password']) {
+    bridge.openAcct(view);
+    expect(bridge.registry['acct-page'].innerHTML).not.toContain('auth-google');
+  }
+  // One emission site in the whole file: the helper called from formInner, and nothing else.
+  expect(count(appSrc, 'id="auth-google"')).toBe(1);
+});
+
+it('a bfcache restore hands the dead button back (H17)', async () => {
+  bridge.openAuth('signin');
+  const btn = bridge.registry['auth-google'];
+  bridge.setClaimIntent(true);
+  let release;
+  bridge.supaNext('signInWithOAuth', new Promise((r) => { release = r; }));
+  const inFlight = btn.listeners.click[0]();
+  release({ data: { provider: 'google', url: 'https://accounts.google.com/x' }, error: null });
+  await inFlight;
+  expect(btn.disabled).toBe(true);                    // left disabled on purpose: the page was leaving
+  expect(bridge.session.get('athletic_specimen_claim_intent')).toBe('1');
+
+  bridge.pageshow(false);                             // a plain pageshow is not a restore
+  expect(btn.disabled).toBe(true);
+
+  bridge.pageshow(true);                              // iOS Back from the consent screen
+  expect(btn.disabled).toBe(false);                   // the dead button is alive again
+  expect(btn.listeners.click.length).toBe(1);         // and bound exactly once by the repaint
+  expect(bridge.registry['auth-err'].hidden).toBe(true);
+  // Nothing completed, so nothing waits in storage for the next boot; the memory flag still serves the
+  // email path the person can fall back to.
+  expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+  expect(bridge.getClaimIntent()).toBe(true);
+  // The bridge proves the behaviour; only the SOURCE proves the app subscribes at all.
+  expect(appSrc).toContain("window.addEventListener('pageshow', onAuthPageShow)");
 });
 
 it('a tap calls signInWithOAuth with google and the origin, exactly once, and disables while it awaits', async () => {
@@ -1063,7 +1206,7 @@ it('a Google user whose profile already carries both names is never prompted', a
   expect(bridge.connectRuns()).toBe(1);                    // names the person DID confirm, once
 });
 
-it('the CSS block ships once, with no new !important and none of our own neon', () => {
+it('the CSS block ships once, with Google\'s own values and no new !important', () => {
   expect(count(css, '.au-google {')).toBe(1);
   expect(count(css, '.au-or {')).toBe(1);
   // Google's Light theme values, verbatim and deliberately NOT tokenised: they are not ours to theme.
@@ -1074,10 +1217,15 @@ it('the CSS block ships once, with no new !important and none of our own neon', 
   expect(css).toMatch(/\.au-google span \{[^}]*font-size: 14px/);
   expect(css).not.toMatch(/\.au-google[^}]*!important/);
   expect(css).not.toMatch(/\.au-or[^}]*!important/);
+  // The only saturated colour this round adds is Google's, inside their mark and their fill. Nothing in
+  // the block may reach for a colour of our own beyond the app's tokens (the divider's rule and label).
+  const blk = css.slice(css.indexOf('.au-google {'), css.indexOf('.au-or::before'));
+  const ours = (blk.match(/#[0-9A-Fa-f]{3,8}\b/g) || []).filter((h) => !['#FFFFFF', '#747775', '#1F1F1F', '#F2F2F2'].includes(h));
+  expect(ours).toEqual([]);
 });
 ```
 
-- [ ] **Step 9: The CSS.** Append at the END of `public/styles.css` (6141 lines today), inside the
+- [ ] **Step 10: The CSS.** Append at the END of `public/styles.css` (6141 lines today), inside the
 `ACCOUNT DESIGN ROUND - 2026-08-25` banner opened at `:6037`. CRLF.
 
 ```css
@@ -1138,9 +1286,9 @@ it('the CSS block ships once, with no new !important and none of our own neon', 
 .au-or::before, .au-or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 ```
 
-- [ ] **Step 10: Version, checks, commit and push.** `APP_VERSION` is `'2026.08.25.N'`, where N is the
-next unused number when Task 8 is dispatched (the controller states the real number at dispatch; do not
-guess it here, Tasks 5 to 7 have not consumed theirs yet). `node --check public/app.js && node --check
+- [ ] **Step 11: Version, checks, commit and push.** `APP_VERSION` is `'2026.08.25.N'`, where N is the
+next unused number when Task 8 is dispatched. THE CONTROLLER STATES N AT DISPATCH; do not guess it here.
+`.24` is already taken by Task 4's fix round, and Tasks 5 to 7 have not consumed theirs yet. `node --check public/app.js && node --check
 public/pure.js`. Line endings: `app.js` LF, `pure.js` and `styles.css` CRLF, counted before and after.
 `cd test && npx vitest run account-round`, and gate the push on its exit code.
 
@@ -1150,7 +1298,7 @@ Commit message:
 feat(account): Continue with Google - one button on both forms under the primary, the claim intent survives the redirect, the name screen prefilled from Google - v2026.08.25.N
 ```
 
-- [ ] **Step 11: The standing note and the open list, both carried into Task 7's vault write.**
+- [ ] **Step 12: The standing note and the open list, both carried into Task 7's vault write.**
 
 **Standing note, Confirm email (Mike's call 4).** It is OFF today, and OFF is the safe state for both
 halves of this feature. Flipping it ON arms two failures and both become required work IN THE SAME PUSH:
@@ -1216,7 +1364,7 @@ vitest, green in the drive, and still broken for the first player who taps it:
 ### Task 7: Verification + the vault
 
 - [ ] **Step 1: Bytes on prod** — `APP_VERSION` matches; `grep -c` for `openGatePage`, `passwordMeterScore`, `PASSWORD_RECOVERY`, `openResetPage`, `openAcctPage`, `acc-card` in the served files.
-- [ ] **Step 2: Drive (read-only; Mike's Chrome; §63):** in a 390 frame with every auth write stubbed (`signUp`, `signInWithPassword`, `resend`, `resetPasswordForEmail`, `updateUser`, `signOut`, the profiles update): the card (rows, initial, no tag), each edit screen's markup, the reveal on a DUMMY value typed by the script (never a real password), the meter's labels for `abc` / `password` / `Passw0rd!`, the forgot screen (no send), the wall by setting `state.authSession = null` in the frame and activating the Tournament tab (then restore), the sign-out confirm (cancel). **Google (Task 8):** `#auth-google` is present exactly once on the sign-in form and once on create account at 390 and absent on forgot (`document.getElementById('auth-google') === null`); its `getBoundingClientRect()` matches `#auth-submit`'s width with a height at or above 44; the inner SVG carries the conic gradient and none of the four outdated hexes, checked ON A REAL iPHONE as well, because the mark paints through a `foreignObject` and WebKit was never tested; and ONE real tap navigates to `accounts.google.com`, where the drive CANCELS (no account picked, nothing signed in) and then returns and confirms the app boots clean. A `redirect_uri_mismatch` or a "provider is not enabled" page there is itself the useful fact: it means the Supabase or Google console side is not wired. Console clean, and specifically no `sessionStorage` exception. Screenshots if capture works; facts either way.
+- [ ] **Step 2: Drive (read-only; Mike's Chrome; §63):** in a 390 frame with every auth write stubbed (`signUp`, `signInWithPassword`, `resend`, `resetPasswordForEmail`, `updateUser`, `signOut`, the profiles update): the card (rows, initial, no tag), each edit screen's markup, the reveal on a DUMMY value typed by the script (never a real password), the meter's labels for `abc` / `password` / `Passw0rd!`, the forgot screen (no send), the wall by setting `state.authSession = null` in the frame and activating the Tournament tab (then restore), the sign-out confirm (cancel). **Google (Task 8):** `#auth-google` is present exactly once on the sign-in form and once on create account at 390 and absent on forgot (`document.getElementById('auth-google') === null`); its `getBoundingClientRect()` matches `#auth-submit`'s width with a height at or above 44; the inner SVG carries the conic gradient and none of the four outdated hexes, checked ON A REAL iPHONE as well, because the mark paints through a `foreignObject` and WebKit was never tested (if it does not paint there, Task 8 Step 1 carries the decision rule: the bundle's official PNG as a data URI in the same button, never a flat or monochrome G); and ONE real tap navigates to `accounts.google.com`, where the drive CANCELS (no account picked, nothing signed in) and then returns and confirms the app boots clean. A `redirect_uri_mismatch` or a "provider is not enabled" page there is itself the useful fact: it means the Supabase or Google console side is not wired. Console clean, and specifically no `sessionStorage` exception. Screenshots if capture works; facts either way.
 - [ ] **Step 3: Restore the tab.**
-- [ ] **Step 4: Vault** — log, current, decisions (anything decided in build), debugging, NOW, Tasks (C100 DONE; C101 gains the `profiles.email` sync), `12-history/task-#4-account-handoff-session18.md` BEFORE marking done; plus Task 8's standing note (flipping Confirm email ON arms H2 and H3 and makes both required work in the same push) and its open list.
+- [ ] **Step 4: Vault:** log, current, decisions (anything decided in build), debugging, NOW, Tasks (C100 DONE; C101 gains the `profiles.email` sync), `12-history/task-#4-account-handoff-session18.md` BEFORE marking done; plus Task 8's standing note (flipping Confirm email ON arms H2 and H3 and makes both required work in the same push) and its open list.
 - [ ] **Step 5: Hand back** with AskUserQuestion: Task 10 of the Manage plan (canvas consent) / C101 the data round / C102 the extraction.

@@ -183,8 +183,10 @@ no account edit page, and the account card is a read-only dialog. In build order
 
 Not one of the 14 screens: Mike's handoff draws no Google button anywhere (`grep -rn -i google` over
 `docs/design-handoffs/2026-08-24/account/` returns only the webfont links), and there is no Google sign-in
-in the repo today. It is a new element, decided in its own round after the recon (4 lenses plus a critic,
-`scratchpad/recon-google/DIGEST.md`), and it ships as Task 8, before the drive.
+in the repo today. It is a new element, decided in its own round after the recon (4 lenses plus a critic), whose digest and
+design options are archived in the vault at `C:\Ai Master\Projects\Athletic Specimen\12-history\assets\`
+as `2026-08-25-google-signin-recon-digest.md` and `2026-08-25-google-signin-design-options.md`. It ships as
+Task 8, before the drive.
 
 **Mike's four calls (AskUserQuestion, 2026-08-25).**
 
@@ -218,6 +220,11 @@ in the repo today. It is a new element, decided in its own round after the recon
    verbatim and are deliberately NOT tokenised: they are not ours to theme, the guidelines forbid a
    background other than their light, dark or neutral, and they forbid recoloring the mark. The face is
    Inter, not Google Sans (a documented deviation: a fourth webfont for one button is not worth the bytes).
+   The mark paints its gradient through a `foreignObject`, which was verified in Chrome and never on WebKit,
+   so the drive looks at it on a real iPhone. If it does not paint there the substitute is decided in
+   advance: the bundle's own 80 by 80 PNG as a `data:` URI in an `<img>` in the same button and the same
+   18px box, and the structural test becomes either/or. Never a flat, monochrome or redrawn G, on any
+   platform: a broken gradient is a rendering bug, an outdated G is a compliance one.
    The order preserves the rank this round spent six tasks establishing, and it keeps First name, Last
    name, Email, Password and the meter above the fold at 390. `.au-google` and `.au-or` go under the
    ACCOUNT banner with a PORT NOTE naming the branding rules; no new `!important` (the label rides in a
@@ -247,6 +254,15 @@ or use your email.", and hands the button back. That line is deliberately not ro
 there is: an OAuth failure is never delivered to `onAuthStateChange`. `flowType` stays the client default,
 which is implicit: the tokens come back in the URL fragment and `detectSessionInUrl` already consumes them,
 and the recovery marker regex cannot match an OAuth fragment, so the two flows stay separate.
+
+**One way back does NOT re-evaluate anything, and it leaves a dead button.** On iOS Safari the tap freezes
+the page rather than unloading it: the person sees the consent screen, presses Back, and the page is
+restored from the back/forward cache with every module `let` exactly as they left it, including the
+disabled button and no error line to explain it. The app's existing `pageshow` hook only calls
+`triggerRefresh`, which never touches the overlay. So this round adds its own module-scope `pageshow`
+listener: on `event.persisted` it re-enables the button, repaints `#auth-page` if one is open, and drops
+the persisted claim intent key, because no redirect completed. The in-memory flag stays, exactly as on the
+failure path, so the email fallback still finishes the journey.
 
 **The redirect destroys module state, and one piece of it has to survive.** A full page navigation
 re-evaluates `app.js`, so every module `let` is back at its initializer. `claimIntent` is the one that
@@ -308,7 +324,9 @@ a11y item with the reveal's `aria-pressed`).
   keeps the flag, the boot restore consumes the key and sits below the declaration (asserted against
   the SOURCE), and both a sign-out and the back chevron drop it; a Google user with no profile names
   is still ASKED, with the fields prefilled from `full_name` and nothing claimed until Save, while a
-  one-word name prefills nothing; and the pure splitter splits on the last space. The harness gains a
+  one-word name prefills nothing; a persisted `pageshow` hands the disabled button back, rebound once, with
+  the storage key dropped and the memory flag kept, while a non-persisted one changes nothing; and the pure
+  splitter splits on the last space. The harness gains a
   real Map-backed `sessionStorage` for that half only, `signInWithOAuth` on the auth stub, `assign` /
   `replace` spies proving the app never navigates itself, and `'auth-google'` in `AUTH_CONTROL_IDS`.
   Every storage assertion reads a NAMED key, never `length`.
