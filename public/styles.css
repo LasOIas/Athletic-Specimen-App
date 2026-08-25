@@ -3857,18 +3857,11 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 }
 .mgv-bkdonel { margin-left: auto; font-weight: 700; color: var(--accent); }
 
-/* bracket score entry reuses the pools score sheet; the one thing it adds is
-   where each side goes next, because that is the consequence of tapping Final */
-.mgv-bknext {
-  margin: 12px 0 4px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  background: oklch(0.985 0.003 75);
-  font-size: 12.5px;
-  color: var(--muted);
-}
-.mgv-bknext b { font-weight: 700; color: var(--ink); }
+/* PORT NOTE: the .mgv-bknext block that lived here (bracket score entry's "Winner
+   goes to G11 · loser drops to G10" line) was DELETED with its markup in the
+   2026-08-25 round — mgScoreNextHTML now emits .mgv-scstake, styled at the bottom
+   of the Manage block below. Nothing in app.js, the tests or the CSS refers to
+   .mgv-bknext any more, so the rules went rather than sitting here dead. */
 
 /* Round 2026-08-03 — "this looks so bad" (bracket score entry). Was the pools
    slide-up: two loose stepper columns with small square buttons and a second
@@ -3965,7 +3958,6 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
-#mgss-sheet .mgv-bknext { margin-bottom: 0; }
 #mgss-sheet .mgv-scfoot {
   display: grid;
   gap: 8px;
@@ -5829,6 +5821,138 @@ input.set-money {
 .pc-team { min-height: 0; color: var(--ink); font-size: 15px !important; }
 .pc-team .pc-tn { color: var(--ink); font-size: 15px; }
 .pc-team .pc-move { color: var(--accent); font-size: 12px; }
+
+/* PORT NOTE: _bracket-run.css:7-45 + 85-110 (the round's own comments kept) - Manage > Tournament >
+   Bracket & scores, the RUNNING board (mockup mgbk-run). Placed HERE, inside the 2026-08-25 Manage block
+   and ABOVE the 2026-08-23 button restyle below, so the restyle still wins where the two overlap.
+   DROPPED, per spec 2026-08-25 decision 4 (the UI ships now, the DB gaps get their own round): every
+   .bkr-undo rule (46-73) - there is no undo write to hang it on - and .mgv-bkm.is-queued /
+   .mgv-bknet.is-wait (75-77), which style a "no net yet" state nothing can produce until net
+   reassignment lands. .bkr-champ[hidden] went too: the block is rendered conditionally, never hidden. */
+.bkr-strip {
+  margin-top: 14px;
+  padding: 15px 16px 16px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .06), 0 0 0 1px oklch(0.90 0.005 75);
+}
+.bkr-eye {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.bkr-count {
+  margin-top: 5px;
+  font-family: var(--font-display);
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -.015em;
+  color: var(--ink);
+}
+.bkr-bar {
+  margin-top: 11px;
+  height: 5px;
+  border-radius: 4px;
+  background: oklch(0.93 0.004 75);
+  overflow: hidden;
+}
+.bkr-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--success);
+  transition: width 220ms cubic-bezier(.2, .7, .3, 1);
+}
+.bkr-now { margin-top: 10px; font-size: 12px; line-height: 1.45; color: var(--muted); text-wrap: pretty; }
+.bkr-now b { color: var(--ink); font-weight: 700; }
+
+.mgv-bkpill.is-done {
+  background: oklch(0.94 0.004 75);
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px oklch(0.88 0.005 75);
+}
+
+.bkr-champ {
+  margin-top: 16px;
+  padding: 20px 18px 22px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, oklch(0.97 0.03 150), #fff 62%);
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .06), 0 0 0 1px oklch(0.87 0.05 152);
+  text-align: center;
+}
+.bkr-champe {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: oklch(0.45 0.09 152);
+}
+.bkr-champn {
+  margin-top: 7px;
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  line-height: 1.05;
+  color: var(--ink);
+}
+.bkr-champs { margin-top: 8px; font-size: 12px; color: var(--muted); }
+
+/* PORT NOTE: _shared.css:137-182 (the round's own comment kept) - the bracket score card's three additive
+   lines, RENAMED off the round's aria-label selectors onto production's own classes. The round wrote every
+   rule as `.mgs-card[aria-label="Pick the winner"] .mgs-*`; an aria-label is a label, not a hook, so each
+   one is re-mapped to the class the markup actually carries (.mgv-scnb / .mgv-scsub / .mgv-scwpill /
+   .mgv-scstake / .mgv-scstk) and scoped by the presence of the sub-line instead, which is what "this is a
+   bracket card" really means. TWO deliberate differences from the prototype:
+   1. the prototype's card has NO stepper, so it hangs the pill off `.mgs-win { justify-content:
+      space-between }`. Production keeps the stepper and the live save, so the row's right edge is already
+      spoken for - the pill is absolutely positioned inside the winner button instead, which puts it in the
+      prototype's place (right of the name, left of the stepper) and costs no layout when it appears.
+   2. the 16px name and the 62px row are scoped to :has(.mgv-scsub), so the POOL card - the same component -
+      keeps the 15px name and the shorter row it ships today. */
+#mgss-sheet .mgv-scrow { position: relative; }
+#mgss-sheet .mgv-scwin { position: relative; gap: 12px; }
+#mgss-sheet .mgv-scwin:has(.mgv-scsub) { min-height: 62px; }
+#mgss-sheet .mgv-scwin:has(.mgv-scwpill) { padding-right: 66px; }
+#mgss-sheet .mgv-scnb { flex: 1; display: grid; gap: 3px; min-width: 0; }
+#mgss-sheet .mgv-scwin:has(.mgv-scsub) .mgv-scname { font-size: 16px; letter-spacing: -.01em; }
+#mgss-sheet .mgv-scsub { font-size: 11.5px; font-weight: 400; color: var(--muted); }
+#mgss-sheet .mgv-scwpill {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  display: grid;
+  place-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 4px 10px -5px oklch(0.55 0.07 240 / .7), inset 0 1px 0 rgba(255, 255, 255, .18);
+  font-family: var(--font-display, 'Barlow Semi Condensed', sans-serif);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: #fff;
+  opacity: 0;
+  transform: translateY(-50%) scale(.86);
+  transition: opacity var(--m-state, 140ms) var(--e-settle, ease),
+              transform var(--m-state, 140ms) var(--e-press, ease);
+}
+#mgss-sheet .mgv-scrow.is-won .mgv-scwpill { opacity: 1; transform: translateY(-50%); }
+#mgss-sheet .mgv-scstake {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 12px 2px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+#mgss-sheet .mgv-scstk b { font-weight: 700; color: var(--ink); }
 
 /* ============================================================
    Round 2026-08-23 — "redo the styling of the buttons, highlighting, checkmarks"

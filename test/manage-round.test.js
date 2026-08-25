@@ -206,6 +206,15 @@ function loadApp() {
       setTab: (v) => { activeMainTab = v; },
       tabNow: () => activeMainTab,
       setBoot: (v) => { bootPaintDone = !!v; },
+      // Task 9 (the organizer's bracket): the keyboard path has to reach the SAME opener a tap reaches, so
+      // the test swaps openMgScoreSheet for a recorder and drives the real keydown listener. Returns its
+      // own undo — this suite shares one vm context, so leaving it swapped would break every later case.
+      mockOpenScore: () => {
+        const calls = [];
+        const was = openMgScoreSheet;
+        openMgScoreSheet = (id) => { calls.push(id); };
+        return { calls, restore: () => { openMgScoreSheet = was; } };
+      },
       mockTeamAdd: (o) => {
         o = o || {};
         const calls = [];
@@ -246,30 +255,38 @@ function setMainBracketFixture(extra = {}) {
       team_size: 4, net_count: 2, bracket_target: 21, bracket_cap: 25, win_by_2: true }],
     activeTournamentId: 'T',
     tournamentTeams: [
-      { id: 't1', name: 'Dink Responsibly' }, { id: 't2', name: 'Sets and Reps' },
-      { id: 't3', name: 'Block Party' }, { id: 't4', name: 'Net Gains' },
-      { id: 't5', name: 'Ace Holes' }, { id: 't6', name: 'Dig It' },
-      { id: 't7', name: 'Kitchen Sync' }, { id: 't8', name: 'Paddle Boat' },
+      { id: 't1', name: 'Dink Responsibly', seed: 1 }, { id: 't2', name: 'Sets and Reps', seed: 2 },
+      { id: 't3', name: 'Block Party', seed: 3 }, { id: 't4', name: 'Net Gains', seed: 4 },
+      { id: 't5', name: 'Ace Holes', seed: 5 }, { id: 't6', name: 'Dig It', seed: 6 },
+      { id: 't7', name: 'Kitchen Sync', seed: 7 }, { id: 't8', name: 'Paddle Boat', seed: 8 },
     ],
     tournamentPools: [],
+    // Task 9 additions to the same fixture: the REAL wiring (winner_next_match_id / loser_next_match_id),
+    // teams[].seed the way generate_bracket_atomic writes it, and a short pool round so the score card's
+    // "Seed 2 · 2–0 in pools" sub-line has a record to read (computeSeeding only counts phase 'pool').
     tournamentMatches: [
       // Winners R1, all four finished (held back behind the closing row by default)
-      { id: 'w1a', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 0, round_label: 'WB R1 M1', net: 1, queue_order: 0, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 21, score_b: 14, version: 1 },
-      { id: 'w1b', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 1, round_label: 'WB R1 M2', net: 2, queue_order: 1, status: 'final', team_a_id: 't3', team_b_id: 't4', winner_team_id: 't3', score_a: 21, score_b: 18, version: 1 },
-      { id: 'w1c', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 2, round_label: 'WB R1 M3', net: 1, queue_order: 2, status: 'final', team_a_id: 't5', team_b_id: 't6', winner_team_id: 't5', score_a: 21, score_b: 9, version: 1 },
-      { id: 'w1d', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 3, round_label: 'WB R1 M4', net: 2, queue_order: 3, status: 'final', team_a_id: 't7', team_b_id: 't8', winner_team_id: 't7', score_a: 21, score_b: 12, version: 1 },
+      { id: 'w1a', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 0, round_label: 'WB R1 M1', net: 1, queue_order: 0, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 21, score_b: 14, winner_next_match_id: 'w2a', loser_next_match_id: 'l1a', version: 1 },
+      { id: 'w1b', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 1, round_label: 'WB R1 M2', net: 2, queue_order: 1, status: 'final', team_a_id: 't3', team_b_id: 't4', winner_team_id: 't3', score_a: 21, score_b: 18, winner_next_match_id: 'w2a', loser_next_match_id: 'l1a', version: 1 },
+      { id: 'w1c', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 2, round_label: 'WB R1 M3', net: 1, queue_order: 2, status: 'final', team_a_id: 't5', team_b_id: 't6', winner_team_id: 't5', score_a: 21, score_b: 9, winner_next_match_id: 'w2b', loser_next_match_id: 'l1b', version: 1 },
+      { id: 'w1d', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 3, round_label: 'WB R1 M4', net: 2, queue_order: 3, status: 'final', team_a_id: 't7', team_b_id: 't8', winner_team_id: 't7', score_a: 21, score_b: 12, winner_next_match_id: 'w2b', loser_next_match_id: 'l1b', version: 1 },
       // Losers R1, both ready to play (round 1 of 2, so it stays a plain "bracket" group)
-      { id: 'l1a', tournament_id: 'T', phase: 'main', side: 'losers', round: 1, slot: 0, round_label: 'LB R1 M1', net: 1, queue_order: 4, status: 'scheduled', team_a_id: 't2', team_b_id: 't4', version: 0 },
-      { id: 'l1b', tournament_id: 'T', phase: 'main', side: 'losers', round: 1, slot: 1, round_label: 'LB R1 M2', net: 2, queue_order: 5, status: 'scheduled', team_a_id: 't6', team_b_id: 't8', version: 0 },
+      { id: 'l1a', tournament_id: 'T', phase: 'main', side: 'losers', round: 1, slot: 0, round_label: 'LB R1 M1', net: 1, queue_order: 4, status: 'scheduled', team_a_id: 't2', team_b_id: 't4', winner_next_match_id: 'l2a', loser_next_match_id: null, version: 0 },
+      { id: 'l1b', tournament_id: 'T', phase: 'main', side: 'losers', round: 1, slot: 1, round_label: 'LB R1 M2', net: 2, queue_order: 5, status: 'scheduled', team_a_id: 't6', team_b_id: 't8', winner_next_match_id: 'l2a', loser_next_match_id: null, version: 0 },
       // Winners R2, both live (round 2 of 3, still a plain "bracket" group)
-      { id: 'w2a', tournament_id: 'T', phase: 'main', side: 'winners', round: 2, slot: 0, round_label: 'WB R2 M1', net: 1, queue_order: 6, status: 'live', team_a_id: 't1', team_b_id: 't3', score_a: 18, score_b: 15, version: 1 },
-      { id: 'w2b', tournament_id: 'T', phase: 'main', side: 'winners', round: 2, slot: 1, round_label: 'WB R2 M2', net: 2, queue_order: 7, status: 'live', team_a_id: 't5', team_b_id: 't7', score_a: 7, score_b: 4, version: 1 },
+      { id: 'w2a', tournament_id: 'T', phase: 'main', side: 'winners', round: 2, slot: 0, round_label: 'WB R2 M1', net: 1, queue_order: 6, status: 'live', team_a_id: 't1', team_b_id: 't3', score_a: 18, score_b: 15, winner_next_match_id: 'w3a', loser_next_match_id: 'l2a', version: 1 },
+      { id: 'w2b', tournament_id: 'T', phase: 'main', side: 'winners', round: 2, slot: 1, round_label: 'WB R2 M2', net: 2, queue_order: 7, status: 'live', team_a_id: 't5', team_b_id: 't7', score_a: 7, score_b: 4, winner_next_match_id: 'w3a', loser_next_match_id: 'l2a', version: 1 },
       // Losers R2, the last losers round, still waiting on its feeders
-      { id: 'l2a', tournament_id: 'T', phase: 'main', side: 'losers', round: 2, slot: 0, round_label: 'LB R2 M1', net: 1, queue_order: 8, status: 'scheduled', team_a_id: null, team_b_id: null, source_a: 'Winner of LB R1 M1', source_b: 'Winner of LB R1 M2', version: 0 },
+      { id: 'l2a', tournament_id: 'T', phase: 'main', side: 'losers', round: 2, slot: 0, round_label: 'LB R2 M1', net: 1, queue_order: 8, status: 'scheduled', team_a_id: null, team_b_id: null, source_a: 'Winner of LB R1 M1', source_b: 'Winner of LB R1 M2', winner_next_match_id: 'gf', loser_next_match_id: null, version: 0 },
       // Winners R3, the last winners round
-      { id: 'w3a', tournament_id: 'T', phase: 'main', side: 'winners', round: 3, slot: 0, round_label: 'WB R3 M1', net: 1, queue_order: 9, status: 'scheduled', team_a_id: null, team_b_id: null, source_a: 'Winner of WB R2 M1', source_b: 'Winner of WB R2 M2', version: 0 },
+      { id: 'w3a', tournament_id: 'T', phase: 'main', side: 'winners', round: 3, slot: 0, round_label: 'WB R3 M1', net: 1, queue_order: 9, status: 'scheduled', team_a_id: null, team_b_id: null, source_a: 'Winner of WB R2 M1', source_b: 'Winner of WB R2 M2', winner_next_match_id: 'gf', loser_next_match_id: 'l2a', version: 0 },
       // The championship
-      { id: 'gf', tournament_id: 'T', phase: 'main', side: 'grand_final', round: 1, slot: 0, round_label: 'Grand Final', net: 1, queue_order: 10, status: 'scheduled', team_a_id: null, team_b_id: null, source_a: 'Winner of WB R3 M1', source_b: 'Winner of LB R2 M1', version: 0 },
+      { id: 'gf', tournament_id: 'T', phase: 'main', side: 'grand_final', round: 1, slot: 0, round_label: 'Grand Final', net: 1, queue_order: 10, status: 'scheduled', team_a_id: null, team_b_id: null, source_a: 'Winner of WB R3 M1', source_b: 'Winner of LB R2 M1', winner_next_match_id: null, loser_next_match_id: null, version: 0 },
+      // A short pool round behind the bracket: t1 2–0, t3 2–1, t2 0–2, t4 0–1.
+      { id: 'pA1', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 1, queue_order: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 15, score_b: 9, version: 1 },
+      { id: 'pA2', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 1, queue_order: 2, status: 'final', team_a_id: 't1', team_b_id: 't3', winner_team_id: 't1', score_a: 15, score_b: 13, version: 1 },
+      { id: 'pA3', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 2, queue_order: 3, status: 'final', team_a_id: 't3', team_b_id: 't2', winner_team_id: 't3', score_a: 15, score_b: 7, version: 1 },
+      { id: 'pA4', tournament_id: 'T', pool_id: 'p1', phase: 'pool', net: 2, queue_order: 4, status: 'final', team_a_id: 't3', team_b_id: 't4', winner_team_id: 't3', score_a: 15, score_b: 11, version: 1 },
     ],
     players: [], checkedIn: [], teamMembers: null, isAdmin: true,
     ...extra,
@@ -1889,6 +1906,283 @@ describe('Task 8 pool controls', () => {
   });
 
   it('the version bumped with the change', () => {
-    expect(appSrc).toContain("const APP_VERSION = '2026.08.25.12'");
+    expect(appSrc).toContain("const APP_VERSION = '2026.08.25.13'");
+  });
+});
+
+// ── Task 9: the organizer's bracket ───────────────────────────────────────────────────────────────────
+// Screens 37 (the bracket score card) + 38 (mgbk-run) of the 2026-08-25 Manage handoff. Spec decision 4:
+// the UI ships now and the DB gaps go to their own round, so what lands here is the progress strip, the
+// champion block, the card's three additive lines, the Done pill and keyboard reach — and NOTHING that
+// needs a write the schema hasn't got (no undo strip, no clear-every-score, no net reassignment).
+//
+// The 8-team fixture above is mid-play and every number in the strip is checkable by hand:
+// G1–G4 winners R1 (final), G5–G6 losers R1 (up next), G7–G8 winners R2 (LIVE on nets 1 and 2),
+// G9 losers R2, G10 winners R3, G11 the championship — 11 games, 4 in, two live.
+
+// The REAL keydown listeners, captured the way withDelegate captures the click one. The bracket's
+// Enter/Space reach is bound on #app-content and the score card's Escape on document, so both lists are
+// collected and driven with a synthetic event: a grep of app.js proves neither is actually wired.
+function withKeys(fn) {
+  const doc = bridge.doc;
+  const realGet = doc.getElementById;
+  const realAdd = doc.addEventListener;
+  const noop = () => {};
+  const onEl = [];
+  const onDoc = [];
+  const appContent = {
+    dataset: {}, style: {},
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+    addEventListener: (type, cb) => { if (type === 'keydown') onEl.push(cb); },
+    removeEventListener: noop,
+    querySelector: () => null, querySelectorAll: () => ({ forEach: noop, length: 0 }),
+  };
+  doc.getElementById = (id) => (id === 'app-content' ? appContent : null);
+  doc.addEventListener = (type, cb) => { if (type === 'keydown') onDoc.push(cb); };
+  // the later bindings in attachHandlers want DOM this harness has not got; the two keydown listeners are
+  // bound before any of them complain
+  try { bridge.attachHandlers(); } catch (_) { /* nothing after the keydown bindings matters here */ }
+  finally { doc.getElementById = realGet; doc.addEventListener = realAdd; }
+  // One synthetic key press. `hooks` is every attribute the focused node sits under, so a row can be
+  // reproduced exactly; `list` picks which set of listeners hears it (the element's, or document's).
+  const press = (key, hooks, value, list) => {
+    const names = hooks == null ? [] : (Array.isArray(hooks) ? hooks : [hooks]);
+    let prevented = false;
+    const target = {
+      tagName: 'DIV', dataset: {}, classList: { contains: () => false },
+      closest: (sel) => (names.some((a) => sel === '[' + a + ']')
+        ? { getAttribute: (name) => (names.includes(name) ? (value == null ? '' : value) : null), dataset: {} }
+        : null),
+    };
+    (list || onEl).forEach((cb) => cb({ key, target, preventDefault: () => { prevented = true; }, stopPropagation: noop }));
+    return prevented;
+  };
+  return fn({ press, onEl, onDoc });
+}
+
+// Every game played out, so the champion block and the "done" progress word are both on screen. t1 takes
+// the championship from the winners side (slot a), which is the no-reset path computeChampion decides on.
+function setDecidedBracketFixture() {
+  setMainBracketFixture();
+  const st = bridge.getState();
+  const pairs = { l2a: ['t2', 't6'], w3a: ['t1', 't5'], gf: ['t1', 't2'] };
+  const wins = { l1a: 't2', l1b: 't6', w2a: 't1', w2b: 't5', l2a: 't2', w3a: 't1', gf: 't1' };
+  st.tournamentMatches.forEach((m) => {
+    if (pairs[m.id]) { m.team_a_id = pairs[m.id][0]; m.team_b_id = pairs[m.id][1]; }
+    if (wins[m.id]) { m.status = 'final'; m.winner_team_id = wins[m.id]; m.score_a = 21; m.score_b = 15; }
+  });
+}
+
+describe('Task 9 the progress strip', () => {
+  it('reads the event off the tournament and the count off the games', () => {
+    setMainBracketFixture();
+    const html = bridge.buildBracket();
+    expect(html).toContain('DOUBLE ELIMINATION · 8 TEAMS · 2 NETS');
+    expect(html).toMatch(/\d+ of \d+ games in/);
+    expect(html).toContain('class="bkr-count">4 of 11 games in<');
+    expect(html).toContain('<span style="width:36%">');   // 4 of 11
+  });
+
+  it('the now-line names the live games and their nets', () => {
+    setMainBracketFixture();
+    const html = bridge.buildBracket();
+    expect(html).toContain('On the nets now: <b>G7 on Net 1</b>, <b>G8 on Net 2</b>. Tap a game to pick its winner.');
+  });
+
+  it('the now-line names what is up next when nothing is on a net', () => {
+    setMainBracketFixture();
+    bridge.getState().tournamentMatches.forEach((m) => { if (m.status === 'live') m.status = 'scheduled'; });
+    const html = bridge.buildBracket();
+    expect(html).toContain('Up next: <b>G5</b>, <b>G6</b>, <b>G7</b>. Tap a game to pick its winner.');
+  });
+
+  it('the now-line says so plainly when the next round is waiting on results', () => {
+    setMainBracketFixture();
+    bridge.getState().tournamentMatches.forEach((m) => {
+      if (m.phase === 'main' && m.team_a_id && m.team_b_id) {
+        m.status = 'final'; m.winner_team_id = m.team_a_id; m.score_a = 21; m.score_b = 15;
+      }
+    });
+    const html = bridge.buildBracket();
+    expect(html).toContain('No game is playable, the next round needs results first.');
+    expect(html).not.toMatch(/—|&mdash;/);
+  });
+
+  it('rides between the controls and the board, and brings nothing from the data round with it', () => {
+    setMainBracketFixture();
+    const html = bridge.buildBracket();
+    expect(html.indexOf('data-mgbk-players')).toBeLessThan(html.indexOf('class="bkr-strip"'));
+    expect(html.indexOf('class="bkr-strip"')).toBeLessThan(html.indexOf('class="mgv-bkr"'));
+    expect(html).not.toContain('bkr-undo');
+    expect(html).not.toContain('Clear every score');
+    expect(html).not.toContain('Undo');
+    expect(html).toContain('data-mgbk-reset');   // the one destructive control this page already had
+  });
+});
+
+describe('Task 9 the champion block', () => {
+  it('names the champion, the seed, the pool record and the deciding game', () => {
+    setDecidedBracketFixture();
+    const html = bridge.buildBracket();
+    expect(html).toContain('class="bkr-champe">Champion<');
+    expect(html).toContain('class="bkr-champn">Dink Responsibly<');
+    expect(html).toContain('class="bkr-champs">Seed 1 · 2–0 in pools · won the championship, G11<');
+    expect(html).toContain('Every game is in. <b>Dink Responsibly</b> takes it.');
+    expect(html.indexOf('class="bkr-champ"')).toBeLessThan(html.indexOf('class="bkr-strip"'));
+  });
+
+  it('drops a clause whose fact is missing', () => {
+    setDecidedBracketFixture();
+    const st = bridge.getState();
+    st.tournamentMatches = st.tournamentMatches.filter((m) => m.phase !== 'pool'); // no pools played
+    st.tournamentTeams.forEach((tm) => { delete tm.seed; });                       // pre-0049 rows
+    expect(bridge.buildBracket()).toContain('class="bkr-champs">won the championship, G11<');
+  });
+
+  it('an undecided bracket renders no champion block at all', () => {
+    setMainBracketFixture();
+    expect(bridge.buildBracket()).not.toContain('bkr-champ');
+  });
+
+  it('a finished round reads done, never final', () => {
+    setDecidedBracketFixture();
+    const html = bridge.buildBracket();
+    expect(html).toContain('class="mgv-bkrs">done<');
+    expect(html).not.toContain('class="mgv-bkrs">final<');
+  });
+});
+
+describe('Task 9 the bracket score card', () => {
+  const match = (id) => bridge.getState().tournamentMatches.find((m) => m.id === id);
+
+  it('carries the seed and pool record, the stakes and a WINNER pill, and keeps the steppers', () => {
+    setMainBracketFixture();
+    const html = bridge.buildScoreSheet(match('w2a'));
+    expect(html).toMatch(/class="mgv-scsub">Seed \d · \d–\d in pools</);
+    expect(html).toContain('class="mgv-scsub">Seed 1 · 2–0 in pools<');
+    expect(html).toContain('class="mgv-scsub">Seed 3 · 2–1 in pools<');
+    expect(html).toContain('<b>Winner</b> → winners bracket · G10');
+    expect(html).toContain('<b>Loser</b> → losers bracket · G9');
+    expect(html).toContain('class="mgv-scwpill" aria-hidden="true">Winner<');
+    expect(count(html, 'data-mgss-step=')).toBe(4);
+    expect(html).toContain('data-mgss="live"');
+    expect(html).not.toMatch(/—|&mdash;/);
+  });
+
+  it('keeps every hook and class the row already had', () => {
+    setMainBracketFixture();
+    const html = bridge.buildScoreSheet(match('w2a'));
+    expect(count(html, 'class="mgv-scrow')).toBe(2);
+    expect(count(html, 'class="mgv-scwin" data-mgss-winner=')).toBe(2);
+    expect(count(html, 'class="mgv-scdot" aria-hidden="true"')).toBe(2);
+    expect(count(html, 'class="mgv-scname"')).toBe(2);
+    expect(count(html, 'class="mgv-scstep"')).toBe(2);
+    expect(count(html, 'class="mgv-scnb"')).toBe(2);   // the name + sub wrapper keeps the 44px target whole
+    expect(html).toContain('id="mgss-a"');
+    expect(html).toContain('id="mgss-b"');
+  });
+
+  it('the championship names the terminal outcomes, never a game that does not exist', () => {
+    setMainBracketFixture();
+    const gf = match('gf');
+    gf.team_a_id = 't1'; gf.team_b_id = 't2';
+    const html = bridge.buildScoreSheet(gf);
+    expect(html).toContain('<b>Winner</b> → champion');
+    expect(html).toContain('<b>Loser</b> → runner-up');
+  });
+
+  it('the last losers round sends its loser to third place', () => {
+    setMainBracketFixture();
+    const l2 = match('l2a');
+    l2.team_a_id = 't2'; l2.team_b_id = 't6';
+    const html = bridge.buildScoreSheet(l2);
+    expect(html).toContain('<b>Winner</b> → Championship · G11');
+    expect(html).toContain('<b>Loser</b> → third place');
+  });
+
+  it('a pool card has no seed line, no stakes and no pill', () => {
+    setPoolsFixture();
+    const html = bridge.buildScoreSheet(match('gA2'));
+    expect(html).not.toContain('mgv-scsub');
+    expect(html).not.toContain('mgv-scstake');
+    expect(html).not.toContain('mgv-scwpill');
+    expect(html).toContain('class="mgv-scname"');
+    expect(count(html, 'data-mgss-step=')).toBe(4);
+  });
+});
+
+describe('Task 9 keyboard reach', () => {
+  it('a resolved row is a button the keyboard can land on; a placeholder is not', () => {
+    setMainBracketFixture();
+    const html = bridge.buildBracket();
+    expect(html).toContain('<div class="mgv-bkm is-live" role="button" tabindex="0" data-mgbk-score="w2a">');
+    expect(html).toContain('class="mgv-bkm is-tbd"');
+    expect(html).not.toMatch(/class="mgv-bkm is-tbd"[^>]*tabindex/);
+    expect(count(html, 'tabindex="0"')).toBe(count(html, 'data-mgbk-score="'));
+  });
+
+  it('Enter and Space open the same score card the tap opens, and Space never scrolls the page', () => {
+    setMainBracketFixture();
+    bridge.buildBracket();   // puts Manage on the bracket page, the way a tap would
+    const mock = bridge.mockOpenScore();
+    try {
+      withKeys(({ press }) => {
+        expect(press('Enter', 'data-mgbk-score', 'w2a')).toBe(true);
+        expect(press(' ', 'data-mgbk-score', 'w2b')).toBe(true);
+        press('a', 'data-mgbk-score', 'w2a');            // any other key is left alone
+        press('Enter', 'data-mgbk-showdone', '');        // and a non-row hook never opens a card
+      });
+      expect(mock.calls).toEqual(['w2a', 'w2b']);
+    } finally { mock.restore(); }
+  });
+
+  it('Escape closes the score card', () => {
+    withKeys(({ press, onDoc }) => {
+      const doc = bridge.doc;
+      const realGet = doc.getElementById;
+      let removed = 0;
+      doc.getElementById = (id) => (id === 'mgss-sheet' ? { remove: () => { removed += 1; } } : null);
+      try {
+        press('Escape', null, null, onDoc);
+        expect(removed).toBe(1);
+        removed = 0;
+        press('Enter', null, null, onDoc);
+        expect(removed).toBe(0);
+      } finally { doc.getElementById = realGet; }
+    });
+  });
+});
+
+describe('Task 9 the ported CSS', () => {
+  const body = css.replace(/\/\*[\s\S]*?\*\//g, '');   // PORT NOTEs name what they ban
+
+  it('ports the strip and the champion block from _bracket-run.css', () => {
+    expect(body).toContain('.bkr-strip {');
+    expect(body).toContain('.bkr-eye {');
+    expect(body).toContain('.bkr-count {');
+    expect(body).toContain('.bkr-bar {');
+    expect(body).toContain('.bkr-now {');
+    expect(body).toContain('.bkr-champ {');
+    expect(body).toContain('.bkr-champe {');
+    expect(body).toContain('.bkr-champn {');
+    expect(body).toContain('.bkr-champs {');
+    expect(body).toContain('.mgv-bkpill.is-done {');
+    expect(body).not.toContain('.bkr-undo');   // the data round's, not this one's
+  });
+
+  it('renames the card lines onto production classes, never an aria-label selector', () => {
+    expect(body).toContain('.mgv-scsub');
+    expect(body).toContain('.mgv-scwpill');
+    expect(body).toContain('.mgv-scstake');
+    expect(body).toContain('.mgv-scstk');
+    expect(body).toContain('.mgv-scnb');
+    expect(body).not.toContain('[aria-label="Pick the winner"]');
+    expect(body).toMatch(/#mgss-sheet \.mgv-scrow \{[^}]*position: relative/);
+  });
+
+  it('the old .mgv-bknext block went with its markup', () => {
+    expect(appSrc).not.toContain('mgv-bknext');
+    expect(body).not.toContain('mgv-bknext');   // only the PORT NOTE naming the removal still says it
+    expect(css).toContain('.mgv-bknext block that lived here');
   });
 });

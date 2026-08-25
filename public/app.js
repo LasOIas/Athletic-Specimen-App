@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.12'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.13'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -10802,18 +10802,55 @@ function mgBracketMatchLabel(m) {
   return part ? side + ' · ' + part : side;
 }
 
-// "Winner goes to G11 · loser drops to G10" — what tapping Final actually does, derived from the match's REAL
-// wiring (winner_next_match_id / loser_next_match_id). A clause is omitted when there is no such destination,
-// so the grand final — which has neither — renders no line at all.
+// "Winner → winners bracket · G10 / Loser → losers bracket · G9" — the STAKES of the tap, derived from the
+// match's REAL wiring (winner_next_match_id / loser_next_match_id). Round 2026-08-25 (screen 37): a bare
+// game number said where, never what, so each side now names the round it lands in — and where the wiring
+// ENDS, the terminal outcome is named instead of nothing: champion / runner-up for the deciding
+// championship game, third place for the loser of the last losers round, eliminated everywhere else.
+// A clause is still omitted when there is genuinely no destination to name.
 function mgScoreNextHTML(match) {
   if (!match || match.phase !== 'main') return '';
   const main = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).filter((x) => x.phase === 'main');
-  const byId = bracketGameNumbers(main).byId;
+  const byId = {};
+  main.forEach((x) => { byId[x.id] = x; });
+  const gn = bracketGameNumbers(main).byId;
+  const maxRounds = { winners: 0, losers: 0 };
+  main.forEach((x) => { if (x.side === 'winners' || x.side === 'losers') maxRounds[x.side] = Math.max(maxRounds[x.side], x.round || 0); });
+  const dest = (id) => {
+    const d = byId[id];
+    if (!d) return '';
+    const side = d.side === 'grand_final' ? 'Championship' : (d.side === 'losers' ? 'losers bracket' : 'winners bracket');
+    return `${side} · G${gn[d.id]}`;
+  };
+  // The championship is the one game with no wiring out of it, so its two ends ARE the outcome. With a
+  // reset game pending, winner_next_match_id points at the reset and reads "Championship · G15" honestly.
+  const isChamp = match.side === 'grand_final';
+  const win = (match.winner_next_match_id && byId[match.winner_next_match_id]) ? dest(match.winner_next_match_id) : (isChamp ? 'champion' : '');
+  const lose = (match.loser_next_match_id && byId[match.loser_next_match_id]) ? dest(match.loser_next_match_id)
+    : (isChamp ? 'runner-up' : (match.side === 'losers' && (match.round || 0) >= maxRounds.losers ? 'third place' : 'eliminated'));
   const parts = [];
-  if (match.winner_next_match_id && byId[match.winner_next_match_id]) parts.push(`Winner goes to <b>G${byId[match.winner_next_match_id]}</b>`);
-  if (match.loser_next_match_id && byId[match.loser_next_match_id]) parts.push(`loser drops to <b>G${byId[match.loser_next_match_id]}</b>`);
+  if (win) parts.push(`<span class="mgv-scstk"><b>Winner</b> → ${escapeHTML(win)}</span>`);
+  if (lose) parts.push(`<span class="mgv-scstk"><b>Loser</b> → ${escapeHTML(lose)}</span>`);
   if (!parts.length) return '';
-  return `<div class="mgv-bknext">${parts.join(' · ')}</div>`;
+  return `<div class="mgv-scstake">${parts.join('')}</div>`;
+}
+
+// "Seed 2 · 2–0 in pools" — who this team is and how they got here, under their name on a BRACKET card
+// (round 2026-08-25, screen 37: "its too bland"). The seed is the one generate_bracket_atomic wrote onto
+// the team row; the record is counted off the POOL games by computeSeeding. A clause whose fact is missing
+// is dropped, and a pool card gets no sub-line at all — in pools the seed does not exist yet.
+function mgScoreSubLine(match, side) {
+  if (!match || match.phase !== 'main') return '';
+  const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];
+  const id = side === 'a' ? match.team_a_id : match.team_b_id;
+  const team = teams.find((x) => x && x.id === id);
+  const seed = team ? team.seed : null;
+  if (seed == null || !Number.isFinite(Number(seed))) return '';
+  const bits = ['Seed ' + Number(seed)];
+  const poolMatches = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).filter((m) => m.phase === 'pool');
+  const row = computeSeeding(teams, poolMatches).find((r) => r.teamId === id);
+  if (row && (row.wins || row.losses)) bits.push(row.wins + '–' + row.losses + ' in pools');
+  return `<span class="mgv-scsub">${escapeHTML(bits.join(' · '))}</span>`;
 }
 
 // The primary action's label. The LEADER is what it names, so the button can never claim a winner the score
@@ -10883,12 +10920,22 @@ function buildMgScoreSheetHTML(match, winner) {
     + `<button type="button" class="mgv-scx pd-reg-sheetx" data-mgss="close" aria-label="Close">&times;</button></div>`;
   // One row per team doing BOTH jobs: tap the team to mark it the winner, use the stepper only if a score
   // was kept. A finished game is a same-winner correction (the RPC refuses a flip), so its radio is inert.
+  // Round 2026-08-25 (screen 37): the name gained a seed/record sub-line and the pick gained a WINNER pill.
+  // Both are ADDITIVE — every hook the sync loop and the click delegate read (data-mgss-winner, .mgv-scrow,
+  // .mgv-scdot, .mgv-scname, .mgv-scstep, data-mgss-step, #mgss-a/#mgss-b) is untouched. The name and its
+  // sub-line share one .mgv-scnb block so the 44px tap target still covers both lines. The pill rides
+  // INSIDE the winner button at its right edge (the mockup's own place for it) rather than at the row's,
+  // because production keeps the stepper on this row and the row's right edge is already spoken for; it is
+  // absolutely positioned, so revealing it on .is-won never reflows the row.
   const row = (side, name, val) => {
     const won = pick === side;
+    const sub = mgScoreSubLine(match, side);
+    const pill = match.phase === 'main' ? `<span class="mgv-scwpill" aria-hidden="true">Winner</span>` : '';
     return `<div class="mgv-scrow${won ? ' is-won' : ''}">`
       + `<button type="button" class="mgv-scwin" data-mgss-winner="${side}" aria-pressed="${won ? 'true' : 'false'}"`
         + ` aria-label="${escapeHTMLText(name)} won this game"${isFinal ? ' disabled' : ''}>`
-        + `<span class="mgv-scdot" aria-hidden="true"></span><span class="mgv-scname">${escapeHTML(name)}</span></button>`
+        + `<span class="mgv-scdot" aria-hidden="true"></span>`
+        + `<span class="mgv-scnb"><span class="mgv-scname">${escapeHTML(name)}</span>${sub}</span>${pill}</button>`
       + `<span class="mgv-scstep">`
         + `<button type="button" class="mgss-sbtn mgv-scb" data-mgss-step="${side}" data-mgss-d="-1" aria-label="${escapeHTMLText(name)} minus one">&minus;</button>`
         + `<span class="mgss-sval mgv-scval" id="mgss-${side}">${val}</span>`
@@ -11201,6 +11248,58 @@ function mgBracketTournament() {
   return byActive || manageLeadTournament();
 }
 
+// The running bracket's state in one strip (round 2026-08-25, mockup mgbk-run): what kind of event this is,
+// how many games are in, and — the line that actually runs the day — what is on a net right now. Every
+// number is derived, nothing is stored. An unplayed RESET game is left out of the total: a bracket that
+// never needs it would otherwise read "13 of 14" forever. `champName` is passed in rather than recomputed
+// so the block above and the line here can never disagree about who won.
+function mgBracketStripHTML(t, main, teams, champName) {
+  const gn = bracketGameNumbers(main).byId;
+  const total = main.filter((m) => !(m.side === 'grand_final' && Number(m.round) === 2 && !m.team_a_id && !m.team_b_id && m.status !== 'final')).length;
+  const done = main.filter((m) => m.status === 'final').length;
+  const nets = Number(t && t.net_count) || 0;
+  const live = main.filter((m) => m.status === 'live' && m.net != null).sort((a, b) => a.net - b.net);
+  const playable = main.filter((m) => m.status !== 'final' && m.team_a_id && m.team_b_id);
+  let now;
+  // The champion line only speaks when the board actually backs it up: a close-out can STORE a champion on
+  // a tournament that still has an unplayed game, and "Every game is in" would be a lie on that page.
+  if (champName && total && done === total) now = `Every game is in. <b>${escapeHTML(champName)}</b> takes it.`;
+  else if (live.length) now = 'On the nets now: ' + live.map((m) => `<b>G${gn[m.id]} on Net ${escapeHTML(String(m.net))}</b>`).join(', ') + '. Tap a game to pick its winner.';
+  else if (playable.length) now = 'Up next: ' + playable.slice(0, 3).map((m) => `<b>G${gn[m.id]}</b>`).join(', ') + '. Tap a game to pick its winner.';
+  else if (total && done === total) now = 'Every game is in.';
+  else now = 'No game is playable, the next round needs results first.';
+  return `<div class="bkr-strip">`
+    + `<div class="bkr-eye">DOUBLE ELIMINATION · ${teams.length} TEAMS · ${nets} NETS</div>`
+    + `<div class="bkr-count">${done} of ${total} games in</div>`
+    + `<div class="bkr-bar"><span style="width:${total ? Math.round(done / total * 100) : 0}%"></span></div>`
+    + `<p class="bkr-now">${now}</p></div>`;
+}
+
+// The champion block (mockup mgbk-run), rendered only once the bracket has actually decided. The champion
+// is the STORED one when a close-out recorded it, else the computed grand-final winner — resolveHistoryChampion
+// already owns that precedence, so this never re-derives it. The sub-line drops any clause whose fact is
+// missing (a pre-0049 team row carries no seed; a bracket-only event has no pool record).
+function mgBracketChampHTML(t, main, teams) {
+  const champ = resolveHistoryChampion(t || {}, teams, main);
+  if (!champ || !champ.teamId) return '';
+  const gn = bracketGameNumbers(main).byId;
+  const isGF = (r) => (m) => m.side === 'grand_final' && Number(m.round) === r && m.status === 'final';
+  const decider = main.find(isGF(2)) || main.find(isGF(1)); // the reset game decides when it was played
+  const team = teams.find((x) => x && x.id === champ.teamId);
+  const bits = [];
+  const seed = team ? team.seed : null;
+  if (seed != null && Number.isFinite(Number(seed))) bits.push('Seed ' + Number(seed));
+  const poolMatches = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).filter((m) => m.phase === 'pool');
+  const row = computeSeeding(teams, poolMatches).find((r) => r.teamId === champ.teamId);
+  if (row && (row.wins || row.losses)) bits.push(row.wins + '–' + row.losses + ' in pools');
+  const g = decider ? gn[decider.id] : null;
+  bits.push(g ? ('won the championship, G' + g) : 'won the championship');
+  return `<div class="bkr-champ">`
+    + `<div class="bkr-champe">Champion</div>`
+    + `<div class="bkr-champn">${escapeHTML(champ.name)}</div>`
+    + `<div class="bkr-champs">${escapeHTML(bits.join(' · '))}</div></div>`;
+}
+
 function buildMgBracketHTML() {
   const t = mgBracketTournament();
   const header = `<div class="pd-pagehdr">`
@@ -11211,7 +11310,13 @@ function buildMgBracketHTML() {
   if (status === 'bracket' || status === 'completed') {
     // Round 2026-08-03 (README §10): controls ride at the TOP (the public-bracket link only) and the
     // destructive Reset closes the page under a plain hairline, so the board itself is what you land on.
-    return header + mgBracketControlsHTML(t, status === 'completed') + mgBracketLiveHTML(t) + mgBracketResetHTML();
+    // Round 2026-08-25: the champion block, then the progress strip, sit between the controls and the board
+    // — the answer to "where are we" before the list of games that answers "what next".
+    const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];
+    const main = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).filter((m) => m.phase === 'main');
+    const champ = main.length ? resolveHistoryChampion(t, teams, main) : null;
+    const strip = main.length ? mgBracketChampHTML(t, main, teams) + mgBracketStripHTML(t, main, teams, champ && champ.name) : '';
+    return header + mgBracketControlsHTML(t, status === 'completed') + strip + mgBracketLiveHTML(t) + mgBracketResetHTML();
   }
   return header + mgBracketSeedingHTML(t);
 }
@@ -11308,7 +11413,7 @@ function mgBracketSideName(g, maxRounds) {
   return (g.round >= ((maxRounds || {})[g.side] || 0)) ? base + ' semifinal' : base + ' bracket';
 }
 
-// The right-hand progress word in a group header: "live now" / "up next" / "final", or — when nothing in the
+// The right-hand progress word in a group header: "live now" / "up next" / "done", or — when nothing in the
 // group is playable yet — the feeder games it is waiting on ("needs G5, G6, G7"). A feeder is only NAMED when
 // it is itself playable now (both teams known); otherwise the group is just "waiting", because pointing at a
 // game that can't be played either tells the organiser nothing.
@@ -11316,7 +11421,9 @@ function mgBracketGroupProgress(g, all, gn) {
   if (g.matches.some((m) => m.status === 'live')) return 'live now';
   const resolved = g.matches.filter((m) => m.team_a_id && m.team_b_id);
   if (resolved.some((m) => m.status !== 'final')) return 'up next';
-  if (resolved.length && resolved.every((m) => m.status === 'final')) return 'final';
+  // Task 1 left the bare word 'final' here when it renamed the round headers; round 2026-08-25 finishes the
+  // job — on this page "final" is the NOUN (the championship), so a finished round says "done".
+  if (resolved.length && resolved.every((m) => m.status === 'final')) return 'done';
   const byLabel = {};
   (all || []).forEach((m) => { if (m && m.round_label) byLabel[m.round_label] = m; });
   const need = [];
@@ -11410,6 +11517,9 @@ function mgBracketRowHTML(m, teams, gn) {
     const have = m.score_a != null && m.score_b != null;
     body = line(aN, have ? m.score_a : null, aWin) + line(bN, have ? m.score_b : null, !aWin)
       + `<div class="mgv-bkmeta">Tap to edit</div>`;
+    // Round 2026-08-25 (mockup mgbk-run): a revealed finished game says so in the same slot Live / Up next
+    // use, so every row on the board answers "where is this game" the same way.
+    pill = `<span class="mgv-bkpill is-done">Done</span>`;
   } else if (m.status === 'live') {
     cls = ' is-live';
     body = line(aN, Number(m.score_a) || 0, false) + line(bN, Number(m.score_b) || 0, false)
@@ -11424,7 +11534,9 @@ function mgBracketRowHTML(m, teams, gn) {
       + `<div class="mgv-bkmeta">${escapeHTML(meta)}</div>`;
     pill = `<span class="mgv-bkpill is-next">Up next</span>`;
   }
-  return `<div class="mgv-bkm${cls}" data-mgbk-score="${idAttr}">${rail}<div class="mgv-bkb">${body}</div>${pill}</div>`;
+  // Round 2026-08-25: a resolved row IS a button, so it says so and takes focus. Only resolved rows get it —
+  // a placeholder is not tappable, and a tab stop that does nothing is worse than no tab stop.
+  return `<div class="mgv-bkm${cls}" role="button" tabindex="0" data-mgbk-score="${idAttr}">${rail}<div class="mgv-bkb">${body}</div>${pill}</div>`;
 }
 
 // The TOP of the bracket page: the completed note, then the one non-destructive control (the players' view).
@@ -12551,6 +12663,17 @@ function attachHandlers() {
       const t = e.target;
       if (t && t.classList && t.classList.contains && t.classList.contains('rf-pinput')) mgTeamAddCloseMenus();
     });
+    // Bracket & scores (round 2026-08-25): a resolved board row ships role="button" tabindex="0", so Enter
+    // and Space have to open the SAME score card the tap opens — one opener, never a second path. Space is
+    // prevented so a keyboard organiser does not scroll the board out from under the card.
+    appContent.addEventListener('keydown', (e) => {
+      if (!e || (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar')) return;
+      if (manageView !== 'tournament' || mgtView !== 'bracket') return;
+      const row = (e.target && e.target.closest) ? e.target.closest('[data-mgbk-score]') : null;
+      if (!row) return;
+      if (e.preventDefault) e.preventDefault();
+      openMgScoreSheet(row.getAttribute('data-mgbk-score'));
+    });
     appContent.addEventListener('click', (e) => {
       // Slice 3b: "claim your team" — signed-in → the claim page; signed-out → sign in first
       // (claimIntent re-opens the claim page automatically once SIGNED_IN lands).
@@ -13023,6 +13146,14 @@ function attachHandlers() {
       if (e.key !== 'Escape' || !mgHubPickerOpen) return;
       mgHubPickerOpen = false;
       repaintManage();
+    });
+    // Escape closes the shared score card too (round 2026-08-25), the same as its × or a tap on the scrim.
+    // The card is body-level and rebuilt on every open, so the listener is bound ONCE here and asks the DOM
+    // whether a card is up — a no-op keystroke otherwise. Bound outside the sheet so nothing leaks when the
+    // sheet is removed, and it reaches the card from the public pages that open it as well as from Manage.
+    document.addEventListener('keydown', (e) => {
+      if (!e || e.key !== 'Escape') return;
+      if (document.getElementById('mgss-sheet')) closeMgScoreSheet();
     });
   }
   // C46 cleanup: the admin "Menu" dropdown (#admin-quick-open) was removed in C40 (Add = the + button,
