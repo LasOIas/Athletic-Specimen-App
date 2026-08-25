@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.21'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.22'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6918,6 +6918,10 @@ async function promptNameFillIfNeeded() {
   }
   if (first && last) {
     accountName = { first, last };
+    // Review fix (2026-08-25): the header chip draws its initial from this cache, and the sign-in render
+    // has already happened by the time this read resolves, so nothing would repaint it. Same full render
+    // as onNameFillSave below, for the same reason: only render() paints the header.
+    if (state.loaded && bootPaintDone) { try { render(); } catch (_) {} }
     if (!identityConnectAttempted) {
       try { await connectProfileByName(first, last); }
       catch (err) { console.error('connect_profile_by_name', err); }
@@ -7093,8 +7097,10 @@ async function onAuthEvent(event, session) {
     state.teamMembers = null; // the personal layer signs out with the account (anon can't read claims)
     state.myClaimedPlayer = null; // Round 2 §12.3: clear the check-in hero on the SIGNED_OUT path too
     claimIntent = false;
+    accountName = null; // the name cache belongs to the account: the next chip/card must not wear it
     authRecoveryPending = false; // an abandoned recovery must not route the next sign-in (review fix)
     closeClaimPage(); // a claim page can't outlive its session (harmless no-op when not open)
+    closeAcctPage(); // neither can an account edit screen (same no-op when it isn't open)
     if (state.isAdmin) {
       state.isAdmin = false;
       state.masterAdminAuthenticated = false;
@@ -7185,7 +7191,10 @@ function openAccountMenu() {
     el.remove();
     openAcctPage(row.getAttribute('data-acct-view'));
   });
-  el.querySelector('#am-signout').addEventListener('click', () => { el.remove(); void confirmSignOut(); });
+  el.querySelector('#am-signout').addEventListener('click', () => {
+    el.remove();
+    confirmSignOut().catch((err) => console.error('confirmSignOut', err));
+  });
 }
 
 // Signing out is one tap from a card people open to read their own email, so it asks first (the design's

@@ -6095,8 +6095,11 @@ input.pc-nin:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--accent),
 @media (hover: hover) and (pointer: fine) { .au-alt2.is-danger:hover { background: none; color: var(--danger-dark); } }
 
 /* PORT NOTE: the account card, from the handoff's _rounds.css:2351-2381. Three raises off the design.
-   (1) .acc-row keeps the app's shipped press-dip (button:active translateY(1px)) - the design's
-   transform: none would have cancelled Mike's own motion round. (2) .acc-rv adds white-space: normal
+   (1) .acc-row keeps the app's shipped press-dip: the motion round ships
+   button:active, [role="button"]:active { transform: scale(.972) }, narrowed for rows by
+   :is(a, button)[class*="-row"]:not(.ckx-row):active { transform: scale(.994) }, which is the one
+   .acc-row lands on. The design's transform: none would have cancelled Mike's own round.
+   (2) .acc-rv adds white-space: normal
    beside overflow-wrap: anywhere, so a long address wraps instead of clipping (the .ckx-nm precedent).
    (3) .acc-out / .acc-close carry the 15px !important iOS counter: production's button rule ships
    font-size: 16px !important, which the design's shorthand alone could never have beaten, and 15px is

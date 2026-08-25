@@ -141,7 +141,9 @@ function loadApp() {
       updateUser: rec('updateUser'),
       signOut: rec('signOut'),
     },
-    from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: [], error: null }) }) }) }),
+    // maybeSingle is the profile read promptNameFillIfNeeded makes. Scriptable like the auth calls, so a
+    // case can hand it a name (Task 3 review: the header chip has to repaint when that name lands).
+    from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: [], error: null }), maybeSingle: rec('profileRead') }) }) }),
     channel: () => ({ on: () => ({ subscribe: noop }) }),
     removeChannel: noop, rpc: async () => ({ data: null, error: null }),
   };
@@ -177,6 +179,11 @@ function loadApp() {
     ;let __postRuns = 0;
     const __postWork = runPostSignInWork;
     runPostSignInWork = async function () { __postRuns += 1; return __postWork(); };
+    // Task 3 review spy: only render() paints the header chip, and it throws in this sandbox (no #root),
+    // so the count is taken BEFORE the call and the app's own try/catch swallows the throw.
+    ;let __renders = 0;
+    const __render = render;
+    render = function () { __renders += 1; return __render(); };
     ;globalThis.__bridge = {
       authEvent: (event, session) => onAuthEvent(event, session),
       // The sandbox's location.hash is empty, so the fragment flag a real recovery link sets is set here.
@@ -202,6 +209,11 @@ function loadApp() {
       // Task 3: the account card reads the cached name for its initial, its title and its Name row.
       openMenu: () => openAccountMenu(),
       setAccountName: (n) => { accountName = n; },
+      authInitial: () => authInitial(),
+      nameFill: () => promptNameFillIfNeeded(),
+      renderCount: () => __renders,
+      // The two gates every post-boot repaint sits behind.
+      setPainted: (v) => { state.loaded = !!v; bootPaintDone = !!v; },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -241,6 +253,7 @@ function loadApp() {
     bridge.getState().authSession = null;
     bridge.getState().account = null;
     bridge.setAccountName(null);   // the cached name outlives a render, so it has to be cleared per case
+    bridge.setPainted(false);
     // FRESH nodes, not cleared ones: a control carries listeners, classes and a value, and every one of
     // those has to start empty or a case inherits the previous case's bindings.
     for (const id of AUTH_CONTROL_IDS) { const n = mkNode('div'); n.id = id; registry[id] = n; }
@@ -925,5 +938,44 @@ describe('Account round Task 3 - the account card and the sign-out confirm', () 
       expect(noComments).not.toContain(dead);
       expect(appSrc).not.toContain(dead.slice(1));
     }
+  });
+
+  it('a scrim tap dismisses the card', () => {
+    bridge.setSignedIn(MORGAN, { first: 'Morgan', last: 'Blake' });
+    bridge.openMenu();
+    const card = bridge.registry['account-menu'];
+    fireClick(card, { target: card });
+    expect(bridge.registry['account-menu']).toBeFalsy();
+  });
+
+  it('the header chip repaints when the profile name lands after sign-in', async () => {
+    // The profile read resolves long AFTER the sign-in render, and only render() paints the header, so
+    // caching the name without a repaint left the chip wearing the email's letter until the next nav tap.
+    bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, null);
+    bridge.setPainted(true);
+    expect(bridge.authInitial()).toBe('M');
+    const before = bridge.renderCount();
+    bridge.supaNext('profileRead', { data: { first_name: 'Ada', last_name: 'Blake' }, error: null });
+    await bridge.nameFill();
+    expect(bridge.authInitial()).toBe('A');
+    expect(bridge.renderCount()).toBe(before + 1);
+  });
+
+  it('signing out drops the cached name and the account edit page', async () => {
+    bridge.setSignedIn(MORGAN, { first: 'Ada', last: 'Blake' });
+    bridge.openMenu();
+    fireClick(bridge.registry['account-menu'], { target: synth('[data-acct-view]', { getAttribute: () => 'name' }) });
+    expect(bridge.registry['acct-page']).toBeTruthy();
+
+    await bridge.authEvent('SIGNED_OUT', null);
+    expect(bridge.registry['acct-page']).toBeFalsy();
+    expect(bridge.authInitial()).toBe('?');
+
+    // The next account gets its own initial and its own empty Name row, never the last one's.
+    bridge.setSignedIn({ id: 'u2', email: 'sam@email.com' });
+    bridge.openMenu();
+    const html = bridge.registry['account-menu'].innerHTML;
+    expect(html).toContain('class="acc-av">S<');
+    expect(html).toContain('class="acc-rv">Add your name<');
   });
 });
