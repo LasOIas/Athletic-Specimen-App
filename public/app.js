@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.19'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.20'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6823,14 +6823,19 @@ async function onResetSave(e) {
       <button type="button" class="auth-submit" id="reset-go">Go to the tournament</button>
     </div>`;
       const go = el.querySelector('#reset-go');
-      if (go) go.addEventListener('click', () => { closeResetPage(); activateMainTab('tournament'); });
+      // The router deliberately skipped the heavy path (a recovery is not a sign-in), so it runs HERE,
+      // once, on the way out: an organizer who recovered on a device that was already signed in gets
+      // Manage back without a reload, and a fresh device gets its role, tournaments and claimed player.
+      // NOT in the save itself (review, fix round 2): runPostSignInWork reaches promptNameFillIfNeeded,
+      // which appends #namefill-page, and that would stack over "Password changed". The recovery is over
+      // by then, so a later SIGNED_IN is a plain sign-in again.
+      if (go) go.addEventListener('click', () => {
+        closeResetPage();
+        authRecoveryPending = false;
+        void runPostSignInWork();
+        activateMainTab('tournament');
+      });
     }
-    // The router deliberately skipped the heavy path (a recovery is not a sign-in), so it runs HERE,
-    // once: an organizer who recovered on a device that was already signed in gets Manage back without
-    // a reload, and a fresh device gets its role, tournaments and claimed player. The recovery is over,
-    // so a later SIGNED_IN is a plain sign-in again.
-    authRecoveryPending = false;
-    void runPostSignInWork();
   } catch (err) {
     console.error('updateUser (password reset)', err);   // never the password itself
     showErr('Something went wrong. Try again.');

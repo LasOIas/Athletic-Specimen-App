@@ -649,6 +649,13 @@ describe('Account round Task 2 - forgot, reset and the recovery router', () => {
     expect(page.innerHTML).toContain("You're signed in.");
     expect(page.innerHTML).toContain('Go to the tournament');
     expect(page.innerHTML).not.toMatch(/—|&mdash;|night/i);
+    // The heavy path waits for the way out: it can open the name-fill overlay, and the done state has
+    // to be the only thing on screen (review, fix round 2).
+    expect(bridge.postSignInRuns()).toBe(0);
+    expect(bridge.registry['namefill-page']).toBeFalsy();
+
+    bridge.registry['reset-go'].listeners.click[0]();
+    expect(bridge.registry['reset-page']).toBeFalsy();
     expect(bridge.postSignInRuns()).toBe(1);
   });
 
@@ -686,11 +693,17 @@ describe('Account round Task 2 - forgot, reset and the recovery router', () => {
     expect(bridge.postSignInRuns()).toBe(0);
     expect(bridge.registry['namefill-page']).toBeFalsy();
 
-    // The heavy work runs once, on the far side of the save, and the flag stops routing after that.
+    // The heavy work runs once, on the far side of "Go to the tournament", and the flag stops routing
+    // at the same moment. Nothing stacks over the done state in between.
     bridge.registry['rs-new'].value = 'Passw0rd!';
     bridge.registry['rs-again'].value = 'Passw0rd!';
     bridge.supaNext('updateUser', { data: {}, error: null });
     await bridge.resetSave();
+    expect(bridge.postSignInRuns()).toBe(0);
+    expect(bridge.recoveryPending()).toBe(true);
+    expect(bridge.registry['namefill-page']).toBeFalsy();
+
+    bridge.registry['reset-go'].listeners.click[0]();
     expect(bridge.postSignInRuns()).toBe(1);
     expect(bridge.recoveryPending()).toBe(false);
   });
