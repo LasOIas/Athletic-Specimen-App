@@ -1147,7 +1147,7 @@ describe('buildMgPoolsHTML — post-draw scored schedule (reuses the public pl-*
   it('expands the controls to per-team taps + edit nets + a type-name reset', () => {
     const open = bridge.buildMgPools({ filter: 'A', controls: true });
     expect(open).toContain('data-mgps-team="t1"');     // tap a team → the T6 team sheet
-    expect(open).toContain('data-mgps-editnets="p1"'); // edit a pool's nets
+    expect(open).toContain('data-pc-editnets="p1"'); // edit a pool's nets
     expect(open).toContain('data-mgps-reset');         // reset pools (type-name unlock)
   });
 });

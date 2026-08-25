@@ -2454,7 +2454,6 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgps-pteam { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 2px; border-top: 1px solid var(--border); background: none; text-align: left; cursor: pointer; }
 .pl-sect + .mgps-pteam { border-top: none; }
 .mgps-ptn { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mgps-editnets { margin-top: 8px; padding: 8px 12px; border: 1.5px solid var(--accent-bd); border-radius: 10px; background: transparent; color: var(--accent); font: 600 13px 'Inter', sans-serif; cursor: pointer; }
 .mgps-ctrlrow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 2px; background: none; border: none; text-align: left; cursor: pointer; }
 .mgps-quiet { display: block; width: 100%; margin-top: 12px; padding: 11px; border: none; background: none; color: var(--muted); font: 600 13px 'Inter', sans-serif; cursor: pointer; }
 
@@ -5647,6 +5646,184 @@ input.set-money {
    padding and room for the Write pill. */
 .rlv-card .mgru-empty { padding: 22px 16px; }
 .mgru-empty .rlv-edit { margin-top: 14px; }
+
+/* PORT NOTE: _shared.css:439-534 + 611-654 (the round's own banner comment kept) - Manage > Tournament >
+   Pools & schedule > the OPEN Pool controls. Placed HERE, inside the 2026-08-25 Manage block and ABOVE the
+   2026-08-23 button restyle below, so the shared pill/ring treatment still has the last word.
+   DROPPED, deliberately: the .pc-toggle on the section head (_shared.css:635-654) - Done and the collapsed
+   .mgps-ctrlrow are the two ways in and out, so a third control doing the same job is only a surprise; and
+   the .pc-confirm / .pc-cin / .pc-cgo type-the-name strip (_shared.css:571-598), because Reset pools keeps
+   production's own appPrompt lock inside the shared .mgv-danger block, which is already styled.
+   ADDED, not in the round: .pc-nhint, the line that sits with the open field and says what saving does. */
+/* ============================================================
+   Round 2026-08-24 - "i dont like the pools controls how they are, fix them".
+   They were a stray "Close controls" button, then two undifferentiated lists of
+   team names with chevrons that never said what tapping one would do, an
+   "Edit nets" button floating under each, and a red Reset sitting flush against
+   the last list. Now each pool is a card that states its nets and carries its
+   own Edit nets control, every team row says "Move", and the reset lives in the
+   same danger block the rest of the app uses.
+   ============================================================ */
+.pc-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 2px 12px;
+}
+.pc-note { flex: 1; min-width: 0; margin: 0; font-size: 12.5px; color: var(--muted); text-wrap: pretty; }
+.pc-done {
+  flex: none;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .06), inset 0 0 0 1px oklch(0.89 0.005 75);
+  font: 700 12.5px 'Inter', system-ui, sans-serif;
+  color: var(--ink);
+  cursor: pointer;
+}
+.pc-done:hover { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
+
+.pc-card {
+  margin: 0 0 10px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .05), 0 0 0 1px oklch(0.91 0.005 75);
+  overflow: hidden;
+}
+.pc-hd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 12px 11px 14px;
+  border-bottom: 1px solid var(--border);
+  background: oklch(0.985 0.003 75);
+}
+.pc-name { font-size: 14.5px; font-weight: 700; color: var(--ink); }
+.pc-nets {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-display, 'Barlow Semi Condensed', sans-serif);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pc-nbtn {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .06), inset 0 0 0 1px var(--accent-bd, oklch(0.86 0.03 240));
+  font: 700 12px 'Inter', system-ui, sans-serif;
+  color: var(--accent);
+  cursor: pointer;
+}
+.pc-nbtn:hover { background: var(--accent-soft); }
+
+.pc-team {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 12px 12px 14px;
+  border: 0;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+.pc-team + .pc-team { border-top: 1px solid var(--border); }
+.pc-team:hover { background: oklch(0.98 0.004 240); }
+.pc-tn { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--ink); }
+.pc-move {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--accent);
+}
+.pc-team .mg-chev { flex: none; width: 17px; height: 17px; color: oklch(0.72 0.01 75); }
+
+/* the controls, working: a pool picker under the team you tapped, and the nets
+   label swapped for a field */
+.pc-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px 13px;
+  border-top: 1px solid var(--border);
+  background: var(--accent-soft);
+}
+.pc-pl { flex: 1 0 100%; font-size: 12px; font-weight: 700; color: var(--accent); }
+.pc-pbtn,
+.pc-pcancel {
+  height: 32px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .06), inset 0 0 0 1px var(--accent-bd, oklch(0.86 0.03 240));
+  font: 700 12.5px 'Inter', system-ui, sans-serif;
+  color: var(--accent);
+  cursor: pointer;
+}
+.pc-pcancel { box-shadow: inset 0 0 0 1px oklch(0.88 0.005 75); color: var(--muted); }
+.pc-pbtn:hover { background: var(--accent); color: #fff; }
+.pc-nin {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  font: 700 12px 'Inter', system-ui, sans-serif;
+  letter-spacing: .06em;
+  color: var(--ink);
+}
+.pc-nin:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft); }
+/* ADDED, not in the round: Save nets re-lays the pool's unplayed games, so the open field says so. It
+   takes the whole second line of the head, under the field and its button. */
+.pc-nhint { flex: 1 0 100%; order: 9; font-size: 11.5px; color: var(--muted); }
+
+/* the nets field and the team rows answer a press like everything else */
+.pc-team { transition: background-color var(--m-state, 140ms) var(--e-settle, ease), transform var(--m-tap, 90ms) var(--e-press, ease); }
+.pc-team:active { transform: scale(.995); }
+.pc-team[data-pc-open="1"] { background: var(--accent-soft); }
+.pc-team[data-pc-open="1"] .pc-move { color: var(--accent); }
+.pc-pbtn,
+.pc-pcancel,
+.pc-nbtn,
+.pc-done {
+  transition: background-color var(--m-state, 140ms) var(--e-settle, ease),
+              box-shadow var(--m-state, 140ms) var(--e-settle, ease),
+              color var(--m-state, 140ms) var(--e-settle, ease),
+              transform var(--m-tap, 90ms) var(--e-press, ease);
+}
+.pc-pbtn:active,
+.pc-pcancel:active,
+.pc-nbtn:active,
+.pc-done:active { transform: scale(.97); }
+
+/* PORT NOTE: _shared.css:657-670. Production ships button { font-size: 16px !important } as an iOS zoom
+   guard plus a 38px min-height, and a plain class selector loses to both - so every compact pill in this
+   kit has to say its own size back with !important, and the team ROW has to say it is a row and not a
+   button face (that same rule hands it white text). The round's counters for the two blocks dropped above
+   (the .pc-toggle line and the .pc-cgo line) go with them. */
+.pc-done { min-height: 32px; height: 32px; font-size: 12.5px !important; }
+.pc-nbtn { min-height: 30px; height: 30px; font-size: 12px !important; }
+.pc-pbtn,
+.pc-pcancel { min-height: 32px; height: 32px; font-size: 12.5px !important; }
+.pc-team { min-height: 0; color: var(--ink); font-size: 15px !important; }
+.pc-team .pc-tn { color: var(--ink); font-size: 15px; }
+.pc-team .pc-move { color: var(--accent); font-size: 12px; }
 
 /* ============================================================
    Round 2026-08-23 — "redo the styling of the buttons, highlighting, checkmarks"

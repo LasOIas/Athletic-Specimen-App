@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.11'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.12'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -848,10 +848,14 @@ function partialRender() {
     // Task 7 EXCEPTION: the Tournament → Pools pre-draw setup carries live pool-count / nets inputs. Bail the
     // background repaint (refresh the sync notice only) while one is focused so a half-typed value survives.
     // (The score sheet is body-level → already immune to the container swap.)
+    // Task 8 of the 2026-08-25 round widens it: the OPEN Pool controls hold two half-finished actions with
+    // no write behind them — an inline nets field and a move picker waiting on a destination. Neither needs
+    // focus to be real work (the picker holds none at all), so manageNetsDirty() bails on its own.
     if (manageView === 'tournament' && mgtView === 'pools') {
       const mp = document.getElementById('tab-manage');
       const active = mp ? document.activeElement : null;
-      if (active && mp.contains(active) && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+      const typing = !!(active && mp.contains(active) && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA'));
+      if (typing || manageNetsDirty()) {
         if (syncNoticeEl) syncNoticeEl.innerHTML = buildSharedSyncNoticeHTML();
         return;
       }
@@ -7040,6 +7044,12 @@ let mgHubDoneText = '';
 // survive the container-swap repaint (a background score sync must not reset the tab or collapse the panel).
 let mgpPoolFilter = null;
 let mgpControlsOpen = false;
+// Round 2026-08-24 (Task 8 of the Manage handoff): which team's move picker is open, and which pool's nets
+// are being edited inline. Both are half-finished actions with NO write behind them yet, so they also drive
+// manageNetsDirty() — the 15s poll must not rebuild the panel out from under a typed net list or a picker
+// waiting on a destination. Cleared wherever mgpControlsOpen is (adopt / reset / delete / create).
+let mgpMoveTeamId = null;
+let mgpNetsEditPoolId = null;
 // Task 8 / round 2026-08-03 (README §10 "State: showFinished, default false"): the Bracket board hides
 // games that are already final so it shows only what is live, next, or coming. The closing "already done ·
 // Show" row flips this. Survives the container-swap repaint like every other manage toggle, so a background
@@ -8889,7 +8899,8 @@ function mgAdoptTournament(id) {
   state.activeTournamentId = id;
   state.tournamentTeams = []; state.tournamentPools = []; state.tournamentMatches = []; state.teamMembers = null;
   state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null; state.seedOverride = null;
-  mgpControlsOpen = false; mgpPoolFilter = null; mgCloseoutChampId = undefined; mgBracketShowDone = false;
+  mgpControlsOpen = false; mgpMoveTeamId = null; mgpNetsEditPoolId = null;
+  mgpPoolFilter = null; mgCloseoutChampId = undefined; mgBracketShowDone = false;
   return true;
 }
 
@@ -9509,6 +9520,13 @@ function manageSettingsDirty() {
   // 2026-08-04: same widening as manageRegDirty — a typed-but-unsaved settings field is protected whether or
   // not it still holds focus, because tapping Save blurs it a beat before the write goes out.
   return mgDirtyFieldIds(MGES_FIELD_IDS, mgActiveTournament()).length > 0;
+}
+// Task 8 of the 2026-08-25 round: the OPEN Pool controls. An inline nets field and a move picker are both
+// unsaved work the 15s poll would throw away — the picker holds a decision with no text in it at all, so a
+// focus test alone would miss it. Same shape as manageSettingsDirty / manageTeamAddDirty, minus the DOM:
+// these two live in module state, so they are true whether or not anything on the panel holds the caret.
+function manageNetsDirty() {
+  return !!(mgpNetsEditPoolId || mgpMoveTeamId);
 }
 // The Rules view (§38 pick C) is now rendered content with no inline input — editing happens in the
 // body-appended overlay (poll-clobber-immune). Nothing on the panel needs protecting from a background
@@ -10527,7 +10545,7 @@ function mgPoolsSetupHTML(t, teams, pools) {
       + (enough ? '' : `<div class="mgps-note">Add at least 2 teams first.</div>`);
   }
   return `<div class="pl-sect">Pools drawn</div>`
-    + pools.map((p) => mgPoolTeamsBlockHTML(p, teams, null, false)).join('')
+    + pools.map((p) => mgPoolTeamsBlockHTML(p, teams, null)).join('')
     + `<button type="button" class="mgt-cta" data-mgps-start>Start pool play</button>`
     + `<button type="button" class="mgps-quiet" data-mgps-redraw>Draw again</button>`;
 }
@@ -10593,9 +10611,11 @@ function mgpSyncDrawHint() {
   hint.textContent = mgPoolsDrawHint(teamCt, pc ? pc.value : 1, nc ? nc.value : 1);
 }
 
-// One pool's teams (each tappable → the T6 openMgTeamSheet for move/edit). Shared by the drawn-not-started
-// step and the expanded Pool controls; `showEditNets` adds the Edit-nets action in the controls context.
-function mgPoolTeamsBlockHTML(pool, teams, matches, showEditNets) {
+// One pool's teams (each tappable → the T6 openMgTeamSheet for move/edit). Serves the drawn-not-started
+// step. (Round 2026-08-24: the expanded Pool controls used to share this too, with a `showEditNets` flag.
+// They now render mgPoolCardHTML instead, so the flag and its Edit-nets button are gone — this step's
+// markup is byte-identical to what it always emitted, because it only ever passed the flag as false.)
+function mgPoolTeamsBlockHTML(pool, teams, matches) {
   const label = pool.label || '';
   const mine = teams.filter((tm) => String(tm.pool_id || '') === String(pool.id));
   let sub = `Pool ${escapeHTML(label)}`;
@@ -10606,10 +10626,7 @@ function mgPoolTeamsBlockHTML(pool, teams, matches, showEditNets) {
   const rows = mine.length
     ? mine.map((tm) => `<button type="button" class="mgps-pteam" data-mgps-team="${escapeHTMLText(String(tm.id))}"><span class="mgps-ptn">${escapeHTML(tm.name || 'Team')}</span>${MG_CHEV}</button>`).join('')
     : `<div class="mgps-note">No teams in this pool.</div>`;
-  const editNets = showEditNets
-    ? `<button type="button" class="mgps-editnets" data-mgps-editnets="${escapeHTMLText(String(pool.id))}">Edit nets</button>`
-    : '';
-  return `<div class="pl-sect">${sub}</div>${rows}${editNets}`;
+  return `<div class="pl-sect">${sub}</div>${rows}`;
 }
 
 // The post-draw schedule — reuses the public buildPoolsSchedulePageHTML shape (pool + Seeding tabs,
@@ -10683,8 +10700,56 @@ function mgPoolGameRowHTML(g, order, teams) {
   return `<div class="pl-g" data-mgps-score="${idAttr}">${rd}<span class="gt">${aN} <span class="vs">vs</span> ${bN}</span><button type="button" class="mgps-score" data-mgps-score="${idAttr}">SCORE</button></div>`;
 }
 
-// The Pool controls section — collapsed to one "careful stuff" row (mockup ps-a), expanded to per-pool team
-// lists (tap → the T6 team sheet to move a team), Edit nets per pool, and a type-name Reset pools.
+// One pool as a card inside the OPEN Pool controls (round 2026-08-24, Mike: "i dont like the pools controls
+// how they are, fix them"). The head states the pool's nets and carries its own Edit-nets control; tapping
+// it swaps the label for a field prefilled with the PARSED net list ("1, 2, 3") — never the rendered
+// "Nets 1-3" label, because parseInt('1-3') is 1 and the pool would silently collapse to a single net.
+// MOVE, spec decision 3 (Mike, 2026-08-25): a pool moves ONLY BEFORE PLAY STARTS. tdbMoveTeamToPool writes
+// teams.pool_id and nothing else, so a team that has already played would leave its finished games behind
+// and drop out of the new pool's standings. The moment any game in the pool is final the Move label goes;
+// the panel note above the cards is what says why.
+function mgPoolCardHTML(pool, teams, pools, matches) {
+  const pid = String(pool.id);
+  const label = pool.label || '';
+  const mine = teams.filter((tm) => String(tm.pool_id || '') === pid);
+  const nets = [...new Set(matches.filter((m) => String(m.pool_id) === pid && m.net != null).map((m) => m.net))].sort((a, b) => a - b);
+  const head = mgpNetsEditPoolId === pool.id
+    ? `<input class="pc-nin" id="pc-nin-${escapeHTMLText(pid)}" type="text" inputmode="numeric" value="${escapeHTMLText(nets.join(', '))}" aria-label="Nets for pool ${escapeHTMLText(label)}" />`
+      + `<span class="pc-nhint">Re-assigns its unplayed games.</span>`
+      + `<button type="button" class="pc-nbtn" data-pc-savenets="${escapeHTMLText(pid)}">Save nets</button>`
+    : `<span class="pc-nets">${nets.length ? 'Nets ' + escapeHTML(formatNetList(nets)) : 'No nets yet'}</span>`
+      + `<button type="button" class="pc-nbtn" data-pc-editnets="${escapeHTMLText(pid)}">Edit nets</button>`;
+  const movable = !matches.some((m) => String(m.pool_id) === pid && m.status === 'final');
+  const others = pools.filter((p) => String(p.id) !== pid);
+  const rows = mine.length
+    ? mine.map((tm) => {
+      const tid = String(tm.id);
+      const open = movable && others.length > 0 && mgpMoveTeamId === tm.id;
+      // The row BODY keeps data-mgps-team, so tapping the name still opens the T6 team sheet; the Move
+      // label carries its own hook and is checked first in the delegate.
+      const row = `<button type="button" class="pc-team" data-mgps-team="${escapeHTMLText(tid)}"${open ? ' data-pc-open="1"' : ''}>`
+        + `<span class="pc-tn">${escapeHTML(tm.name || 'Team')}</span>`
+        + (movable ? `<span class="pc-move" data-pc-move="${escapeHTMLText(tid)}">Move</span>` : '')
+        + MG_CHEV + `</button>`;
+      if (!open) return row;
+      return row + `<div class="pc-pick">`
+        + `<span class="pc-pl">Move <b>${escapeHTML(tm.name || 'Team')}</b> to &rarr;</span>`
+        + others.map((p) => `<button type="button" class="pc-pbtn" data-pc-pick="${escapeHTMLText(tid + ':' + String(p.id))}">Pool ${escapeHTML(p.label || '')}</button>`).join('')
+        + `<button type="button" class="pc-pcancel" data-pc-cancel>Cancel</button>`
+        + `</div>`;
+    }).join('')
+    : `<div class="mgps-note">No teams in this pool.</div>`;
+  return `<div class="pc-card" data-pc-card="${escapeHTMLText(pid)}">`
+    + `<div class="pc-hd"><span class="pc-name">Pool ${escapeHTML(label)}</span>${head}</div>`
+    + rows + `</div>`;
+}
+
+// The Pool controls section — collapsed to one "careful stuff" row (mockup ps-a), expanded to a card per
+// pool plus the shared danger block. What it replaced (round 2026-08-24): a stray "Close controls" button,
+// two undifferentiated lists of team names with chevrons that never said what tapping one would do, an
+// "Edit nets" button floating under each, and a red Reset flush against the last list.
+// The design's .pc-toggle on the section head is DROPPED — Done and the collapsed row are the two ways in
+// and out, and a third control that does the same thing is one more way to be surprised.
 function mgPoolsControlsHTML(t, teams, pools, matches) {
   if (!mgpControlsOpen) {
     return `<div class="pl-sect">Pool controls</div>`
@@ -10693,10 +10758,18 @@ function mgPoolsControlsHTML(t, teams, pools, matches) {
         + `<div class="mg-rs">The careful stuff, one tap deeper</div></div>${MG_CHEV}</button>`;
   }
   return `<div class="pl-sect">Pool controls</div>`
-    + `<button type="button" class="mgps-quiet" data-mgps-controls>Close controls</button>`
-    + pools.map((p) => mgPoolTeamsBlockHTML(p, teams, matches, true)).join('')
-    + `<button type="button" class="mgts-danger" data-mgps-reset>Reset pools</button>`
-    + `<div class="mgps-note">Clears every pool result and re-draws. Type the tournament name to confirm.</div>`;
+    + `<div class="pc-top">`
+      + `<p class="pc-note">Move a team to another pool before play starts, change the nets a pool plays on, or start the draw over.</p>`
+      + `<button type="button" class="pc-done" data-mgps-controls>Done</button></div>`
+    + pools.map((p) => mgPoolCardHTML(p, teams, pools, matches)).join('')
+    + `<div class="pl-sect mgv-dsect" aria-hidden="true"></div>`
+    + `<div class="mgv-danger">`
+      + `<div class="mgv-drow"><span class="mgv-dtxt">`
+        + `<span class="mgv-dt">Reset pools</span>`
+        + `<span class="mgv-dd">Clears every pool result and draws new pools from the registered teams at random. Pool play starts over.</span>`
+      + `</span><button type="button" class="mgts-danger mgv-dbtn" data-mgps-reset>Reset</button></div>`
+      + `<div class="mgv-dnote">Asks you to type the tournament name before anything happens.</div>`
+    + `</div>`;
 }
 
 // ── The shared body-level score sheet (Task 7 defines it; Task 8's bracket reuses openMgScoreSheet) ──────
@@ -10998,19 +11071,54 @@ async function mgPoolsRedraw() {
   } catch (err) { appNotice({ title: 'Could not draw pools', message: (err && err.message) || 'Try again.' }); }
 }
 
-async function mgPoolsEditNets(poolId) {
+// The nets a typed field means. "1, 2" / "1 2" / "1,2," all parse the same, and anything that is not a
+// number is dropped rather than becoming NaN. Split out of the old prompt flow (round 2026-08-24) so the
+// inline Save nets button and any future caller share ONE parser.
+function mgPoolsParseNets(input) {
+  return String(input == null ? '' : input).split(/[,\s]+/).map((s) => parseInt(s, 10)).filter((n) => !isNaN(n));
+}
+
+// The write half. tdbSetPoolNets dedupes, refuses an empty list, and re-lays the pool's UNPLAYED games
+// round-aware behind a per-row version CAS — played games are never touched. It throws on a refused write,
+// so every caller wraps it and surfaces the reason through appNotice.
+async function mgPoolsApplyNets(pool, nets) {
+  await tdbSetPoolNets(pool, nets, state.tournamentMatches || []);
+  await tdbRefreshTournaments();
+  repaintManage();
+}
+
+// Save nets from the card's inline field. The field closes with the save that succeeded and comes BACK if
+// the write was refused, so a rejected list (empty, say) can be fixed where it was typed.
+async function mgPoolsSaveNets(poolId) {
   if (!state.isAdmin) return;
-  const pool = (state.tournamentPools || []).find((p) => p.id === poolId);
+  const pool = (state.tournamentPools || []).find((p) => String(p.id) === String(poolId));
   if (!pool) return;
-  const cur = [...new Set((state.tournamentMatches || []).filter((m) => m.pool_id === pool.id && m.net != null).map((m) => m.net))].sort((a, b) => a - b);
-  const input = await appPrompt({ title: 'Pool ' + (pool.label || '') + ' nets', message: 'Which nets does this pool play on? Separate with commas. Re-assigns its unplayed games.', value: cur.join(', '), placeholder: 'e.g. 1, 2', confirmText: 'Save' });
-  if (input == null) return;
-  const nets = String(input).split(/[,\s]+/).map((s) => parseInt(s, 10)).filter((n) => !isNaN(n));
+  const field = document.getElementById('pc-nin-' + poolId);
+  const nets = mgPoolsParseNets(field ? field.value : '');
   try {
-    await tdbSetPoolNets(pool, nets, state.tournamentMatches || []);
+    mgpNetsEditPoolId = null;
+    await mgPoolsApplyNets(pool, nets);
+  } catch (err) {
+    mgpNetsEditPoolId = pool.id;
+    repaintManage();
+    appNotice({ title: 'Could not update nets', message: (err && err.message) || 'Try again.' });
+  }
+}
+
+// Move a team into another pool. Offered only while the SOURCE pool has no final game (see mgPoolCardHTML)
+// because tdbMoveTeamToPool is a bare teams.pool_id update. On success the destination card flashes, so the
+// answer to "where did it go" is on screen rather than a scroll away.
+async function mgPoolsMoveTeam(teamId, poolId) {
+  if (!state.isAdmin || !teamId || !poolId) return;
+  try {
+    await tdbMoveTeamToPool(teamId, poolId);
+    mgpMoveTeamId = null;
     await tdbRefreshTournaments();
     repaintManage();
-  } catch (err) { appNotice({ title: 'Could not update nets', message: (err && err.message) || 'Try again.' }); }
+    let card = null;
+    try { card = document.querySelector('[data-pc-card="' + String(poolId).replace(/["\\]/g, '\\$&') + '"]'); } catch { card = null; }
+    mPlay(card, 'm-flash', 600);
+  } catch (err) { appNotice({ title: 'Could not move the team', message: (err && err.message) || 'Try again.' }); }
 }
 
 async function mgPoolsResetPools() {
@@ -11025,7 +11133,7 @@ async function mgPoolsResetPools() {
     if (typeof _autoGenPrompted !== 'undefined' && _autoGenPrompted) delete _autoGenPrompted[t.id];
     await tdbDrawPoolsAtomic({ ...t, status: 'setup' });
     await tdbRefreshTournaments();
-    mgpControlsOpen = false;
+    mgpControlsOpen = false; mgpMoveTeamId = null; mgpNetsEditPoolId = null;
     repaintManage();
   } catch (err) { appNotice({ title: 'Could not reset pools', message: (err && err.message) || 'Try again.' }); }
 }
@@ -11377,7 +11485,7 @@ async function mgTournamentFullReset() {
     await tdbResetTournamentFull(t);
     if (typeof _autoGenPrompted !== 'undefined' && _autoGenPrompted) delete _autoGenPrompted[t.id];
     state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null; state.seedOverride = null;
-    mgpControlsOpen = false;
+    mgpControlsOpen = false; mgpMoveTeamId = null; mgpNetsEditPoolId = null;
     mgpPoolFilter = null;
     await tdbRefreshTournaments();
     repaintManage();
@@ -11422,7 +11530,8 @@ async function mgTournamentDelete() {
   state.tournaments = (state.tournaments || []).filter((x) => x && x.id !== t.id);
   state.tournamentTeams = []; state.tournamentPools = []; state.tournamentMatches = []; state.teamMembers = null;
   state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null; state.seedOverride = null;
-  mgtView = null; mgpControlsOpen = false; mgpPoolFilter = null; mgCloseoutChampId = undefined;
+  mgtView = null; mgpControlsOpen = false; mgpMoveTeamId = null; mgpNetsEditPoolId = null;
+  mgpPoolFilter = null; mgCloseoutChampId = undefined;
   await tdbRefreshTournaments();
   repaintManage();
   appNotice({ title: 'Tournament deleted', message: `${nm} is gone, along with its teams, payments and results.` });
@@ -11559,7 +11668,8 @@ async function mgTournamentCreate({ name, eventDate, teamCap, teamSize, nets, bu
   // into the Tournament area never opens a sub-view belonging to the tournament that was open before.
   manageView = 'lead';
   mgtView = null;
-  mgpControlsOpen = false; mgpPoolFilter = null; mgCloseoutChampId = undefined; mgBracketShowDone = false;
+  mgpControlsOpen = false; mgpMoveTeamId = null; mgpNetsEditPoolId = null;
+  mgpPoolFilter = null; mgCloseoutChampId = undefined; mgBracketShowDone = false;
   await tdbRefreshTournaments();
   // "Manage it right away" (default ON) is what decides whether the new row becomes the managed one. With it
   // OFF the created tournament is a draft on the chooser list and Manage keeps editing whatever it was
@@ -12645,11 +12755,36 @@ function attachHandlers() {
           if (e.target.closest('[data-mgps-draw]')) { void mgPoolsDraw(); return; }
           if (e.target.closest('[data-mgps-start]')) { void mgPoolsStart(); return; }
           if (e.target.closest('[data-mgps-redraw]')) { void mgPoolsRedraw(); return; }
-          if (e.target.closest('[data-mgps-controls]')) { mgpControlsOpen = !mgpControlsOpen; repaintManage(); return; }
+          if (e.target.closest('[data-mgps-controls]')) {
+            mgpControlsOpen = !mgpControlsOpen;
+            mgpMoveTeamId = null; mgpNetsEditPoolId = null;
+            repaintManage();
+            return;
+          }
+          // Pool controls, the per-pool cards (round 2026-08-24). ORDER MATTERS: data-pc-move sits INSIDE
+          // the row that carries data-mgps-team, so a tap on Move matches both hooks — check it first or
+          // opening the picker would also open the team sheet on top of it.
+          const pcMove = e.target.closest('[data-pc-move]');
+          if (pcMove) {
+            const mvId = pcMove.getAttribute('data-pc-move');
+            mgpMoveTeamId = (mgpMoveTeamId === mvId ? null : mvId);   // a second tap on Move closes it again
+            mgpNetsEditPoolId = null;
+            repaintManage();
+            return;
+          }
+          const pcPick = e.target.closest('[data-pc-pick]');
+          if (pcPick) {
+            const parts = String(pcPick.getAttribute('data-pc-pick') || '').split(':');
+            void mgPoolsMoveTeam(parts[0], parts.slice(1).join(':'));
+            return;
+          }
+          if (e.target.closest('[data-pc-cancel]')) { mgpMoveTeamId = null; repaintManage(); return; }
+          const pcEdit = e.target.closest('[data-pc-editnets]');
+          if (pcEdit) { mgpNetsEditPoolId = pcEdit.getAttribute('data-pc-editnets'); mgpMoveTeamId = null; repaintManage(); return; }
+          const pcSave = e.target.closest('[data-pc-savenets]');
+          if (pcSave) { void mgPoolsSaveNets(pcSave.getAttribute('data-pc-savenets')); return; }
           const psTeam = e.target.closest('[data-mgps-team]');
           if (psTeam) { openMgTeamSheet(psTeam.getAttribute('data-mgps-team')); return; }
-          const psNets = e.target.closest('[data-mgps-editnets]');
-          if (psNets) { void mgPoolsEditNets(psNets.getAttribute('data-mgps-editnets')); return; }
           if (e.target.closest('[data-mgps-reset]')) { void mgPoolsResetPools(); return; }
         }
         // Bracket & scores (Task 8, pick R10-C): pre-bracket = ▲/▼ seed reorder + Generate; live/completed =

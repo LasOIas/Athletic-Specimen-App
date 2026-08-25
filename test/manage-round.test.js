@@ -102,7 +102,35 @@ function loadApp() {
       leadTournament: () => manageLeadTournament(),
       buildMgTeams: () => { manageView = 'tournament'; mgtView = 'teams'; return buildMgTeamsHTML(); },
       buildTeamSheet: (id) => buildMgTeamSheetHTML(mgFindTeam(id)),
-      buildMgPools: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'pools'; mgpPoolFilter = (opts.filter === undefined ? null : opts.filter); mgpControlsOpen = !!opts.controls; return buildMgPoolsHTML(); },
+      // Task 8 (pool controls): netsEdit / moveTeam set the two module vars a tap would set, so the open
+      // panel can be built in any of its states. Both are set on EVERY call, never only when passed, so a
+      // case that leaves a picker open cannot leak it into the next one.
+      buildMgPools: (opts) => {
+        opts = opts || {};
+        manageView = 'tournament'; mgtView = 'pools';
+        mgpPoolFilter = (opts.filter === undefined ? null : opts.filter);
+        mgpControlsOpen = !!opts.controls;
+        mgpNetsEditPoolId = (opts.netsEdit === undefined ? null : opts.netsEdit);
+        mgpMoveTeamId = (opts.moveTeam === undefined ? null : opts.moveTeam);
+        return buildMgPoolsHTML();
+      },
+      netsDirty: () => manageNetsDirty(),
+      moveTeamId: () => mgpMoveTeamId,
+      netsEditId: () => mgpNetsEditPoolId,
+      // The two writes the open Pool controls can make, swapped for recorders (plus the team sheet, so a
+      // Move tap that leaked through to it is visible rather than silent). This suite is offline — no tdb
+      // call is ever real — and either write may throw to drive its refusal branch.
+      mockPoolWrites: (o) => {
+        o = o || {};
+        const calls = [];
+        tdbMoveTeamToPool = async (teamId, poolId) => { calls.push(['move', teamId, poolId]); if (o.move) return o.move(teamId, poolId); };
+        tdbSetPoolNets = async (pool, nets) => { calls.push(['nets', pool && pool.id, nets]); if (o.nets) return o.nets(pool, nets); };
+        tdbRefreshTournaments = async () => { calls.push(['refresh']); };
+        repaintManage = () => { calls.push(['repaint']); };
+        appNotice = (n) => { calls.push(['notice', n && n.title]); };
+        openMgTeamSheet = (id) => { calls.push(['sheet', id]); };
+        return calls;
+      },
       buildScoreSheet: (m, w) => buildMgScoreSheetHTML(m, w),
       buildBracket: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'bracket'; state.seedOverride = (opts.seedOverride === undefined ? null : opts.seedOverride); mgBracketShowDone = !!opts.showDone; return buildMgBracketHTML(); },
       buildSettings: () => { manageView = 'tournament'; mgtView = 'settings'; return buildMgSettingsHTML(); },
@@ -258,6 +286,31 @@ function setPoolsFixture(extra = {}) {
     ...extra,
   });
 }
+
+// Task 8 (pool controls): a pools-status tournament seeded through seedHub, with two teams per pool so
+// every card has rows to move. `matches` is what each case actually varies — it decides which pool has
+// already played, which is the whole of the Move rule.
+function seedPools(bridge, o) {
+  o = o || {};
+  const pools = (o.pools || [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }])
+    .map((p, i) => Object.assign({ display_order: i }, p));
+  const teams = o.teams || [
+    { id: 't1', name: 'Dink Responsibly', pool_id: 'p1', paid: true },
+    { id: 't2', name: 'Sets and Reps', pool_id: 'p1', paid: true },
+    { id: 't3', name: 'Block Party', pool_id: 'p2', paid: true },
+    { id: 't4', name: 'Net Gains', pool_id: 'p2', paid: true },
+  ];
+  return seedHub(bridge, Object.assign({ status: 'pools', name: 'August 2026', net_count: 3 }, o.tournament),
+    { teams, pools, matches: o.matches || [] });
+}
+
+// Pool play with nothing final anywhere, so every pool is still movable.
+const UNPLAYED = [
+  { id: 'a1', phase: 'pool', pool_id: 'p1', net: 1, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 1 },
+  { id: 'a2', phase: 'pool', pool_id: 'p1', net: 2, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 2 },
+  { id: 'a3', phase: 'pool', pool_id: 'p1', net: 3, status: 'live', team_a_id: 't2', team_b_id: 't1', score_a: 4, score_b: 3, queue_order: 3 },
+  { id: 'b1', phase: 'pool', pool_id: 'p2', net: 4, status: 'scheduled', team_a_id: 't3', team_b_id: 't4', queue_order: 1 },
+];
 
 describe('Task 1 foundations', () => {
   it('Manage bracket vocabulary: Championship and semifinals, never final', () => {
@@ -1327,7 +1380,7 @@ function withEditorDOM(fn) {
 // The REAL click delegate, captured off the #app-content element attachHandlers binds it to. Driving it
 // with a synthetic event is what proves a tap reaches the editor with the right caret and that the hooks
 // are checked in the right order — a grep of app.js proves neither.
-function withRulesDelegate(fn) {
+function withDelegate(fn) {
   const doc = bridge.doc;
   const realGet = doc.getElementById;
   const noop = () => {};
@@ -1407,7 +1460,7 @@ describe('Task 7 the one editor, opened at a section', () => {
     seedHub(bridge, { status: 'setup', name: 'A', rules });
     bridge.setMgtView('rules');
     const off = rules.indexOf('## Between games');
-    const seen = withRulesDelegate((tap) => withEditorDOM((ta) => {
+    const seen = withDelegate((tap) => withEditorDOM((ta) => {
       tap('data-rlv-edit', String(off));
       return { value: ta.value, carets: ta.carets.slice() };
     }));
@@ -1418,7 +1471,7 @@ describe('Task 7 the one editor, opened at a section', () => {
   it('a non-numeric offset falls back to the top of the document rather than NaN', () => {
     seedHub(bridge, { status: 'setup', name: 'A', rules: '## Format\n- 4s' });
     bridge.setMgtView('rules');
-    const carets = withRulesDelegate((tap) => withEditorDOM((ta) => {
+    const carets = withDelegate((tap) => withEditorDOM((ta) => {
       tap('data-rlv-edit', 'nonsense');
       return ta.carets.slice();
     }));
@@ -1428,7 +1481,7 @@ describe('Task 7 the one editor, opened at a section', () => {
   it('an Add-a-section tap appends the scaffold through the delegate', () => {
     seedHub(bridge, { status: 'setup', name: 'A', rules: '## Format\n- 4s\n' });
     bridge.setMgtView('rules');
-    const seen = withRulesDelegate((tap) => withEditorDOM((ta) => {
+    const seen = withDelegate((tap) => withEditorDOM((ta) => {
       tap('data-rlv-add');
       return { value: ta.value, carets: ta.carets.slice() };
     }));
@@ -1441,7 +1494,7 @@ describe('Task 7 the one editor, opened at a section', () => {
     // [data-mgru-edit] were checked first, the pill would silently become a second plain Edit.
     seedHub(bridge, { status: 'setup', name: 'A', rules: '' });
     bridge.setMgtView('rules');
-    const value = withRulesDelegate((tap) => withEditorDOM((ta) => {
+    const value = withDelegate((tap) => withEditorDOM((ta) => {
       tap(['data-rlv-add', 'data-mgru-edit']);
       return ta.value;
     }));
@@ -1451,11 +1504,249 @@ describe('Task 7 the one editor, opened at a section', () => {
   it('the header Edit all still opens the whole document with the caret at the end', () => {
     seedHub(bridge, { status: 'setup', name: 'A', rules: '## Format\n- 4s' });
     bridge.setMgtView('rules');
-    const seen = withRulesDelegate((tap) => withEditorDOM((ta) => {
+    const seen = withDelegate((tap) => withEditorDOM((ta) => {
       tap('data-mgru-edit');
       return { value: ta.value, carets: ta.carets.slice() };
     }));
     expect(seen.value).toBe('## Format\n- 4s');
     expect(seen.carets).toEqual([seen.value.length]);   // no options at all: the 2026-07-12 behaviour
+  });
+});
+
+// ── Task 8: Pool controls ─────────────────────────────────────────────────────────────────────────────
+// The open panel is a card per pool now. Three things in it are load-bearing and none is cosmetic:
+//   1. a team MOVES ONLY BEFORE ITS POOL HAS PLAYED (Mike, spec decision 3) — tdbMoveTeamToPool writes
+//      teams.pool_id and nothing else, so a team with finished games would leave them behind and drop out
+//      of the new pool's standings. The design's "Scores follow the team" was simply false and never ships.
+//   2. the inline nets field prefills the PARSED list, never the rendered "Nets 1-3" label — parseInt('1-3')
+//      is 1, so saving the label back would silently collapse the pool onto one net.
+//   3. the two half-finished actions (a typed field, an open picker) block the 15s poll.
+// Every case drives the real builder or the real click delegate; none greps app.js for a substring.
+describe('Task 8 pool controls', () => {
+  it('a card per pool, Edit nets in the header, Move only before play, reset in the danger block', () => {
+    seedPools(bridge, { pools: [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }], matches: [
+      { id: 'm1', phase: 'pool', pool_id: 'p1', net: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', score_a: 15, score_b: 9, winner_team_id: 't1', queue_order: 1 },
+      { id: 'm2', phase: 'pool', pool_id: 'p2', net: 2, status: 'scheduled', team_a_id: 't3', team_b_id: 't4', queue_order: 1 }] });
+    const html = bridge.buildMgPools({ controls: true });
+    expect(count(html, 'class="pc-card"')).toBe(2);
+    expect(count(html, 'data-pc-editnets=')).toBe(2);
+    expect(html).toContain('>Nets 1<');
+    expect(html).toMatch(/pc-card"[\s\S]*Pool B[\s\S]*data-pc-move=/);
+    expect(html.split('Pool B')[0]).not.toContain('data-pc-move=');   // pool A has a final game: no Move
+    // the sharp version of the line above: the pools tab strip also says "Pool B", so slice the CARDS
+    const cardA = html.slice(html.indexOf('data-pc-card="p1"'), html.indexOf('data-pc-card="p2"'));
+    const cardB = html.slice(html.indexOf('data-pc-card="p2"'));
+    expect(cardA).toContain('data-mgps-team="t1"');   // the row is still there, and still opens the sheet
+    expect(cardA).not.toContain('data-pc-move=');     // it just cannot be moved any more
+    expect(cardA).not.toContain('>Move<');
+    expect(count(cardB, 'data-pc-move=')).toBe(2);    // pool B has not played: both its teams can move
+    expect(html).toContain('before play starts');
+    expect(html).not.toContain('Scores follow the team');
+    expect(html).toContain('class="mgv-danger"');
+    expect(html).toContain('draws new pools from the registered teams at random');
+    expect(html).toContain('data-mgps-reset');
+    expect(html).not.toContain('Close controls');
+    expect(html).not.toContain('pc-toggle');
+    expect(html.slice(html.indexOf('>Pool controls<'))).not.toContain('—');   // copy law: no em dashes
+  });
+
+  it('the collapsed row and the drawn-not-started step are untouched by any of it', () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    const shut = bridge.buildMgPools();
+    expect(shut).toContain('data-mgps-controls');
+    expect(shut).toContain('Move teams · edit nets · reset pools');
+    expect(shut).not.toContain('pc-card');
+    // the two-step draw flow shares no markup with the controls any more, and never showed Edit nets
+    seedPools(bridge, { tournament: { status: 'setup' }, matches: [] });
+    const drawn = bridge.buildMgPools();
+    expect(drawn).toContain('Start pool play');
+    expect(drawn).toContain('data-mgps-team="t1"');
+    expect(drawn).toContain('class="mgps-pteam"');
+    expect(drawn).not.toContain('pc-card');
+    expect(drawn).not.toContain('Edit nets');
+  });
+
+  it('the inline nets field prefills the parsed list, never the label', () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    const shut = bridge.buildMgPools({ controls: true });
+    expect(shut).toContain('>Nets 1-3<');                     // formatNetList, plain hyphen
+    const open = bridge.buildMgPools({ controls: true, netsEdit: 'p1' });
+    expect(open).toContain('value="1, 2, 3"');                // the PARSED list, so parseInt never sees 1-3
+    expect(open).not.toMatch(/value="[^"]*1-3/);
+    expect(open).toContain('id="pc-nin-p1"');
+    expect(open).toContain('data-pc-savenets="p1"');
+    expect(open).toContain('Re-assigns its unplayed games.');
+    expect(count(open, 'data-pc-editnets=')).toBe(1);         // pool B still offers its own
+    expect(open).not.toContain('>Nets 1-3<');                 // the label is GONE while the field is open
+  });
+
+  it('the move picker offers the other pools, never its own, and names the team it is moving', () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    const open = bridge.buildMgPools({ controls: true, moveTeam: 't1' });
+    expect(open).toContain('class="pc-pick"');
+    expect(open).toContain('Move <b>Dink Responsibly</b> to');
+    expect(open).toContain('data-pc-pick="t1:p2"');
+    expect(open).not.toContain('data-pc-pick="t1:p1"');
+    expect(open).toContain('data-pc-cancel');
+    expect(count(open, 'class="pc-pick"')).toBe(1);           // one picker at a time
+    // a team in a pool that HAS played can never have one, even if the module var somehow named it
+    seedPools(bridge, { matches: [{ id: 'f1', phase: 'pool', pool_id: 'p1', net: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', score_a: 15, score_b: 9, winner_team_id: 't1', queue_order: 1 }] });
+    expect(bridge.buildMgPools({ controls: true, moveTeam: 't1' })).not.toContain('class="pc-pick"');
+  });
+
+  it('the delegate: Move opens the picker BEFORE the team sheet, and a pick writes, refreshes, repaints', async () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    bridge.setMgtView('pools');
+    bridge.buildMgPools({ controls: true });
+    const calls = bridge.mockPoolWrites({});
+    const opened = await withDelegate(async (tap) => {
+      // a real tap on the Move label matches BOTH hooks — the label sits inside the row that carries
+      // data-mgps-team. If the order were wrong this would also open the team sheet on top of the picker.
+      tap(['data-pc-move', 'data-mgps-team'], 't1');
+      const was = bridge.moveTeamId();
+      tap('data-pc-pick', 't1:p2');
+      await new Promise((r) => setTimeout(r, 0));
+      return was;
+    });
+    expect(opened).toBe('t1');
+    expect(calls).toEqual([['repaint'], ['move', 't1', 'p2'], ['refresh'], ['repaint']]);
+    expect(calls.some((c) => c[0] === 'sheet')).toBe(false);
+    expect(bridge.moveTeamId()).toBe(null);
+  });
+
+  it('the delegate: the team row itself still opens the team sheet, and Cancel closes the picker', () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    bridge.setMgtView('pools');
+    bridge.buildMgPools({ controls: true, moveTeam: 't1' });
+    const calls = bridge.mockPoolWrites({});
+    withDelegate((tap) => {
+      tap('data-mgps-team', 't1');          // the name, not the Move label
+      tap('data-pc-cancel');
+    });
+    expect(calls).toContainEqual(['sheet', 't1']);
+    expect(bridge.moveTeamId()).toBe(null);
+  });
+
+  it('a refused move says why and leaves the picker open, rather than reporting a move that never happened', async () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    bridge.setMgtView('pools');
+    bridge.buildMgPools({ controls: true, moveTeam: 't1' });
+    const calls = bridge.mockPoolWrites({ move: () => { throw new Error('new row violates row-level security'); } });
+    await withDelegate(async (tap) => {
+      tap('data-pc-pick', 't1:p2');
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(calls.map((c) => c[0])).toEqual(['move', 'notice']);
+    expect(calls).toContainEqual(['notice', 'Could not move the team']);
+    expect(bridge.moveTeamId()).toBe('t1');   // still open on the team that did not move
+  });
+
+  it('the delegate: Edit nets opens the field and Save nets writes what was TYPED in it', async () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    bridge.setMgtView('pools');
+    bridge.buildMgPools({ controls: true });
+    const calls = bridge.mockPoolWrites({});
+    const doc = bridge.doc;
+    const realGet = doc.getElementById;
+    doc.getElementById = (id) => (id === 'pc-nin-p1' ? { value: ' 2, 3 ,' } : null);
+    try {
+      await withDelegate(async (tap) => {
+        tap('data-pc-editnets', 'p1');
+        expect(bridge.netsEditId()).toBe('p1');
+        tap('data-pc-savenets', 'p1');
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    } finally { doc.getElementById = realGet; }
+    expect(calls).toEqual([['repaint'], ['nets', 'p1', [2, 3]], ['refresh'], ['repaint']]);
+    expect(bridge.netsEditId()).toBe(null);   // the field closed with the save that succeeded
+  });
+
+  it('a refused nets write says why and brings the field back so the list can be fixed', async () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    bridge.setMgtView('pools');
+    bridge.buildMgPools({ controls: true, netsEdit: 'p1' });
+    const calls = bridge.mockPoolWrites({ nets: () => { throw new Error('A pool needs at least one net.'); } });
+    const doc = bridge.doc;
+    const realGet = doc.getElementById;
+    doc.getElementById = (id) => (id === 'pc-nin-p1' ? { value: 'nonsense' } : null);
+    try {
+      await withDelegate(async (tap) => {
+        tap('data-pc-savenets', 'p1');
+        await new Promise((r) => setTimeout(r, 0));
+      });
+    } finally { doc.getElementById = realGet; }
+    expect(calls).toEqual([['nets', 'p1', []], ['repaint'], ['notice', 'Could not update nets']]);
+    expect(bridge.netsEditId()).toBe('p1');
+  });
+
+  it('the poll guard: a typed nets field or an open picker is unsaved work', () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    bridge.buildMgPools({ controls: true });
+    expect(bridge.netsDirty()).toBe(false);
+    bridge.buildMgPools({ controls: true, netsEdit: 'p1' });
+    expect(bridge.netsDirty()).toBe(true);
+    bridge.buildMgPools({ controls: true, moveTeam: 't1' });
+    expect(bridge.netsDirty()).toBe(true);
+    bridge.buildMgPools({ controls: true });
+    expect(bridge.netsDirty()).toBe(false);
+  });
+
+  // The WIRING, driven rather than grepped: partialRender rebuilds the Manage container with the controls
+  // idle and bails (sync notice only) with a nets field open or a picker waiting.
+  it('the background poll repaints an idle panel and bails on an open nets field', () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    const prevTab = bridge.tabNow();
+    const container = mkEl({ tagName: 'DIV', innerHTML: 'STALE' });
+    const notice = mkEl({ tagName: 'DIV' });
+    const rootEl = mkEl({ tagName: 'DIV', hasChildNodes: () => true });
+    const panel = { scrollTop: 0, contains: () => false, querySelectorAll: () => [], querySelector: (sel) => (sel === '.container' ? container : null) };
+    const doc = bridge.doc;
+    const realGet = doc.getElementById;
+    const realQuery = doc.querySelector;
+    doc.getElementById = (id) => (id === 'root' ? rootEl : (id === 'js-sync-notice' ? notice : (id === 'tab-manage' ? panel : null)));
+    doc.querySelector = () => null;   // no .players — partialRender takes the Manage branch
+    doc.activeElement = null;
+    bridge.setBoot(true);
+    bridge.setTab('manage');
+    try {
+      bridge.buildMgPools({ controls: true });
+      bridge.poll();
+      expect(container.innerHTML).toContain('class="pc-card"');   // idle: repainted
+      container.innerHTML = 'STALE';
+      bridge.buildMgPools({ controls: true, netsEdit: 'p1' });
+      bridge.poll();
+      expect(container.innerHTML).toBe('STALE');                  // half-typed nets: bailed
+      bridge.buildMgPools({ controls: true, moveTeam: 't1' });
+      bridge.poll();
+      expect(container.innerHTML).toBe('STALE');                  // an open picker: bailed too
+    } finally {
+      bridge.setBoot(false);
+      bridge.setTab(prevTab);
+      doc.getElementById = realGet;
+      doc.querySelector = realQuery;
+      doc.activeElement = undefined;
+    }
+  });
+
+  it('the pool-controls CSS kit is ported, minus the toggle and the type-the-name strip', () => {
+    const body = css.replace(/\/\*[\s\S]*?\*\//g, '');   // PORT NOTEs name what they ban
+    expect(body).toContain('.pc-card {');
+    expect(body).toContain('.pc-hd {');
+    expect(body).toContain('.pc-pick {');
+    expect(body).toContain('.pc-nin {');
+    expect(body).toContain('.pc-nhint {');
+    expect(body).not.toContain('.pc-toggle');
+    expect(body).not.toContain('.pc-confirm');
+    expect(body).not.toContain('.pc-cin');
+    expect(body).not.toContain('.pc-cgo');
+    expect(body).not.toContain('.mgps-editnets');   // its markup went with the old controls
+    // the iOS button-rule counters, which a plain class selector loses to
+    expect(body).toContain('.pc-done { min-height: 32px; height: 32px; font-size: 12.5px !important; }');
+    expect(body).toContain('.pc-nbtn { min-height: 30px; height: 30px; font-size: 12px !important; }');
+    expect(body).toContain('.pc-team { min-height: 0; color: var(--ink); font-size: 15px !important; }');
+  });
+
+  it('the version bumped with the change', () => {
+    expect(appSrc).toContain("const APP_VERSION = '2026.08.25.12'");
   });
 });
