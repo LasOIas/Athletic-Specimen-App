@@ -183,6 +183,10 @@ function loadApp(opts) {
       toggleReg: () => mgrToggleRegistration(),
       toggleSetting: (f) => mgToggleSettingsField(f),
       syncBtn: () => mgSyncSaveButton(),
+      // Fix round 1: drive the in-flight window without awaiting a real write. mgSaveScreenFields sets
+      // this the instant its first await is issued and clears it after the read-back; the tests set it
+      // directly so the guard can be exercised on its own.
+      setInFlight: (v) => { mgSaveInFlight = !!v; },
       dirtyIds: (screen) => mgDirtyFieldIds(screen === 'settings' ? MGES_FIELD_IDS : MGR_FIELD_IDS, mgActiveTournament()),
       regDirty: () => manageRegDirty(),
       settingsDirty: () => manageSettingsDirty(),
@@ -316,6 +320,27 @@ describe('the Save button is inert until something changed', () => {
     h.venmo.value = '';
     h.bridge.syncBtn();
     expect(h.st.textContent).toBe('Saved');
+  });
+
+  // Fix round 1 (reviewer-caught): the guard has to run BEFORE the button is re-armed. A keystroke during
+  // the write leaves the field dirty, so an early `btn.disabled = !dirty` handed the admin a live Save in
+  // the middle of a write — mgSaveScreenFields had just disabled it precisely so a second tap could not
+  // start a concurrent save, and two racing saves share one boolean: the first to finish clears it and the
+  // other one's remaining awaits run unguarded.
+  it('holds Save DOWN and the status line still while a write is in flight, even with a dirty field', () => {
+    const h = openRegistration();
+    h.venmo.value = 'https://venmo.com/u/as';   // a keystroke landing mid-write
+    h.saveBtn.disabled = true;                    // mgSaveScreenFields disabled it for the duration
+    h.st.textContent = 'Saving…';
+    h.bridge.setInFlight(true);
+    h.bridge.syncBtn();
+    expect(h.saveBtn.disabled).toBe(true);        // no second tap, no concurrent save
+    expect(h.st.textContent).toBe('Saving…');   // and nothing talks over the write
+    // …and the moment the write lands, the same call reports the truth again.
+    h.bridge.setInFlight(false);
+    h.bridge.syncBtn();
+    expect(h.saveBtn.disabled).toBe(false);
+    expect(h.st.textContent).toBe('Unsaved changes');
   });
 
   it('never talks over an error line: a refused write stays on screen through the next sync', async () => {

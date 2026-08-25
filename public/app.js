@@ -8747,9 +8747,9 @@ function buildManageTournamentHTML() {
   // enter — before the draw it would open an empty board. Announcement and Player view are not sub-views
   // at all (one opens the full-screen editor, one leaves Manage), so they are written out by hand.
   const rows = `<div class="pl-sect">Sign-ups</div>`
-    + mgtRowHTML('registration', 'Registration &amp; public page', regSub, t.registration_open ? 'Open' : 'Closed')
+    + mgtRowHTML('registration', escapeHTML(MGT_SUB_TITLES.registration), regSub, t.registration_open ? 'Open' : 'Closed')
     + mgtRowHTML('teams', 'Teams &amp; payment', teamsSub, unpaid ? `${unpaid} unpaid` : (nTeams ? 'All paid' : ''))
-    + mgtRowHTML('teamadd', 'Add a team', 'For the pair who paid you at the net')
+    + mgtRowHTML('teamadd', escapeHTML(MGT_SUB_TITLES.teamadd), 'For the pair who paid you at the net')
     + `<div class="pl-sect">Play</div>`
     + mgtRowHTML('pools', 'Pools &amp; schedule', poolsSub, poolsMeta)
     + (poolMatches.length ? mgtRowHTML('pools', 'Score sheet', 'Enter pool results as each game finishes') : '')
@@ -9159,8 +9159,13 @@ function mgSyncSaveButton() {
   const screen = btn.getAttribute('data-mg-save');
   const ids = screen === 'settings' ? MGES_FIELD_IDS : MGR_FIELD_IDS;
   const dirty = mgDirtyFieldIds(ids, mgActiveTournament()).length > 0;
+  // A write in flight OWNS the button. mgSaveScreenFields disabled it so a second tap cannot start a
+  // concurrent save, and the field stays dirty until that write lands — so re-arming here on a keystroke
+  // would undo exactly the guard it set, and two saves racing would leave whichever finished first
+  // clearing the shared flag while the other one's remaining awaits ran unguarded. Hold it down, leave
+  // the "Saving…" line alone, and let the save's own exit re-sync both.
+  if (mgSaveInFlight) { btn.disabled = true; return; }
   btn.disabled = !dirty;
-  if (mgSaveInFlight) return;
   const el = document.getElementById(screen === 'settings' ? 'mges-status' : 'mgr-status');
   if (!el) return;
   if (el.classList && el.classList.contains('is-bad')) return;
