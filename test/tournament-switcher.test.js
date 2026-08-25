@@ -114,7 +114,6 @@ function loadApp() {
         mgTournamentPinned = !!opts.pinned;
       },
       hub: () => buildManagePageHTML(),
-      meta: (t) => mgSwitcherMetaText(t),
       dateLabel: (v) => mgEventDateLabel(v),
       phase: (t) => mgTournamentPhase(t),
       teamsClause: (t) => mgTeamsClause(t),

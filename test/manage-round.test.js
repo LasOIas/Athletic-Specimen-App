@@ -231,6 +231,50 @@ function loadApp() {
         repaintManage = () => { calls.push(['repaint', mgtView]); };
         return calls;
       },
+      // Fix wave (2026-08-25): the hub's registration flip, DRIVEN, so a silently refused write (the RLS
+      // shape — no error raised, no row changed, which is what mgVerifyTournamentFields exists to catch)
+      // is provably reported on #mgh-status instead of dying quietly. Every swap is restored by the
+      // returned undo; this suite shares one vm context, so a leaked swap would break every later case.
+      flipReg: (open) => mgHubFlipRegistration(open),
+      mockFlip: (o) => {
+        o = o || {};
+        const calls = [];
+        const was = { tdbSetTournamentFields, mgVerifyTournamentFields, repaintManage };
+        tdbSetTournamentFields = async (id, f) => { calls.push(['fields', id, f]); if (o.write) return o.write(id, f); };
+        mgVerifyTournamentFields = async () => { calls.push(['verify']); return o.unsaved || []; };
+        repaintManage = () => { calls.push(['repaint']); };
+        return { calls, restore: () => {
+          tdbSetTournamentFields = was.tdbSetTournamentFields;
+          mgVerifyTournamentFields = was.mgVerifyTournamentFields;
+          repaintManage = was.repaintManage;
+        } };
+      },
+      // Fix wave: the 15s poll's tab branch. refreshTournamentLive picks its branch off activeMainTab, so
+      // which collections a Manage-tab poll reloads is only provable by DRIVING it with every collaborator
+      // swapped for a recorder — a grep of app.js proves nothing about which branch runs.
+      refreshLive: () => refreshTournamentLive(),
+      mockPoll: () => {
+        const calls = [];
+        const was = { tdbRefreshTournaments, tdbListTournaments, partialRender, partialRenderTournament, render };
+        tdbRefreshTournaments = async () => { calls.push('refresh'); };
+        tdbListTournaments = async () => { calls.push('list'); return state.tournaments || []; };
+        partialRender = () => { calls.push('partialRender'); };
+        partialRenderTournament = () => { calls.push('partialRenderTournament'); };
+        render = () => { calls.push('render'); };
+        return { calls, restore: () => {
+          tdbRefreshTournaments = was.tdbRefreshTournaments;
+          tdbListTournaments = was.tdbListTournaments;
+          partialRender = was.partialRender;
+          partialRenderTournament = was.partialRenderTournament;
+          render = was.render;
+        } };
+      },
+      // Fix wave: every team-sheet write runs through mgtsWrite, whose catch was a console.warn — a pool
+      // move the DB refused looked exactly like one that landed. Driven directly; mockPoolWrites records
+      // the notice it now raises.
+      teamSheetWrite: (fn) => mgtsWrite(fn),
+      // Fix wave: the double-tap guard on Save nets. Driven through the real delegate by its own test.
+      saveNets: (poolId) => mgPoolsSaveNets(poolId),
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -752,7 +796,9 @@ describe('Task 4 the tournament page', () => {
     for (const h of ['Sign-ups', 'Play', 'The event', 'After it ends']) expect(html).toContain(`>${h}<`);
     expect(html).toContain('Registration &amp; public page');
     expect(html).toContain('data-mgt-view="teamadd"');
-    expect(html).not.toContain('data-mgt-view="scoresheet"'); // omitted before the draw
+    // Fix wave: this used to assert `data-mgt-view="scoresheet"` was absent — a view name the app has
+    // never emitted, so it passed whether or not the row rendered. The row's own text is the real check.
+    expect(html).not.toContain('>Score sheet<'); // omitted before the draw
     expect(html).toContain('data-mgt-announce');
     expect(html).not.toContain('closes ');
     expect(html).toContain('12-team cap');
@@ -760,6 +806,7 @@ describe('Task 4 the tournament page', () => {
     expect(html.indexOf('data-mgtl-new')).toBeGreaterThan(html.indexOf('data-mgt-view="closeout"'));
     expect(html.indexOf('mgv-danger')).toBeGreaterThan(html.indexOf('data-mgtl-new'));
     expect(html).not.toContain('mgt-stage');
+    expect(html).not.toMatch(/—|&mdash;|night/i);
   });
 
   // The Needs-you list here is the TOURNAMENT scope: the club-level items (the Venmo link, "no pickup day
@@ -782,9 +829,10 @@ describe('Task 4 the tournament page', () => {
       pools: [{ id: 'p1', label: 'A' }], matches,
     });
     seedPools([]);
-    expect(bridge.buildTournament()).not.toContain('Score sheet');
+    expect(bridge.buildTournament()).not.toContain('>Score sheet<');
     seedPools([{ id: 'g1', phase: 'pool', pool_id: 'p1', net: 1, queue_order: 1, status: 'scheduled', team_a_id: 't1', team_b_id: 't2' }]);
     const html = bridge.buildTournament();
+    expect(html).toContain('>Score sheet<');
     expect(html).toContain('Enter pool results as each game finishes');
     expect(count(html, 'data-mgt-view="pools"')).toBeGreaterThanOrEqual(2);
     expect(html).toContain('<span class="tv-sn">0<small>/1</small></span><span class="tv-sl">Games</span>');
@@ -830,6 +878,76 @@ describe('Task 4 the tournament page', () => {
     expect(reg).toContain('class="pd-htitle">Registration &amp; public page<');
     expect(reg).toContain('class="mgr-status" id="mgr-status" role="status" aria-live="polite">Saved<');
     expect(bridge.buildSettings()).toContain('id="mges-status" role="status" aria-live="polite">Saved<');
+  });
+
+  // DRIVE 2026-08-25 + final review: the scoped Needs-you list on THIS page carries the same two WRITING
+  // items the hub does (Open registration, Reuse rules), but #mgh-status and the confirmation strip were
+  // emitted only by the hub's quick-actions block — so a refused write here said nothing at all, and a
+  // write that landed showed no confirmation. One status target and one strip, shared by both pages.
+  it('the tournament page carries the status target and the confirmation strip, one of each per page', () => {
+    seedHub(bridge, { status: 'setup', registration_open: false, name: 'August', rules: '' }, { teams: [] });
+    expect(count(bridge.buildTournament(), 'id="mgh-status"')).toBe(1);
+    expect(count(bridge.buildManage(), 'id="mgh-status"')).toBe(1);
+    // The strip can only ever mean "the write landed" — both pages draw it from the same mgHubDoneText.
+    bridge.setHub({ doneText: 'Registration is open' });
+    try {
+      const page = bridge.buildTournament();
+      expect(count(page, 'class="mgh-done is-under"')).toBe(1);
+      expect(page).toContain('Registration is open');
+      expect(count(bridge.buildManage(), 'class="mgh-done is-under"')).toBe(1);
+    } finally { bridge.setHub({}); }
+  });
+
+  it('a silently refused registration flip says so on the #mgh-status both pages emit', async () => {
+    seedHub(bridge, { status: 'setup', registration_open: false, name: 'August' }, { teams: [] });
+    expect(bridge.buildTournament()).toContain('id="mgh-status"');
+    const doc = bridge.doc;
+    const realGet = doc.getElementById;
+    const line = { textContent: '', classList: { add: () => {}, remove: () => {} } };
+    doc.getElementById = (id) => (id === 'mgh-status' ? line : null);
+    // The RLS shape: the write raises nothing, the read-back shows the column never moved.
+    const { calls, restore } = bridge.mockFlip({ unsaved: ['registration_open'] });
+    try {
+      await bridge.flipReg(true);
+      expect(calls.map((c) => c[0])).toEqual(['fields', 'verify', 'repaint']);
+      expect(line.textContent).toContain('That did not save');
+    } finally { restore(); doc.getElementById = realGet; }
+  });
+
+  // DRIVE 2026-08-25: both rows read "N of M games final". "done" is this app's word (Task 1 locks it on
+  // the pools meta) and "final" is the bracket vocabulary the round retired.
+  it('the Pools and Bracket rows say games DONE, never games final', () => {
+    seedHub(bridge, { status: 'pools', name: 'August', net_count: 2 }, {
+      teams: [{ id: 't1', name: 'A', paid: true }, { id: 't2', name: 'B', paid: true }],
+      pools: [{ id: 'p1', label: 'A' }],
+      matches: [
+        { id: 'g1', phase: 'pool', pool_id: 'p1', net: 1, queue_order: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 15, score_b: 9 },
+        { id: 'g2', phase: 'pool', pool_id: 'p1', net: 1, queue_order: 2, status: 'scheduled', team_a_id: 't1', team_b_id: 't2' },
+        { id: 'm1', phase: 'main', side: 'winners', round: 1, slot: 0, net: 1, queue_order: 3, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 21, score_b: 12 },
+        { id: 'm2', phase: 'main', side: 'grand_final', round: 1, slot: 0, net: 1, queue_order: 4, status: 'scheduled', team_a_id: 't1', team_b_id: 't2' },
+      ],
+    });
+    const html = bridge.buildTournament();
+    expect(count(html, '1 of 2 games done')).toBe(2);   // the Pools row and the Bracket row
+    expect(html).not.toMatch(/games? final/);
+  });
+
+  // DRIVE 2026-08-25 on the live August bracket: the row read "26 of 31" under a strip reading "26 of 30".
+  // The strip excludes an unplayed reset game; the row counted every main row. One helper now, both callers.
+  it('the Bracket row and the bracket strip agree, both leaving out an unplayed reset game', () => {
+    seedHub(bridge, { status: 'bracket', name: 'August', net_count: 2 }, {
+      teams: [{ id: 't1', name: 'A', seed: 1 }, { id: 't2', name: 'B', seed: 2 }, { id: 't3', name: 'C', seed: 3 }],
+      pools: [],
+      matches: [
+        { id: 'w1', phase: 'main', side: 'winners', round: 1, slot: 0, round_label: 'WB R1 M1', net: 1, queue_order: 0, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 21, score_b: 10, version: 1 },
+        { id: 'l1', phase: 'main', side: 'losers', round: 1, slot: 0, round_label: 'LB R1 M1', net: 2, queue_order: 1, status: 'final', team_a_id: 't2', team_b_id: 't3', winner_team_id: 't2', score_a: 21, score_b: 12, version: 1 },
+        { id: 'gf', phase: 'main', side: 'grand_final', round: 1, slot: 0, round_label: 'Grand Final', net: 1, queue_order: 2, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 21, score_b: 15, version: 1 },
+        // The reset game only gets played when the losers side wins the first championship. It never was.
+        { id: 'gf2', phase: 'main', side: 'grand_final', round: 2, slot: 0, round_label: 'Grand Final Reset', net: 1, queue_order: 3, status: 'scheduled', team_a_id: null, team_b_id: null, version: 0 },
+      ],
+    });
+    expect(bridge.buildTournament()).toContain('3 of 3 games done');
+    expect(bridge.buildBracket()).toContain('3 of 3 games in');
   });
 
   it('the page CSS ships', () => {
@@ -1892,12 +2010,60 @@ describe('Task 8 pool controls', () => {
     }
   });
 
+  // Final review: Save nets shipped with no in-flight guard. A double-tap sent the SAME stale row version
+  // twice, so the per-row CAS in tdbSetPoolNets threw "Another device just updated a game" over a write
+  // that had already landed, and the field reopened on a pool whose nets were correct.
+  it('a double-tap on Save nets writes once, and the button greys while it is in flight', async () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    bridge.setMgtView('pools');
+    bridge.buildMgPools({ controls: true, netsEdit: 'p1' });
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const { calls, restore } = bridge.mockPoolWrites({ nets: () => gate });
+    const doc = bridge.doc;
+    const realGet = doc.getElementById;
+    const realQuery = doc.querySelector;
+    const btn = { disabled: false };
+    doc.getElementById = (id) => (id === 'pc-nin-p1' ? { value: '2, 3' } : null);
+    doc.querySelector = (sel) => (sel === '[data-pc-savenets]' ? btn : null);
+    try {
+      await withDelegate(async (tap) => {
+        tap('data-pc-savenets', 'p1');
+        tap('data-pc-savenets', 'p1');   // the second tap of a double-tap, while the first is still open
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(calls.filter((c) => c[0] === 'nets')).toEqual([['nets', 'p1', [2, 3]]]);
+      expect(btn.disabled).toBe(true);
+      release();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(btn.disabled).toBe(false);
+    } finally { restore(); doc.getElementById = realGet; doc.querySelector = realQuery; }
+  });
+
+  // Final review: the team sheet's pool selector calls mgtsWrite, whose catch was a bare console.warn.
+  // A refused move left the tapped pill looking selected with nothing said, which is the exact silent-
+  // refusal shape the rest of this round has been closing.
+  it('a refused team-sheet write says so instead of dying in a console.warn', async () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    const { calls, restore } = bridge.mockPoolWrites({});
+    try {
+      await bridge.teamSheetWrite(() => { throw new Error('Another device just updated this team.'); });
+      expect(calls.filter((c) => c[0] === 'notice')).toEqual([['notice', 'That did not save']]);
+      expect(calls[calls.length - 1]).toEqual(['repaint']);   // and the list under the sheet still repaints
+    } finally { restore(); }
+  });
+
   it('the pool-controls CSS kit is ported, minus the toggle and the type-the-name strip', () => {
     const body = css.replace(/\/\*[\s\S]*?\*\//g, '');   // PORT NOTEs name what they ban
     expect(body).toContain('.pc-card {');
     expect(body).toContain('.pc-hd {');
     expect(body).toContain('.pc-pick {');
-    expect(body).toContain('.pc-nin {');
+    // Final review: a bare `.pc-nin` (0,1,0) LOSES to production's `input[type="text"], …` block (0,1,1)
+    // on padding, border, radius, height, background and font — the field rendered as prod's grey box.
+    // `input.pc-nin` ties on specificity and wins on source order, the Task 6 `input.set-in` pattern.
+    expect(count(body, 'input.pc-nin {')).toBe(1);
+    expect(count(body, 'input.pc-nin:focus {')).toBe(1);
+    expect(body).not.toMatch(/(^|\n)\.pc-nin[\s:{]/);
     expect(body).toContain('.pc-nhint {');
     expect(body).toContain('.pc-lock {');
     expect(body).not.toContain('.pc-toggle');
@@ -1912,7 +2078,44 @@ describe('Task 8 pool controls', () => {
   });
 
   it('the version bumped with the change', () => {
-    expect(appSrc).toContain("const APP_VERSION = '2026.08.25.13'");
+    expect(appSrc).toContain("const APP_VERSION = '2026.08.25.14'");
+  });
+});
+
+// ── Final review fix wave: the Manage tab's 15s poll ──────────────────────────────────────────────────
+// refreshTournamentLive branches on activeMainTab. Manage had no branch of its own, so it fell into the
+// off-tab else, which reloads state.tournaments and NOTHING else — the hub's live strip, the tournament
+// page's tiles and both Needs-you lists moved only on the organizer's own writes. A score entered on a
+// second phone left this one reading a frozen board for as long as it sat there.
+describe('the poll refreshes the Manage tab', () => {
+  // A tournament still in SETUP, so publicLiveTournament() is null and Home falls to the off-tab branch:
+  // that is what makes the two tabs distinguishable here rather than both repainting for their own reasons.
+  it('reloads the collections and repaints in place on Manage, and does not on Home', async () => {
+    seedHub(bridge, { status: 'setup', registration_open: false, name: 'August', net_count: 2 }, { teams: [] });
+    const prevTab = bridge.tabNow();
+    const { calls, restore } = bridge.mockPoll();
+    try {
+      bridge.setTab('manage');
+      await bridge.refreshLive();
+      expect(calls).toEqual(['refresh', 'partialRender']);
+
+      calls.length = 0;
+      bridge.setTab('home');
+      await bridge.refreshLive();
+      expect(calls).toEqual(['list']);
+    } finally { restore(); bridge.setTab(prevTab); }
+  });
+
+  it('leaves a non-admin on Manage in the off-tab branch, which loads no collections', async () => {
+    seedHub(bridge, { status: 'setup', registration_open: false, name: 'August', net_count: 2 }, { teams: [] });
+    const prevTab = bridge.tabNow();
+    bridge.getState().isAdmin = false;
+    const { calls, restore } = bridge.mockPoll();
+    try {
+      bridge.setTab('manage');
+      await bridge.refreshLive();
+      expect(calls).toEqual(['list']);
+    } finally { restore(); bridge.setTab(prevTab); bridge.getState().isAdmin = true; }
   });
 });
 

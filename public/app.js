@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.13'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.14'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3053,6 +3053,18 @@ async function refreshTournamentLive() {
     // while they sat on My Team). Refresh the data + repaint via partialRender() (its in-place
     // branches rebuild these panels; no form lives on them). History stays out: its data is the
     // separate lazy loadTournamentHistory, not live tournament state.
+    const tabAtStart = activeMainTab;
+    await tdbRefreshTournaments();
+    if (activeMainTab === tabAtStart) partialRender();
+  } else if (activeMainTab === 'manage' && state.isAdmin) {
+    // Fix wave (2026-08-25 final review): Manage fell into the off-tab else below, which reloads
+    // state.tournaments and NOTHING else. So the hub's "On the nets" strip, the tournament page's four
+    // tiles and BOTH Needs-you lists moved only on this organizer's own writes — a score entered on a
+    // second phone left this one reading a frozen board for as long as it sat there, which is the exact
+    // failure Slice 3c fixed for Home and My Team. Same shape as that branch: reload the collections
+    // (tdbRefreshTournaments loads teams/pools/matches for state.activeTournamentId) and repaint in
+    // place. partialRender's dirty guards already protect every live input, the open pool pickers and
+    // the body-level sheets, so nothing half-typed is at risk.
     const tabAtStart = activeMainTab;
     await tdbRefreshTournaments();
     if (activeMainTab === tabAtStart) partialRender();
@@ -7139,15 +7151,22 @@ function manageUpcomingPickupDays() {
 function manageNeedsYouCtx(scope) {
   const t = mgActiveTournament();
   const loaded = !!(t && state.activeTournamentId === t.id);
+  const matches = loaded && Array.isArray(state.tournamentMatches) ? state.tournamentMatches : [];
+  const main = matches.filter((m) => m && m.phase === 'main');
   return {
     t,
     teams: loaded && Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [],
     pickupDays: manageUpcomingPickupDays(),
     pools: loaded && Array.isArray(state.tournamentPools) ? state.tournamentPools : [],
-    matches: loaded && Array.isArray(state.tournamentMatches) ? state.tournamentMatches : [],
+    matches,
     tournaments: state.tournaments || [],
     scope,
     venueLoaded: tournamentHasVenue(),
+    // Fix wave (2026-08-25 final review): the "silent game" item named a bracket game by queue_order, which
+    // is its execution order and not the number on the board. The EXISTING numbering (pure.js) — never a
+    // second scheme — so the item sends the organizer to the game every other bracket surface calls by
+    // that name.
+    gameNumbers: main.length ? bracketGameNumbers(main).byId : null,
   };
 }
 function manageNeedsYou() { return manageNeedsYouModel(manageNeedsYouCtx('hub')); }
@@ -7210,18 +7229,11 @@ function mgTeamsClause(t) {
   return cap ? `${n} of ${cap} teams` : `${n} team${n === 1 ? '' : 's'}`;
 }
 
-// The card's meta sentence: date · phase · teams. EVERY clause is dropped when the value behind it is not
-// there — no placeholder, no em dash, no invented figure (Mike's standing ruling, 2026-08-03 round). Before
-// migration 0057 is applied the date clause never appears and the teams clause carries no cap, so the line
-// reads "registration open · 6 teams" and states only what is true.
-function mgSwitcherMetaText(t) {
-  const phase = mgTournamentPhase(t);
-  return [
-    tournamentHasEventDate() ? mgEventDateLabel(t.event_date) : '',
-    phase ? MGT_PHASE_SENTENCE[phase] : '',
-    mgTeamsClause(t),
-  ].filter(Boolean).join(' · ');
-}
+// RETIRED (fix wave, 2026-08-25 final review): mgSwitcherMetaText wrote the meta sentence for the switcher
+// CARD, which this round replaced with the hub title's own line (mgHubMetaHTML). No builder called it, and
+// it had drifted from the shipped copy — a closed setup event read "registration closed" where the hub says
+// "not open yet". Its three clause helpers (mgEventDateLabel / mgTournamentPhase / mgTeamsClause) are still
+// live and still tested; only the second, staler sentence over the same facts is gone.
 
 const MGV_CHEVDOWN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
 const MGV_PLUS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>';
@@ -7371,12 +7383,26 @@ function mgHubActsHTML(t) {
   } else if (t.status === 'pools' || t.status === 'bracket') {
     primary = `<button type="button" class="mgh-act is-primary" data-mgt-view="pools"><span>Open score sheet</span></button>`;
   }
+  return `<div class="mgh-acts"><div class="mgh-face">${primary}`
+    + `<button type="button" class="mgh-act" data-mgt-view="teamadd"><span>Add a team</span></button></div>`
+    + mgHubStatusHTML() + `</div>`;
+}
+
+// The confirmation strip + the status target the hub's two WRITES report on, in ONE place because BOTH
+// pages need them (fix wave 2026-08-25). The tournament page renders the same scoped Needs-you list, and
+// its 'signups' → regopen and 'rules' → reuserules rows call the same mgHubFlipRegistration /
+// mgHubReuseRules — but #mgh-status was emitted only by mgHubActsHTML, which that page does not render, so
+// a refused write there wrote into nothing at all and a write that landed showed no confirmation.
+// Emitted exactly ONCE per page: the hub gets it inside the quick actions, the tournament page under its
+// Needs-you rows. It is deliberately NOT inside mgNeedsRowsHTML — that returns '' on an empty list, and the
+// item that triggers a write is the first thing to disappear once the write lands, which is precisely when
+// the confirmation has to still be on screen. The strip only ever means the write landed: both writers
+// clear mgHubDoneText before reporting a refusal.
+function mgHubStatusHTML() {
   const done = mgHubDoneText
     ? `<div class="mgh-done is-under">${MGH_TICK_SVG}<span class="mgh-donetxt">${escapeHTML(mgHubDoneText)}</span></div>`
     : '';
-  return `<div class="mgh-acts"><div class="mgh-face">${primary}`
-    + `<button type="button" class="mgh-act" data-mgt-view="teamadd"><span>Add a team</span></button></div>${done}`
-    + `<p class="mgr-status" id="mgh-status" role="status" aria-live="polite"></p></div>`;
+  return done + `<p class="mgr-status" id="mgh-status" role="status" aria-live="polite"></p>`;
 }
 
 // Task 3 (2026-08-25 hub round): the game-day "On the nets" strip — the honest subset of the design's live
@@ -8744,16 +8770,22 @@ function buildManageTournamentHTML() {
   }
   else if (!poolMatches.length) { poolsSub = `Drawn, not started · ${plural(pools.length, 'pool')}`; poolsMeta = 'Ready'; }
   else {
+    // "done", not "final": the word this app uses for a played game everywhere else (the pools meta, the
+    // bracket board). "final" is the retired bracket vocabulary. Fix wave, 2026-08-25 drive.
     const done = finalCt(poolMatches);
-    poolsSub = `${done} of ${plural(poolMatches.length, 'game')} final`;
+    poolsSub = `${done} of ${plural(poolMatches.length, 'game')} done`;
     poolsMeta = done === poolMatches.length ? 'Done' : 'Live';
   }
   let bracketSub, bracketMeta;
   if (!mainMatches.length) { bracketSub = 'Double elimination · opens when pool play finishes'; bracketMeta = 'Locked'; }
   else {
-    const done = finalCt(mainMatches);
-    bracketSub = `${done} of ${plural(mainMatches.length, 'game')} final`;
-    bracketMeta = (t.status === 'completed' || done === mainMatches.length) ? 'Done' : 'Live';
+    // The SAME countable list the bracket's own progress strip counts (mgBracketCountable), so the row and
+    // the strip can never disagree — the drive caught this row reading "26 of 31" under a strip reading
+    // "26 of 30", because the row was counting an unplayed reset championship the strip leaves out.
+    const countable = mgBracketCountable(mainMatches);
+    const done = finalCt(countable);
+    bracketSub = `${done} of ${plural(countable.length, 'game')} done`;
+    bracketMeta = (t.status === 'completed' || done === countable.length) ? 'Done' : 'Live';
   }
   // Event settings states the shape of the event. The cap clause is column-gated the same way the tile is,
   // and the nets clause drops when net_count is unset rather than printing "0 nets".
@@ -8816,7 +8848,9 @@ function buildManageTournamentHTML() {
       + `</span><button type="button" class="mgts-danger mgv-dbtn mgv-del" data-mgt-delete>Delete</button></div>`
       + `<div class="mgv-dnote">Both ask you to type the tournament name before anything happens.</div>`
     + `</div>`;
-  return header + `<div class="tv-when">${when}</div>` + mgHubTrackHTML(t) + stats + needs + rows + create + note + danger;
+  // mgHubStatusHTML rides under the Needs-you rows: the two items on this list that WRITE (Open
+  // registration, Reuse rules) report on #mgh-status, and without it their refusals were silent here.
+  return header + `<div class="tv-when">${when}</div>` + mgHubTrackHTML(t) + stats + needs + mgHubStatusHTML() + rows + create + note + danger;
 }
 
 // The Registration view (mockup r-b): THE ANNOUNCEMENT (editable textarea prefilled from the persisted value
@@ -10334,9 +10368,19 @@ async function mgTeamAddSubmit() {
 function closeMgTeamSheet() { const el = document.getElementById('mgts-sheet'); if (el) el.remove(); }
 
 // Run a sheet write, refresh state, repaint the list UNDER the sheet (the sheet is body-level → untouched).
+// Fix wave (2026-08-25 final review): the catch was a bare console.warn, so a refused write died there.
+// The pool selector is the one that hurt — the tapped pill had already been given the `on` class by the
+// caller, so a move the DB rejected left the sheet SHOWING the new pool with nothing said. Every path
+// still repaints, which is what puts the pill back on the pool the team is actually in.
 async function mgtsWrite(fn) {
   if (!state.isAdmin) return;
-  try { await fn(); await tdbRefreshTournaments(); } catch (err) { console.warn('mgts write', err); }
+  try {
+    await fn();
+    await tdbRefreshTournaments();
+  } catch (err) {
+    console.warn('mgts write', err);
+    appNotice({ title: 'That did not save', message: (err && err.message) || MG_SAVE_FAILED });
+  }
   repaintManage();
 }
 async function mgtsSaveName(teamId, el) {
@@ -11183,14 +11227,28 @@ async function mgPoolsApplyNets(pool, nets) {
   repaintManage();
 }
 
+// Fix wave (2026-08-25 final review): the double-tap guard this write shipped without. tdbSetPoolNets
+// re-nets the pool's unplayed games one row at a time, each under its own version CAS, and the versions it
+// compares against come from the collections loaded BEFORE the first tap. A second tap while the first
+// write is still open therefore sends the stale version, the CAS rejects it, and the organizer is told
+// "Another device just updated a game" about a save that had in fact landed — with the field reopened on a
+// pool whose nets were already correct. Same shape as mgTeamAddInFlight: a module flag turns the re-entry
+// into a no-op, the button greys for the duration, and the finally restores both however the path ends.
+let mgPoolsNetsInFlight = false;
+
 // Save nets from the card's inline field. The field closes with the save that succeeded and comes BACK if
 // the write was refused, so a rejected list (empty, say) can be fixed where it was typed.
 async function mgPoolsSaveNets(poolId) {
-  if (!state.isAdmin) return;
+  if (!state.isAdmin || mgPoolsNetsInFlight) return;
   const pool = (state.tournamentPools || []).find((p) => String(p.id) === String(poolId));
   if (!pool) return;
   const field = document.getElementById('pc-nin-' + poolId);
   const nets = mgPoolsParseNets(field ? field.value : '');
+  // Held by reference, not re-queried in the finally: a save that succeeds repaints the panel, so a second
+  // lookup would find a different element (or none at all).
+  const btn = document.querySelector('[data-pc-savenets]');
+  mgPoolsNetsInFlight = true;
+  if (btn) btn.disabled = true;
   try {
     mgpNetsEditPoolId = null;
     await mgPoolsApplyNets(pool, nets);
@@ -11198,6 +11256,9 @@ async function mgPoolsSaveNets(poolId) {
     mgpNetsEditPoolId = pool.id;
     repaintManage();
     appNotice({ title: 'Could not update nets', message: (err && err.message) || 'Try again.' });
+  } finally {
+    mgPoolsNetsInFlight = false;
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -11282,14 +11343,26 @@ function mgBracketTournament() {
   return byActive || manageLeadTournament();
 }
 
+// The bracket games that COUNT toward a total, in one place. A double-elimination bracket always carries a
+// reset championship (grand_final round 2), but it is only ever played when the losers side wins the first
+// one — so a bracket that never needs it would read "13 of 14" forever. It is excluded while it is still
+// empty and unplayed, and counted the moment it has teams or a result.
+// Fix wave (2026-08-25 final review, from the drive on the live August bracket): this rule used to live
+// inline in mgBracketStripHTML only, so the tournament page's Bracket row counted every main row and read
+// "26 of 31" under a strip reading "26 of 30". One helper, both callers, no way to disagree again.
+function mgBracketCountable(main) {
+  const list = Array.isArray(main) ? main : [];
+  return list.filter((m) => !(m && m.side === 'grand_final' && Number(m.round) === 2
+    && !m.team_a_id && !m.team_b_id && m.status !== 'final'));
+}
+
 // The running bracket's state in one strip (round 2026-08-25, mockup mgbk-run): what kind of event this is,
 // how many games are in, and — the line that actually runs the day — what is on a net right now. Every
-// number is derived, nothing is stored. An unplayed RESET game is left out of the total: a bracket that
-// never needs it would otherwise read "13 of 14" forever. `champName` is passed in rather than recomputed
-// so the block above and the line here can never disagree about who won.
+// number is derived, nothing is stored. `champName` is passed in rather than recomputed so the block above
+// and the line here can never disagree about who won.
 function mgBracketStripHTML(t, main, teams, champName) {
   const gn = bracketGameNumbers(main).byId;
-  const total = main.filter((m) => !(m.side === 'grand_final' && Number(m.round) === 2 && !m.team_a_id && !m.team_b_id && m.status !== 'final')).length;
+  const total = mgBracketCountable(main).length;
   const done = main.filter((m) => m.status === 'final').length;
   const nets = Number(t && t.net_count) || 0;
   const live = main.filter((m) => m.status === 'live' && m.net != null).sort((a, b) => a.net - b.net);

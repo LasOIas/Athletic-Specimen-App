@@ -1659,6 +1659,8 @@ const MANAGE_HUB_STEPS = ['Setup', 'Sign-ups', 'Check-in', 'Pools', 'Bracket', '
 //   ctx.tournaments  — every loaded tournament, for the rules-reuse source
 //   ctx.scope        — 'hub' adds the club-level items (venmo, noday); 'tournament' is the tournament page's list
 //   ctx.venueLoaded  — whether the venue columns exist on the loaded rows (0058); false → the item is dropped
+//   ctx.gameNumbers  — { matchId: N } from bracketGameNumbers, so a BRACKET game is named the way the
+//                     board names it; absent or unmatched falls back to the row's queue_order
 // kind 'jump' = a neutral-ring verb that navigates; 'fix' = an accent verb that WRITES (only the registration
 // flip and the rules reuse do). A finished tournament lists no tournament-scoped item.
 function manageNeedsYouModel(ctx) {
@@ -1715,8 +1717,15 @@ function manageNeedsYouModel(ctx) {
     const silent = matches.find((m) => m && m.status === 'live'
       && !(Number(m.score_a) > 0 || Number(m.score_b) > 0) && m.net != null);
     if (silent) {
+      // The number the ORGANIZER is looking at. On the bracket that is the board's continuous G number
+      // (bracketGameNumbers), which every other bracket surface prints — the strip, the rows, the score
+      // card, the champion line. queue_order is only the row's execution order, so naming a bracket game
+      // by it walks him to the wrong court. A POOL game keeps queue_order: that IS the number its own
+      // board prints, and bracketGameNumbers does not cover pool play.
+      const nums = (c.gameNumbers && typeof c.gameNumbers === 'object') ? c.gameNumbers : null;
+      const g = (silent.phase === 'main' && nums && nums[silent.id]) ? nums[silent.id] : silent.queue_order;
       items.push({ id: 'silent', title: 'Net ' + silent.net + ' has no score',
-        sub: (silent.queue_order ? 'G' + silent.queue_order + ' is on' : 'A game is on') + ' and nothing is entered',
+        sub: (g ? 'G' + g + ' is on' : 'A game is on') + ' and nothing is entered',
         verb: 'Enter', kind: 'jump', target: { matchId: silent.id } });
     }
   }

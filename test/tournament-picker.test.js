@@ -775,7 +775,7 @@ describe('wiring, copy, and what was deliberately NOT built', () => {
       'mgHubFlipRegistration', 'mgHubReuseRules', 'mgHubEnsureHistory',
       'mgSaveTournamentPin', 'mgAdoptStoredTournament',
       'buildMgTournamentNewHTML', 'mgTournamentPickerList',
-      'mgtlSeasonSub', 'mgtlFinishedSub', 'mgSwitcherMetaText', 'mgTournamentPhase',
+      'mgtlSeasonSub', 'mgtlFinishedSub', 'mgTournamentPhase',
       'mgEventDateLabel', 'mgTeamsClause', 'mgManagedTeamCount', 'mgTournamentRowStage',
       'mgPickTournament', 'mgAdoptTournament', 'mgActiveTournament', 'publicLiveTournament',
       'loadTournamentHistory', 'repaintManage', 'tdbRefreshTournaments'].forEach((fn) =>
@@ -784,7 +784,10 @@ describe('wiring, copy, and what was deliberately NOT built', () => {
 
   it('the chooser SCREEN’s surface is gone, so there is only ONE way to switch', () => {
     const { bridge } = loadApp();
-    ['buildMgTournamentListHTML', 'mgtlRowHTML', 'mgSwitcherCardHTML',
+    // mgSwitcherMetaText went with the card it wrote for (final review 2026-08-25): no builder called it,
+    // and it had drifted — a closed setup event read "registration closed" where the shipped hub meta line
+    // says "not open yet". A second, staler sentence for the same facts is a bug waiting for a caller.
+    ['buildMgTournamentListHTML', 'mgtlRowHTML', 'mgSwitcherCardHTML', 'mgSwitcherMetaText',
       'buildMgTournamentPickerHTML', 'mgtPickRowHTML', 'mgtHubBackToList', 'mgOpenTournamentPicker']
       .forEach((fn) => expect(bridge.defined(fn), fn + ' should have been retired').toBe('undefined'));
     bridge.seed([JULY, AUG], { active: AUG.id });

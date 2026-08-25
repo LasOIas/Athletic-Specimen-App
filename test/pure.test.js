@@ -22,6 +22,7 @@ const {
   resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
   checkinHeroModel, resolveHistoryChampion,
   settingsRuleSummary, rulesToHTML, rulesToSections,
+  manageNeedsYouModel,
 } = pure;
 
 const count = (hay, needle) => String(hay).split(needle).length - 1;
@@ -1244,5 +1245,42 @@ describe('rulesToSections — the rules document as cards (Manage handoff 2026-0
     expect(rulesToHTML('## Teams\n- 4 players\n\n## Scoring\n- To 21'))
       .toBe('<div class="rl-sect"><div class="rl-h">Teams</div><div class="rl-li"><span class="rl-dot"></span><span>4 players</span></div></div>'
         + '<div class="rl-sect"><div class="rl-h">Scoring</div><div class="rl-li"><span class="rl-dot"></span><span>To 21</span></div></div>');
+  });
+});
+
+// ── manageNeedsYouModel: the silent-game item names the game the ORGANIZER sees ───────────────────────
+// Final review 2026-08-25: the item printed 'G' + queue_order. On a bracket that is the row's execution
+// order, not the number on the board — every other bracket surface (the strip, the rows, the score card,
+// the champion line) reads bracketGameNumbers. Sending the organizer to "G6" for a game the board calls
+// G7 is the kind of mismatch that costs a minute on a live net. Pool games keep queue_order: it IS the
+// number the pool board prints, and bracketGameNumbers does not cover them.
+describe('manageNeedsYouModel — the silent-game item', () => {
+  const base = { t: { id: 'a', status: 'bracket', buy_in: '$80', rules: 'x', venue: 'y', venmo_link: 'z' },
+    teams: [], pickupDays: [{ day: '2999-01-01' }], pools: [{ id: 'p' }], tournaments: [],
+    scope: 'tournament', venueLoaded: true };
+  const live = { id: 'm', phase: 'main', net: 3, status: 'live', queue_order: 6, score_a: 0, score_b: 0 };
+
+  it('names a bracket game by its BOARD number, not by its queue order', () => {
+    const items = manageNeedsYouModel({ ...base, matches: [live], gameNumbers: { m: 7 } });
+    expect(items.map((i) => i.id)).toEqual(['silent']);
+    expect(items[0].title).toBe('Net 3 has no score');
+    expect(items[0].sub).toBe('G7 is on and nothing is entered');
+  });
+
+  it('falls back to the queue order when the board has no number for it', () => {
+    expect(manageNeedsYouModel({ ...base, matches: [live] })[0].sub).toBe('G6 is on and nothing is entered');
+    expect(manageNeedsYouModel({ ...base, matches: [live], gameNumbers: {} })[0].sub)
+      .toBe('G6 is on and nothing is entered');
+  });
+
+  it('leaves a POOL game on its queue order, which is the number its own board prints', () => {
+    const pool = { ...live, id: 'p1', phase: 'pool', queue_order: 2 };
+    const items = manageNeedsYouModel({ ...base, matches: [pool], gameNumbers: { p1: 9 } });
+    expect(items[0].sub).toBe('G2 is on and nothing is entered');
+  });
+
+  it('says "A game is on" when there is no number at all', () => {
+    const noOrder = { ...live, queue_order: 0 };
+    expect(manageNeedsYouModel({ ...base, matches: [noOrder] })[0].sub).toBe('A game is on and nothing is entered');
   });
 });

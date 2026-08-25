@@ -5767,7 +5767,19 @@ input.set-money {
 }
 .pc-pcancel { box-shadow: inset 0 0 0 1px oklch(0.88 0.005 75); color: var(--muted); }
 .pc-pbtn:hover { background: var(--accent); color: #fff; }
-.pc-nin {
+/* PORT NOTE (fix wave, final review 2026-08-25): authored as `input.pc-nin`, not `.pc-nin`. A bare class
+   is (0,1,0) and LOSES to production's `input[type="text"], ...` block at the top of this file, which is
+   (0,1,1) - so the design's field rendered as prod's 40px grey box with prod's padding, border, radius
+   and background. `input.pc-nin` ties that block on specificity and wins on source order, the same
+   Task 6 pattern `input.set-in` uses. TWO values are deliberately NOT the design's:
+     - font-size stays 16px, not the design's 12px. This is a real text input and iOS zooms the page on
+       focus below 16px; prod's block also carries `font-size: 16px !important`, which no non-important
+       declaration here could beat anyway. Weight, family and letter-spacing ARE the design's.
+     - flex stays `1` / min-width `0` (the design's own values, and prod's) rather than the Task 6
+       `none` / `auto`: the field shares a wrapping flex head with the pool name and Save nets, and a
+       flex item that cannot shrink would overflow the card on a narrow phone. Both are declared here
+       explicitly so nothing about this field depends on prod's block leaking through. */
+input.pc-nin {
   flex: 1;
   min-width: 0;
   height: 30px;
@@ -5776,11 +5788,11 @@ input.set-money {
   border-radius: 9px;
   background: #fff;
   box-shadow: inset 0 0 0 1.5px var(--accent);
-  font: 700 12px 'Inter', system-ui, sans-serif;
+  font: 700 16px 'Inter', system-ui, sans-serif;
   letter-spacing: .06em;
   color: var(--ink);
 }
-.pc-nin:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft); }
+input.pc-nin:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft); }
 /* ADDED, not in the round: Save nets re-lays the pool's unplayed games, so the open field says so. It
    takes the whole second line of the head, under the field and its button. */
 .pc-nhint { flex: 1 0 100%; order: 9; font-size: 11.5px; color: var(--muted); }
