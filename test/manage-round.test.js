@@ -117,19 +117,36 @@ function loadApp() {
       netsDirty: () => manageNetsDirty(),
       moveTeamId: () => mgpMoveTeamId,
       netsEditId: () => mgpNetsEditPoolId,
+      // Fix round 1: the tdb read-back guards are only provable by DRIVING the write against a fake
+      // PostgREST chain. supabaseClient is a const, but its "from" is a plain property, so it can be
+      // swapped for the length of one case. Returns its own undo.
+      swapSupaFrom: (fn) => { const was = supabaseClient.from; supabaseClient.from = fn; return () => { supabaseClient.from = was; }; },
+      moveTeamToPool: (teamId, poolId) => tdbMoveTeamToPool(teamId, poolId),
       // The two writes the open Pool controls can make, swapped for recorders (plus the team sheet, so a
       // Move tap that leaked through to it is visible rather than silent). This suite is offline — no tdb
-      // call is ever real — and either write may throw to drive its refusal branch.
+      // call is ever real — and any of them may throw to drive its refusal branch.
+      // Fix round 1: these six live in the SHARED vm context, so leaving them swapped would quietly break
+      // every later test in the file. The returned "restore" puts the originals back and every caller runs
+      // it in a finally.
       mockPoolWrites: (o) => {
         o = o || {};
         const calls = [];
+        const was = { tdbMoveTeamToPool, tdbSetPoolNets, tdbRefreshTournaments, repaintManage, appNotice, openMgTeamSheet };
         tdbMoveTeamToPool = async (teamId, poolId) => { calls.push(['move', teamId, poolId]); if (o.move) return o.move(teamId, poolId); };
         tdbSetPoolNets = async (pool, nets) => { calls.push(['nets', pool && pool.id, nets]); if (o.nets) return o.nets(pool, nets); };
-        tdbRefreshTournaments = async () => { calls.push(['refresh']); };
+        tdbRefreshTournaments = async () => { calls.push(['refresh']); if (o.refresh) return o.refresh(); };
         repaintManage = () => { calls.push(['repaint']); };
         appNotice = (n) => { calls.push(['notice', n && n.title]); };
         openMgTeamSheet = (id) => { calls.push(['sheet', id]); };
-        return calls;
+        const restore = () => {
+          tdbMoveTeamToPool = was.tdbMoveTeamToPool;
+          tdbSetPoolNets = was.tdbSetPoolNets;
+          tdbRefreshTournaments = was.tdbRefreshTournaments;
+          repaintManage = was.repaintManage;
+          appNotice = was.appNotice;
+          openMgTeamSheet = was.openMgTeamSheet;
+        };
+        return { calls, restore };
       },
       buildScoreSheet: (m, w) => buildMgScoreSheetHTML(m, w),
       buildBracket: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'bracket'; state.seedOverride = (opts.seedOverride === undefined ? null : opts.seedOverride); mgBracketShowDone = !!opts.showDone; return buildMgBracketHTML(); },
@@ -1550,6 +1567,44 @@ describe('Task 8 pool controls', () => {
     expect(html.slice(html.indexOf('>Pool controls<'))).not.toContain('—');   // copy law: no em dashes
   });
 
+  // Fix round 1 (the controller's ruling): the panel note above the cards is no explanation once you have
+  // scrolled to the third pool, so the card that has withheld Move says why on itself.
+  it('a pool that has played carries the locked line; a movable one does not', () => {
+    seedPools(bridge, { matches: [
+      { id: 'm1', phase: 'pool', pool_id: 'p1', net: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', score_a: 15, score_b: 9, winner_team_id: 't1', queue_order: 1 },
+      { id: 'm2', phase: 'pool', pool_id: 'p2', net: 2, status: 'scheduled', team_a_id: 't3', team_b_id: 't4', queue_order: 1 }] });
+    const html = bridge.buildMgPools({ controls: true });
+    const cardA = html.slice(html.indexOf('data-pc-card="p1"'), html.indexOf('data-pc-card="p2"'));
+    const cardB = html.slice(html.indexOf('data-pc-card="p2"'));
+    expect(cardA).toContain('<span class="pc-lock">Play has started, teams stay put.</span>');
+    expect(cardB).not.toContain('pc-lock');
+    expect(count(html, 'class="pc-lock"')).toBe(1);
+    // nothing final anywhere: neither card claims play has started
+    seedPools(bridge, { matches: UNPLAYED });
+    expect(bridge.buildMgPools({ controls: true })).not.toContain('pc-lock');
+  });
+
+  // Fix round 1: tdbDrawPoolsAtomic clamps to at least one pool, so a 2-3 team event is ONE pool. Move used
+  // to render there on `movable` alone while the picker needed another pool to exist — so the tap set
+  // mgpMoveTeamId, drew nothing, offered no Cancel, and manageNetsDirty() then bailed every background sync
+  // on a live-scoring page until the panel was closed.
+  it('a one-pool event offers no Move at all, and never claims play has started to explain it', () => {
+    seedPools(bridge, {
+      pools: [{ id: 'p1', label: 'A' }],
+      teams: [{ id: 't1', name: 'Dink Responsibly', pool_id: 'p1' }, { id: 't2', name: 'Sets and Reps', pool_id: 'p1' }, { id: 't3', name: 'Block Party', pool_id: 'p1' }],
+      matches: [{ id: 'a1', phase: 'pool', pool_id: 'p1', net: 1, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 1 }],
+    });
+    const html = bridge.buildMgPools({ controls: true });
+    expect(count(html, 'class="pc-card"')).toBe(1);
+    expect(html).toContain('data-mgps-team="t1"');   // the rows are all still there
+    expect(html).not.toContain('data-pc-move=');     // there is simply nowhere to move to
+    expect(html).not.toContain('pc-lock');           // and nothing has been played, so no lock line either
+    // and the dead-end state cannot be reached even if the module var somehow named a team
+    const forced = bridge.buildMgPools({ controls: true, moveTeam: 't1' });
+    expect(forced).not.toContain('class="pc-pick"');
+    expect(forced).not.toContain('data-pc-pick=');
+  });
+
   it('the collapsed row and the drawn-not-started step are untouched by any of it', () => {
     seedPools(bridge, { matches: UNPLAYED });
     const shut = bridge.buildMgPools();
@@ -1598,54 +1653,96 @@ describe('Task 8 pool controls', () => {
     seedPools(bridge, { matches: UNPLAYED });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true });
-    const calls = bridge.mockPoolWrites({});
-    const opened = await withDelegate(async (tap) => {
-      // a real tap on the Move label matches BOTH hooks — the label sits inside the row that carries
-      // data-mgps-team. If the order were wrong this would also open the team sheet on top of the picker.
-      tap(['data-pc-move', 'data-mgps-team'], 't1');
-      const was = bridge.moveTeamId();
-      tap('data-pc-pick', 't1:p2');
-      await new Promise((r) => setTimeout(r, 0));
-      return was;
-    });
-    expect(opened).toBe('t1');
-    expect(calls).toEqual([['repaint'], ['move', 't1', 'p2'], ['refresh'], ['repaint']]);
-    expect(calls.some((c) => c[0] === 'sheet')).toBe(false);
-    expect(bridge.moveTeamId()).toBe(null);
+    const { calls, restore } = bridge.mockPoolWrites({});
+    try {
+      const opened = await withDelegate(async (tap) => {
+        // a real tap on the Move label matches BOTH hooks — the label sits inside the row that carries
+        // data-mgps-team. If the order were wrong this would also open the team sheet on top of the picker.
+        tap(['data-pc-move', 'data-mgps-team'], 't1');
+        const was = bridge.moveTeamId();
+        tap('data-pc-pick', 't1:p2');
+        await new Promise((r) => setTimeout(r, 0));
+        return was;
+      });
+      expect(opened).toBe('t1');
+      expect(calls).toEqual([['repaint'], ['move', 't1', 'p2'], ['refresh'], ['repaint']]);
+      expect(calls.some((c) => c[0] === 'sheet')).toBe(false);
+      expect(bridge.moveTeamId()).toBe(null);
+    } finally { restore(); }
   });
 
   it('the delegate: the team row itself still opens the team sheet, and Cancel closes the picker', () => {
     seedPools(bridge, { matches: UNPLAYED });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true, moveTeam: 't1' });
-    const calls = bridge.mockPoolWrites({});
-    withDelegate((tap) => {
-      tap('data-mgps-team', 't1');          // the name, not the Move label
-      tap('data-pc-cancel');
-    });
-    expect(calls).toContainEqual(['sheet', 't1']);
-    expect(bridge.moveTeamId()).toBe(null);
+    const { calls, restore } = bridge.mockPoolWrites({});
+    try {
+      withDelegate((tap) => {
+        tap('data-mgps-team', 't1');          // the name, not the Move label
+        tap('data-pc-cancel');
+      });
+      expect(calls).toContainEqual(['sheet', 't1']);
+      expect(bridge.moveTeamId()).toBe(null);
+    } finally { restore(); }
+  });
+
+  // Fix round 1: opening a picker is not a reason to throw away a net list typed into another card — that
+  // is the same unsaved-work defect the poll guard exists to prevent, reached through a different door.
+  it('opening a move picker keeps an open nets field, and Done clears both', () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    bridge.setMgtView('pools');
+    bridge.buildMgPools({ controls: true, netsEdit: 'p1' });
+    const { calls, restore } = bridge.mockPoolWrites({});
+    try {
+      withDelegate((tap) => { tap(['data-pc-move', 'data-mgps-team'], 't3'); });
+      expect(bridge.moveTeamId()).toBe('t3');
+      expect(bridge.netsEditId()).toBe('p1');     // the typed field survived the unrelated tap
+      withDelegate((tap) => { tap('data-mgps-controls'); });   // Done
+      expect(bridge.moveTeamId()).toBe(null);
+      expect(bridge.netsEditId()).toBe(null);
+      expect(calls.length).toBeGreaterThan(0);
+    } finally { restore(); }
   });
 
   it('a refused move says why and leaves the picker open, rather than reporting a move that never happened', async () => {
     seedPools(bridge, { matches: UNPLAYED });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true, moveTeam: 't1' });
-    const calls = bridge.mockPoolWrites({ move: () => { throw new Error('new row violates row-level security'); } });
-    await withDelegate(async (tap) => {
-      tap('data-pc-pick', 't1:p2');
-      await new Promise((r) => setTimeout(r, 0));
-    });
-    expect(calls.map((c) => c[0])).toEqual(['move', 'notice']);
-    expect(calls).toContainEqual(['notice', 'Could not move the team']);
-    expect(bridge.moveTeamId()).toBe('t1');   // still open on the team that did not move
+    const { calls, restore } = bridge.mockPoolWrites({ move: () => { throw new Error('The move did not save. Check you are signed in as an admin.'); } });
+    try {
+      await withDelegate(async (tap) => {
+        tap('data-pc-pick', 't1:p2');
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(calls.map((c) => c[0])).toEqual(['move', 'notice']);
+      expect(calls).toContainEqual(['notice', 'Could not move the team']);
+      expect(bridge.moveTeamId()).toBe('t1');   // still open on the team that did not move
+    } finally { restore(); }
+  });
+
+  // Fix round 1: the write and the redraw fail for different reasons. A refresh that fails AFTER the move
+  // landed must not be reported as a failed move — that notice invites a second tap on a write that worked.
+  it('a landed move whose refresh fails is never reported as a failed move', async () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    bridge.setMgtView('pools');
+    bridge.buildMgPools({ controls: true, moveTeam: 't1' });
+    const { calls, restore } = bridge.mockPoolWrites({ refresh: () => { throw new Error('Failed to fetch'); } });
+    try {
+      await withDelegate(async (tap) => {
+        tap('data-pc-pick', 't1:p2');
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(calls).toEqual([['move', 't1', 'p2'], ['refresh'], ['notice', 'The team moved']]);
+      expect(calls).not.toContainEqual(['notice', 'Could not move the team']);
+      expect(bridge.moveTeamId()).toBe(null);   // the picker closed: the move DID happen
+    } finally { restore(); }
   });
 
   it('the delegate: Edit nets opens the field and Save nets writes what was TYPED in it', async () => {
     seedPools(bridge, { matches: UNPLAYED });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true });
-    const calls = bridge.mockPoolWrites({});
+    const { calls, restore } = bridge.mockPoolWrites({});
     const doc = bridge.doc;
     const realGet = doc.getElementById;
     doc.getElementById = (id) => (id === 'pc-nin-p1' ? { value: ' 2, 3 ,' } : null);
@@ -1656,16 +1753,35 @@ describe('Task 8 pool controls', () => {
         tap('data-pc-savenets', 'p1');
         await new Promise((r) => setTimeout(r, 0));
       });
-    } finally { doc.getElementById = realGet; }
-    expect(calls).toEqual([['repaint'], ['nets', 'p1', [2, 3]], ['refresh'], ['repaint']]);
-    expect(bridge.netsEditId()).toBe(null);   // the field closed with the save that succeeded
+      expect(calls).toEqual([['repaint'], ['nets', 'p1', [2, 3]], ['refresh'], ['repaint']]);
+      expect(bridge.netsEditId()).toBe(null);   // the field closed with the save that succeeded
+    } finally { restore(); doc.getElementById = realGet; }
+  });
+
+  // Fix round 1: the field the repaint just drew is a new element, so the caret has to be put in it one
+  // tick later. The sandbox stubs setTimeout to a noop, so the test swaps in an immediate one.
+  it('the delegate: Edit nets puts the caret in the field it just opened', () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    bridge.setMgtView('pools');
+    bridge.buildMgPools({ controls: true });
+    const { calls, restore } = bridge.mockPoolWrites({});
+    const doc = bridge.doc;
+    const realGet = doc.getElementById;
+    const focused = [];
+    doc.getElementById = (id) => (id === 'pc-nin-p1' ? { value: '1, 2, 3', focus: () => focused.push(id) } : null);
+    const realTimeout = bridge.swapTimeout((cb) => { cb(); return 0; });
+    try {
+      withDelegate((tap) => { tap('data-pc-editnets', 'p1'); });
+      expect(focused).toEqual(['pc-nin-p1']);
+      expect(calls).toContainEqual(['repaint']);   // and the focus happens AFTER the repaint drew it
+    } finally { bridge.swapTimeout(realTimeout); restore(); doc.getElementById = realGet; }
   });
 
   it('a refused nets write says why and brings the field back so the list can be fixed', async () => {
     seedPools(bridge, { matches: UNPLAYED });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true, netsEdit: 'p1' });
-    const calls = bridge.mockPoolWrites({ nets: () => { throw new Error('A pool needs at least one net.'); } });
+    const { calls, restore } = bridge.mockPoolWrites({ nets: () => { throw new Error('A pool needs at least one net.'); } });
     const doc = bridge.doc;
     const realGet = doc.getElementById;
     doc.getElementById = (id) => (id === 'pc-nin-p1' ? { value: 'nonsense' } : null);
@@ -1674,9 +1790,34 @@ describe('Task 8 pool controls', () => {
         tap('data-pc-savenets', 'p1');
         await new Promise((r) => setTimeout(r, 0));
       });
-    } finally { doc.getElementById = realGet; }
-    expect(calls).toEqual([['nets', 'p1', []], ['repaint'], ['notice', 'Could not update nets']]);
-    expect(bridge.netsEditId()).toBe('p1');
+      expect(calls).toEqual([['nets', 'p1', []], ['repaint'], ['notice', 'Could not update nets']]);
+      expect(bridge.netsEditId()).toBe('p1');
+    } finally { restore(); doc.getElementById = realGet; }
+  });
+
+  // Fix round 1: RLS on teams is a row FILTER, not a RAISE — an UPDATE from a session that has drifted off
+  // organizer membership matches zero rows and comes back error: null. Driven against a fake PostgREST
+  // chain, because a grep for ".select('id')" proves nothing about what the function DOES with the result.
+  it('tdbMoveTeamToPool refuses to report a move that RLS silently dropped', async () => {
+    const seen = [];
+    let rows = [];
+    const undo = bridge.swapSupaFrom((table) => {
+      seen.push(['from', table]);
+      return { update: (patch) => {
+        seen.push(['update', patch]);
+        return { eq: (col, val) => {
+          seen.push(['eq', col, val]);
+          return { select: (cols) => { seen.push(['select', cols]); return Promise.resolve({ data: rows, error: null }); } };
+        } };
+      } };
+    });
+    try {
+      await expect(bridge.moveTeamToPool('t1', 'p2')).rejects.toThrow('The move did not save. Check you are signed in as an admin.');
+      expect(seen).toEqual([['from', 'teams'], ['update', { pool_id: 'p2' }], ['eq', 'id', 't1'], ['select', 'id']]);
+      // the row comes back: the same call resolves, with no invented error
+      rows = [{ id: 't1' }];
+      await expect(bridge.moveTeamToPool('t1', 'p2')).resolves.toBeUndefined();
+    } finally { undo(); }
   });
 
   it('the poll guard: a typed nets field or an open picker is unsaved work', () => {
@@ -1735,6 +1876,7 @@ describe('Task 8 pool controls', () => {
     expect(body).toContain('.pc-pick {');
     expect(body).toContain('.pc-nin {');
     expect(body).toContain('.pc-nhint {');
+    expect(body).toContain('.pc-lock {');
     expect(body).not.toContain('.pc-toggle');
     expect(body).not.toContain('.pc-confirm');
     expect(body).not.toContain('.pc-cin');

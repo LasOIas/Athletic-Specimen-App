@@ -2243,10 +2243,15 @@ async function tdbListMatches(tournamentId, phase) {
   return data || [];
 }
 
+// Fix round 1 (2026-08-25): a MANDATORY read-back, the same guard tdbDeleteTournament carries. RLS on
+// teams is a row FILTER, not a RAISE — a session that has drifted off organizer membership gets an UPDATE
+// matching zero rows back as `error: null`, so without this the caller would report a move that never
+// happened and flash the destination card green over it. Zero rows returned = the write did not land.
 async function tdbMoveTeamToPool(teamId, poolId) {
   if (!supabaseClient || !teamId) return;
-  const { error } = await supabaseClient.from('teams').update({ pool_id: poolId || null }).eq('id', teamId);
+  const { data, error } = await supabaseClient.from('teams').update({ pool_id: poolId || null }).eq('id', teamId).select('id');
   if (error) { console.error('tdbMoveTeamToPool', error); throw error; }
+  if (!Array.isArray(data) || !data.length) throw new Error('The move did not save. Check you are signed in as an admin.');
 }
 
 // Wave 1c (2026-06-25): in-flight guard for the pool-setup writers. tdbDrawPools/tdbStartPoolPlay
@@ -10719,8 +10724,13 @@ function mgPoolCardHTML(pool, teams, pools, matches) {
       + `<button type="button" class="pc-nbtn" data-pc-savenets="${escapeHTMLText(pid)}">Save nets</button>`
     : `<span class="pc-nets">${nets.length ? 'Nets ' + escapeHTML(formatNetList(nets)) : 'No nets yet'}</span>`
       + `<button type="button" class="pc-nbtn" data-pc-editnets="${escapeHTMLText(pid)}">Edit nets</button>`;
-  const movable = !matches.some((m) => String(m.pool_id) === pid && m.status === 'final');
+  // Fix round 1: `others` is computed FIRST, because a one-pool event (tdbDrawPoolsAtomic clamps to at
+  // least one pool, so 2-3 teams is a single pool) has nowhere to move a team TO. Offering Move there set
+  // mgpMoveTeamId, drew an empty picker with no Cancel in it, and then manageNetsDirty() bailed every
+  // background sync on a live-scoring page until the panel was closed.
   const others = pools.filter((p) => String(p.id) !== pid);
+  const played = matches.some((m) => String(m.pool_id) === pid && m.status === 'final');
+  const movable = others.length > 0 && !played;
   const rows = mine.length
     ? mine.map((tm) => {
       const tid = String(tm.id);
@@ -10739,8 +10749,13 @@ function mgPoolCardHTML(pool, teams, pools, matches) {
         + `</div>`;
     }).join('')
     : `<div class="mgps-note">No teams in this pool.</div>`;
+  // Fix round 1 (the controller's ruling): a card that has withheld Move says so on the card, rather than
+  // leaving the panel note above two cards as the only explanation. Gated on `played`, NOT on `!movable` —
+  // a one-pool event also has no Move, and telling that organizer "play has started" when nothing has been
+  // scored would be copy the app cannot honour.
+  const lock = played ? `<span class="pc-lock">Play has started, teams stay put.</span>` : '';
   return `<div class="pc-card" data-pc-card="${escapeHTMLText(pid)}">`
-    + `<div class="pc-hd"><span class="pc-name">Pool ${escapeHTML(label)}</span>${head}</div>`
+    + `<div class="pc-hd"><span class="pc-name">Pool ${escapeHTML(label)}</span>${head}${lock}</div>`
     + rows + `</div>`;
 }
 
@@ -11110,15 +11125,37 @@ async function mgPoolsSaveNets(poolId) {
 // answer to "where did it go" is on screen rather than a scroll away.
 async function mgPoolsMoveTeam(teamId, poolId) {
   if (!state.isAdmin || !teamId || !poolId) return;
+  // TWO tries on purpose (fix round 1). The write and the redraw fail for different reasons and mean
+  // different things: a refresh that fails AFTER the move landed must never be reported as "could not move
+  // the team", because the team DID move and that notice invites a second tap on a write that succeeded.
   try {
     await tdbMoveTeamToPool(teamId, poolId);
-    mgpMoveTeamId = null;
+  } catch (err) {
+    appNotice({ title: 'Could not move the team', message: (err && err.message) || 'Try again.' });
+    return;
+  }
+  mgpMoveTeamId = null;
+  try {
     await tdbRefreshTournaments();
     repaintManage();
     let card = null;
     try { card = document.querySelector('[data-pc-card="' + String(poolId).replace(/["\\]/g, '\\$&') + '"]'); } catch { card = null; }
     mPlay(card, 'm-flash', 600);
-  } catch (err) { appNotice({ title: 'Could not move the team', message: (err && err.message) || 'Try again.' }); }
+  } catch (err) {
+    appNotice({ title: 'The team moved', message: 'The page could not refresh just now. The next sync will show it in its new pool.' });
+  }
+}
+
+// The inline nets field the repaint just drew is a NEW element, so focusing it has to wait one tick past
+// repaintManage's innerHTML swap. Null-guarded at every step: a repaint the poll guard bailed, or a panel
+// that closed under the tap, simply leaves nothing to focus.
+function mgpFocusNetsField(poolId) {
+  setTimeout(() => {
+    try {
+      const el = document.getElementById('pc-nin-' + poolId);
+      if (el && typeof el.focus === 'function') el.focus();
+    } catch {}
+  }, 0);
 }
 
 async function mgPoolsResetPools() {
@@ -12768,7 +12805,8 @@ function attachHandlers() {
           if (pcMove) {
             const mvId = pcMove.getAttribute('data-pc-move');
             mgpMoveTeamId = (mgpMoveTeamId === mvId ? null : mvId);   // a second tap on Move closes it again
-            mgpNetsEditPoolId = null;
+            // Fix round 1: mgpNetsEditPoolId deliberately SURVIVES. A nets list typed into another card is
+            // unsaved work, and closing it from an unrelated control is the very thing this guards against.
             repaintManage();
             return;
           }
@@ -12780,7 +12818,13 @@ function attachHandlers() {
           }
           if (e.target.closest('[data-pc-cancel]')) { mgpMoveTeamId = null; repaintManage(); return; }
           const pcEdit = e.target.closest('[data-pc-editnets]');
-          if (pcEdit) { mgpNetsEditPoolId = pcEdit.getAttribute('data-pc-editnets'); mgpMoveTeamId = null; repaintManage(); return; }
+          if (pcEdit) {
+            mgpNetsEditPoolId = pcEdit.getAttribute('data-pc-editnets');
+            mgpMoveTeamId = null;
+            repaintManage();
+            mgpFocusNetsField(mgpNetsEditPoolId);   // the caret lands in the field the tap just opened
+            return;
+          }
           const pcSave = e.target.closest('[data-pc-savenets]');
           if (pcSave) { void mgPoolsSaveNets(pcSave.getAttribute('data-pc-savenets')); return; }
           const psTeam = e.target.closest('[data-mgps-team]');
