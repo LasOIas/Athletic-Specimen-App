@@ -278,6 +278,9 @@ function loadApp() {
       resend: (kind, email) => authResend(kind, email),
       friendlyError: (err, signup) => friendlyAuthError(err, signup),
       tab: (t) => activateMainTab(t),
+      // Flash fix 2026-08-25: the entrance-once flag and the tab, so a case can stage a same-tab re-render.
+      setActiveTab: (t) => { activeMainTab = t; },
+      resetEntrance: () => { activateMainTab._entered = false; },
       setView: (v) => { pdTournamentView = v; },
       // The module vars the overlays keep between renders. reset() clears them so a cooldown or a typed
       // address can never leak from one case into the next (this suite shares one vm context).
@@ -2546,5 +2549,33 @@ describe('Account round - the harness starts every case from the same place', ()
     // The banned form is spelled in two pieces because this file is grepping itself.
     expect(harness).toContain('return dflt === undefined ? { data: {}, error: null } : dflt;');
     expect(harness).not.toContain('return dflt ' + '|| {');
+  });
+});
+
+describe('Motion - the page entrance plays once per navigation, not once per render', () => {
+  beforeEach(() => bridge.reset());
+
+  it('the first paint enters, a same-tab re-render stays still, a tab change enters again', () => {
+    const body = bridge.doc.body;
+    bridge.resetEntrance();
+    bridge.setActiveTab('home');
+    body.classList.remove('m-enter');
+    bridge.tab('home');
+    expect(body.classList.contains('m-enter')).toBe(true);
+    body.classList.remove('m-enter');
+    bridge.tab('home');
+    expect(body.classList.contains('m-enter')).toBe(false);
+    bridge.tab('tournament');
+    expect(body.classList.contains('m-enter')).toBe(true);
+    body.classList.remove('m-enter');
+    bridge.tab('tournament');
+    expect(body.classList.contains('m-enter')).toBe(false);
+  });
+
+  it('the source says so: mEnter is conditional inside activateMainTab', () => {
+    const i = appSrc.indexOf('function activateMainTab(');
+    const slice = appSrc.slice(i, i + 1600);
+    expect(slice).toContain('tab !== prevTab || !activateMainTab._entered');
+    expect(slice).not.toMatch(/\n\s*mEnter\(\)\;/);
   });
 });

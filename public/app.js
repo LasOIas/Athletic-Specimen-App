@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.32'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.33'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -13683,9 +13683,15 @@ function activateMainTab(tab) {
   // Check In rework (Mike 2026-07-10): the public Check In tab only exists on the pickup-session day —
   // any stale route to it (saved tab, mid-visit nav rebuild after the session hides) bounces to Home.
   if (tab === 'players' && !checkinNavVisible()) tab = 'home';
+  const prevTab = activeMainTab;
   activeMainTab = tab;
   sessionStorage.setItem(currentTabKey(), tab);
-  mEnter(); // motion (2026-08-24): a tab change is a real navigation — the screen may arrive
+  // motion (2026-08-24): a tab change is a real navigation, the screen may arrive.
+  // Flash fix (Mike 2026-08-25, "it flashes like 5 times"): render() ends in activateMainTab(activeMainTab)
+  // and boot runs FOUR full renders in under a second (the paint, INITIAL_SESSION, the post-sign-in work,
+  // the name load), so an unconditional mEnter() replayed the whole page entrance each time. Enter on the
+  // first paint and on a tab CHANGE only; a same-tab re-render keeps the screen still.
+  if (tab !== prevTab || !activateMainTab._entered) { activateMainTab._entered = true; mEnter(); }
   // e2e catch 2026-07-11: entering Manage glues the loaded tournament data to the resolved tournament
   // (activeTournamentId only ever followed the old shell's select flow before this).
   if (tab === 'manage' && state.isAdmin) mgSyncActiveTournament();
