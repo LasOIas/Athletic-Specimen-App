@@ -17,7 +17,7 @@
 - Line endings: `app.js` LF; `pure.js` + `styles.css` CRLF (count `\r\n` vs `\n` before and after). Never `git stash` a `public/` file.
 - No em dashes; never "night"; no neon; skill never public; passwords never trimmed, logged, echoed or placed in `state`; a drive never types a real password; no Supabase write in a drive.
 - New `!important` only as the four documented iOS counters (`.au-reveal` 13px, `.au-alt2` 13.5px, `.acc-out, .acc-close` 15px) with a PORT NOTE each; no wildcard motion selectors; PORT NOTEs on every ported block.
-- Every `redirectTo` / `emailRedirectTo` is `location.origin`.
+- Every `redirectTo` / `emailRedirectTo` is `location.origin`, and `flowType` stays the client default (implicit): the OAuth tokens come back in the URL fragment and `detectSessionInUrl` already consumes them.
 - The design files: `docs/design-handoffs/2026-08-24/account/design/` (`_rounds.css:2306-2396` is the CSS; `screens/*.html` carry the markup — the PNGs are unusable).
 - Test harness: `test/manage-round.test.js:11-127` (`loadApp()` + `__bridge`) with the document-stub upgrade defined in Task 1.
 
@@ -343,10 +343,880 @@ with `function accRow(view, label, value, tag) { return '<button type="button" c
 
 ---
 
+### Task 8: Continue with Google
+
+> Sits BEFORE Task 7 on purpose: Task 7 is the round's single drive and its only vault write, so the
+> Google button has to be in the bytes that drive looks at. Build order for the round is 4, 5, 6, 8, 7.
+
+**Files:**
+- Modify: `public/pure.js` (`splitFullName`, plus its `module.exports` entry)
+- Modify: `public/app.js` (the `AUTH_*` const block beside `AUTH_MAIL_SVG` `:6203`; `authGoogleButtonHTML`
+  beside `authFieldHTML` `:6265`; the `formInner` tail, between the submit at `:6357` and the forgot
+  ternary at `:6358`; the per-paint id bind beside `#auth-alt` in `renderAuthPageInner` `:6375`; the
+  claim-intent helpers immediately ABOVE `let claimIntent = false;` `:6395` and the boot call immediately
+  BELOW it; the three clear sites `:6372`, `:7080`, `:7099`; `onGoogleSignIn` beside `onAuthSubmit`
+  `:6665`; `googleNameFromSession` beside `promptNameFillIfNeeded` `:6905`, the fall-through at `:6931`,
+  and `openNameFillOverlay` `:6934`)
+- Modify: `public/styles.css` (append `.au-google` and `.au-or` at the END of the file, inside the
+  `ACCOUNT DESIGN ROUND - 2026-08-25` banner opened at `:6037`; the file ends at 6141 today)
+- Modify: `test/account-round.test.js` (`AUTH_CONTROL_IDS`; `supaStub.auth`; the `from` stub; the
+  `location` stub; the sandbox's two storages; the bridge epilogue; `bridge.reset`; a new `describe`
+  block appended after the last one)
+- Create: nothing.
+
+Every line number here is as of `a248410` (Task 4 landed, `APP_VERSION = '2026.08.25.23'`). Tasks 5 and 6
+move everything below `renderAcctPageInner`; every anchor above is NAMED, so find the name first and read
+the number as a hint.
+
+**Interfaces:**
+- Consumes (Tasks 1 to 3): `renderAuthPageInner`'s one `formInner` template, which already serves both
+  `signin` and `signup` (the only per-mode differences in that tail are the two ternaries at `:6358` and
+  `:6359`); its per-paint id binds (`#auth-alt` `:6375`, `#auth-resend` `:6381`) as the shape to copy; the
+  `#auth-err` line every form state renders; `authBindOverlay`'s one-delegate-per-overlay rule (which is
+  exactly what this task must NOT reuse); the `AUTH_*` const block; `closeGatePage`; and the harness names
+  `bridge.reset` / `bridge.openAuth` / `bridge.supaNext` / `bridge.supaCalls` / `bridge.registry` /
+  `bridge.flushTimers` / `bridge.getClaimIntent` / `bridge.setClaimIntent` / `bridge.nameFill` /
+  `bridge.authEvent` / `bridge.setSignedIn` / `bridge.setSignedOut` / `bridge.getState`.
+  `authFieldHTML` is the SHAPE the new markup helper copies (a plain string builder called from inside
+  `formInner`), not a function this task calls.
+- Produces (app): `AUTH_GOOGLE_SVG`, `AUTH_GOOGLE_LABEL` (`'Continue with Google'`),
+  `AUTH_CLAIM_INTENT_KEY` (`'athletic_specimen_claim_intent'`), `authGoogleButtonHTML()`,
+  `async function onGoogleSignIn()`, `authPersistClaimIntent()`, `authRestoreClaimIntent()`,
+  `authForgetClaimIntent()`, `authClearClaimIntent()`, `googleNameFromSession(session)`, and
+  `openNameFillOverlay(prefill)` gaining ONE optional argument (its other caller, the register success
+  screen at `public/app.js:299`, passes nothing and is untouched).
+- Produces (pure): `splitFullName(full)`.
+- Produces (test): `bridge.session`, `bridge.assigns()`, `bridge.oauth()`, `bridge.restoreClaimIntent()`,
+  `bridge.getAccountName()`, `bridge.connectRuns()`, `bridge.setConnectAttempted(v)`.
+- `onGoogleSignIn`, `authPersistClaimIntent`, `authRestoreClaimIntent`, `authForgetClaimIntent`,
+  `authClearClaimIntent` and `googleNameFromSession` MUST be top level `function` declarations: the bridge
+  epilogue is a template string concatenated onto `app.js` inside the same vm context, so it can only
+  close over top level names.
+
+**Mike's four calls (AskUserQuestion, 2026-08-25), which the steps below implement and may not drift from:**
+
+1. **Screens.** The button appears on BOTH the sign-in and the create-account forms, with one string,
+   "Continue with Google". Not on forgot, not on either sent screen, not on the wall, and never on a
+   signed-in surface (`#acct-page`, the account card). The last part is not taste: `signInWithOAuth`'s
+   first act is `await this._removeSession()` and that function notifies nobody
+   (gotrue-js 2.62.2 `GoTrueClient.ts:516-517`, `:1951-1955`), so a signed-in person who taps it and then
+   backs out at Google looks signed in until their next reload, when they are not (HAZARD H4).
+2. **The name.** Keep the name-fill overlay, PREFILL it from the Google identity's
+   `user_metadata.full_name` (fallback `name`), split on the LAST space, and let the person tap Save or
+   fix the split. Nothing is claimed on a roster until they save. No migration, no silent seeding.
+   Google sends no `given_name` and no `family_name` on either provider path
+   (supabase/auth `internal/api/provider/google.go:13-22`, `:120-131` and `oidc.go:107-117`; contrast
+   Azure at `oidc.go:251-256`, which does set them), so a last-space split is the only name available and
+   it is a GUESS: "Mary Jo Van Der Berg" splits wrong. `connect_profile_by_name` links roster rows on an
+   exact name match and inserts APPROVED `player_claims` (`db/migrations/0053_tournament_identity.sql:73-127`),
+   which is not a claim to make on somebody's behalf from a string they never typed here.
+3. **The look.** Full width, white (`#FFFFFF`), UNDER the primary Sign in / Create account button, with an
+   OR hairline divider row above it. The mark is Google's CURRENT gradient G, inline SVG. Same 48px height
+   and 11px radius as `.auth-submit` (`public/styles.css:2084`), which is literally the "approximately the
+   same size and similar visual weight" the guidelines ask for. The divider reuses `.auth-label`'s type
+   spec (`public/styles.css:2076`). New CSS is `.au-google` and `.au-or` under the ACCOUNT banner, with a
+   PORT NOTE naming Google's branding rules for the hardcoded white and the mark. No new `!important`, no
+   wildcard motion selectors, no em dashes.
+4. **Confirm email stays OFF.** No warning copy on the button, and no handling of the obfuscated
+   fake-success signup (HAZARD H3) in this task. Step 11 carries the standing note instead.
+
+- [ ] **Step 1: The mark and the two strings.** Add beside `AUTH_MAIL_SVG` (`public/app.js:6203`).
+
+Provenance: Google's own bundle, `developers.google.com/static/identity/images/signin-assets.zip`
+(HTTP 200, 855303 bytes, 24 SVGs), file
+`Android + Web/SVG/Light/Theme=Light, Show text=No, Shape=Square, Platform=Android+Web.svg`, with only the
+two button chrome paths removed, the `viewBox` cropped to `10 10 20 20` and the Figma ids renamed to `g`.
+No path data, no color and no gradient stop was touched, which is the route the guidelines sanction ("If
+you need to create your own custom size Google logo, start with any of the logo sizes included in the
+download bundle"). The same extract is saved at `scratchpad/g-mark-gradient.svg` (10338 bytes, 65 lines)
+and is reproduced in full at the end of this step so the task does not depend on a temp folder surviving.
+Verified safe for a single-quoted JS string literal: 0 single quotes, 0 backticks, 0 `${`, 0 backslashes,
+0 em dashes, and 0 of the four outdated hexes.
+
+```js
+// Google sign-in (Account round 2026-08-25, Mike's call 3). The mark is Google's CURRENT asset: a masked
+// conic gradient. The flat four-color G that every older tutorial shows is the "outdated Google G" their
+// guidelines list under Don't, and it appears in ZERO of the 24 SVGs in the official bundle. Do not swap
+// it for a hand-drawn one: the size and the color of the G are the two things the guidelines say outright
+// may not be changed, and a monochrome G is listed under Don't as well.
+const AUTH_GOOGLE_SVG = '[the mark below, its 65 lines joined with no separator]';
+// One of Google's three approved strings ("Sign in with Google" / "Sign up with Google" / "Continue with
+// Google"). "Continue" is the only one that is honest on BOTH screens: a Supabase OAuth redirect has no
+// separate sign-up, the first redirect creates the user, so a button that said "Sign up with Google" on
+// one screen would lie to the returning player who taps it and lands in their existing account.
+const AUTH_GOOGLE_LABEL = 'Continue with Google';
+```
+
+The mark, verbatim:
+
+```svg
+<svg viewBox="10 10 20 20" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+<mask id="mask0_g" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="10" y="10" width="20" height="20">
+<path d="M29.3987 18.1814H19.9849V22.0445H25.3598C25.1286 23.294 24.4294 24.3596 23.3676 25.0712C22.4746 25.6716 21.3266 26.0211 19.9849 26.0211C17.3864 26.0211 15.1823 24.2666 14.3947 21.9004C14.1952 21.2989 14.0853 20.6599 14.0853 19.9983C14.0853 19.3367 14.1952 18.6966 14.3947 18.0962C15.1823 15.7311 17.3864 13.9755 19.9849 13.9755C21.4524 13.9755 22.767 14.4816 23.8039 15.4713L26.6653 12.6057C24.936 10.9908 22.6786 10 19.9849 10C16.0832 10 12.705 12.2414 11.0618 15.5076C10.383 16.8592 10 18.3834 10 19.9994C10 21.6155 10.383 23.1396 11.0618 24.4913C12.705 27.7597 16.0832 30 19.9849 30C22.6797 30 24.9485 29.1137 26.6018 27.5861C28.4887 25.8452 29.5732 23.2702 29.5732 20.2275C29.5732 19.5182 29.5131 18.835 29.3987 18.1825V18.1814Z" fill="#E94FFF"/>
+</mask>
+<g mask="url(#mask0_g)">
+<g filter="url(#filter0_f_g)">
+<g clip-path="url(#paint0_angular_g_clip_path)" data-figma-skip-parse="true"><g transform="matrix(0.00804129 -0.00805186 0.00804128 0.00805186 19.6819 19.7927)"><foreignObject x="-2105.64" y="-2105.64" width="4211.29" height="4211.29"><div xmlns="http://www.w3.org/1999/xhtml" style="background:conic-gradient(from 90deg,rgba(255, 70, 65, 1) 0deg,rgba(255, 70, 65, 1) 4.14555deg,rgba(49, 134, 255, 1) 39.154deg,rgba(49, 134, 255, 1) 72.0044deg,rgba(0, 165, 183, 1) 96.7463deg,rgba(14, 188, 95, 1) 120.897deg,rgba(14, 188, 95, 1) 154.722deg,rgba(108, 196, 0, 1) 179.136deg,rgba(255, 204, 0, 1) 203.588deg,rgba(255, 211, 20, 1) 226.915deg,rgba(255, 204, 0, 1) 251.688deg,rgba(255, 106, 43, 1) 273.129deg,rgba(253, 70, 65, 1) 289.305deg,rgba(255, 70, 65, 1) 359.593deg,rgba(255, 70, 65, 1) 360deg);height:100%;width:100%;opacity:1"></div></foreignObject></g></g><path d="M7.25922 19.7927C7.25922 12.6759 13.0209 6.90668 20.1283 6.90668C27.2357 6.90668 32.9973 12.6759 32.9973 19.7927C32.9973 26.9094 27.2357 32.6786 20.1283 32.6786C13.0209 32.6786 7.25921 26.9094 7.25922 19.7927Z" data-figma-gradient-fill="{&#34;type&#34;:&#34;GRADIENT_ANGULAR&#34;,&#34;stops&#34;:[{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.011515417136251926},{&#34;color&#34;:{&#34;r&#34;:0.19215686619281769,&#34;g&#34;:0.52549022436141968,&#34;b&#34;:1.0,&#34;a&#34;:1.0},&#34;position&#34;:0.10876122117042542},{&#34;color&#34;:{&#34;r&#34;:0.19215686619281769,&#34;g&#34;:0.52549022436141968,&#34;b&#34;:1.0,&#34;a&#34;:1.0},&#34;position&#34;:0.20001229643821716},{&#34;color&#34;:{&#34;r&#34;:0.0,&#34;g&#34;:0.64705884456634521,&#34;b&#34;:0.71764707565307617,&#34;a&#34;:1.0},&#34;position&#34;:0.26873961091041565},{&#34;color&#34;:{&#34;r&#34;:0.054901961237192154,&#34;g&#34;:0.73725491762161255,&#34;b&#34;:0.37254902720451355,&#34;a&#34;:1.0},&#34;position&#34;:0.33582508563995361},{&#34;color&#34;:{&#34;r&#34;:0.054901961237192154,&#34;g&#34;:0.73725491762161255,&#34;b&#34;:0.37254902720451355,&#34;a&#34;:1.0},&#34;position&#34;:0.42978334426879883},{&#34;color&#34;:{&#34;r&#34;:0.42528781294822693,&#34;g&#34;:0.77231442928314209,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.49760133028030396},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.80000001192092896,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.56552332639694214},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.82745099067687988,&#34;b&#34;:0.078431375324726105,&#34;a&#34;:1.0},&#34;position&#34;:0.63031959533691406},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.80000001192092896,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.69913208484649658},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.41842123866081238,&#34;b&#34;:0.16917318105697632,&#34;a&#34;:1.0},&#34;position&#34;:0.75869029760360718},{&#34;color&#34;:{&#34;r&#34;:0.99215686321258545,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.80362409353256226},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.99887031316757202}],&#34;stopsVar&#34;:[{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.011515417136251926},{&#34;color&#34;:{&#34;r&#34;:0.19215686619281769,&#34;g&#34;:0.52549022436141968,&#34;b&#34;:1.0,&#34;a&#34;:1.0},&#34;position&#34;:0.10876122117042542},{&#34;color&#34;:{&#34;r&#34;:0.19215686619281769,&#34;g&#34;:0.52549022436141968,&#34;b&#34;:1.0,&#34;a&#34;:1.0},&#34;position&#34;:0.20001229643821716},{&#34;color&#34;:{&#34;r&#34;:0.0,&#34;g&#34;:0.64705884456634521,&#34;b&#34;:0.71764707565307617,&#34;a&#34;:1.0},&#34;position&#34;:0.26873961091041565},{&#34;color&#34;:{&#34;r&#34;:0.054901961237192154,&#34;g&#34;:0.73725491762161255,&#34;b&#34;:0.37254902720451355,&#34;a&#34;:1.0},&#34;position&#34;:0.33582508563995361},{&#34;color&#34;:{&#34;r&#34;:0.054901961237192154,&#34;g&#34;:0.73725491762161255,&#34;b&#34;:0.37254902720451355,&#34;a&#34;:1.0},&#34;position&#34;:0.42978334426879883},{&#34;color&#34;:{&#34;r&#34;:0.42528781294822693,&#34;g&#34;:0.77231442928314209,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.49760133028030396},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.80000001192092896,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.56552332639694214},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.82745099067687988,&#34;b&#34;:0.078431375324726105,&#34;a&#34;:1.0},&#34;position&#34;:0.63031959533691406},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.80000001192092896,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.69913208484649658},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.41842123866081238,&#34;b&#34;:0.16917318105697632,&#34;a&#34;:1.0},&#34;position&#34;:0.75869029760360718},{&#34;color&#34;:{&#34;r&#34;:0.99215686321258545,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.80362409353256226},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.99887031316757202}],&#34;transform&#34;:{&#34;m00&#34;:16.082571029663086,&#34;m01&#34;:16.082569122314453,&#34;m02&#34;:3.5993347167968750,&#34;m10&#34;:-16.103721618652344,&#34;m11&#34;:16.103721618652344,&#34;m12&#34;:19.792665481567383},&#34;opacity&#34;:1.0,&#34;blendMode&#34;:&#34;NORMAL&#34;,&#34;visible&#34;:true}"/>
+</g>
+<g filter="url(#filter1_f_g)">
+<ellipse cx="20.0496" cy="20.2413" rx="5.39634" ry="2.83537" transform="rotate(24.4473 20.0496 20.2413)" fill="#3186FF"/>
+</g>
+<g filter="url(#filter2_f_g)">
+<ellipse cx="33.3538" cy="18.2155" rx="7.43918" ry="3.09357" fill="#3186FF"/>
+</g>
+<g filter="url(#filter3_f_g)">
+<ellipse cx="25.2744" cy="16.2195" rx="7.40854" ry="2.37805" fill="#FF4641"/>
+</g>
+<g filter="url(#filter4_f_g)">
+<ellipse cx="29.5427" cy="12.9268" rx="7.40854" ry="2.37805" fill="#FF5B8B"/>
+</g>
+<g filter="url(#filter5_f_g)">
+<ellipse cx="24.4817" cy="19.878" rx="8.5061" ry="3.10976" fill="#3186FF"/>
+</g>
+<g filter="url(#filter6_f_g)">
+<ellipse cx="25.1842" cy="14.0197" rx="4.53882" ry="2.37805" transform="rotate(-28.6599 25.1842 14.0197)" fill="#FF4641"/>
+</g>
+</g>
+<defs>
+<filter id="filter0_f_g" x="5.25922" y="4.90668" width="29.7381" height="29.772" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/>
+</filter>
+<clipPath id="paint0_angular_g_clip_path"><path d="M7.25922 19.7927C7.25922 12.6759 13.0209 6.90668 20.1283 6.90668C27.2357 6.90668 32.9973 12.6759 32.9973 19.7927C32.9973 26.9094 27.2357 32.6786 20.1283 32.6786C13.0209 32.6786 7.25921 26.9094 7.25922 19.7927Z"/></clipPath><filter id="filter1_f_g" x="12.9977" y="14.828" width="14.1038" height="10.8265" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/>
+</filter>
+<filter id="filter2_f_g" x="23.9146" y="13.1219" width="18.8784" height="10.1871" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/>
+</filter>
+<filter id="filter3_f_g" x="15.8659" y="11.8415" width="18.8171" height="8.7561" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/>
+</filter>
+<filter id="filter4_f_g" x="20.1341" y="8.54878" width="18.8171" height="8.7561" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/>
+</filter>
+<filter id="filter5_f_g" x="13.9756" y="14.7683" width="21.0122" height="10.2195" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/>
+</filter>
+<filter id="filter6_f_g" x="19.0404" y="9.00419" width="12.2878" height="10.0309" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/>
+</filter>
+</defs>
+</svg>
+```
+
+- [ ] **Step 2: The button markup, once, for both modes.** Add the helper beside `authFieldHTML`
+(`public/app.js:6265`) and slot the call into `formInner` between `public/app.js:6357` and `:6358`.
+
+```js
+// The OR rule and the provider button, as one part, because they are never useful apart. The label rides
+// in a SPAN on purpose: production ships button { font-size: 16px !important } (styles.css:241) as a
+// blanket iOS guard, and a span is not a button, so Google's 14/20 lands with plain specificity and this
+// round adds no fifth !important counter. The divider's text is lowercase in the markup and uppercased by
+// .au-or, exactly the way .auth-label already uppercases "Email" and "Password".
+function authGoogleButtonHTML() {
+  return `<div class="au-or">or</div>
+        <button type="button" class="au-google" id="auth-google">${AUTH_GOOGLE_SVG}<span>${AUTH_GOOGLE_LABEL}</span></button>`;
+}
+```
+
+```
+public/app.js:6357   <button type="submit" class="auth-submit" id="auth-submit">${signup ? 'Create account' : 'Sign in'}</button>
+NEW                  ${authGoogleButtonHTML()}
+public/app.js:6358   ${signup ? '' : '<button type="button" class="au-alt2" data-auth-view="forgot">Forgot your password?</button>'}
+public/app.js:6359   <button type="button" class="auth-alt" id="auth-alt">${signup ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>
+```
+
+One insertion serves both screens by construction, which is Mike's call 1. `type="button"` is not
+optional: the control sits inside `#auth-form` and a submit would fire `onAuthSubmit`. The markup goes in
+`formInner` ONLY, so `sentInner`, `forgotInner` and `forgotSentInner` never carry it, and `#gate-page`
+(`openGatePage`, `:6855`) is not touched at all.
+
+- [ ] **Step 3: The bind. Per paint, BY ID, guarded.** Beside the `#auth-alt` bind at
+`public/app.js:6375-6379`.
+
+```js
+  // Per-paint id bind, the same shape as #auth-alt above and #auth-resend below. The innerHTML swap
+  // replaces the child nodes, so this cannot stack. NOT a delegate on the overlay and NOT data-auth-view:
+  // openAuthPage already binds one click delegate on the element itself (:6252-6257) and it consumes
+  // data-auth-view, so a Google control carrying that attribute would set authMode = 'google' and repaint
+  // an unknown mode, while a SECOND delegate on the element would stack one more handler per repaint (the
+  // comment at :6248-6252 records that incident). The `if (g)` is what keeps forgot, forgot-sent and
+  // signup-sent from throwing: those markups never declare the id, and addEventListener on null is a
+  // TypeError inside the paint.
+  const g = el.querySelector('#auth-google');
+  if (g) g.addEventListener('click', () => onGoogleSignIn());
+```
+
+`() => onGoogleSignIn()` and not `() => { onGoogleSignIn(); }`: the tests await the value the listener
+returns, exactly as the two Resend cases already do.
+
+- [ ] **Step 4: The claim intent that survives the redirect.** The const and the four helpers go
+immediately ABOVE `let claimIntent = false;` (`public/app.js:6395`); the boot call goes on the line
+immediately BELOW it. Anywhere higher and the call hits `let`'s temporal dead zone and kills the app at
+parse.
+
+```js
+// A Google sign-in is a full page navigation away and back, so app.js is re-evaluated from scratch and
+// every module `let` is back at its initializer. claimIntent is the one that matters: without this, the
+// person who tapped "claim your team", signed in with Google, and came back, lands on the hub with no
+// claim page and no explanation. Password sign-in never had this problem because the page never unloads.
+// sessionStorage, not localStorage: the redirect returns to the SAME tab, and an abandoned intent should
+// die with the tab instead of haunting a visit next week. Every access is wrapped: Safari private mode
+// and several in-app browsers throw on sessionStorage outright, and the restore runs at module scope,
+// where a throw is fatal instead of merely broken. (The app's own sessionStorage calls at :5124, :5127,
+// :13162 and :13251 are unwrapped and predate this task; widening that is not this task's job.)
+const AUTH_CLAIM_INTENT_KEY = 'athletic_specimen_claim_intent';
+function authPersistClaimIntent() {
+  if (!claimIntent) return;
+  try { sessionStorage.setItem(AUTH_CLAIM_INTENT_KEY, '1'); } catch (_) {}
+}
+function authForgetClaimIntent() {
+  // The KEY only. The in-memory flag is deliberately left alone, so a Google call that FAILS still lets
+  // the same person finish with email and password and land on the claim page they asked for.
+  try { sessionStorage.removeItem(AUTH_CLAIM_INTENT_KEY); } catch (_) {}
+}
+function authRestoreClaimIntent() {
+  let v = null;
+  try { v = sessionStorage.getItem(AUTH_CLAIM_INTENT_KEY); } catch (_) { return; }
+  authForgetClaimIntent();   // consumed on read: a reload that never reaches SIGNED_IN must not leave it armed
+  if (v === '1') claimIntent = true;
+}
+function authClearClaimIntent() {
+  claimIntent = false;
+  authForgetClaimIntent();
+}
+```
+
+Then, in file order:
+
+```js
+let claimIntent = false;      // a signed-out "claim" tap, auto-open the page after sign-in
+authRestoreClaimIntent();     // must sit BELOW the declaration: `let` has a temporal dead zone
+```
+
+The three clear sites each become `authClearClaimIntent();`, replacing the bare assignment:
+`public/app.js:6372` (the back chevron inside `renderAuthPageInner`), `:7080` (the consume inside the
+fresh-SIGNED_IN branch of `onAuthEvent`) and `:7099` (the signed-out branch). The three SETTERS stay bare
+assignments and are untouched: `:305` (the register success screen's "Sign in"), `:4234` (the join sheet)
+and `:13424` (the hub's `#pd-claim` row).
+
+- [ ] **Step 5: The call.** Top level, beside `onAuthSubmit` (`public/app.js:6665`).
+
+```js
+// The whole Google path, in one function. signInWithOAuth returns { data: { provider, url }, error } and
+// NEVER a session (gotrue-js 2.62.2 GoTrueClient.ts:1786): in a browser it calls
+// window.location.assign(url) itself unless skipBrowserRedirect is set (:1783-1785), so on the success
+// path the lines after the await may never run. flowType stays the client default, which is implicit
+// (DEFAULT_OPTIONS at GoTrueClient.ts:95-104): the client at public/app.js:31-33 sets no flowType, the
+// tokens come back in the URL FRAGMENT, and detectSessionInUrl already consumes them. Switching to pkce
+// would put a ?code= in the query that this build never exchanges.
+async function onGoogleSignIn() {
+  const btn = document.getElementById('auth-google');
+  // Belt and suspenders: a disabled <button> emits no click in a real browser, but the test fires the
+  // bound closure directly, and a double tap must never send two authorize requests.
+  if (btn && btn.disabled) return;
+  const errEl = document.getElementById('auth-err');
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
+  if (errEl) errEl.hidden = true;
+  if (!supabaseClient) { showErr('Sign-in is unavailable right now.'); return; }
+  if (btn) btn.disabled = true;
+  // Written BEFORE the call, never after: the library navigates the document itself.
+  authPersistClaimIntent();
+  const fail = () => {
+    // Deliberately NOT routed through friendlyAuthError: that map has no OAuth arm, so "Unsupported
+    // provider: provider is not enabled" would fall through its final `return m` and put a raw server
+    // string in front of a player. This line is the ONLY feedback there is, because an OAuth failure is
+    // never delivered to onAuthStateChange (_initialize returns the error and notifies nobody,
+    // GoTrueClient.ts:305-320).
+    showErr('Google did not answer. Try again, or use your email.');
+    authForgetClaimIntent();   // no redirect happened, so no key should outlive this tap
+    if (btn) btn.disabled = false;
+  };
+  try {
+    const res = await supabaseClient.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: location.origin },   // the round's law, and the only value the allow-list
+                                                  // accepts beside the Site URL (Step 11, item 3)
+    });
+    if (res && res.error) fail();
+  } catch (_) { fail(); }
+}
+```
+
+The button is deliberately left DISABLED on the success path: the page is leaving.
+
+- [ ] **Step 6: The name, prefilled (Mike's call 2).** The split is PURE and lives in `public/pure.js`
+beside `splitFullNameParts` (`:677`), with an entry in `module.exports`; the session read and the prefill
+live in `app.js`.
+
+```js
+// pure.js. Google supplies ONE display string and never given_name / family_name, so first and last have
+// to be guessed by splitting it. Last space, not first: "Mary Jo Van Der Berg" is a person, and putting
+// the whole run in `first` is the guess a human can correct in one field instead of two. Returns null
+// rather than a half-answer for one word or nothing, so the caller asks instead of guessing.
+function splitFullName(full) {
+  const whole = String(full == null ? '' : full).trim().replace(/\s+/g, ' ');
+  const cut = whole.lastIndexOf(' ');
+  if (cut < 1) return null;
+  return { first: whole.slice(0, cut), last: whole.slice(cut + 1) };
+}
+```
+
+```js
+// app.js, beside promptNameFillIfNeeded (:6905). full_name and name are the two aliases both Google
+// provider paths carry (provider/google.go:120-131 and oidc.go:107-117); given_name and family_name are
+// carried by NEITHER. The halves run through the app's own splitFullNameParts so a prefill can never seed
+// something the Save button would then refuse.
+function googleNameFromSession(session) {
+  const md = (session && session.user && session.user.user_metadata) || {};
+  const nm = splitFullName(md.full_name || md.name || '');
+  if (!nm) return null;
+  const parts = splitFullNameParts(nm.first, nm.last);
+  return parts.ok ? { first: parts.first, last: parts.last } : null;
+}
+```
+
+`openNameFillOverlay` (`:6934`) takes an optional seed and writes it into the two `value` attributes,
+escaped. The no-stack guard at `:6935` stays, the ids stay `namefill-first` / `namefill-last`, and there is
+still no back control, so the only exits are saving or reloading:
+
+```js
+function openNameFillOverlay(prefill) {
+  if (document.getElementById('namefill-page')) return; // never stack
+  // Account round Task 8: an OPTIONAL seed, used only by the Google path. The other caller (the register
+  // success screen, :299) passes nothing and renders exactly as it did. Escaped, because it is a string
+  // from an identity provider going straight into an attribute.
+  const seed = prefill || {};
+  const firstVal = seed.first ? ` value="${escapeHTML(seed.first)}"` : '';
+  const lastVal = seed.last ? ` value="${escapeHTML(seed.last)}"` : '';
+  ... unchanged ...
+        <input class="auth-input" id="namefill-first" type="text" autocomplete="given-name" autocapitalize="words" spellcheck="false" placeholder="First"${firstVal} />
+  ... unchanged ...
+        <input class="auth-input" id="namefill-last" type="text" autocomplete="family-name" autocapitalize="words" spellcheck="false" placeholder="Last"${lastVal} />
+}
+```
+
+and the fall-through at `public/app.js:6931` becomes:
+
+```js
+  // Every new Google user reaches this line today with ZERO code changes: handle_new_user seeds
+  // display_name from raw_user_meta_data->>'full_name' but first_name / last_name ONLY from the
+  // first_name / last_name keys the app's own signUp writes (0053_tournament_identity.sql:58-68), and
+  // Google sends neither. So the prompt is unavoidable; prefilling it is what makes it one tap.
+  openNameFillOverlay(googleNameFromSession(state.authSession)); // either name missing, ask once
+```
+
+`onNameFillSave` is UNCHANGED. Nothing reaches `profiles` and no `player_claims` row is written until the
+person taps Save, which is the whole point of the call.
+
+- [ ] **Step 7: The harness, additively.** Nothing below renames an existing bridge key or changes an
+existing stub's shape for an existing caller. Find each anchor by NAME: Tasks 5 and 6 will have moved the
+line numbers.
+
+`AUTH_CONTROL_IDS` (the array that ends with the Task 4 ids), append:
+```js
+  // Task 8: the OAuth button, the name overlay's controls (openNameFillOverlay binds #namefill-form back
+  // after its innerHTML swap, so the id has to exist before the bind), and the claim page's three, so
+  // #claim-page renders for real instead of relying on a swallowed throw.
+  'auth-google', 'namefill-form', 'namefill-first', 'namefill-last', 'namefill-err', 'namefill-save',
+  'claim-back', 'claim-search', 'claim-results',
+```
+
+`supaStub.auth`, one line beside `signOut: rec('signOut')`:
+```js
+      signInWithOAuth: rec('signInWithOAuth'),
+```
+
+The `from` stub, one key added to the object `select()` returns (purely additive: nothing calls `.is`
+today):
+```js
+      // Task 8: the claim page reads the two unclaimed lists with .is(col, null) and awaits both through
+      // Promise.allSettled, so .is has to answer with a THENABLE. It never chains .eq here, because
+      // fetchCommunityId resolves to null in this sandbox (its maybeSingle answers { data: {} }).
+      is: () => Promise.resolve({ data: [], error: null }),
+```
+
+The `location` stub, so a case can PROVE the app never navigates on its own (the LIBRARY navigates):
+```js
+  const assigns = [];
+  // ...inside windowStub.location:
+    assign: (u) => { assigns.push(String(u)); }, replace: (u) => { assigns.push(String(u)); },
+```
+
+The two storages. sessionStorage becomes REAL for the Task 8 half; localStorage stays inert:
+```js
+  // sessionStorage is REAL from Task 8 on: the OAuth redirect tears the page down, so the claim intent has
+  // to survive in storage and a test has to be able to see what was written. localStorage stays inert on
+  // purpose, nothing in this round reads it. Blast radius, checked: the app touches bare sessionStorage in
+  // loadLocal (:5124, :5127), which readyState 'loading' keeps from running at load, and in
+  // activateMainTab (:13162, :13251), so the Task 1 case that calls bridge.tab(...) now writes a real key.
+  // That is why EVERY assertion below reads a NAMED key and none of them reads length.
+  const sessionMap = new Map();
+  const sessionStorageStub = {
+    getItem: (k) => (sessionMap.has(String(k)) ? sessionMap.get(String(k)) : null),
+    setItem: (k, v) => { sessionMap.set(String(k), String(v)); },
+    removeItem: (k) => { sessionMap.delete(String(k)); },
+    clear: () => sessionMap.clear(),
+    key: (i) => (Array.from(sessionMap.keys())[i] ?? null),
+    get length() { return sessionMap.size; },
+  };
+```
+then in the sandbox: `localStorage: storageStub(), sessionStorage: sessionStorageStub,`.
+
+The bridge epilogue (the template string), four additions plus one spy in the shape the file already uses
+for `runPostSignInWork` and `render`:
+```js
+    // Task 8 spy: nothing may be claimed on a roster until the person taps Save, and
+    // connect_profile_by_name is the call that would do it. The real function still runs; this counts.
+    ;let __connects = 0;
+    const __connect = connectProfileByName;
+    connectProfileByName = async function (...a) { __connects += 1; return __connect(...a); };
+```
+```js
+      oauth: () => onGoogleSignIn(),
+      restoreClaimIntent: () => authRestoreClaimIntent(),
+      getAccountName: () => accountName,
+      connectRuns: () => __connects,
+      splitName: (v) => splitFullName(v),   // the pure helper, the way bridge.meter exposes passwordMeterScore
+      resetConnects: () => { __connects = 0; },
+      // identityConnectAttempted is a module flag with no reset today, so whichever case runs the
+      // both-names path first silently disarms every later one. reset() clears it (nothing in Tasks 1 to 4
+      // depends on it being sticky).
+      setConnectAttempted: (v) => { identityConnectAttempted = !!v; },
+```
+and after load: `bridge.assigns = () => assigns;` plus
+```js
+  // A named-key view of the real sessionStorage. get() answers null (never undefined) for a missing key,
+  // so an assertion reads the same way as the DOM API it stands in for.
+  bridge.session = {
+    get: (k) => (sessionMap.has(String(k)) ? sessionMap.get(String(k)) : null),
+    set: (k, v) => { sessionMap.set(String(k), String(v)); },
+    keys: () => Array.from(sessionMap.keys()),
+  };
+```
+
+`bridge.reset`, three lines beside `supaCalls.length = 0;`:
+```js
+    sessionMap.clear();
+    assigns.length = 0;
+    bridge.resetConnects();
+    bridge.setConnectAttempted(false);
+```
+
+- [ ] **Step 8: The vitest cases.** A new `describe('Account round Task 8 - Continue with Google', ...)`
+appended after the last block, with `beforeEach(() => bridge.reset())`. The module-scope helpers `count`,
+`fillSignup`, `css` and `appSrc` are already there. One spelling note: the copy guard below is written
+`/\u2014|&mdash;|night/i` so this plan carries no em dash of its own; the existing blocks spell the same
+regex with the literal character. Either form works, so match whichever the file uses when you paste.
+
+```js
+it('splitFullName splits on the LAST space and refuses a single word', () => {
+  const s = bridge.splitName;
+  expect(s('Morgan Reyes')).toEqual({ first: 'Morgan', last: 'Reyes' });
+  expect(s('  Morgan   Reyes ')).toEqual({ first: 'Morgan', last: 'Reyes' });
+  expect(s('Mary Jo Van Der Berg')).toEqual({ first: 'Mary Jo Van Der', last: 'Berg' });
+  expect(s('Morgan')).toBe(null);
+  expect(s('')).toBe(null);
+  expect(s(null)).toBe(null);
+  expect(s(undefined)).toBe(null);
+});
+
+it('the Google button renders once on sign in and once on create account, with the current gradient mark', () => {
+  for (const mode of ['signin', 'signup']) {
+    bridge.reset();
+    bridge.openAuth(mode);
+    const html = bridge.registry['auth-page'].innerHTML;
+    expect(count(html, 'id="auth-google"')).toBe(1);            // one button, never one per render
+    expect(html).toContain('<button type="button" class="au-google" id="auth-google">');
+    expect(html).toContain('Continue with Google');
+    expect(count(html, 'class="au-or"')).toBe(1);
+    // Under the primary, never above it: the rank this round spent six tasks establishing.
+    expect(html.indexOf('id="auth-submit"')).toBeLessThan(html.indexOf('id="auth-google"'));
+    // The mark is Google's CURRENT asset, a masked conic gradient. The flat four-color G is the
+    // "outdated Google G" their guidelines list under Don't, and it is in none of the 24 official SVGs.
+    expect(html).toContain('conic-gradient(');
+    expect(html).toContain('mask0_g');
+    for (const dead of ['#4285F4', '#34A853', '#FBBC05', '#EA4335']) expect(html).not.toContain(dead);
+    expect(html).not.toMatch(/\u2014|&mdash;|night/i);          // the round's standing copy guard
+  }
+});
+
+it('the Google button never appears on forgot, forgot-sent or signup-sent', async () => {
+  bridge.openAuth('forgot');
+  expect(bridge.registry['auth-page'].innerHTML).not.toContain('id="auth-google"');
+  bridge.registry['fg-email'].value = 'a@b.co';
+  bridge.supaNext('resetPasswordForEmail', { data: {}, error: null });
+  await bridge.authSubmit();
+  expect(bridge.registry['auth-page'].innerHTML).toContain('Check your email');
+  expect(bridge.registry['auth-page'].innerHTML).not.toContain('id="auth-google"');
+  bridge.reset();
+  bridge.openAuth('signup');
+  fillSignup();
+  bridge.supaNext('signUp', { data: { user: {}, session: null }, error: null });
+  await bridge.authSubmit();
+  expect(bridge.registry['auth-page'].innerHTML).toContain('Check your email');
+  expect(bridge.registry['auth-page'].innerHTML).not.toContain('id="auth-google"');
+});
+
+it('the wall and the signed-in surfaces never carry it', () => {
+  bridge.setSignedOut();
+  bridge.openGate();
+  expect(bridge.registry['gate-page'].innerHTML).not.toContain('auth-google');
+  // Not on a signed-in surface either: signInWithOAuth removes the session before it builds a URL, and
+  // that removal notifies nobody, so a signed-in person who backs out at Google would look signed in
+  // until their next reload.
+  expect(appSrc).not.toMatch(/acct-google|acc-google/);
+});
+
+it('a tap calls signInWithOAuth with google and the origin, exactly once, and disables while it awaits', async () => {
+  bridge.openAuth('signin');
+  const btn = bridge.registry['auth-google'];
+  expect(btn.listeners.click.length).toBe(1);   // bound by the render, once, by id
+  expect(btn.disabled).toBe(false);
+  let release;
+  bridge.supaNext('signInWithOAuth', new Promise((r) => { release = r; }));
+  const inFlight = btn.listeners.click[0]();
+  expect(btn.disabled).toBe(true);              // set synchronously, before the first await
+  release({ data: { provider: 'google', url: 'https://accounts.google.com/o/oauth2/v2/auth?x=1' }, error: null });
+  await inFlight;
+  const calls = bridge.supaCalls().filter((c) => c[0] === 'signInWithOAuth');
+  expect(calls.length).toBe(1);
+  expect(calls[0][1]).toEqual({ provider: 'google', options: { redirectTo: 'http://localhost' } });
+  expect(bridge.supaCalls().map((c) => c[0])).toEqual(['signInWithOAuth']);
+  expect(btn.disabled).toBe(true);              // left disabled on the success path: the page is leaving
+  // The LIBRARY navigates, never the app. These spies exist to prove the app does not.
+  expect(bridge.assigns()).toEqual([]);
+});
+
+it('a second tap while the first is in flight does not send a second signInWithOAuth', async () => {
+  bridge.openAuth('signin');
+  const btn = bridge.registry['auth-google'];
+  let release;
+  bridge.supaNext('signInWithOAuth', new Promise((r) => { release = r; }));
+  const first = btn.listeners.click[0]();
+  const second = btn.listeners.click[0]();
+  release({ data: { provider: 'google', url: 'https://accounts.google.com/x' }, error: null });
+  await Promise.all([first, second]);
+  expect(bridge.supaCalls().filter((c) => c[0] === 'signInWithOAuth').length).toBe(1);
+});
+
+it('a failed signInWithOAuth shows a visible error line and hands the button back', async () => {
+  bridge.openAuth('signin');
+  const btn = bridge.registry['auth-google'];
+  const err = bridge.registry['auth-err'];
+  bridge.supaNext('signInWithOAuth', { data: { provider: 'google', url: null }, error: { message: 'Unsupported provider: provider is not enabled' } });
+  await btn.listeners.click[0]();
+  expect(err.hidden).toBe(false);
+  expect(err.textContent).toBe('Google did not answer. Try again, or use your email.');
+  expect(err.textContent).not.toContain('provider is not enabled');   // never the raw server string
+  expect(btn.disabled).toBe(false);
+  expect(bridge.registry['auth-page'].innerHTML).toContain('class="auth-err" id="auth-err"');
+});
+
+it('a thrown signInWithOAuth reads the same way', async () => {
+  bridge.openAuth('signin');
+  const btn = bridge.registry['auth-google'];
+  bridge.supaNext('signInWithOAuth', Promise.reject(new Error('network down')));
+  await btn.listeners.click[0]();
+  expect(bridge.registry['auth-err'].hidden).toBe(false);
+  expect(bridge.registry['auth-err'].textContent).toBe('Google did not answer. Try again, or use your email.');
+  expect(btn.disabled).toBe(false);
+});
+
+it('a pending claim intent is written to sessionStorage before the OAuth call, and only then', async () => {
+  bridge.openAuth('signin');
+  bridge.setClaimIntent(true);
+  expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+  let release;
+  bridge.supaNext('signInWithOAuth', new Promise((r) => { release = r; }));
+  const inFlight = bridge.registry['auth-google'].listeners.click[0]();
+  expect(bridge.session.get('athletic_specimen_claim_intent')).toBe('1');   // before the await resolves
+  release({ data: { provider: 'google', url: 'https://accounts.google.com/x' }, error: null });
+  await inFlight;
+  expect(bridge.session.get('athletic_specimen_claim_intent')).toBe('1');
+});
+
+it('no pending intent writes nothing, and a failed call drops the key but keeps the intent', async () => {
+  bridge.openAuth('signin');
+  expect(bridge.getClaimIntent()).toBe(false);
+  bridge.supaNext('signInWithOAuth', { data: { provider: 'google', url: 'https://x' }, error: null });
+  await bridge.registry['auth-google'].listeners.click[0]();
+  expect(bridge.session.keys()).not.toContain('athletic_specimen_claim_intent');
+  bridge.reset();
+  bridge.openAuth('signin');
+  bridge.setClaimIntent(true);
+  bridge.supaNext('signInWithOAuth', { data: null, error: { message: 'nope' } });
+  await bridge.registry['auth-google'].listeners.click[0]();
+  // No redirect happened, so no key may outlive the tap. The MEMORY flag stays armed on purpose: the
+  // same person can now finish with email and password and still land on the claim page they asked for.
+  expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+  expect(bridge.getClaimIntent()).toBe(true);
+});
+
+it('a persisted intent is restored by the boot restore, and the key is consumed', () => {
+  expect(bridge.getClaimIntent()).toBe(false);
+  bridge.session.set('athletic_specimen_claim_intent', '1');
+  bridge.restoreClaimIntent();
+  expect(bridge.getClaimIntent()).toBe(true);
+  expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+});
+
+it('the restore runs at boot, below the declaration', () => {
+  // The bridge can call the function; only the SOURCE proves the app calls it, and the call MUST sit
+  // below `let claimIntent` or the temporal dead zone throws at load and the whole app is dead.
+  const decl = appSrc.indexOf('let claimIntent = false');
+  const call = appSrc.indexOf('\nauthRestoreClaimIntent();');
+  expect(decl).toBeGreaterThan(-1);
+  expect(call).toBeGreaterThan(decl);
+});
+
+it('an absent or junk key leaves the flag alone', () => {
+  bridge.restoreClaimIntent();
+  expect(bridge.getClaimIntent()).toBe(false);
+  bridge.session.set('athletic_specimen_claim_intent', 'nonsense');
+  bridge.restoreClaimIntent();
+  expect(bridge.getClaimIntent()).toBe(false);
+  expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);   // junk is consumed too
+});
+
+it('a restored intent opens the claim page once, and a second SIGNED_IN does not reopen it', async () => {
+  bridge.setSignedOut();
+  bridge.session.set('athletic_specimen_claim_intent', '1');
+  bridge.restoreClaimIntent();
+  const session = { user: { id: 'u1', email: 'a@b.co' } };
+  await bridge.authEvent('SIGNED_IN', session);
+  await bridge.flushTimers();
+  expect(bridge.registry['claim-page']).toBeTruthy();
+  expect(bridge.getClaimIntent()).toBe(false);
+  bridge.registry['claim-page'].remove();
+  await bridge.authEvent('SIGNED_IN', session);
+  await bridge.flushTimers();
+  expect(bridge.registry['claim-page']).toBeFalsy();      // not a new sign-in, no intent
+});
+
+it('signing out and dismissing the overlay both drop a persisted intent', async () => {
+  bridge.session.set('athletic_specimen_claim_intent', '1');
+  bridge.setClaimIntent(true);
+  await bridge.authEvent('SIGNED_OUT', null);
+  expect(bridge.getClaimIntent()).toBe(false);
+  expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+  bridge.reset();
+  bridge.openAuth('signin');
+  bridge.setClaimIntent(true);
+  bridge.session.set('athletic_specimen_claim_intent', '1');
+  bridge.registry['auth-back'].listeners.click[0]();
+  expect(bridge.registry['auth-page']).toBeFalsy();
+  expect(bridge.getClaimIntent()).toBe(false);
+  expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+});
+
+it('a Google user with no profile names gets the name prompt, PREFILLED from full_name', async () => {
+  bridge.setSignedIn({ id: 'g1', email: 'morgan@gmail.com' });
+  bridge.getState().authSession.user.user_metadata = { full_name: 'Morgan Reyes', name: 'Morgan Reyes' };
+  bridge.supaNext('profileRead', { data: { first_name: null, last_name: null }, error: null });
+  await bridge.nameFill();
+  const page = bridge.registry['namefill-page'];
+  expect(page).toBeTruthy();                               // still ASKED, never assumed
+  expect(page.innerHTML).toContain("What's your name?");
+  expect(page.innerHTML).toContain('value="Morgan"');
+  expect(page.innerHTML).toContain('value="Reyes"');
+  expect(page.innerHTML).not.toMatch(/\u2014|&mdash;|night/i);
+  // Nothing is claimed until Save: connect_profile_by_name inserts APPROVED player_claims, and that is
+  // not a claim to make from a string the person never typed here.
+  expect(bridge.connectRuns()).toBe(0);
+  expect(bridge.getAccountName()).toBe(null);
+});
+
+it('a one-word or missing Google name prefills nothing and still asks', async () => {
+  for (const meta of [{ full_name: 'Morgan' }, { name: 'Morgan' }, {}, undefined]) {
+    bridge.reset();
+    bridge.setSignedIn({ id: 'g1', email: 'm@gmail.com' });
+    bridge.getState().authSession.user.user_metadata = meta;
+    bridge.supaNext('profileRead', { data: { first_name: null, last_name: null }, error: null });
+    await bridge.nameFill();
+    expect(bridge.registry['namefill-page']).toBeTruthy();
+    expect(bridge.registry['namefill-page'].innerHTML).not.toContain('value="Morgan"');
+    expect(bridge.connectRuns()).toBe(0);
+  }
+});
+
+it('a Google user whose profile already carries both names is never prompted', async () => {
+  bridge.setSignedIn({ id: 'g1', email: 'morgan@gmail.com' });
+  bridge.getState().authSession.user.user_metadata = { full_name: 'Morgan Reyes' };
+  bridge.supaNext('profileRead', { data: { first_name: 'Morgan', last_name: 'Reyes' }, error: null });
+  await bridge.nameFill();
+  expect(bridge.registry['namefill-page']).toBeFalsy();
+  expect(bridge.getAccountName()).toEqual({ first: 'Morgan', last: 'Reyes' });
+  expect(bridge.connectRuns()).toBe(1);                    // names the person DID confirm, once
+});
+
+it('the CSS block ships once, with no new !important and none of our own neon', () => {
+  expect(count(css, '.au-google {')).toBe(1);
+  expect(count(css, '.au-or {')).toBe(1);
+  // Google's Light theme values, verbatim and deliberately NOT tokenised: they are not ours to theme.
+  expect(css).toMatch(/\.au-google \{[^}]*background: #FFFFFF/);
+  expect(css).toMatch(/\.au-google \{[^}]*border: 1px solid #747775/);
+  expect(css).toMatch(/\.au-google \{[^}]*border-radius: 11px/);
+  expect(css).toMatch(/\.au-google \{[^}]*min-height: 48px/);
+  expect(css).toMatch(/\.au-google span \{[^}]*font-size: 14px/);
+  expect(css).not.toMatch(/\.au-google[^}]*!important/);
+  expect(css).not.toMatch(/\.au-or[^}]*!important/);
+});
+```
+
+- [ ] **Step 9: The CSS.** Append at the END of `public/styles.css` (6141 lines today), inside the
+`ACCOUNT DESIGN ROUND - 2026-08-25` banner opened at `:6037`. CRLF.
+
+```css
+/* ===== CONTINUE WITH GOOGLE ===== */
+/* PORT NOTE: this is NOT a port. Mike's Account handoff draws no Google button on any of its 14 screens
+   (grep -rn -i google over docs/design-handoffs/2026-08-24/account/ returns only the webfont links), so
+   this block is new and the geometry is matched to .auth-submit (styles.css:2084) on purpose: same 48px
+   box, same 11px radius, same Inter face, so the two read as one pair. That match is also what Google's
+   guidelines ask for in words ("approximately the same size and similar visual weight").
+   GOOGLE'S RULES, not ours: #FFFFFF, #747775 and #1F1F1F are their Light theme values verbatim, from
+   developers.google.com/identity/branding-guidelines and from the SVGs in signin-assets.zip. They are
+   deliberately NOT tokenised and must not follow our palette: the guidelines forbid a background other
+   than their light, dark or neutral, forbid recoloring the mark, and forbid an outdated G. That is also
+   why the most saturated object on a deliberately matte screen is allowed to stay: it is held at 18px on
+   a white field, which are the only two levers we have and both are already at the quiet end.
+   NOTE 1: the label rides in a SPAN. Production ships button { font-size: 16px !important }
+   (styles.css:241) as a blanket iOS guard, and a span is not a button, so Google's 14/20 lands with plain
+   specificity and this block adds no fifth !important counter.
+   NOTE 2: no transition is declared here on purpose. The global rule at styles.css:4472-4479 already
+   transitions background-color, border-color, color and transform on the motion tokens, and :4481
+   supplies the press. Declaring our own would opt out of the token system.
+   NOTE 3: the face is Inter, not Google Sans. Documented deviation: the app loads Inter, Sora and Barlow
+   only (index.html:23) and a fourth family for one button is not worth the bytes on tournament wifi. */
+.au-google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;       /* the .auth-submit box, so the pair reads as one */
+  margin-top: 0;          /* the .au-or row owns the 18px above and below */
+  padding: 0 12px;        /* Google's Web spec: 12px left, 10px after the logo, 12px right */
+  background: #FFFFFF;
+  border: 1px solid #747775;
+  border-radius: 11px;
+  color: #1F1F1F;
+  cursor: pointer;
+}
+.au-google svg { flex: none; width: 18px; height: 18px; }
+.au-google span { font-family: inherit; font-size: 14px; line-height: 20px; font-weight: 500; }
+/* #F2F2F2 is Google's own Neutral fill, so even the hover stays inside their palette. */
+@media (hover: hover) and (pointer: fine) { .au-google:hover { background: #F2F2F2; } }
+.au-google:disabled { opacity: .65; cursor: default; }
+
+/* The OR rule between the primary and the provider button. Same type spec as .auth-label
+   (styles.css:2076), so this adds a component and not a new vocabulary. */
+.au-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.au-or::before, .au-or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+```
+
+- [ ] **Step 10: Version, checks, commit and push.** `APP_VERSION` is `'2026.08.25.N'`, where N is the
+next unused number when Task 8 is dispatched (the controller states the real number at dispatch; do not
+guess it here, Tasks 5 to 7 have not consumed theirs yet). `node --check public/app.js && node --check
+public/pure.js`. Line endings: `app.js` LF, `pure.js` and `styles.css` CRLF, counted before and after.
+`cd test && npx vitest run account-round`, and gate the push on its exit code.
+
+Commit message:
+
+```
+feat(account): Continue with Google - one button on both forms under the primary, the claim intent survives the redirect, the name screen prefilled from Google - v2026.08.25.N
+```
+
+- [ ] **Step 11: The standing note and the open list, both carried into Task 7's vault write.**
+
+**Standing note, Confirm email (Mike's call 4).** It is OFF today, and OFF is the safe state for both
+halves of this feature. Flipping it ON arms two failures and both become required work IN THE SAME PUSH:
+
+- **H2, an unconfirmed password account loses its password silently.** With Autoconfirm on, every password
+  signup is confirmed on the spot, so linking a Google identity to the same address is non-destructive:
+  same user id, both identities kept (supabase/auth `internal/models/linking.go:62-205`, applied at
+  `internal/api/external.go:319-341`). Turn Confirm email ON and an unconfirmed account can exist; when
+  that person taps Continue with Google, `RemoveUnconfirmedIdentities` nulls `encrypted_password` and
+  destroys the other identity rows (`external.go:409-416`, `internal/models/user.go:1020-1051`). They stay
+  signed in through Google, so nothing looks wrong until the day they try their password.
+- **H3, the reverse dead end.** With Confirm email ON, a Google-only user who tries to create a password
+  account on the same address gets an obfuscated HTTP 200 with a fake user, `identities: []`, and no email
+  is ever sent (`internal/api/signup.go:280-300`, `:347-378`). The app's current no-session branch
+  (`public/app.js:6701-6708`) renders "Check your email" and the person waits forever. The fix, when it is
+  needed: treat `Array.isArray(res.data.user.identities) && res.data.user.identities.length === 0` as
+  "that email already has an account" and route to sign-in. With Confirm email OFF the same case returns a
+  real 422 that `friendlyAuthError` already maps (`public/app.js:6627`).
+
+**Also known and accepted, not fixed here (H12):** the register-then-Google path loses its payoff.
+`regSubmittedTeam` (`:3507`), `regAutoAttached` (`:3511`), `pdTournamentView` (`:3499`) and `accountName`
+all reset in the redirect, and the auto-attach at `:4043` needs `accountName`, which stays null for a
+Google user until a name is saved. The persisted claim intent turns that landing into the CLAIM PAGE,
+which is where the person was heading. Do not widen Task 8 to persist the register payoff.
+
+**Open, and only Mike or one real Google login can close them.** Every one is a way this is green in
+vitest, green in the drive, and still broken for the first player who taps it:
+
+1. **Is the Google provider enabled in the Supabase dashboard**, with a client id and secret? A wrong
+   secret fails at the token exchange, which is AFTER Google's consent screen, so it is invisible until
+   somebody actually signs in.
+2. **Does a Google Cloud OAuth client exist**, with `https://<ref>.supabase.co/auth/v1/callback` in its
+   Authorized redirect URIs? The ref is `mlzblkzflgylnjorgjcp`, read from `public/supabase-config.js:5`;
+   the pattern is from `supabase.com/docs/guides/auth/social-login/auth-google.md`. The exact string is
+   DERIVED and must be read off the dashboard before it is saved anywhere.
+3. **The Redirect URLs allow-list.** With Site URL `https://athletic-specimen.com`, `location.origin`
+   should match on hostname, scheme and port with no dashboard change
+   (supabase/auth `internal/utilities/request.go:109-113`), but the allow-list is a separate field and is
+   UNCONFIRMED. If it is rejected the person lands on the Site URL root with a valid session and NO error
+   (`request.go:75-89`, `:129-136`).
+4. **One real login on an address that already has a password account.** The source says it links cleanly,
+   same user id, both identities kept, so everything keyed on `auth.uid()` survives. Verify it once before
+   this reaches players, and check afterwards that the `profiles` row, the claimed player and the team
+   history all survived.
+5. **Does `sessionStorage` survive the round trip on Mike's actual phone.** The whole intent design rests
+   on the redirect returning to the SAME tab. If Google opens in an iOS in-app browser or a new tab the
+   intent is lost and the person lands on the hub. The failure is soft (they can tap claim again), which
+   is why sessionStorage is still the right choice, but it should be SEEN once rather than assumed.
+6. **What `raw_user_meta_data` actually holds for a Google identity here.** The prefill reads `full_name`
+   with `name` as the fallback, both of which the provider source says are present on both paths, but only
+   a real login proves it. It does NOT change the answer: neither path carries `given_name` or
+   `family_name`.
+7. **Consent-screen branding.** Without it the consent screen shows `mlzblkzflgylnjorgjcp.supabase.co`,
+   which Supabase's own doc says "does not inspire trust and can make your application more susceptible to
+   successful phishing attempts". The two fixes are brand verification (a few business days) or a Supabase
+   custom domain. Mike's call, and it is the first thing a player will see.
+8. **Whether Google's app verification objects to Inter in place of Google Sans**, and whether Google Sans
+   may be served as a webfont at all. The guidelines state the font requirement without stating a
+   tolerance.
+
+---
+
 ### Task 7: Verification + the vault
 
 - [ ] **Step 1: Bytes on prod** — `APP_VERSION` matches; `grep -c` for `openGatePage`, `passwordMeterScore`, `PASSWORD_RECOVERY`, `openResetPage`, `openAcctPage`, `acc-card` in the served files.
-- [ ] **Step 2: Drive (read-only; Mike's Chrome; §63):** in a 390 frame with every auth write stubbed (`signUp`, `signInWithPassword`, `resend`, `resetPasswordForEmail`, `updateUser`, `signOut`, the profiles update): the card (rows, initial, no tag), each edit screen's markup, the reveal on a DUMMY value typed by the script (never a real password), the meter's labels for `abc` / `password` / `Passw0rd!`, the forgot screen (no send), the wall by setting `state.authSession = null` in the frame and activating the Tournament tab (then restore), the sign-out confirm (cancel). Console clean. Screenshots if capture works; facts either way.
+- [ ] **Step 2: Drive (read-only; Mike's Chrome; §63):** in a 390 frame with every auth write stubbed (`signUp`, `signInWithPassword`, `resend`, `resetPasswordForEmail`, `updateUser`, `signOut`, the profiles update): the card (rows, initial, no tag), each edit screen's markup, the reveal on a DUMMY value typed by the script (never a real password), the meter's labels for `abc` / `password` / `Passw0rd!`, the forgot screen (no send), the wall by setting `state.authSession = null` in the frame and activating the Tournament tab (then restore), the sign-out confirm (cancel). **Google (Task 8):** `#auth-google` is present exactly once on the sign-in form and once on create account at 390 and absent on forgot (`document.getElementById('auth-google') === null`); its `getBoundingClientRect()` matches `#auth-submit`'s width with a height at or above 44; the inner SVG carries the conic gradient and none of the four outdated hexes, checked ON A REAL iPHONE as well, because the mark paints through a `foreignObject` and WebKit was never tested; and ONE real tap navigates to `accounts.google.com`, where the drive CANCELS (no account picked, nothing signed in) and then returns and confirms the app boots clean. A `redirect_uri_mismatch` or a "provider is not enabled" page there is itself the useful fact: it means the Supabase or Google console side is not wired. Console clean, and specifically no `sessionStorage` exception. Screenshots if capture works; facts either way.
 - [ ] **Step 3: Restore the tab.**
-- [ ] **Step 4: Vault** — log, current, decisions (anything decided in build), debugging, NOW, Tasks (C100 DONE; C101 gains the `profiles.email` sync), `12-history/task-#4-account-handoff-session18.md` BEFORE marking done.
+- [ ] **Step 4: Vault** — log, current, decisions (anything decided in build), debugging, NOW, Tasks (C100 DONE; C101 gains the `profiles.email` sync), `12-history/task-#4-account-handoff-session18.md` BEFORE marking done; plus Task 8's standing note (flipping Confirm email ON arms H2 and H3 and makes both required work in the same push) and its open list.
 - [ ] **Step 5: Hand back** with AskUserQuestion: Task 10 of the Manage plan (canvas consent) / C101 the data round / C102 the extraction.

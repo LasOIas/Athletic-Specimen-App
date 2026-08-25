@@ -179,6 +179,100 @@ no account edit page, and the account card is a read-only dialog. In build order
   current-password check, then `updateUser({ password })`, `makeSaveToast('Password saved')`, back to the
   card. "Forgot your current one?" opens `authMode = 'forgot'` in `#auth-page` (this round ships it).
 
+### Continue with Google (added 2026-08-25)
+
+Not one of the 14 screens: Mike's handoff draws no Google button anywhere (`grep -rn -i google` over
+`docs/design-handoffs/2026-08-24/account/` returns only the webfont links), and there is no Google sign-in
+in the repo today. It is a new element, decided in its own round after the recon (4 lenses plus a critic,
+`scratchpad/recon-google/DIGEST.md`), and it ships as Task 8, before the drive.
+
+**Mike's four calls (AskUserQuestion, 2026-08-25).**
+
+1. **Both forms, one string.** The button renders on sign-in AND on create-account, labelled "Continue
+   with Google". Not on forgot, not on either sent screen, not on the wall, and never on a signed-in
+   surface. One `formInner` template already serves both form states, so one insertion does it. "Continue"
+   is the only one of Google's three approved strings that is honest here: a Supabase OAuth redirect has
+   no separate sign-up, the first redirect creates the user, so "Sign up with Google" would lie to the
+   returning player who taps it and lands in their existing account. The signed-in exclusion is not taste:
+   `signInWithOAuth` removes the session before it builds a URL and that removal notifies nobody, so a
+   signed-in person who taps and then backs out at Google looks signed in until their next reload.
+2. **The name is asked for, and prefilled.** Google carries no `given_name` and no `family_name` on either
+   provider path, only one display string (`full_name`, with `name` as its alias). `handle_new_user` seeds
+   `display_name` from that string but `first_name` / `last_name` only from the keys the app's own
+   `signUp` writes, so every Google user reaches the existing name-fill overlay with both names null and
+   would reach it with or without this round. So the overlay stays, and it opens PREFILLED: the display
+   string split on the last space, both halves run through `splitFullNameParts`, written into the two
+   `value` attributes, escaped. The person taps Save or fixes the split. Nothing is written to `profiles`
+   and no `player_claims` row is made until they do, which matters because `connect_profile_by_name`
+   links roster rows on an exact name match and inserts APPROVED claims. A last-space split is a guess
+   ("Mary Jo Van Der Berg" splits wrong), which is exactly why it is shown rather than applied. No
+   migration and no silent seeding: seeding from the trigger would need a Supabase write and would make a
+   roster claim from a string nobody confirmed.
+3. **Under the primary, white, with an OR rule.** Full width, `#FFFFFF`, below the Sign in / Create
+   account button, with a hairline "OR" divider row between them. The mark is Google's CURRENT gradient G,
+   inline SVG, taken verbatim from their own bundle: the flat four-color G that every older tutorial shows
+   appears in none of the 24 official SVGs and is the "outdated Google G" their guidelines list under
+   Don't. Same 48px box and 11px radius as `.auth-submit`, which is the guidelines' own "approximately the
+   same size and similar visual weight"; the divider reuses `.auth-label`'s type spec, so this adds a
+   component and no new vocabulary. `#FFFFFF`, `#747775` and `#1F1F1F` are Google's Light theme values
+   verbatim and are deliberately NOT tokenised: they are not ours to theme, the guidelines forbid a
+   background other than their light, dark or neutral, and they forbid recoloring the mark. The face is
+   Inter, not Google Sans (a documented deviation: a fourth webfont for one button is not worth the bytes).
+   The order preserves the rank this round spent six tasks establishing, and it keeps First name, Last
+   name, Email, Password and the meter above the fold at 390. `.au-google` and `.au-or` go under the
+   ACCOUNT banner with a PORT NOTE naming the branding rules; no new `!important` (the label rides in a
+   `<span>`, which production's `button { font-size: 16px !important }` guard does not reach), no wildcard
+   motion selectors, and no transition of its own (the global button rule already supplies the tokens).
+4. **Confirm email stays OFF, and that is the decision that matters.** No warning copy on the button and
+   no same-email special case in the code: with Autoconfirm on, every existing password account is already
+   confirmed, so Supabase links a Google identity to the same address non-destructively (same user id,
+   both identities kept, everything keyed on `auth.uid()` intact). **Standing note: flipping Confirm email
+   ON arms two failures and both become required work in the same push.** One, an unconfirmed password
+   account that taps Continue with Google loses its password silently (`RemoveUnconfirmedIdentities` nulls
+   `encrypted_password` and destroys the other identity rows; they stay signed in through Google, so
+   nothing looks wrong until the day they try their password). Two, a Google-only user who tries to create
+   a password account on the same address gets an obfuscated HTTP 200 with `identities: []` and no email
+   is ever sent, so the "Check your email" branch this round already ships would leave them waiting
+   forever; the fix is to read `data.user.identities.length === 0` as "that email already has an account"
+   and route to sign-in. With the toggle OFF that same case returns a real 422 that `friendlyAuthError`
+   already maps.
+
+**Behaviour.** One awaited `signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin } })`
+per tap, the button disabled synchronously before the first await and deliberately left disabled on the
+success path because the page is leaving. The call returns `{ data: { provider, url }, error }` and never
+a session; the library navigates the document itself, so the app never calls `location.assign`. A failure
+writes one line into the same `.auth-err` box the form already renders, "Google did not answer. Try again,
+or use your email.", and hands the button back. That line is deliberately not routed through
+`friendlyAuthError` (no OAuth arm, so a raw server string would fall through), and it is the ONLY feedback
+there is: an OAuth failure is never delivered to `onAuthStateChange`. `flowType` stays the client default,
+which is implicit: the tokens come back in the URL fragment and `detectSessionInUrl` already consumes them,
+and the recovery marker regex cannot match an OAuth fragment, so the two flows stay separate.
+
+**The redirect destroys module state, and one piece of it has to survive.** A full page navigation
+re-evaluates `app.js`, so every module `let` is back at its initializer. `claimIntent` is the one that
+matters: without it, the person who tapped "claim your team", signed in with Google and came back lands on
+the hub with no claim page and no explanation. It is persisted to `sessionStorage` under
+`athletic_specimen_claim_intent` immediately before the call, restored on the line straight after
+`let claimIntent = false;` (below the declaration, or the temporal dead zone kills the app at parse),
+consumed on read, and the key removed at every clear site. Every access is wrapped in try/catch, because
+Safari private mode and several in-app browsers throw on `sessionStorage` outright and the restore runs at
+module scope. `sessionStorage` and not `localStorage`: the redirect returns to the same tab, and an
+abandoned intent should die with the tab. A FAILED call drops the key but keeps the in-memory flag, so the
+same person can finish with email and password and still land on the claim page. Known and accepted: the
+register success screen's payoff (`regSubmittedTeam`, `regAutoAttached`, `pdTournamentView`, the
+`accountName` the auto-attach needs) does not survive the redirect. The persisted intent turns that landing
+into the claim page, which is where the person was heading; persisting the register payoff is not this
+round's work.
+
+**Not decided here, and not inspectable from the repo:** whether the Google provider is enabled in the
+Supabase dashboard with a client id and secret; whether a Google Cloud OAuth client exists carrying
+`https://<ref>.supabase.co/auth/v1/callback`; whether the Redirect URLs allow-list accepts `location.origin`
+(a rejection lands the person on the Site URL root with a valid session and no error); what
+`raw_user_meta_data` actually holds for a Google identity here; whether `sessionStorage` survives the round
+trip on an iPhone, where Google may open in an in-app browser or a new tab; and the consent screen's
+branding, which without verification or a Supabase custom domain shows the project ref, the first thing a
+player sees. The plan's Task 8 carries all of them as its open list.
+
 ### Not ported, on purpose
 
 The verify-later banner and the `.vb*` family; the Unverified tag; "Cancel this change"; "Open the link
@@ -204,6 +298,20 @@ a11y item with the reveal's `aria-pressed`).
   renders the pending screen; Password checks all four rules; the CSS block ships once with exactly the
   documented `!important` counters and no `.vb`; no em dash and no "night" in any emitted string; the
   wall's alt opens the sign-up mode; `.tn-gate` is gone from app.js and styles.css.
+
+- Task 8 adds its own block: the Google button renders exactly once on sign-in and once on
+  create-account and on no other state, under the primary, carrying the current gradient mark and none
+  of the four outdated hexes; one tap sends exactly one `signInWithOAuth` with the provider and the
+  origin and disables the button synchronously, a second tap while it is in flight sends nothing, and
+  a failed or thrown call writes the friendly line and never the raw server string; a pending claim
+  intent is written to `sessionStorage` before the call and only then, a failed call drops the key but
+  keeps the flag, the boot restore consumes the key and sits below the declaration (asserted against
+  the SOURCE), and both a sign-out and the back chevron drop it; a Google user with no profile names
+  is still ASKED, with the fields prefilled from `full_name` and nothing claimed until Save, while a
+  one-word name prefills nothing; and the pure splitter splits on the last space. The harness gains a
+  real Map-backed `sessionStorage` for that half only, `signInWithOAuth` on the auth stub, `assign` /
+  `replace` spies proving the app never navigates itself, and `'auth-google'` in `AUTH_CONTROL_IDS`.
+  Every storage assertion reads a NAMED key, never `length`.
 
 ## Global constraints (every task)
 
