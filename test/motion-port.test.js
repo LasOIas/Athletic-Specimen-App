@@ -27,7 +27,9 @@ describe('motion CSS', () => {
     const rise = /([^{}]+)\{[^{}]*animation:\s*m-rise\b/g;
     while ((m = rise.exec(css))) {
       const sel = m[1].trim();
-      const ok = sel.includes('body.m-enter') || sel.includes('.m-in') || sel.includes('.popup-card') || sel.includes('.pd-reg-sheet');
+      // .mgh-pick: the Manage hub's inline tournament picker (2026-08-25 round) is a menu, not a page
+      // entrance - it opens on a tap, so its rise is not gated on the navigation window.
+      const ok = sel.includes('body.m-enter') || sel.includes('.m-in') || sel.includes('.popup-card') || sel.includes('.pd-reg-sheet') || sel.includes('.mgh-pick');
       expect(ok).toBe(true);
     }
   });

@@ -883,12 +883,12 @@ select:focus {
 }
 .popup-edit-input {
   width: 100%;
-  padding: 10px 12px !important;
+  padding: 10px 12px;
   border-radius: var(--r-sm);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
-  font-size: 15px !important;
+  font-size: 15px;
   box-sizing: border-box;
 }
 .popup-edit-row .group-select { width: 100%; margin-top: 2px; }
@@ -3402,11 +3402,13 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   text-transform: uppercase;
   color: var(--muted);
 }
-/* PORT NOTE: production ships .popup-edit-input with `padding: 10px 12px
-   !important`, so the round's `padding: 0 12px` below is inert in the real app.
-   Left exactly as the round wrote it rather than starting an !important war —
-   the field still lands at 44px with the 11px radius and the accent focus ring,
-   which is the visible intent. Flagged for the app.js builder. */
+/* PORT NOTE (resolved 2026-08-25): production used to ship .popup-edit-input with an
+   !important padding, which made the `padding: 0 12px` below inert. Both !important
+   counters on that rule (padding and font-size) are now GONE rather than countered, so
+   this scoped rule simply wins on specificity and the field lands at 44px with the 11px
+   radius and the accent focus ring. Safe to drop them: .popup-edit-input is only ever
+   emitted inside #player-edit-modal (app.js pe-first / pe-last / pe-skill), and nothing
+   else in the sheet sets padding or font-size on those inputs. */
 #player-edit-modal .popup-edit-input {
   width: 100%;
   height: 44px;
@@ -4658,6 +4660,9 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
 @keyframes m-rise   { from { opacity: 0; transform: translateY(9px); } }
 @keyframes m-fade   { from { opacity: 0; } }
 @keyframes m-surface-in { from { opacity: 0; transform: translateY(10px) scale(.985); } }
+/* PORT NOTE: _motion-app.css:208, verbatim. The menu entrance; the hub's inline tournament
+   picker (.mgh-pick) plays it when that surface lands. */
+@keyframes m-menu   { from { opacity: 0; transform: scaleY(.88) translateY(-6px); } }
 @keyframes m-tick   { from { opacity: 0; transform: scale(.72); } }
 @keyframes m-bump   { 0% { transform: translateY(0); } 40% { transform: translateY(-5px); } 100% { transform: translateY(0); } }
 @keyframes m-pop    { 0% { transform: scale(1); } 35% { transform: scale(1.28); } 100% { transform: scale(1); } }
@@ -4880,3 +4885,137 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
   text-wrap: pretty;
 }
 .bk-pv-pane + .pd-bk-prog { margin-top: 14px; }
+
+/* ============================================================
+   MANAGE DESIGN ROUND - 2026-08-25 (Mike's Claude Design handoff, "Manage")
+   Ported from the handoff's _rounds.css. Appended so order alone gives it the
+   win. PORT NOTES inline. No new !important.
+   Spec: docs/superpowers/specs/2026-08-25-manage-handoff-design.md
+   ============================================================ */
+
+/* PORT NOTE: _rounds.css:1592-1625, verbatim (the round's own comment included).
+   Ships app-wide as authored, so it also restyles the public register form and the
+   two type="date" pickers. The build brief said to omit 1624-1625 as "already live
+   at 3653-3660" - that is WRONG on specificity and they are ported: the prod rules
+   are .pk-fld.mgv-nfld (0,2,0) and .mgv-nfld .pk-fl (0,2,0), which BOTH lose to the
+   new #app-shell .pk-fld / #app-shell .pk-fl (1,1,0) above them. Without 1624-1625
+   every stepper row (Nets, Pools, Team size, the score targets) would lose its
+   11px 13px padding and its label would pick up a 12px top margin. */
+/* ============================================================
+   Round 2026-08-05b - one field style for the whole app
+   The registration form's field (transparent input sitting on a hairline rule)
+   replaces the grey boxed .pk-fv everywhere: event settings, new tournament,
+   registration, pickup session, QR. Same class names, same JS hooks - only the
+   look changes, so nothing else has to move.
+   ============================================================ */
+#app-shell .pk-fld { padding: 6px 0 0; }
+#app-shell .pk-fl { display: block; margin: 12px 2px 0; }
+#app-shell input.pk-fv:not(.mgv-sv),
+#app-shell textarea.pk-fv:not(.mgv-sv),
+#app-shell select.pk-fv:not(.mgv-sv) {
+  width: 100%;
+  padding: 10px 2px;
+  border: 0;
+  border-bottom: 1px solid oklch(0.80 0.006 75);
+  border-radius: 0;
+  background: transparent;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--ink);
+  -webkit-appearance: none;
+  appearance: none;
+}
+#app-shell .pk-fv:focus {
+  outline: none;
+  border-bottom-color: var(--accent);
+  box-shadow: 0 1px 0 0 var(--accent);
+}
+#app-shell .pk-fv::placeholder { color: oklch(0.68 0.005 75); }
+/* .mgv-sv (the number inside a stepper pill) is excluded above - it keeps its own box.
+   The boxed stepper rows keep their card padding too. */
+#app-shell .pk-fld.mgv-nfld { padding: 11px 13px; }
+#app-shell .mgv-nfld .pk-fl { flex: 1; width: auto; margin: 0; }
+
+/* PORT NOTE: _rounds.css:2161-2246, re-mapped onto the markup production actually
+   ships today:  .mgs-cta -> #mgss-sheet .mgv-scfinal  ·  .mgs-b -> #mgss-sheet .mgv-scb
+   DROPPED members, none of which match anything in prod: .mgv-modebtn and
+   .mgt-nm.mgv-picked (the drag-to-move feature, removed 2026-08-07), .mgv-trow.is-active
+   (the retired tournament chooser) and .mgv-tn.is-sel.
+   ALSO DROPPED, and this one is a judgement call rather than dead markup: the round's
+   stepper GEOMETRY (.mgs-b { width/height 46px; border-radius 14px }) and .mgs-cta's
+   14px radius. The NEWER 2026-08-22/24 score-card block above fixes those two controls
+   at 40px pills and a 12px primary as its own documented decision, on a card that is
+   live in a running tournament, so only the RESTYLE (ring, shadow, press) is ported
+   here and the geometry stays prod's. The round's .mgs-b:hover accent wash is already
+   live verbatim as #mgss-sheet .mgv-scb:hover.
+   The .mgh-* members are ported as authored and match nothing until the hub lands. */
+/* ============================================================
+   Round 2026-08-23 — "redo the styling of the buttons, highlighting, checkmarks"
+   (the app itself, every screen). The controls were drawn as outlines: a flat
+   accent rectangle for a primary, a 1px grey border for everything else, a bare
+   tick for a confirmation, and one flat wash for a selected row. Nothing had a
+   surface, so nothing looked pressable and the selected state read the same
+   weight as the hover state.
+   The set below gives every control one consistent treatment: a primary carries
+   its own coloured shadow and a top inner highlight so it sits above the page, a
+   secondary is white on a hairline RING (shadow, not border, so nothing shifts
+   when it changes state), a confirmation tick sits in a green disc of its own,
+   and a chosen row keeps the accent ring plus a soft outer glow so choice beats
+   hover at a glance. Every one of them answers a press.
+   ============================================================ */
+
+/* --- primaries --- */
+#mgss-sheet .mgv-scfinal,
+.mtv-obtn,
+.mgh-act.is-primary,
+#player-edit-modal .pe-save,
+#team-pay-modal .mgv-tpay {
+  border: 0;
+  box-shadow: 0 6px 14px -6px oklch(0.55 0.07 240 / .55), inset 0 1px 0 rgba(255, 255, 255, .16);
+  transition: background-color .15s var(--e-settle, ease), box-shadow .15s ease, transform .08s ease;
+}
+.mgh-act.is-primary { border-radius: 13px; }
+#mgss-sheet .mgv-scfinal:active,
+.mtv-obtn:active,
+.mgh-act.is-primary:active,
+#player-edit-modal .pe-save:active,
+#team-pay-modal .mgv-tpay:active {
+  transform: scale(.98);
+  box-shadow: 0 3px 8px -5px oklch(0.55 0.07 240 / .5), inset 0 1px 0 rgba(255, 255, 255, .16);
+}
+
+/* --- secondaries: the border becomes a ring, so state changes never move type --- */
+.mgh-act,
+.mgh-nact,
+#mgss-sheet .mgv-scb,
+.pd-bk-chip,
+#player-edit-modal .pe-cancel {
+  border-color: transparent;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .05), 0 0 0 1px oklch(0.90 0.005 75);
+  transition: background-color .15s ease, box-shadow .15s ease, transform .08s ease;
+}
+.mgh-nact { box-shadow: 0 1px 2px rgba(20, 20, 22, .05), inset 0 0 0 1.5px var(--accent); }
+.mgh-nact.is-go { box-shadow: 0 1px 2px rgba(20, 20, 22, .05), 0 0 0 1px oklch(0.90 0.005 75); }
+.mgh-act:hover,
+#mgss-sheet .mgv-scb:hover,
+.pd-bk-chip:hover,
+#player-edit-modal .pe-cancel:hover {
+  box-shadow: 0 3px 8px -3px rgba(20, 20, 22, .16), 0 0 0 1px oklch(0.84 0.006 75);
+}
+.mgh-act:active, .mgh-nact:active, #mgss-sheet .mgv-scb:active, .pd-bk-chip:active { transform: scale(.97); }
+
+/* --- confirmation marks sit in a disc, never loose on the page --- */
+.mgh-done > svg {
+  width: 19px;
+  height: 19px;
+  padding: 3.5px;
+  border-radius: 999px;
+  background: oklch(0.93 0.06 152);
+  color: var(--live-ink);
+  box-sizing: border-box;
+}
+
+/* --- chosen beats hovered: the accent ring gains a soft outer glow --- */
+.mgh-prow.is-on {
+  box-shadow: inset 0 0 0 1.5px var(--accent), 0 4px 12px -6px oklch(0.55 0.07 240 / .45);
+}

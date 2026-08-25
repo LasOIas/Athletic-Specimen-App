@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3674,7 +3674,7 @@ function buildPublicTournamentRootHTML() {
 // (fixes both tiles routing to one board). pd chrome (page header + one quiet status line, Mike pick M). THREE states driven by
 // tournament status + bracket data:
 //   pre-bracket (no main-phase matches / pools running) — a FLAT block (no card) "The bracket generates when pool
-//     play finishes" + a live "N of M pool games final" progress line + a quiet seeding → Standings chip.
+//     play finishes" + a live "N of M pool games done" progress line + a quiet seeding → Standings chip.
 //   live — the FULL real bt-* tree (buildBracketHTML in read-only mode: winners + losers via side tabs,
 //     live game lit matte green) under one quiet status line "● Live · Double elimination · <current round>".
 //   completed — a matte-gold champions strip above the tree + the decided championship game lit gold; this
@@ -7008,7 +7008,7 @@ let mgTournamentPinned = false; // true = the organizer picked this tournament e
 let mgpPoolFilter = null;
 let mgpControlsOpen = false;
 // Task 8 / round 2026-08-03 (README §10 "State: showFinished, default false"): the Bracket board hides
-// games that are already final so it shows only what is live, next, or coming. The closing "already final ·
+// games that are already final so it shows only what is live, next, or coming. The closing "already done ·
 // Show" row flips this. Survives the container-swap repaint like every other manage toggle, so a background
 // score sync can never re-hide a board the admin just opened to fix a wrong score.
 let mgBracketShowDone = false;
@@ -9926,7 +9926,7 @@ function mgPoolsScheduleHTML(t, teams, pools, matches) {
   const maxRound = Math.max(1, ...poolGames.map((m) => m.queue_order || 0));
   const finalOrders = poolGames.filter((m) => m.status === 'final').map((m) => m.queue_order || 0);
   const curRound = Math.min(maxRound, (finalOrders.length ? Math.max(...finalOrders) : 0) + 1);
-  const meta = `<p class="pl-meta">Round ${curRound} of ${maxRound} · ${done} of ${total} game${total === 1 ? '' : 's'} final</p>`;
+  const meta = `<p class="pl-meta">Round ${curRound} of ${maxRound} · ${done} of ${total} game${total === 1 ? '' : 's'} done</p>`;
   const colh = `<div class="pl-colh"><span class="c1">#</span><span class="c2">Team</span><span class="c3">W${EN}L</span><span class="c4">Diff</span></div>`;
 
   let body;
@@ -10116,8 +10116,10 @@ function buildMgScoreSheetHTML(match, winner) {
     ? 'Fixing the score. Same winner only. To change who won, clear the result first.'
     : (match.phase === 'main' ? 'Tap the team that won. Add the score if you kept one.' : 'Tap a team to mark them the winner, then enter the score.'));
   // The primary is live when the save would be accepted: a bracket game needs a pick (score optional, a tied
-  // non-zero score is still a tie); a pool game needs a decided score.
-  const canFinal = match.phase === 'main' ? (!!pick && !(a === b && a > 0)) : a !== b;
+  // non-zero score is still a tie); a pool game needs a decided score. Round 2026-08-25: a FINISHED bracket
+  // game with no score on it is the one case the pick alone cannot save. edit_match_score derives the winner
+  // from the scores, so re-submitting 0-0 is refused; the primary stays dead until a point goes in.
+  const canFinal = match.phase === 'main' ? (!!pick && !(a === b && a > 0) && !(isFinal && a === 0 && b === 0)) : a !== b;
   const body = `<div class="mgv-scbody">`
     + `<div class="mgv-scbox">${row('a', aName, a)}${row('b', bName, b)}</div>`
     + `<div class="mgv-schint">${escapeHTML(hint)}</div>`
@@ -10429,7 +10431,7 @@ function mgBracketGroups(main) {
 }
 
 // "G1–G4 and G8" from [8,1,2,3,4]. Contiguous runs collapse to a range; the last part joins with "and".
-// Used by the closing "already final" row and by each group header's game-number range.
+// Used by the closing "already done" row and by each group header's game-number range.
 function mgBracketGameList(nums) {
   const list = [...new Set((nums || []).filter((n) => Number.isFinite(n)))].sort((a, b) => a - b);
   if (!list.length) return '';
@@ -10445,13 +10447,15 @@ function mgBracketGameList(nums) {
   return parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1];
 }
 
-// The group's name in the round 2026-08-03 vocabulary: "Winners bracket", "Losers bracket final", "Grand
-// final". maxRounds carries the LAST round number on each side, computed over EVERY main match (never the
-// visible subset) so hiding the finished games can't rename a round.
+// The group's name in the round 2026-08-25 vocabulary ("Championship, never Final" reaches Manage): the
+// grand final is the "Championship", the LAST round on each side is that side's "semifinal", and every
+// earlier round is plain "Winners bracket" / "Losers bracket". maxRounds carries the last round number on
+// each side, computed over EVERY main match (never the visible subset) so hiding the finished games can't
+// rename a round. The stored matches.round_label is untouched: mgBracketGroupProgress parses it.
 function mgBracketSideName(g, maxRounds) {
-  if (g.side === 'grand_final') return 'Grand final';
-  const base = g.side === 'winners' ? 'Winners bracket' : 'Losers bracket';
-  return (g.round >= ((maxRounds || {})[g.side] || 0)) ? base + ' final' : base;
+  if (g.side === 'grand_final') return 'Championship';
+  const base = g.side === 'winners' ? 'Winners' : 'Losers';
+  return (g.round >= ((maxRounds || {})[g.side] || 0)) ? base + ' semifinal' : base + ' bracket';
 }
 
 // The right-hand progress word in a group header: "live now" / "up next" / "final", or — when nothing in the
@@ -10482,7 +10486,7 @@ function mgBracketGroupProgress(g, all, gn) {
 
 // The live board (round 2026-08-03, README §10): every round is a boxed group with a tinted header carrying
 // its name, its game-number range and its progress; every match is a two-line scoreboard. Games that are
-// already FINAL are held back behind the closing "already final · Show" row (mgBracketShowDone) so the board
+// already FINAL are held back behind the closing "already done · Show" row (mgBracketShowDone) so the board
 // shows what is live or next — unless hiding them would leave nothing at all (a completed tournament), in
 // which case they stay on screen rather than emptying the page.
 function mgBracketLiveHTML(t) {
@@ -10511,7 +10515,7 @@ function mgBracketLiveHTML(t) {
   }).join('');
   const toggle = canHide
     ? `<button type="button" class="mgv-bkdone" data-mgbk-showdone>`
-      + `<span>${escapeHTML(mgBracketGameList(done.map((m) => gn.byId[m.id])))} already final</span>`
+      + `<span>${escapeHTML(mgBracketGameList(done.map((m) => gn.byId[m.id])))} already done</span>`
       + `<span class="mgv-bkdonel">${hiding ? 'Show' : 'Hide'}</span></button>`
     : '';
   return groups + toggle;
@@ -11851,7 +11855,7 @@ function attachHandlers() {
         // Reset the bracket (type-name unlock) and the players'-view link out to the public bracket page.
         // Checked BEFORE the generic hub rows so a seed nudge / score / generate never falls through.
         if (mgtView === 'bracket') {
-          // The closing "already final · Show" row (round 2026-08-03): reveal / re-hide the finished games so
+          // The closing "already done · Show" row (round 2026-08-03): reveal / re-hide the finished games so
           // a wrong score can still be corrected. Checked FIRST so the tap never falls through to a row.
           if (e.target.closest('[data-mgbk-showdone]')) { mgBracketShowDone = !mgBracketShowDone; repaintManage(); return; }
           const bkScore = e.target.closest('[data-mgbk-score]');
@@ -12037,15 +12041,26 @@ function attachHandlers() {
 // roster search + per-row in/out toggle (and the public kiosk). Its markup, #admin-checkin-msg node, and
 // handlers (#btn-check-in / #btn-check-out / runAdminModalCheck) are all deleted.
 
+// C81 (2026-08-25): the check-in kiosk URL is DERIVED, never hardcoded. The old preview host stopped
+// resolving on 2026-07-10, so the QR at the door, the text under it and the Copy URL button were all
+// handing players a 404. Whatever origin the organizer has the app open on is the origin the kiosk lives
+// on, so origin + '/checkin.html' is always right and can never go stale again. The literal old host is
+// deliberately absent from this file, comments included: test/manage-round.test.js greps the raw source.
+function checkinKioskUrl() {
+  return location.origin + '/checkin.html';
+}
+
 function openQrModal() {
   const modal = document.getElementById('qrModal');
   const container = document.getElementById('qrCodeContainer');
   if (!modal || !container) return;
   container.innerHTML = '';
+  const urlEl = document.getElementById('qrModalUrl');
+  if (urlEl) urlEl.textContent = checkinKioskUrl();
   // Size the QR to fit the phone so it doesn't overflow the modal off-screen to the right
   const qrSize = Math.max(220, Math.min(340, window.innerWidth - 96));
   new QRCode(container, {
-    text: 'https://athletic-specimen-app.vercel.app/checkin.html',
+    text: checkinKioskUrl(),
     width: qrSize,
     height: qrSize,
     colorDark: '#000000',
@@ -12079,7 +12094,7 @@ function closeQrModal() {
 
   if (copyBtn) {
     copyBtn.addEventListener('click', async () => {
-      const url = 'https://athletic-specimen-app.vercel.app/checkin.html';
+      const url = checkinKioskUrl();
       try {
         await navigator.clipboard.writeText(url);
         const orig = copyBtn.textContent;

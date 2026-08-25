@@ -1261,17 +1261,17 @@ describe('buildMgBracketHTML — live by-round rows (pick R10-C, mockup bk2-c)',
   it('groups games into boxed rounds with a name, a game range and a progress word', () => {
     expect(html).toContain('class="mgv-bkr"');
     expect(html).toContain('class="mgv-bkrh"');
-    expect(html).toContain('<span>Winners bracket final · G4' + BEN + 'G5</span>'); // the live pair
-    expect(html).toContain('<span>Grand final · G6</span>');
+    expect(html).toContain('<span>Winners semifinal · G4' + BEN + 'G5</span>'); // the live pair
+    expect(html).toContain('<span>Championship · G6</span>');
     expect(html).toContain('class="mgv-bkrs">live now<');
     expect(html).toContain('class="mgv-bkrs">up next<');
     expect(html).not.toContain('pd-card');
   });
 
   it('orders the groups active-first: live round, then up-next, then still-unresolved', () => {
-    const iLive = html.indexOf('Winners bracket final');  // live → top
-    const iUp = html.indexOf('Losers bracket');           // up next (plays earlier, q2) but comes AFTER live
-    const iGf = html.indexOf('Grand final');              // unresolved → last
+    const iLive = html.indexOf('Winners semifinal');      // live → top
+    const iUp = html.indexOf('Losers semifinal');         // up next (plays earlier, q2) but comes AFTER live
+    const iGf = html.indexOf('Championship');             // unresolved → last
     expect(iLive).toBeGreaterThanOrEqual(0);
     expect(iLive).toBeLessThan(iUp);
     expect(iUp).toBeLessThan(iGf);
@@ -1302,7 +1302,7 @@ describe('buildMgBracketHTML — live by-round rows (pick R10-C, mockup bk2-c)',
     expect(html).not.toContain('data-mgbk-score="bm-w1a"'); // WB R1 is final → off the board
     expect(html).not.toContain('data-mgbk-score="bm-w1b"');
     expect(html).toContain('data-mgbk-showdone');
-    expect(html).toContain('G1' + BEN + 'G2 already final');
+    expect(html).toContain('G1' + BEN + 'G2 already done');
     expect(html).toContain('class="mgv-bkdonel">Show<');
   });
 
@@ -1357,7 +1357,7 @@ describe('buildMgBracketHTML — completed (mockup bk2-c, quiet close-out pointe
     expect(html).toContain('class="mgv-bkl is-win"'); // the final rows still render, winner in green
     expect(html).not.toContain('data-mgbk-showdone');
     expect(html).toContain('data-mgbk-reset');        // reset still available
-    expect(html).toContain('<span>Grand final · G2</span>');
+    expect(html).toContain('<span>Championship · G2</span>');
   });
 });
 
