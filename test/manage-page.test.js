@@ -61,7 +61,7 @@ function loadApp() {
   sandbox.globalThis = sandbox; sandbox.self = sandbox;
   const epilogue = `
     ;globalThis.__bridge = {
-      needsYou: (t, teams, days) => manageNeedsYouModel(t, teams, days),
+      needsYou: (ctx) => manageNeedsYouModel(ctx),
       buildManage: () => buildManagePageHTML(),
       buildNav: () => buildPublicNavInnerHTML(),
       getState: () => state,
@@ -131,58 +131,78 @@ const bridge = loadApp();
 const count = (hay, needle) => hay.split(needle).length - 1;
 
 // ── the pure needs-you model ──────────────────────────────────────────────────
+// UPDATED by the Manage handoff (2026-08-25): the model takes ONE ctx object and every item now carries the
+// verb that fixes it plus where that verb goes. The three kinds pinned here are the ones that shipped in
+// session 10 and survived the rebuild unchanged in meaning — venmo, unpaid, noday — re-asserted against the
+// new signature. The round's new items (sign-ups, pools, venue, fee, rules, silent net) are covered in
+// manage-round.test.js, next to the hub that renders them.
 describe('manageNeedsYouModel — pure attention model', () => {
-  const openNoVenmo = { id: 'T', name: 'July 2026', status: 'setup', registration_open: true, venmo_link: '' };
-  const openWithVenmo = { id: 'T', name: 'July 2026', status: 'setup', registration_open: true, venmo_link: 'https://venmo.com/u/x' };
+  // Satisfied on every OTHER axis, so each test below moves exactly one thing.
+  const base = { id: 'T', name: 'July 2026', status: 'setup', registration_open: true,
+    buy_in: '$80 a team', rules: '## Format', venue: 'Washington Park' };
+  const openNoVenmo = { ...base, venmo_link: '' };
+  const openWithVenmo = { ...base, venmo_link: 'https://venmo.com/u/x' };
+  const ctx = (t, teams, days) => ({ t, teams, pickupDays: days, pools: [], matches: [],
+    tournaments: [], scope: 'hub', venueLoaded: true });
 
   it('flags a missing venmo link only while registration is open', () => {
-    const items = bridge.needsYou(openNoVenmo, [], ['a-day']);
+    const items = bridge.needsYou(ctx(openNoVenmo, [], ['a-day']));
     expect(items.some((i) => i.id === 'venmo')).toBe(true);
-    // reg closed → the venmo nudge disappears (nobody is paying yet)
-    const closed = bridge.needsYou({ ...openNoVenmo, registration_open: false }, [], ['a-day']);
+    // reg closed → the venmo nudge disappears (nobody is paying yet); the sign-ups item is what blocks
+    const closed = bridge.needsYou(ctx({ ...openNoVenmo, registration_open: false }, [], ['a-day']));
     expect(closed.some((i) => i.id === 'venmo')).toBe(false);
+    expect(closed.some((i) => i.id === 'signups')).toBe(true);
     // venmo present → no nudge
-    const paidLink = bridge.needsYou(openWithVenmo, [], ['a-day']);
+    const paidLink = bridge.needsYou(ctx(openWithVenmo, [], ['a-day']));
     expect(paidLink.some((i) => i.id === 'venmo')).toBe(false);
   });
 
-  it('flags unpaid teams with a pluralized count title', () => {
+  it('flags unpaid teams with a pluralized count title and names who is still out', () => {
     const teams = [
       { id: 't1', name: 'Sets & Reps', paid: false },
       { id: 't2', name: 'Dig It', paid: false },
       { id: 't3', name: 'Paid Squad', paid: true },
     ];
-    const items = bridge.needsYou(openWithVenmo, teams, ['a-day']);
+    const items = bridge.needsYou(ctx(openWithVenmo, teams, ['a-day']));
     const unpaid = items.find((i) => i.id === 'unpaid');
     expect(unpaid).toBeTruthy();
-    expect(unpaid.title).toBe("2 teams haven't paid");
+    expect(unpaid.title).toBe("2 of 3 teams haven't paid");
+    expect(unpaid.sub).toBe('Sets & Reps · Dig It, the other 1 is paid');
+    expect(unpaid.verb).toBe('See who paid');
+    expect(unpaid.kind).toBe('jump');
     // one unpaid team → singular grammar
-    const one = bridge.needsYou(openWithVenmo, [{ id: 't1', name: 'Solo', paid: false }], ['a-day']);
-    expect(one.find((i) => i.id === 'unpaid').title).toBe("1 team hasn't paid");
+    const one = bridge.needsYou(ctx(openWithVenmo, [{ id: 't1', name: 'Solo', paid: false }], ['a-day']));
+    expect(one.find((i) => i.id === 'unpaid').title).toBe("1 of 1 team hasn't paid");
+    expect(one.find((i) => i.id === 'unpaid').sub).toBe('Solo, none are paid yet');
     // all paid → no unpaid item
-    const allPaid = bridge.needsYou(openWithVenmo, [{ id: 't3', name: 'Paid Squad', paid: true }], ['a-day']);
+    const allPaid = bridge.needsYou(ctx(openWithVenmo, [{ id: 't3', name: 'Paid Squad', paid: true }], ['a-day']));
     expect(allPaid.some((i) => i.id === 'unpaid')).toBe(false);
   });
 
   it('flags no pickup day when the (already-upcoming) day set is empty', () => {
-    expect(bridge.needsYou(openWithVenmo, [], []).some((i) => i.id === 'noday')).toBe(true);
-    expect(bridge.needsYou(openWithVenmo, [], ['a-day']).some((i) => i.id === 'noday')).toBe(false);
+    expect(bridge.needsYou(ctx(openWithVenmo, [], [])).some((i) => i.id === 'noday')).toBe(true);
+    expect(bridge.needsYou(ctx(openWithVenmo, [], ['a-day'])).some((i) => i.id === 'noday')).toBe(false);
   });
 
   it('returns [] when nothing needs attention', () => {
     const teams = [{ id: 't3', name: 'Paid Squad', paid: true }];
-    expect(bridge.needsYou(openWithVenmo, teams, ['a-day'])).toEqual([]);
+    expect(bridge.needsYou(ctx(openWithVenmo, teams, ['a-day']))).toEqual([]);
   });
 
-  it('every item carries a deep-link area', () => {
+  it('every item carries a verb and somewhere for it to go', () => {
     const teams = [{ id: 't1', name: 'X', paid: false }];
-    const items = bridge.needsYou(openNoVenmo, teams, []);
-    expect(items.length).toBe(3);
-    items.forEach((i) => expect(['tournament', 'pickup', 'players', 'teams', 'admins']).toContain(i.area));
+    const items = bridge.needsYou(ctx(openNoVenmo, teams, []));
+    expect(items.map((i) => i.id)).toEqual(['unpaid', 'venmo', 'noday']);
+    items.forEach((i) => {
+      expect(i.verb).toBeTruthy();
+      expect(['jump', 'fix']).toContain(i.kind);
+      const t = i.target || {};
+      expect(!!(t.view || t.area || t.matchId || t.action)).toBe(true);
+    });
   });
 });
 
-// ── the Manage lead page builder ──────────────────────────────────────────────
+// ── the Manage hub builder ────────────────────────────────────────────────────
 function setManageState(extra = {}) {
   const st = bridge.getState();
   Object.assign(st, {
@@ -201,62 +221,66 @@ function setManageState(extra = {}) {
   });
 }
 
-describe('buildManagePageHTML — the Manage lead (flat, needs-you first)', () => {
-  it('renders the flush title, both sections, and de-carded flat rows', () => {
+describe('buildManagePageHTML — the Manage hub (title block, then the flat rows)', () => {
+  // UPDATED by the Manage handoff (2026-08-25). The `.mg-h1` heading and the `.mgv-tsw` switcher card both
+  // retired: "Manage" is an eyebrow now and the TOURNAMENT is the page title, with the picker inside it.
+  it('renders the title block, both sections, and de-carded flat rows', () => {
     setManageState();
     const html = bridge.buildManage();
-    expect(html).toContain('class="mg-h1">Manage<');
+    expect(html).toContain('class="mgh-eyebrow">Manage<');
+    expect(html).toContain('class="mgh-tname">July 2026<');
+    expect(html).not.toContain('mg-h1');
     expect(html).toContain('>Needs you<');
     expect(html).toContain('>Everything<');
     expect(html).not.toContain('pd-card');
     expect(html).toContain('class="mg-chev"');
   });
 
-  it('renders exactly the five EVERYTHING area rows (no needs-you sharing an area)', () => {
+  it('renders exactly the six EVERYTHING area rows (no needs-you sharing an area)', () => {
     // satisfied state → NEEDS YOU is omitted, so each area id appears once (its EVERYTHING row only)
     setManageState({
-      tournaments: [{ id: 'T', name: 'July 2026', status: 'setup', registration_open: true, venmo_link: 'https://venmo.com/u/x' }],
+      tournaments: [{ id: 'T', name: 'July 2026', status: 'setup', registration_open: true,
+        venmo_link: 'https://venmo.com/u/x', buy_in: '$80 a team', rules: '## Format' }],
       tournamentTeams: [{ id: 't3', name: 'Paid Squad', paid: true }],
       currentSession: { date: '2999-01-01', time: '10:00 AM', location: 'Gym' },
     });
     const html = bridge.buildManage();
-    ['tournament', 'pickup', 'players', 'teams', 'admins'].forEach((area) => {
+    ['tournament', 'pickup', 'checkin', 'players', 'teams', 'admins'].forEach((area) => {
       expect(count(html, `data-mg-area="${area}"`)).toBe(1);
     });
   });
 
-  // UPDATED by the 2026-08-04 switcher round. The tournament's name and its registration state used to be
-  // the Tournament ROW's subtitle ("July 2026 · Registration open · 2 teams in"). They moved up onto the
-  // switcher card, which states them ONCE for the whole screen, and the row now says what it leads into
-  // plus where that work stands. Both facts are still on the page; they are just no longer on that row.
-  // (The card itself is covered in full by tournament-switcher.test.js.)
+  // UPDATED by the 2026-08-25 handoff. The subtitle carries what the row LEADS INTO; where the work stands
+  // moved to the right-hand chip, and the club roster count is a chip too. Both facts are still on the page.
   it('shows real one-line status subs pulled from state', () => {
     setManageState();
     const html = bridge.buildManage();
-    expect(html).toContain('class="mgv-tswn">July 2026<');            // the card names it
-    expect(html).toContain('registration open');                      // the card's meta clause
+    expect(html).toContain('class="mgh-tname">July 2026<');           // the title names it
+    expect(html).toContain('registration open');                      // the meta clause
     expect(html).toContain('Registration, teams, pools, bracket');    // the row leads into these
-    expect(html).toContain('233 on the roster');   // players row sub
-    expect(html).toContain('19 checked in');
+    expect(html).toContain('class="mgv-rmeta">233 on file<');         // players row chip
+    expect(html).toContain('The roster everyone is picked from');
   });
 
   it('surfaces the needs-you rows when work is pending (venmo + unpaid + noday)', () => {
     setManageState();
     const html = bridge.buildManage();
-    expect(html).toContain("2 teams haven't paid");
+    expect(html).toContain("2 of 2 teams haven't paid");
     expect(html).toContain('Add the Venmo link');
     expect(html).toContain('No pickup day set');
   });
 
   it('omits the NEEDS YOU section entirely when nothing needs attention', () => {
     setManageState({
-      tournaments: [{ id: 'T', name: 'July 2026', status: 'setup', registration_open: true, venmo_link: 'https://venmo.com/u/x' }],
+      tournaments: [{ id: 'T', name: 'July 2026', status: 'setup', registration_open: true,
+        venmo_link: 'https://venmo.com/u/x', buy_in: '$80 a team', rules: '## Format' }],
       tournamentTeams: [{ id: 't3', name: 'Paid Squad', paid: true }],
       currentSession: { date: '2999-01-01', time: '10:00 AM', location: 'Gym' }, // far-future upcoming day
     });
     const html = bridge.buildManage();
     expect(html).not.toContain('>Needs you<');
-    expect(html).toContain('>Everything<'); // the rest of the lead still renders
+    expect(html).not.toContain('mgh-nrow');
+    expect(html).toContain('>Everything<'); // the rest of the hub still renders
   });
 
   it('no longer carries the old-admin escape hatch (Task 14: old shell deleted)', () => {

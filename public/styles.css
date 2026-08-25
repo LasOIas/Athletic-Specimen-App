@@ -4087,110 +4087,11 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
    row, the static close button, the gap/min-width values — is the layout work
    from README §3 and is ported in full. */
 
-/* Round 2026-08-04 — "on the manage page i need to be able to choose between all
-   the tournaments, one to choose which one is active … then the active tournament
-   is whats edited from the manage page". Manage now opens by naming the
-   tournament it is pointed at, so every row under it reads as scoped to that one.
-   The list itself is its own screen (Manage · Tournaments) because it carries
-   drafts and finished events, and New tournament belongs at the top of that list
-   rather than as a seventh row on the hub.
-   PORT NOTE: the round's `.mg-row:has(.mgv-rmeta)` + `.mgv-rmeta` rules are NOT
-   repeated here — they shipped with the 2026-08-03 sub-hub block above, and the
-   chooser rows reuse them as-is for the three-column dot/body/state layout. */
-.mgv-tsw {
-  display: grid;
-  /* production ships button { justify-content:center }, which centres the whole
-     single-column track — this card is a left-aligned block, so undo both axes */
-  grid-template-columns: minmax(0, 1fr);
-  justify-content: stretch;
-  justify-items: stretch;
-  gap: 3px;
-  width: 100%;
-  margin: 2px 0 7px;
-  padding: 12px 14px 13px;
-  border: 1px solid var(--border);
-  border-radius: 15px;
-  background: #fff;
-  text-align: left;
-  cursor: pointer;
-}
-.mgv-tswtop { display: flex; align-items: center; gap: 10px; width: 100%; }
-.mgv-tswlab {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: .09em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.mgv-tswact {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--accent);
-}
-.mgv-tswact svg { width: 15px; height: 15px; }
-.mgv-tswn {
-  font-size: 19px;
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -.01em;
-  color: var(--ink);
-}
-.mgv-tswm { font-size: 12.5px; line-height: 1.45; color: var(--muted); }
-.mgv-tswf { margin: 0 2px; font-size: 12px; color: var(--muted); }
-
-/* the chooser */
-.mgv-tcap { margin: -2px 0 12px; font-size: 13px; line-height: 1.5; color: var(--muted); text-wrap: pretty; }
-.mgv-tnew {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start; /* production centres button content */
-  gap: 12px;
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 15px;
-  background: #fff;
-  text-align: left;
-  cursor: pointer;
-}
-.mgv-tnewic {
-  flex: none;
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
-}
-.mgv-tnewic svg { width: 19px; height: 19px; }
-.mgv-tnewb { display: grid; gap: 2px; min-width: 0; }
-.mgv-tnewn { font-size: 15px; font-weight: 700; color: var(--ink); }
-.mgv-tnews { font-size: 12px; line-height: 1.4; color: var(--muted); text-wrap: pretty; }
-/* selection, not navigation: a radio dot in the lead column and no chevron. The
-   :has() rule above already re-packs .mg-row to flex-start for the state word. */
-.mgv-trow { align-items: center; }
-.mgv-tdot {
-  flex: none;
-  width: 20px;
-  height: 20px;
-  margin-right: 12px;
-  border: 1px solid oklch(0.84 0.006 75);
-  border-radius: 999px;
-  background: #fff;
-}
-.mgv-trow.is-active .mgv-tdot {
-  border-color: var(--accent);
-  background: var(--accent);
-  box-shadow: inset 0 0 0 4px #fff;
-}
-.mgv-trow.is-active .mg-rn { font-weight: 700; }
-.mgv-trow.is-active .mgv-rmeta { color: var(--accent); }
-.mgv-tnote { margin-top: 15px; font-size: 12px; line-height: 1.5; color: var(--muted); }
+/* PORT NOTE: the 2026-08-04 chooser block (.mgv-tsw* card, .mgv-tcap, .mgv-tnew*, .mgv-trow, .mgv-tdot,
+   .mgv-tnote) was DELETED here on 2026-08-25 — the card became the page title and the chooser screen
+   retired with it, so every one of those classes matched nothing. #team-pay-modal .mgv-tnote keeps its
+   own rule above and is unaffected. The replacement is the MANAGE DESIGN ROUND block at the end of
+   this file. */
 
 /* ============ end TOURNAMENT + MANAGE DESIGN ROUND ============ */
 
@@ -4892,6 +4793,356 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
    win. PORT NOTES inline. No new !important.
    Spec: docs/superpowers/specs/2026-08-25-manage-handoff-design.md
    ============================================================ */
+
+/* PORT NOTE: _rounds.css:1106-1249 verbatim (the round's own comments included) — the title block and
+   the inline picker. Placed HERE, above the 2026-08-23 button restyle below, because that is the order
+   the handoff itself ships them in: the restyle is written to sit ON TOP of this geometry (it turns
+   .mgh-act's border into a ring, .mgh-done's tick into a disc and .mgh-prow.is-on's ring into a glow),
+   so appending after it would silently undo all four. */
+/* Round 2026-08-23 — "i dont like this whole feature can you make it better"
+   (Manage · tournament switcher). Before: a boxed card spent four lines saying
+   which tournament you were pointed at, then a footnote apologised for the
+   ambiguity ("Every row below edits this one"), and switching cost a round trip
+   to a separate chooser screen and back. Three problems in one: the card looked
+   like a nav row but behaved as a context selector, the scope needed explaining,
+   and a two-second decision took three taps.
+   Now: the tournament IS the page title. "Manage" drops to an eyebrow, the
+   tournament name becomes the h1 with a caret, and the facts that were inside the
+   card sit under it as one meta line. Tapping the title drops an inline picker
+   over the rows — pick and you are switched, no screen change, no back button.
+   The scope sentence moves inside the panel, where it is only read when relevant,
+   and the chooser screen is retired. */
+.mgh-scope { position: relative; margin: 0 0 14px; }
+.mgh-eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mgh-title {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start; /* production centres button content */
+  gap: 6px;
+  width: 100%;
+  margin: 3px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+}
+/* production ships button { font-size: 16px !important }, so the display size has
+   to live on a child that is not the button itself */
+.mgh-tname {
+  font-family: var(--font-display);
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -.015em;
+  text-wrap: pretty;
+}
+.mgh-car { flex: none; width: 20px; height: 20px; margin-top: 3px; color: var(--accent); transition: transform .16s ease, color .16s ease; }
+/* production fills any bare <button> with the brand dark on hover, which turned the
+   page title into a solid navy slab. The title is text, not a button face: hover
+   only warms the caret. */
+/* PORT NOTE: the round wrote this pair with !important. Dropped, and NOT needed: production's rule is
+   `button:hover { background: var(--brand-dark) }` at (0,1,1) and `button { color:#fff }` at (0,0,1),
+   both of which lose to (0,2,0) on their own. No new !important lands in this round. */
+.mgh-title:hover, .mgh-title:active, .mgh-title:focus { background: none; color: var(--ink); }
+.mgh-title:hover > .mgh-car { color: var(--brand-dark); }
+.mgh-title[aria-expanded="true"] > .mgh-car { transform: rotate(180deg); }
+.mgh-meta { margin-top: 5px; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.mgh-meta b { font-weight: 600; color: var(--live-ink); }
+.mgh-meta b.is-off { color: var(--muted); font-weight: 500; }
+
+/* the picker overlays the rows rather than pushing them down, so the page does
+   not jump under your thumb while you decide */
+.mgh-pick {
+  position: absolute;
+  left: -6px;
+  right: -6px;
+  top: calc(100% + 8px);
+  z-index: 60;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 14px 34px -10px rgba(20, 20, 22, .26), 0 2px 6px rgba(20, 20, 22, .06);
+}
+.mgh-pick[hidden] { display: none; }
+.mgh-pgrp {
+  padding: 8px 9px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mgh-prow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 11px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+/* hover was the same accent-soft as the chosen row, so passing over a row made it
+   look already picked. Hover is now a neutral wash — the accent stays reserved for
+   the one that is actually selected — and the chosen row keeps its fill on hover. */
+.mgh-prow:hover { background: oklch(0.96 0.003 75); }
+.mgh-prow.is-on:hover { background: var(--accent-soft); }
+/* the chosen one is filled in, the same accent-soft + ring the app uses for a
+   picked name — selection, not navigation, so no chevron */
+.mgh-prow.is-on { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent); }
+.mgh-pb { display: grid; gap: 2px; min-width: 0; }
+.mgh-pn { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.mgh-prow.is-on .mgh-pn { font-weight: 700; }
+.mgh-ps { font-size: 12px; line-height: 1.4; color: var(--muted); }
+.mgh-pstate {
+  margin-left: auto;
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mgh-prow.is-on .mgh-pstate { color: var(--accent); }
+.mgh-pnew {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  margin-top: 5px;
+  padding: 10px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 11px 11px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.mgh-pnewic {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent-soft);
+}
+.mgh-pnewic svg { width: 14px; height: 14px; }
+.mgh-pnote { margin: 2px 10px 6px; font-size: 11.5px; line-height: 1.5; color: var(--muted); text-wrap: pretty; }
+/* PORT NOTE: production counters the round was authored without. Its prototype has no global <button>
+   rule; production ships `button { min-height: 38px; font-size: 16px !important }` plus two :active
+   transforms. So (a) the page TITLE, which is a button carrying 29px of text, would be padded to 38px
+   and would jiggle under the thumb like a control; (b) the 32px Needs-you verb pill would render 38px;
+   (c) the New tournament label, the one bare text node in any of these buttons, would render 16px
+   instead of 14px, so it rides on a span like every other label in this round. All three are ordinary
+   specificity wins - no !important is needed or added. Written as #tab-manage-scoped selectors rather
+   than re-opening the bare classes above, so the "nothing was pasted twice" guard stays meaningful
+   and a counter is never mistaken for a duplicated rule. */
+#tab-manage .mgh-title { min-height: 0; }
+#tab-manage .mgh-title:active { transform: none; }
+#tab-manage .mgh-nact { min-height: 0; }
+#tab-manage .mgh-pnew > span:last-child { font-size: 14px; font-weight: 600; color: var(--accent); }
+
+/* PORT NOTE: _shared.css:706-716 — the 62px mark in the title block's top-right corner. Its own
+   `.mgh-scope { position: relative }` (line 705) is dropped: line 1119 above already states it. */
+.mgh-scope > .mgh-mark {
+  position: absolute;
+  top: -2px;
+  right: 0;
+  width: 62px;
+  height: auto;
+  opacity: .85;
+  pointer-events: none;
+  user-select: none;
+}
+
+
+/* PORT NOTE: _rounds.css:1279-1302. The `#tab-manage .mgh-sect` LAYOUT block (1259-1278) is deliberately
+   NOT ported — production's .pl-sect is already `display:flex; align-items:center; gap:10px` with a
+   trailing ::after hairline, which is the same inline head the round draws; re-declaring it would be two
+   places to change one rule. Only its accent COLOUR (1279-1280), the picker-overlay z-index and the
+   .mgh-trow / .mgh-sectn members come across. */
+#tab-manage .mgh-sect { color: var(--accent); }
+#tab-manage .mgh-sect.is-attn { color: var(--accent); }
+/* the picker is an overlay: its scope outranks the rows it covers, whatever
+   order they paint in */
+#tab-manage .mgh-scope { position: relative; z-index: 5; }
+
+/* The tournament is not one item in a directory - it is the thing the organizer
+   came to run. Its own category, and a row with the weight to match. */
+.mgh-trow .mg-rn { font-size: 16.5px; font-weight: 700; }
+.mgh-trow .mg-rs { font-size: 13px; }
+.mgh-trow { padding-top: 15px; padding-bottom: 15px; }
+.mgh-sectn {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+/* PORT NOTE: _rounds.css:1304-1419 — the phase track, the quick actions and the Needs-you rows. DROPPED:
+   every .mgh-undo rule (1409-1411, 1417-1418). Spec 2026-08-25: no in-row write this round has a
+   reversing RPC, and the registration switch is its own undo, so the confirmation strip ships with no
+   Undo link and nothing emits .mgh-undo. The live-strip block (1420-1460) belongs to the "On the nets"
+   task and is not ported here. */
+/* Round 2026-08-23 — "i really like the manage page but i think we can do so much
+   more with it". Manage was a directory: six rows of equal weight that read the
+   same three weeks out and mid-tournament. It is now a control room, with the
+   layout held FIXED across phases (the organizer's answer) — the same five blocks
+   every time, each one saying something different depending on where the
+   tournament is. Three states are drawn: setup (mg-hub-setup), registration
+   (mg-hub) and game day (mg-hub-live).
+   ============================================================ */
+
+/* 1. The track. No clock — these tournaments do not run to one — so it marks
+   SEQUENCE, not time: what is behind you, what you are in, what is left. */
+.mgh-track { display: flex; gap: 3px; margin: 16px 0 2px; }
+.mgh-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: oklch(0.72 0.005 75);
+  white-space: nowrap;
+}
+.mgh-step::before { content: ''; height: 3px; border-radius: 2px; background: oklch(0.93 0.004 75); }
+.mgh-step.is-done { color: var(--muted); }
+.mgh-step.is-done::before { background: var(--accent-bd, var(--accent)); opacity: 1; }
+.mgh-step.is-now { color: var(--accent); }
+.mgh-step.is-now::before { background: var(--accent); opacity: 1; }
+
+/* 2. Quick actions. Two, never a tray: the phase-defining one in the accent and
+   the one an organizer reaches for at any hour. */
+.mgh-acts { margin: 15px 0 2px; }
+.mgh-acts .mgh-face { display: flex; gap: 8px; }
+/* a display: rule beats the UA's [hidden] { display: none }, so the face has to
+   opt back out explicitly or the done strip stacks under the live buttons */
+.mgh-face[hidden] { display: none; }
+.mgh-act {
+  flex: 1;
+  min-width: 0;
+  height: 43px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  transition: background-color .15s ease;
+}
+/* production forces 16px on <button> and fills it dark on hover, so the label
+   rides on a span and both states are stated here */
+.mgh-act > span { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+.mgh-act:hover { background: oklch(0.96 0.003 75); }
+.mgh-act.is-primary { background: var(--accent); border-color: var(--accent); }
+.mgh-act.is-primary > span { color: #fff; }
+.mgh-act.is-primary:hover { background: var(--brand-dark); }
+
+/* 3. Needs you, with the fix in the row. One tap does it and leaves an undo —
+   nothing here should cost a screen. Items that genuinely need a screen say so
+   with a verb instead ("Draw", "Enter", "Set"). */
+.mgh-nrow { display: block; padding: 0; }
+.mgh-nrow .mgh-face { display: flex; align-items: center; gap: 10px; padding: 11px 2px; }
+.mgh-nbody {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  /* production ships button { justify-content: center }, which centres the grid
+     track and rags every line to its own width */
+  justify-content: start;
+  justify-items: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.mgh-nbody:hover { background: none; }
+.mgh-nn { font-size: 14.5px; font-weight: 600; line-height: 1.3; color: var(--ink); }
+.mgh-ns { font-size: 12.5px; line-height: 1.4; color: var(--muted); text-wrap: pretty; }
+.mgh-nact {
+  flex: none;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  padding: 0 13px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+  transition: background-color .15s ease;
+}
+.mgh-nact > span { font-size: 12.5px; font-weight: 700; color: var(--accent); }
+.mgh-nact:hover { background: var(--accent-soft); }
+/* a jump is not a fix: no ring, just the verb and a chevron's worth of weight */
+.mgh-nact.is-go { border-color: var(--border); }
+.mgh-nact.is-go > span { color: var(--ink); }
+
+.mgh-done { display: flex; align-items: center; gap: 8px; padding: 13px 2px; color: var(--live-ink); }
+.mgh-done[hidden] { display: none; }
+.mgh-done > svg { flex: none; width: 16px; height: 16px; }
+.mgh-donetxt { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; }
+.mgh-acts .mgh-done { padding: 0; height: 43px; }
+/* the registration switch keeps its buttons and adds the confirmation UNDER them,
+   so the control never disappears out from under the thumb that just used it */
+.mgh-done.is-under { height: auto; padding: 11px 2px 1px; }
+.mgh-acts .mgh-done.is-under { height: auto; padding: 11px 2px 1px; }
+
+
+/* PORT NOTE: _rounds.css:1461-1473 rewritten onto production's chip class. The round names the hub's
+   right-hand chip .mgh-state; prod already ships .mgv-rmeta (styles.css ~3472) for exactly the same
+   affordance, and the spec's cross-cutting rule is ONE chip class, so .mgh-state is never emitted and
+   the two rules the round ADDS are re-pointed here. The base rule is not repeated. */
+.mgv-rmeta.is-warn { color: oklch(0.50 0.11 70); }
+@media (max-width: 380px) { .mg-row .mgv-rmeta { display: none; } }
+
+/* PORT NOTE: _motion-app.css:128-163, rewritten WITHOUT the prototype's wildcards ([class*="-pick"],
+   [class*="-done"]) — those catch prod classes by accident and the motion-port guard bans them. Each
+   rule names .mgh-* explicitly. The entrances stay gated on body.m-enter, which mEnter() sets only for
+   a real navigation: the hub's container is swapped by the 15s poll, so an ungated menu animation would
+   replay the panel every 15 seconds while it is open. The round's `.mgh-done.is-under { animation: none }`
+   (line 136) is NOT ported: it exists because the prototype opens the strip with a height transition,
+   while prod paints it on a repaint, so the tick is the only motion it has. */
+.mgh-done:not([hidden]) { animation: m-tick calc(var(--m-state) * 1.6 * var(--m-scale)) var(--e-press) backwards; }
+body.m-enter .mgh-pick:not([hidden]) {
+  transform-origin: top center;
+  animation: m-menu calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) backwards;
+}
+body.m-enter .mgh-pick:not([hidden]) > * {
+  animation: m-rise calc(var(--m-elem) * var(--m-scale)) var(--e-settle) backwards;
+  animation-delay: calc(var(--m-surface) * .45 * var(--m-scale) + var(--m-i, 0) * 34ms * var(--m-scale));
+}
 
 /* PORT NOTE: _rounds.css:1592-1625, verbatim (the round's own comment included).
    Ships app-wide as authored, so it also restyles the public register form and the

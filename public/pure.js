@@ -1630,48 +1630,110 @@ function sessionIsToday(days, todayStr) {
   });
 }
 
-// Manage lead — the "needs you" attention model (session-10 pick R1, admin Manage tab). PURE: no state,
-// no DOM, no Date. Returns the ordered action items that need the admin's attention, each with a deep-link
-// `area` into the Manage screen that fixes it. Order is fixed (venmo -> unpaid -> noday) so the lead reads
-// the same every render.
-//   t          — the live/registering tournament row (or null) — { registration_open, venmo_link, ... }
-//   teams      — that tournament's team rows — [{ name, paid }]
-//   pickupDays — the ALREADY-UPCOMING pickup days (caller pre-filters via sessionIsUpcoming); empty = none
-// Rules: reg open + no venmo_link -> venmo; any team with paid falsey -> unpaid ("N teams haven't paid");
-// no upcoming pickup day -> noday; nothing pending -> [].
-function manageNeedsYouModel(t, teams, pickupDays) {
+// The Manage hub's six-step track (Manage handoff 2026-08-23). PURE: no state, no DOM, no Date — todayStr
+// is 'YYYY-MM-DD' in the ORGANIZER's local zone and is passed in. Check-in is the day itself: the only
+// tournament fact the schema carries for it is event_date (0057, applied), so a setup tournament reads
+// Check-in only ON the day, Sign-ups while registration is open, and Setup otherwise. Shared with the
+// tournament page so the two surfaces can never disagree about where the event is.
+function manageHubPhaseIndex(t, todayStr) {
+  if (!t) return 0;
+  if (t.status === 'completed') return 5;
+  if (t.status === 'bracket') return 4;
+  if (t.status === 'pools') return 3;
+  const ed = t.event_date ? String(t.event_date).slice(0, 10) : '';
+  if (ed && todayStr && ed === String(todayStr).slice(0, 10)) return 2;
+  return t.registration_open ? 1 : 0;
+}
+const MANAGE_HUB_STEPS = ['Setup', 'Sign-ups', 'Check-in', 'Pools', 'Bracket', 'Done'];
+
+// Manage — the "needs you" attention model (session-10 pick R1; rebuilt for the Manage handoff 2026-08-23/24).
+// PURE: no state, no DOM, no Date. Returns the ordered action items that need the admin's attention, each
+// with the verb that fixes it and where that verb goes. Order is fixed so the hub reads the same every render.
+//
+// Every item is backed by a loaded column; nothing here invents a minute, a check-in or a pool count.
+//   ctx.t            — the tournament Manage is pointed at (or null)
+//   ctx.teams        — that tournament's team rows — [{ name, paid }] (empty when they are not loaded)
+//   ctx.pickupDays   — the ALREADY-UPCOMING pickup days (caller pre-filters); empty = none
+//   ctx.pools        — that tournament's pools (empty when not loaded — the caller guards)
+//   ctx.matches      — that tournament's matches
+//   ctx.tournaments  — every loaded tournament, for the rules-reuse source
+//   ctx.scope        — 'hub' adds the club-level items (venmo, noday); 'tournament' is the tournament page's list
+//   ctx.venueLoaded  — whether the venue columns exist on the loaded rows (0058); false → the item is dropped
+// kind 'jump' = a neutral-ring verb that navigates; 'fix' = an accent verb that WRITES (only the registration
+// flip and the rules reuse do). A finished tournament lists no tournament-scoped item.
+function manageNeedsYouModel(ctx) {
+  const c = ctx || {};
+  const t = c.t || {};
+  const teams = Array.isArray(c.teams) ? c.teams : [];
+  const days = Array.isArray(c.pickupDays) ? c.pickupDays : [];
+  const pools = Array.isArray(c.pools) ? c.pools : [];
+  const matches = Array.isArray(c.matches) ? c.matches : [];
+  const all = Array.isArray(c.tournaments) ? c.tournaments : [];
+  const scope = c.scope === 'tournament' ? 'tournament' : 'hub';
   const items = [];
-  const tRow = t || {};
-  const teamRows = Array.isArray(teams) ? teams : [];
-  const days = Array.isArray(pickupDays) ? pickupDays : [];
+  const finished = t.status === 'completed';
+  const nm = (x) => (x && x.name) ? String(x.name) : 'Team';
 
-  const venmo = tRow.venmo_link == null ? '' : String(tRow.venmo_link).trim();
-  if (tRow.registration_open && !venmo) {
-    items.push({
-      id: 'venmo', area: 'tournament',
-      title: 'Add the Venmo link',
-      sub: 'The register page\'s pay button says "coming soon"',
-    });
+  if (!finished && t.id) {
+    if (t.status === 'setup' && !t.registration_open) {
+      items.push({ id: 'signups', title: "Sign-ups aren't open", sub: 'Nothing is public until you open them',
+        verb: 'Open', kind: 'fix', target: { action: 'regopen' } });
+    }
+    const unpaid = teams.filter((tm) => tm && !tm.paid);
+    if (unpaid.length) {
+      const paid = teams.length - unpaid.length;
+      items.push({ id: 'unpaid',
+        title: unpaid.length + ' of ' + teams.length + ' team' + (teams.length === 1 ? '' : 's')
+          + (unpaid.length === 1 ? " hasn't" : " haven't") + ' paid',
+        sub: unpaid.map(nm).join(' · ')
+          + (paid ? ', the other ' + paid + (paid === 1 ? ' is' : ' are') + ' paid' : ', none are paid yet'),
+        verb: 'See who paid', kind: 'jump', target: { view: 'teams' } });
+    }
+    if (t.status === 'setup' && teams.length >= 2 && !pools.length) {
+      items.push({ id: 'pools', title: "Pools aren't drawn", sub: teams.length + ' teams in, drawing takes a second',
+        verb: 'Draw', kind: 'jump', target: { view: 'pools' } });
+    }
+    if (c.venueLoaded && !(t.venue && String(t.venue).trim())) {
+      items.push({ id: 'venue', title: "Venue isn't set", sub: 'Players get no address and no directions',
+        verb: 'Set', kind: 'jump', target: { view: 'settings' } });
+    }
+    if (!(t.buy_in && String(t.buy_in).trim())) {
+      items.push({ id: 'fee', title: "Entry fee isn't set", sub: 'Registration cannot take payment without it',
+        verb: 'Set', kind: 'jump', target: { view: 'settings' } });
+    }
+    if (!(t.rules && String(t.rules).trim())) {
+      const prior = all.filter((x) => x && x.id !== t.id && x.rules && String(x.rules).trim())
+        .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
+      items.push(prior
+        ? { id: 'rules', title: 'No rules posted', sub: (prior.name || 'The last tournament') + "'s rules can be reused as they are",
+          verb: 'Reuse', kind: 'fix', target: { action: 'reuserules', from: prior.id } }
+        : { id: 'rules', title: 'No rules posted', sub: 'Players read them on the Rules page',
+          verb: 'Write', kind: 'jump', target: { view: 'rules' } });
+    }
+    // A game the app was told is LIVE with nothing entered. `net` is the only location fact the row carries;
+    // there is no started_at, so no minutes are claimed here or anywhere else on the hub.
+    const silent = matches.find((m) => m && m.status === 'live'
+      && !(Number(m.score_a) > 0 || Number(m.score_b) > 0) && m.net != null);
+    if (silent) {
+      items.push({ id: 'silent', title: 'Net ' + silent.net + ' has no score',
+        sub: (silent.queue_order ? 'G' + silent.queue_order + ' is on' : 'A game is on') + ' and nothing is entered',
+        verb: 'Enter', kind: 'jump', target: { matchId: silent.id } });
+    }
   }
 
-  const unpaid = teamRows.filter((tm) => tm && !tm.paid);
-  if (unpaid.length) {
-    const names = unpaid.map((tm) => (tm && tm.name) ? String(tm.name) : 'Team').join(' · ');
-    items.push({
-      id: 'unpaid', area: 'tournament',
-      title: unpaid.length + ' team' + (unpaid.length === 1 ? ' hasn\'t' : 's haven\'t') + ' paid',
-      sub: names + ', registered without the checkbox',
-    });
+  if (scope === 'hub') {
+    const venmo = t.venmo_link == null ? '' : String(t.venmo_link).trim();
+    // Registration CLOSED means nobody is paying yet, so the missing link is not what needs him today
+    // (the shipped 2026-07 rule; the "Sign-ups aren't open" item above is what is actually blocking).
+    if (t.registration_open && !venmo) {
+      items.push({ id: 'venmo', title: 'Add the Venmo link', sub: 'The register page\'s pay button says "coming soon"',
+        verb: 'Add', kind: 'jump', target: { view: 'registration' } });
+    }
+    if (!days.length) {
+      items.push({ id: 'noday', title: 'No pickup day set', sub: 'The Check In tab stays hidden until one exists',
+        verb: 'Add', kind: 'jump', target: { area: 'pickup' } });
+    }
   }
-
-  if (!days.length) {
-    items.push({
-      id: 'noday', area: 'pickup',
-      title: 'No pickup day set',
-      sub: 'The Check In tab stays hidden until one exists',
-    });
-  }
-
   return items;
 }
 
@@ -1872,7 +1934,8 @@ if (typeof module !== "undefined" && module.exports) {
     bracketOutcome, bracketRoundLabel, bracketStatusLine,
     registerEventModel, joinSheetValidate, registerFormValidate, teamNameTaken,
     extractVenmoUsername, composeVenmoPayURL,
-    computeTeamRunEnded, sessionIsUpcoming, sessionIsToday, manageNeedsYouModel,
+    computeTeamRunEnded, sessionIsUpcoming, sessionIsToday,
+    manageNeedsYouModel, manageHubPhaseIndex, MANAGE_HUB_STEPS,
     publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel,
     tournamentStageModel, rulesToHTML
   };

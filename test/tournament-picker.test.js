@@ -1,20 +1,20 @@
-// Choose a tournament — the switcher's list screen (round 2026-08-04).
+// Choose a tournament — the picker (round 2026-08-04 as a SCREEN, round 2026-08-25 as an INLINE PANEL).
 //
 // WHY THIS FILE EXISTS: Manage → Tournament jumped straight into ONE tournament — whichever sat at
 // state.activeTournamentId — with no list and no way to reach a different one. Mike hit that with two
 // events in play and ended up RENAMING an old tournament rather than managing two.
 //
-// WHAT CHANGED SINCE THE FIRST FIX, and why every assertion in this file moved: the first attempt put a
-// PICKER inside Manage → Tournament. Mike's design round the same day put the choice one level up instead —
-// the Manage HUB carries a card naming the tournament it is pointed at, and the list is its own screen
-// behind that card (manageView === 'tournaments'), with New tournament at the top of it. The interim
-// picker's whole surface is retired, and with it the assertions that pinned it:
-//   * mgtPickerOpen / mgtFromPicker / mgtHubBackToList → gone; the sub-hub's back button is the Manage hub
-//     again, unconditionally, because the hub is where the switch now lives.
-//   * buildMgTournamentPickerHTML / mgtPickRowHTML → buildMgTournamentListHTML / mgtlRowHTML
-//   * data-mgt-pick / data-mgt-tolist → data-mgtl-pick / data-mgtl-back / data-mgtl-new
-//   * "Players see this" → dropped. Mike ANSWERED that open question in the handoff: active is an
-//     ORGANIZER-SIDE POINTER ONLY and the public Tournament tab still follows the live event, so the list
+// WHAT CHANGED ON 2026-08-25, and why every CONTAINER assertion in this file moved: the choice stopped
+// being a screen. "the tournament IS the page title": tapping it drops `.mgh-pick` over the rows, you pick,
+// and you are switched where you stand — no navigation, no back button, nothing to return from. So
+// `manageView === 'tournaments'`, buildMgTournamentListHTML, mgtlRowHTML, MGTL_NEW_ROW_HTML,
+// data-mgtl-pick and data-mgtl-back are all retired, and the assertions that pinned them now pin the panel:
+//   * the chooser's `<a class="mgv-trow">` + `.mgv-tdot` → `<button class="mgh-prow">` + `.is-on` (a fill,
+//     not a dot: selection, not navigation).
+//   * data-mgtl-pick → data-mgp-pick, opened by data-mgp-toggle, closed by a pick / a tap outside / Escape.
+//   * the caption, the back button and the closing note → the one `.mgh-pnote` sentence inside the panel.
+//   * "Players see this" → still dropped. Mike ANSWERED that open question in the handoff: active is an
+//     ORGANIZER-SIDE POINTER ONLY and the public Tournament tab still follows the live event, so the picker
 //     says nothing about the public at all. publicLiveTournament() is untouched (asserted below).
 //
 // The five things pinned here, in order of what would hurt most if it regressed:
@@ -22,20 +22,21 @@
 //      state.activeTournamentId and to nothing else, so a team count on any other row would be one
 //      tournament's number printed under another's name. Same for the date column that migration 0057 has
 //      not added yet: the clause is dropped, never defaulted. (Mike's standing ruling, 2026-08-03 round.)
-//   2. GROUPING IS BY PHASE and EXACTLY ONE ROW IS MARKED. The filled dot follows mgActiveTournament(), the
-//      same resolver the hub's card names, so the marked row and the card can never disagree.
-//   3. A PICK STICKS. mgSyncActiveTournament() re-glues the selection to the lead resolver on every area
-//      entry; without the pin an explicit pick would be silently undone by the very next row tap, which is
-//      the one way this feature could look broken while every builder function was correct.
+//   2. GROUPING IS BY PHASE and EXACTLY ONE ROW IS MARKED. The fill follows mgActiveTournament(), the same
+//      resolver the title names, so the marked row and the title can never disagree.
+//   3. A PICK STICKS — and now SURVIVES A RELOAD. mgSyncActiveTournament() re-glues the selection to the
+//      lead resolver on every area entry; without the pin an explicit pick would be silently undone by the
+//      very next row tap, which is the one way this feature could look broken while every builder was
+//      correct. The pin is written to localStorage and rehydrated after the first list load.
 //   4. THE FINISHED ROWS READ THE SAME SOURCE as the public Past-tournaments screen, so the two lists
 //      cannot disagree about who won.
 //   5. THE ROWS ARE ACTUALLY WIRED. On 2026-08-03 a drag's Undo shipped completely inert while 37 green
 //      unit tests called the function directly and never travelled the click path. So the taps below drive
 //      attachHandlers' real #app-content delegate.
 //
-// WHAT THIS DOES NOT PROVE (§17): that the list LOOKS right on his phone (it renders on the shipped
-// .mg-row / .mgv-trow / .mgv-tdot / .mgv-rmeta grammar, asserted here as class grammar, not as pixels), and
-// nothing about the server — the chooser only reads state that is already loaded.
+// WHAT THIS DOES NOT PROVE (§17): that the panel LOOKS right on his phone (it renders on the shipped
+// .mgh-prow / .mgh-pstate grammar, asserted here as class grammar, not as pixels), and nothing about the
+// server — the picker only reads state that is already loaded.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
@@ -46,7 +47,8 @@ const JUNE = { id: 'j-1', name: 'June 2026 tournament', status: 'completed', cre
 const JULY = { id: 'j-2', name: 'July 2026 tournament', status: 'pools', created_at: '2026-07-01T10:00:00Z' };
 const AUG = { id: 'a-3', name: 'August 2026 tournament', status: 'setup', registration_open: true, created_at: '2026-08-01T10:00:00Z' };
 
-function loadApp() {
+function loadApp(opts0) {
+  const store = Object.assign({}, (opts0 || {}).store);
   const pureSrc = readFileSync(new URL('../public/pure.js', import.meta.url), 'utf8');
   const noop = () => {};
   const emptyList = { forEach: noop, length: 0, item: () => null };
@@ -102,7 +104,15 @@ function loadApp() {
     setTimeout: noop, clearTimeout: noop, setInterval: noop, clearInterval: noop, scrollTo: noop,
   };
   windowStub.window = windowStub;
-  const localStorageStub = { getItem: () => null, setItem: noop, removeItem: noop, clear: noop, key: () => null, length: 0 };
+  // A REAL in-memory store, because the pick now has to survive a reload and "did it write the key" is
+  // exactly the thing a no-op stub cannot answer.
+  const localStorageStub = {
+    getItem: (k) => (k in store ? store[k] : null),
+    setItem: (k, v) => { store[k] = String(v); },
+    removeItem: (k) => { delete store[k]; },
+    clear: () => { Object.keys(store).forEach((k) => delete store[k]); },
+    key: () => null, length: 0,
+  };
   const sandbox = {
     window: windowStub, document: documentStub, localStorage: localStorageStub,
     navigator: windowStub.navigator, location: windowStub.location,
@@ -127,18 +137,22 @@ function loadApp() {
         state.tournamentMatches = opts.matches || [];
         state.tournamentHistory = opts.history;
         state.players = []; state.checkedIn = []; state.pickupDays = []; state.currentSession = null;
-        manageView = ('manageView' in opts) ? opts.manageView : 'tournaments';
+        manageView = ('manageView' in opts) ? opts.manageView : 'lead';
         mgtView = ('mgtView' in opts) ? opts.mgtView : null;
         mgTournamentPinned = !!opts.pinned;
+        mgHubPickerOpen = !!opts.pickerOpen;
+        mgHubDoneText = '';
         // The row tap kicks a refresh; stub it so these tests stay about the chooser, not the DB.
         tdbRefreshTournaments = async () => { globalThis.__refreshes++; };
         loadTournamentHistory = async () => { globalThis.__historyLoads++; };
       },
+      setActive: (id) => { state.activeTournamentId = id; },
+      adoptStored: () => mgAdoptStoredTournament(),
       // What the Manage container paints right now — the same call the 15s poll makes.
       paint: () => manageContainerHTML(),
       resolver: () => { const t = publicLiveTournament(); return t ? t.id : null; },
       managed: () => { const t = mgActiveTournament(); return t ? t.id : null; },
-      flags: () => ({ mgtView, manageView, pinned: mgTournamentPinned }),
+      flags: () => ({ mgtView, manageView, pinned: mgTournamentPinned, pickerOpen: mgHubPickerOpen }),
       after: () => ({
         active: state.activeTournamentId,
         teams: (state.tournamentTeams || []).length,
@@ -159,6 +173,7 @@ function loadApp() {
   bridge.bind();
   return {
     bridge,
+    store,
     // THE GESTURE. Dispatch a click whose target answers to one selector and carries one attribute —
     // exactly what a rendered row/button is — through the real delegate.
     tap(sel, attr, value) {
@@ -175,74 +190,87 @@ function loadApp() {
 
 // Row order as rendered, by tournament name.
 function rowOrder(html) {
-  return (html.match(/class="mg-rn">([^<]*)</g) || []).map((m) => m.replace(/^class="mg-rn">/, '').replace(/<$/, ''));
+  return (html.match(/class="mgh-pn">([^<]*)</g) || []).map((m) => m.replace(/^class="mgh-pn">/, '').replace(/<$/, ''));
 }
-// The whole <a> element for one tournament id.
+// The whole <button> element for one tournament id.
 function rowFor(html, id) {
-  const start = html.indexOf(`data-mgtl-pick="${id}"`);
+  const start = html.indexOf(`data-mgp-pick="${id}"`);
   if (start < 0) return '';
-  const from = html.lastIndexOf('<a', start);
-  const end = html.indexOf('</a>', start);
-  return html.slice(from, end + 4);
+  const from = html.lastIndexOf('<button', start);
+  const end = html.indexOf('</button>', start);
+  return html.slice(from, end + 9);
 }
-// Everything between a section label and the next one.
+// Everything between a group label and the next one (or the New tournament footer).
 function section(html, label) {
-  const start = html.indexOf(`<div class="pl-sect">${label}</div>`);
+  const start = html.indexOf(`<div class="mgh-pgrp">${label}</div>`);
   if (start < 0) return '';
-  const next = html.indexOf('<div class="pl-sect">', start + 1);
-  return html.slice(start, next < 0 ? html.length : next);
+  const next = html.indexOf('<div class="mgh-pgrp">', start + 1);
+  const end = next < 0 ? html.indexOf('class="mgh-pnew"', start) : next;
+  return html.slice(start, end < 0 ? html.length : end);
+}
+// Just the panel.
+function panel(html) {
+  const start = html.indexOf('<div class="mgh-pick"');
+  if (start < 0) return '';
+  return html.slice(start, html.indexOf('</div></div>', start) + 12);
 }
 
-describe('the chooser list', () => {
+describe('the picker list', () => {
   it('renders EVERY loaded tournament, newest first', () => {
     const { bridge } = loadApp();
     // Seeded oldest-first on purpose: the list must sort, not just echo the load order.
     bridge.seed([JUNE, JULY, AUG], { active: JULY.id });
     const html = bridge.paint();
     expect(rowOrder(html)).toEqual(['August 2026 tournament', 'July 2026 tournament', 'June 2026 tournament']);
-    [JUNE, JULY, AUG].forEach((t) => expect(html).toContain(`data-mgtl-pick="${t.id}"`));
   });
 
   it('sorts a row carrying no created_at to the END rather than letting it jump the queue', () => {
     const { bridge } = loadApp();
-    bridge.seed([{ id: 'no-date', name: 'Undated', status: 'setup' }, JULY, AUG], { active: JULY.id });
+    bridge.seed([{ id: 'x', name: 'Undated', status: 'setup' }, JULY, AUG], { active: JULY.id });
     expect(rowOrder(bridge.paint())).toEqual(['August 2026 tournament', 'July 2026 tournament', 'Undated']);
   });
 
-  it('uses the design’s selection grammar: a dot in the lead, a state word, and NO chevron', () => {
+  it('uses the design’s selection grammar: a fill, a state word, and NO chevron', () => {
     const { bridge } = loadApp();
-    bridge.seed([JULY, AUG], { active: JULY.id });
+    bridge.seed([JULY, AUG], { active: AUG.id });
     const html = bridge.paint();
-    expect(html).toContain('class="mg-row mgv-trow');
-    expect(html).toContain('class="mgv-tdot" aria-hidden="true"');
-    expect(html).toContain('class="mg-rb"');
-    expect(html).toContain('class="mg-rn"');
-    expect(html).toContain('class="mg-rs"');
-    // A selection, not a drill-in. A chevron here would promise a screen that does not open.
-    expect(html).not.toContain('mg-chev');
-    expect(html).not.toContain('pd-card');
-    expect(html).toContain('class="pd-htitle">Tournaments<');
+    const row = rowFor(html, AUG.id);
+    expect(row).toContain('class="mgh-prow is-on"');
+    expect(row).toContain('class="mgh-pn">August 2026 tournament<');
+    expect(row).toContain('class="mgh-pstate">Registration<');
+    expect(row).not.toContain('mg-chev');
+    expect(row).not.toContain('mgv-tdot');    // the retired chooser's radio dot
+    expect(html).not.toContain('data-mgtl-pick');
   });
 
-  it('carries the caption and the back button the design specifies', () => {
-    const { bridge } = loadApp();
-    bridge.seed([JULY, AUG], { active: JULY.id });
-    const html = bridge.paint();
-    expect(html).toContain('class="mgv-tcap">Manage edits whichever one is filled in below.<');
-    expect(html).toContain('data-mgtl-back');
+  it('renders the panel HIDDEN until the title is tapped, and never as a second screen', () => {
+    const app = loadApp();
+    app.bridge.seed([JULY, AUG], { active: AUG.id });
+    expect(app.bridge.paint()).toContain('data-mgp-panel hidden');
+    app.tap('[data-mgp-toggle]', 'data-mgp-toggle', '');
+    expect(app.bridge.flags().pickerOpen).toBe(true);
+    expect(app.bridge.flags().manageView).toBe('lead');   // no navigation happened
+    const open = app.bridge.paint();
+    expect(open).toContain('data-mgp-panel>');
+    expect(open).toContain('aria-expanded="true"');
   });
 
-  it('puts New tournament at the TOP of the list, above the first section', () => {
+  it('carries the scope sentence INSIDE the panel, where it is only read when relevant', () => {
     const { bridge } = loadApp();
-    bridge.seed([JULY, AUG], { active: JULY.id });
+    bridge.seed([JULY, AUG], { active: AUG.id });
     const html = bridge.paint();
-    expect(html).toContain('data-mgtl-new');
-    expect(html).toContain('class="mgv-tnew"');
-    expect(html).toContain('New tournament');
-    expect(html).toContain('Starts as a draft, nothing public until you open registration');
-    expect(html.indexOf('data-mgtl-new')).toBeLessThan(html.indexOf('<div class="pl-sect">'));
-    // ...and it is not a row: a create tap must never read as picking a tournament.
-    expect(html).not.toContain('data-mgtl-pick="new"');
+    expect(html).toContain('Everything in Manage edits the one you pick. Finished tournaments stay open so you can fix a score after the fact.');
+    expect(html).not.toContain('Every row below edits this one.');   // the retired footnote
+    expect(html).not.toContain('Manage edits whichever one is filled in below.');
+    expect(html).not.toContain('data-mgtl-back');                    // nothing to go back from
+  });
+
+  it('puts New tournament at the BOTTOM of the panel, as its footer row', () => {
+    const { bridge } = loadApp();
+    bridge.seed([JULY, AUG], { active: AUG.id });
+    const html = bridge.paint();
+    expect(html).toContain('class="mgh-pnew" data-mgtl-new');
+    expect(html.indexOf('class="mgh-pnew"')).toBeGreaterThan(html.indexOf('data-mgp-pick'));
   });
 
   it('still offers the create row when there is nothing to choose between yet', () => {
@@ -250,17 +278,16 @@ describe('the chooser list', () => {
     bridge.seed([], { active: null });
     const html = bridge.paint();
     expect(html).toContain('data-mgtl-new');
-    expect(html).toContain('No tournament yet.');
-    expect(html).not.toContain('data-mgtl-pick');
+    expect(html).toContain('class="mgh-tname">No tournament yet<');
+    expect(html).not.toContain('data-mgp-pick');
   });
 
   it('escapes the tournament name', () => {
     const { bridge } = loadApp();
-    bridge.seed([{ id: 'x', name: '<img src=x> & "Mike\'s"', status: 'setup', created_at: '2026-08-02T00:00:00Z' }, AUG],
-      { active: 'x' });
+    bridge.seed([{ id: 'x', name: '<img src=x onerror=alert(1)>', status: 'setup' }], { active: 'x' });
     const html = bridge.paint();
-    expect(html).not.toContain('<img src=x>');
-    expect(html).toContain('&lt;img src=x&gt;');
+    expect(html).not.toContain('<img src=x');
+    expect(html).toContain('&lt;img src=x');
   });
 });
 
@@ -269,170 +296,138 @@ describe('grouping by phase', () => {
     const { bridge } = loadApp();
     bridge.seed([JUNE, JULY, AUG], { active: AUG.id });
     const html = bridge.paint();
-    expect(rowOrder(section(html, 'This season'))).toEqual(['August 2026 tournament', 'July 2026 tournament']);
-    expect(rowOrder(section(html, 'Finished'))).toEqual(['June 2026 tournament']);
-    // Order on the page: This season first, then Finished.
-    expect(html.indexOf('>This season<')).toBeLessThan(html.indexOf('>Finished<'));
+    expect(section(html, 'This season')).toContain('August 2026 tournament');
+    expect(section(html, 'This season')).toContain('July 2026 tournament');
+    expect(section(html, 'Finished')).toContain('June 2026 tournament');
+    expect(section(html, 'Finished')).not.toContain('July 2026 tournament');
   });
 
-  it('omits a section that would be empty rather than printing a bare heading', () => {
+  it('omits a group that would be empty rather than printing a bare heading', () => {
     const noneFinished = loadApp();
     noneFinished.bridge.seed([JULY, AUG], { active: AUG.id });
-    expect(noneFinished.bridge.paint()).not.toContain('>Finished<');
+    expect(noneFinished.bridge.paint()).not.toContain('>Finished</div>');
 
     const allFinished = loadApp();
     allFinished.bridge.seed([JUNE], { active: JUNE.id });
-    expect(allFinished.bridge.paint()).not.toContain('>This season<');
-  });
-
-  it('shows the closing note only when there is a finished one to pick', () => {
-    const withFinished = loadApp();
-    withFinished.bridge.seed([JUNE, AUG], { active: AUG.id });
-    expect(withFinished.bridge.paint()).toContain('Pick a finished one to fix a score after the fact.');
-
-    const without = loadApp();
-    without.bridge.seed([JULY, AUG], { active: AUG.id });
-    expect(without.bridge.paint()).not.toContain('Pick a finished one');
+    expect(allFinished.bridge.paint()).not.toContain('>This season</div>');
   });
 
   it('prints the state word each phase can actually be backed by', () => {
     const { bridge } = loadApp();
     bridge.seed([
-      { id: 'reg', name: 'R', status: 'setup', registration_open: true, created_at: '2026-08-05T00:00:00Z' },
-      { id: 'setup', name: 'S', status: 'setup', registration_open: false, created_at: '2026-08-04T00:00:00Z' },
-      { id: 'p', name: 'P', status: 'pools', created_at: '2026-08-03T00:00:00Z' },
-      { id: 'b', name: 'B', status: 'bracket', created_at: '2026-08-02T00:00:00Z' },
-      { id: 'c', name: 'C', status: 'completed', created_at: '2026-08-01T00:00:00Z' },
-    ], { active: null });
+      { id: 'a', name: 'Reg', status: 'setup', registration_open: true, created_at: '2026-05-05' },
+      { id: 'b', name: 'Closed', status: 'setup', registration_open: false, created_at: '2026-05-04' },
+      { id: 'c', name: 'Pools', status: 'pools', created_at: '2026-05-03' },
+      { id: 'd', name: 'Bracket', status: 'bracket', created_at: '2026-05-02' },
+      { id: 'e', name: 'Done', status: 'completed', created_at: '2026-05-01' },
+    ], { active: 'a' });
     const html = bridge.paint();
-    expect(rowFor(html, 'reg')).toContain('<span class="mgv-rmeta">Registration</span>');
-    expect(rowFor(html, 'setup')).toContain('<span class="mgv-rmeta">Setup</span>');
-    expect(rowFor(html, 'p')).toContain('<span class="mgv-rmeta">Pool play</span>');
-    expect(rowFor(html, 'b')).toContain('<span class="mgv-rmeta">Bracket</span>');
-    expect(rowFor(html, 'c')).toContain('<span class="mgv-rmeta">Finished</span>');
-    // Draft and Scheduled are in the design's phase model but have NO column behind them. Printing either
-    // would be a guess wearing the clothes of a state.
-    expect(html).not.toContain('>Draft<');
-    expect(html).not.toContain('>Scheduled<');
+    expect(rowFor(html, 'a')).toContain('class="mgh-pstate">Registration<');
+    expect(rowFor(html, 'b')).toContain('class="mgh-pstate">Setup<');
+    expect(rowFor(html, 'c')).toContain('class="mgh-pstate">Pool play<');
+    expect(rowFor(html, 'd')).toContain('class="mgh-pstate">Bracket<');
+    expect(rowFor(html, 'e')).toContain('class="mgh-pstate">Finished<');
+    // No column separates a draft from a scheduled event, so neither word is ever produced.
+    expect(html).not.toContain('Draft');
+    expect(html).not.toContain('Scheduled');
   });
 
   it('prints NO state word for a status it does not know, and groups it with This season', () => {
     const { bridge } = loadApp();
-    bridge.seed([{ id: 'weird', name: 'Weird', status: 'archived_by_someone', created_at: '2026-08-01T00:00:00Z' }, AUG],
-      { active: null });
+    bridge.seed([{ id: 'z', name: 'Odd', status: 'whatever', created_at: '2026-05-05' }], { active: 'z' });
     const html = bridge.paint();
-    const row = rowFor(html, 'weird');
-    expect(row).not.toContain('mgv-rmeta');
-    expect(row).not.toContain('Setup');          // NOT defaulted to the sub-hub's fallback
-    expect(row).not.toContain('archived_by_someone');
-    expect(rowOrder(section(html, 'This season'))).toContain('Weird');
+    expect(rowFor(html, 'z')).not.toContain('class="mgh-pstate"');
+    expect(section(html, 'This season')).toContain('Odd');
   });
 });
 
 describe('exactly one row is filled in', () => {
-  it('marks the tournament the hub card names, and only that one', () => {
+  it('marks the tournament the title names, and only that one', () => {
     const { bridge } = loadApp();
-    bridge.seed([JUNE, JULY, AUG], { active: AUG.id });
+    bridge.seed([JUNE, JULY, AUG], { active: AUG.id, pinned: true });
     const html = bridge.paint();
-    expect(bridge.managed()).toBe(AUG.id);
-    expect(rowFor(html, AUG.id)).toContain('mgv-trow is-active');
-    expect(rowFor(html, JULY.id)).not.toContain('is-active');
-    expect(rowFor(html, JUNE.id)).not.toContain('is-active');
-    expect(html.split('is-active').length - 1).toBe(1);
+    expect((html.match(/class="mgh-prow is-on"/g) || []).length).toBe(1);
+    expect(rowFor(html, AUG.id)).toContain('is-on');
+    expect(html).toContain('class="mgh-tname">August 2026 tournament<');
   });
 
-  it('follows mgActiveTournament even when nothing was explicitly picked, so the card and the dot agree', () => {
+  it('follows mgActiveTournament even when nothing was explicitly picked, so the title and the fill agree', () => {
     const { bridge } = loadApp();
+    // Nothing active → the lead resolver returns the LIVE tournament, and that is the row that fills in.
     bridge.seed([JUNE, JULY, AUG], { active: null });
-    const managed = bridge.managed();
-    expect(managed).toBe(JULY.id);      // the lead resolver's pick: the live one
-    const html = bridge.paint();
-    expect(rowFor(html, managed)).toContain('is-active');
-    expect(html.split('is-active').length - 1).toBe(1);
+    expect(bridge.managed()).toBe(JULY.id);
+    expect(rowFor(bridge.paint(), JULY.id)).toContain('is-on');
   });
 
   it('marks a FINISHED row when that is the one being managed (the design allows picking one)', () => {
     const { bridge } = loadApp();
     bridge.seed([JUNE, AUG], { active: JUNE.id, pinned: true });
-    expect(rowFor(bridge.paint(), JUNE.id)).toContain('is-active');
+    expect(rowFor(bridge.paint(), JUNE.id)).toContain('is-on');
   });
 });
 
 describe('every subtitle clause is backed by loaded state', () => {
   it('prints the team count ONLY on the tournament whose teams are actually loaded', () => {
     const { bridge } = loadApp();
-    bridge.seed([JULY, AUG], { active: JULY.id, teams: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] });
-    const html = bridge.paint();
-    expect(rowFor(html, JULY.id)).toContain('3 teams');
-    // AUG's collections are not loaded. Borrowing July's count would print one tournament's number under
-    // another's name — the exact thing the 2026-07-11 resolver note calls out.
-    expect(rowFor(html, AUG.id)).not.toContain('team');
+    bridge.seed([JULY, AUG], { active: AUG.id, teams: [{ id: 't1' }, { id: 't2' }] });
+    expect(rowFor(bridge.paint(), AUG.id)).toContain('2 teams');
+    expect(rowFor(bridge.paint(), JULY.id)).not.toContain('teams');
   });
 
   it('says "1 team", not "1 teams"', () => {
     const { bridge } = loadApp();
-    bridge.seed([JULY, AUG], { active: JULY.id, teams: [{ id: 'a' }] });
-    expect(rowFor(bridge.paint(), JULY.id)).toContain('1 team<');
+    bridge.seed([AUG], { active: AUG.id, teams: [{ id: 't1' }] });
+    expect(rowFor(bridge.paint(), AUG.id)).toContain('1 team<');
   });
 
   it('prints no team count at all when nothing is selected', () => {
     const { bridge } = loadApp();
-    bridge.seed([JULY, AUG], { active: null, teams: [{ id: 'a' }, { id: 'b' }] });
+    bridge.seed([JULY, AUG], { active: null, teams: [{ id: 't1' }, { id: 't2' }] });
     const html = bridge.paint();
-    expect(rowFor(html, JULY.id)).not.toContain('team');
-    expect(rowFor(html, AUG.id)).not.toContain('team');
+    expect(rowFor(html, AUG.id)).not.toContain('teams');
+    expect(rowFor(html, JULY.id)).not.toContain('teams');
   });
 
   it('drops the DATE clause entirely while migration 0057 is unapplied', () => {
     const { bridge } = loadApp();
-    // No loaded row carries event_date, so the column does not exist as far as this app can tell.
-    bridge.seed([JULY, AUG], { active: JULY.id, teams: [{ id: 'a' }] });
-    const row = rowFor(bridge.paint(), JULY.id);
-    expect(row).toContain('1 team');
+    bridge.seed([AUG], { active: AUG.id, teams: [{ id: 't1' }] });
+    const row = rowFor(bridge.paint(), AUG.id);
     expect(row).not.toMatch(/Mon|Tue|Wed|Thu|Fri|Sat|Sun/);
-    expect(row).not.toContain('Invalid Date');
+    expect(row).not.toContain('—');
+    expect(row).not.toContain('No date');
   });
 
   it('prints it as "Sat Aug 22" once the column is there, and drops it again on a null or junk value', () => {
-    const { bridge } = loadApp();
-    bridge.seed([
-      { id: 'dated', name: 'Dated', status: 'setup', event_date: '2026-08-22', created_at: '2026-08-03T00:00:00Z' },
-      { id: 'nulled', name: 'Nulled', status: 'setup', event_date: null, created_at: '2026-08-02T00:00:00Z' },
-      { id: 'junk', name: 'Junk', status: 'setup', event_date: 'next saturday', created_at: '2026-08-01T00:00:00Z' },
-    ], { active: null });
-    const html = bridge.paint();
-    expect(rowFor(html, 'dated')).toContain('Sat Aug 22');
-    expect(rowFor(html, 'nulled')).toContain('<div class="mg-rs"></div>');
-    expect(rowFor(html, 'junk')).toContain('<div class="mg-rs"></div>');
-    expect(html).not.toContain('Invalid Date');
+    const real = loadApp();
+    real.bridge.seed([{ ...AUG, event_date: '2026-08-22' }], { active: AUG.id, teams: [{ id: 't1' }] });
+    expect(rowFor(real.bridge.paint(), AUG.id)).toContain('Sat Aug 22 · 1 team');
+
+    const nulled = loadApp();
+    nulled.bridge.seed([{ ...AUG, event_date: null }], { active: AUG.id, teams: [{ id: 't1' }] });
+    expect(rowFor(nulled.bridge.paint(), AUG.id)).toContain('1 team');
+    expect(rowFor(nulled.bridge.paint(), AUG.id)).not.toMatch(/Mon|Tue|Wed|Thu|Fri|Sat|Sun/);
+
+    const junk = loadApp();
+    junk.bridge.seed([{ ...AUG, event_date: 'soon' }], { active: AUG.id, teams: [{ id: 't1' }] });
+    expect(rowFor(junk.bridge.paint(), AUG.id)).not.toContain('Invalid Date');
   });
 
   it('adds the cap only when team_cap is a real number on a real column', () => {
-    const withCap = loadApp();
-    withCap.bridge.seed([{ id: 'c', name: 'Capped', status: 'setup', team_cap: 12 }],
-      { active: 'c', teams: [{ id: 'a' }, { id: 'b' }] });
-    expect(rowFor(withCap.bridge.paint(), 'c')).toContain('2 of 12 teams');
+    const capped = loadApp();
+    capped.bridge.seed([{ ...AUG, team_cap: 12 }], { active: AUG.id, teams: [{ id: 't1' }, { id: 't2' }] });
+    expect(rowFor(capped.bridge.paint(), AUG.id)).toContain('2 of 12 teams');
 
-    const nullCap = loadApp();
-    nullCap.bridge.seed([{ id: 'c', name: 'Uncapped', status: 'setup', team_cap: null }],
-      { active: 'c', teams: [{ id: 'a' }, { id: 'b' }] });
-    expect(rowFor(nullCap.bridge.paint(), 'c')).toContain('2 teams');
-
-    const noColumn = loadApp();
-    noColumn.bridge.seed([{ id: 'c', name: 'Pre-0057', status: 'setup' }],
-      { active: 'c', teams: [{ id: 'a' }, { id: 'b' }] });
-    const row = rowFor(noColumn.bridge.paint(), 'c');
+    const nulled = loadApp();
+    nulled.bridge.seed([{ ...AUG, team_cap: null }], { active: AUG.id, teams: [{ id: 't1' }, { id: 't2' }] });
+    const row = rowFor(nulled.bridge.paint(), AUG.id);
     expect(row).toContain('2 teams');
-    expect(row).not.toContain('of');
+    expect(row).not.toMatch(/of \d+ teams/);
   });
 
-  it('leaves the sub-line empty rather than inventing filler when nothing is backed', () => {
+  it('leaves the sub-line off entirely rather than inventing filler when nothing is backed', () => {
     const { bridge } = loadApp();
-    bridge.seed([{ id: 'bare', name: 'Bare' }, AUG], { active: null });
-    const row = rowFor(bridge.paint(), 'bare');
-    expect(row).toContain('<div class="mg-rs"></div>');
-    expect(row).not.toContain('—');
-    expect(row).not.toContain('·');
+    bridge.seed([JULY, AUG], { active: null });
+    expect(rowFor(bridge.paint(), AUG.id)).not.toContain('class="mgh-ps"');
   });
 
   it('never prints the design’s "$480 collected", because buy_in is display TEXT and not a number', () => {
@@ -459,8 +454,8 @@ describe('the Finished rows read the public history, not a second derivation', (
     const { bridge } = loadApp();
     bridge.seed([JUNE, AUG], { active: AUG.id });   // history undefined = never loaded
     const row = rowFor(bridge.paint(), JUNE.id);
-    expect(row).toContain('<div class="mg-rs"></div>');
-    expect(row).toContain('<span class="mgv-rmeta">Finished</span>');   // the one thing it does know
+    expect(row).not.toContain('class="mgh-ps"');
+    expect(row).toContain('class="mgh-pstate">Finished<');   // the one thing it does know
   });
 
   it('prints the team count alone when no champion was recorded', () => {
@@ -479,40 +474,45 @@ describe('the Finished rows read the public history, not a second derivation', (
     expect(html).toContain('&lt;b&gt;x&lt;/b&gt;');
   });
 
-  it('loads that history lazily on entering the screen, once', () => {
+  it('loads that history lazily on entering the hub, once, and only when a finished row needs it', () => {
     const app = loadApp();
-    app.bridge.seed([JUNE, AUG], { manageView: 'lead', active: AUG.id });
-    app.tap('[data-mg-area]', 'data-mg-area', 'tournaments');
+    app.bridge.seed([JUNE, AUG], { manageView: 'players', active: AUG.id });
+    app.tap('[data-mg-area]', 'data-mg-area', 'lead');
     expect(app.bridge.after().historyLoads).toBe(1);
     // Already loaded (even as an empty list) → not read again on the next entry.
-    app.bridge.seed([JUNE, AUG], { manageView: 'lead', active: AUG.id, history: [] });
-    app.tap('[data-mg-area]', 'data-mg-area', 'tournaments');
+    app.bridge.seed([JUNE, AUG], { manageView: 'players', active: AUG.id, history: [] });
+    app.tap('[data-mg-area]', 'data-mg-area', 'lead');
     expect(app.bridge.after().historyLoads).toBe(1);
+    // No finished tournament at all → nothing to describe, so nothing is fetched.
+    const none = loadApp();
+    none.bridge.seed([JULY, AUG], { manageView: 'players', active: AUG.id });
+    none.tap('[data-mg-area]', 'data-mg-area', 'lead');
+    expect(none.bridge.after().historyLoads).toBe(0);
   });
 });
 
 describe('picking a tournament', () => {
-  it('a real tap on a row repoints activeTournamentId and returns to the Manage hub', () => {
+  it('a real tap on a row repoints activeTournamentId and closes the panel where he stands', () => {
     const app = loadApp();
-    app.bridge.seed([JUNE, JULY, AUG], { active: JULY.id });
-    const bound = app.tap('[data-mgtl-pick]', 'data-mgtl-pick', AUG.id);
+    app.bridge.seed([JUNE, JULY, AUG], { active: JULY.id, pickerOpen: true });
+    const bound = app.tap('[data-mgp-pick]', 'data-mgp-pick', AUG.id);
     expect(bound).toBeGreaterThan(0);                    // the delegate exists at all
     expect(app.bridge.after().active).toBe(AUG.id);
     const flags = app.bridge.flags();
     expect(flags.manageView).toBe('lead');
     expect(flags.mgtView).toBe(null);
-    // The hub, naming the picked tournament in its card.
+    expect(flags.pickerOpen).toBe(false);
+    // The hub, naming the picked tournament in its title.
     const html = app.bridge.paint();
-    expect(html).toContain('class="mg-h1">Manage<');
-    expect(html).toContain('class="mgv-tswn">August 2026 tournament<');
-    expect(html).not.toContain('data-mgtl-pick');
+    expect(html).toContain('class="mgh-tname">August 2026 tournament<');
+    expect(html).toContain('data-mgp-panel hidden');
   });
 
   it('PINS the pick, so the lead resolver stops overriding it', () => {
     const app = loadApp();
     // JULY is live, so the lead resolver would otherwise pull the selection back to it on every row tap.
     app.bridge.seed([JUNE, JULY, AUG], { active: JULY.id });
-    app.tap('[data-mgtl-pick]', 'data-mgtl-pick', AUG.id);
+    app.tap('[data-mgp-pick]', 'data-mgp-pick', AUG.id);
     expect(app.bridge.flags().pinned).toBe(true);
     expect(app.bridge.resync()).toBe(AUG.id);
   });
@@ -529,7 +529,7 @@ describe('picking a tournament', () => {
       active: JULY.id,
       teams: [{ id: 't' }], pools: [{ id: 'p' }], matches: [{ id: 'm' }],
     });
-    app.tap('[data-mgtl-pick]', 'data-mgtl-pick', AUG.id);
+    app.tap('[data-mgp-pick]', 'data-mgp-pick', AUG.id);
     const after = app.bridge.after();
     expect(after).toMatchObject({ active: AUG.id, teams: 0, pools: 0, matches: 0, refreshes: 1 });
   });
@@ -537,7 +537,7 @@ describe('picking a tournament', () => {
   it('does not touch the loaded collections when the picked row is already the active one', () => {
     const app = loadApp();
     app.bridge.seed([JULY, AUG], { active: JULY.id, teams: [{ id: 't' }, { id: 'u' }] });
-    app.tap('[data-mgtl-pick]', 'data-mgtl-pick', JULY.id);
+    app.tap('[data-mgp-pick]', 'data-mgp-pick', JULY.id);
     const after = app.bridge.after();
     expect(after).toMatchObject({ active: JULY.id, teams: 2, refreshes: 0 });
     expect(app.bridge.flags().manageView).toBe('lead');
@@ -546,64 +546,82 @@ describe('picking a tournament', () => {
   it('refuses to switch to a row that is no longer in state', () => {
     const app = loadApp();
     app.bridge.seed([JULY, AUG], { active: JULY.id });
-    app.tap('[data-mgtl-pick]', 'data-mgtl-pick', 'deleted-under-him');
+    app.tap('[data-mgp-pick]', 'data-mgp-pick', 'deleted-under-him');
     expect(app.bridge.after().active).toBe(JULY.id);      // selection untouched
-    expect(app.bridge.flags().manageView).toBe('tournaments');  // still on the list
-    expect(app.bridge.paint()).toContain('data-mgtl-pick');
+    expect(app.bridge.flags().manageView).toBe('lead');
+    expect(app.bridge.paint()).toContain('data-mgp-pick');
   });
 });
 
-describe('navigation', () => {
-  it('the hub card routes to the chooser', () => {
+describe('the panel closes the way a menu closes', () => {
+  it('a tap outside it shuts it, without eating the tap that did it', () => {
     const app = loadApp();
-    app.bridge.seed([JULY, AUG], { manageView: 'lead', active: AUG.id });
-    const html = app.bridge.paint();
-    expect(html).toContain('class="mgv-tsw" data-mg-area="tournaments"');
-    app.tap('[data-mg-area]', 'data-mg-area', 'tournaments');
-    expect(app.bridge.flags().manageView).toBe('tournaments');
-    expect(app.bridge.paint()).toContain('data-mgtl-pick');
+    app.bridge.seed([JULY, AUG], { active: AUG.id, pickerOpen: true });
+    app.tap('[data-mg-area]', 'data-mg-area', 'players');
+    expect(app.bridge.flags().pickerOpen).toBe(false);
+    expect(app.bridge.flags().manageView).toBe('players');   // the tap still navigated
   });
 
-  it('the chooser’s back button leaves for the Manage hub', () => {
+  it('the toggle closes it again on a second tap', () => {
     const app = loadApp();
-    app.bridge.seed([JULY, AUG], { active: AUG.id });
-    app.tap('[data-mgtl-back]', 'data-mgtl-back', '');
-    expect(app.bridge.flags().manageView).toBe('lead');
-    expect(app.bridge.paint()).toContain('class="mg-h1">Manage<');
+    app.bridge.seed([JULY, AUG], { active: AUG.id, pickerOpen: true });
+    app.tap('[data-mgp-toggle]', 'data-mgp-toggle', '');
+    expect(app.bridge.flags().pickerOpen).toBe(false);
   });
 
-  it('back from the chooser leaves the active tournament exactly where it was', () => {
+  it('Escape closes it, bound on document so a keypress anywhere lands', () => {
+    expect(APP_SRC).toContain("document.addEventListener('keydown', (e) => {\n      if (e.key !== 'Escape' || !mgHubPickerOpen) return;");
+  });
+
+  it('entering any Manage area leaves it shut, so it never reopens behind a screen', () => {
     const app = loadApp();
-    app.bridge.seed([JULY, AUG], { active: AUG.id, pinned: true });
-    app.tap('[data-mgtl-back]', 'data-mgtl-back', '');
+    app.bridge.seed([JULY, AUG], { active: AUG.id, manageView: 'players', pickerOpen: true });
+    app.tap('[data-mg-area]', 'data-mg-area', 'lead');
+    expect(app.bridge.flags().pickerOpen).toBe(false);
+  });
+});
+
+describe('the pick survives a reload', () => {
+  it('writes the pinned id to localStorage on a real tap', () => {
+    const app = loadApp();
+    app.bridge.seed([JULY, AUG], { active: JULY.id });
+    app.tap('[data-mgp-pick]', 'data-mgp-pick', AUG.id);
+    expect(JSON.parse(app.store['as-manage-tournament'])).toEqual({ id: AUG.id });
+  });
+
+  it('rehydrates it after the first list load, and pins it so the resolver stands down', () => {
+    const app = loadApp({ store: { 'as-manage-tournament': JSON.stringify({ id: AUG.id }) } });
+    app.bridge.seed([JUNE, JULY, AUG], { active: null });
+    app.bridge.adoptStored();
     expect(app.bridge.after().active).toBe(AUG.id);
     expect(app.bridge.flags().pinned).toBe(true);
+    expect(app.bridge.resync()).toBe(AUG.id);   // JULY is live, and does NOT win
   });
 
-  it('the SUB-HUB’s back button goes to the Manage hub, always, now that the switch lives there', () => {
-    const one = loadApp();
-    one.bridge.seed([AUG], { manageView: 'tournament', active: AUG.id });
-    expect(one.bridge.paint()).toContain('data-mg-area="lead"');
-
-    const many = loadApp();
-    many.bridge.seed([JULY, AUG], { manageView: 'tournament', active: AUG.id });
-    const html = many.bridge.paint();
-    expect(html).toContain('data-mg-area="lead"');
-    expect(html).not.toContain('data-mgt-tolist');   // the interim picker's hook, retired
+  it('a stored id that no longer exists is dropped, never adopted, so nothing blanks the page', () => {
+    const app = loadApp({ store: { 'as-manage-tournament': JSON.stringify({ id: 'deleted-last-month' }) } });
+    app.bridge.seed([JULY, AUG], { active: null });
+    app.bridge.adoptStored();
+    expect(app.bridge.flags().pinned).toBe(false);
+    expect(app.store['as-manage-tournament']).toBe(undefined);   // and the dead key is cleaned up
+    expect(app.bridge.managed()).toBe(JULY.id);                  // the resolver takes over again
+    expect(app.bridge.paint()).toContain('class="mgh-tname">July 2026 tournament<');
   });
 
-  it('leaves the sub-VIEW back button alone (it still returns to the sub-hub)', () => {
-    const { bridge } = loadApp();
-    bridge.seed([JULY, AUG], { manageView: 'tournament', active: AUG.id, mgtView: 'registration' });
-    const html = bridge.paint();
-    expect(html).toContain('data-mgt-back');
-    expect(html).not.toContain('data-mgt-tolist');
+  it('survives junk in the key rather than throwing on boot', () => {
+    const app = loadApp({ store: { 'as-manage-tournament': 'not json' } });
+    app.bridge.seed([JULY, AUG], { active: null });
+    expect(() => app.bridge.adoptStored()).not.toThrow();
+    expect(app.bridge.flags().pinned).toBe(false);
   });
 
-  it('the New tournament screen’s back button returns to the chooser', () => {
-    const { bridge } = loadApp();
-    bridge.seed([JULY, AUG], { manageView: 'tournament-new', active: AUG.id });
-    expect(bridge.paint()).toContain('data-mg-area="tournaments"');
+  it('is read ONCE — a later list refresh cannot re-pin a tournament he has since switched away from', () => {
+    const app = loadApp({ store: { 'as-manage-tournament': JSON.stringify({ id: AUG.id }) } });
+    app.bridge.seed([JUNE, JULY, AUG], { active: null });
+    app.bridge.adoptStored();
+    app.bridge.setActive(JULY.id);
+    app.bridge.adoptStored();
+    expect(app.bridge.after().active).toBe(JULY.id);
   });
 });
 
@@ -615,7 +633,7 @@ describe('entering Manage → Tournament', () => {
     expect(app.bridge.flags().manageView).toBe('tournament');
     const html = app.bridge.paint();
     expect(html).toContain('class="pd-htitle">August 2026 tournament<');
-    expect(html).not.toContain('data-mgtl-pick');
+    expect(html).not.toContain('data-mgp-pick');
   });
 
   it('goes to the sub-hub empty state when there are none', () => {
@@ -631,29 +649,44 @@ describe('entering Manage → Tournament', () => {
     app.tap('[data-mg-area]', 'data-mg-area', 'tournament');
     expect(app.bridge.flags().mgtView).toBe(null);
   });
+
+  it('a hub control carrying data-mgt-view opens the area STRAIGHT onto that sub-view', () => {
+    const app = loadApp();
+    app.bridge.seed([JULY, AUG], { manageView: 'lead', active: AUG.id, pinned: true });
+    app.tap('[data-mgt-view]', 'data-mgt-view', 'teamadd');
+    expect(app.bridge.flags()).toMatchObject({ manageView: 'tournament', mgtView: 'teamadd' });
+  });
 });
 
 describe('the 15s background poll', () => {
-  it('repaints the CHOOSER while he is on it, never swapping it for something else', () => {
+  it('repaints the HUB while he is on it, never swapping it for something else', () => {
     const { bridge } = loadApp();
     bridge.seed([JULY, AUG], { active: JULY.id });
     const first = bridge.paint();
     const second = bridge.paint();
     expect(second).toBe(first);
-    expect(second).toContain('data-mgtl-pick');
+    expect(second).toContain('data-mgp-pick');
   });
 
-  it('repaints the SUB-HUB he is on after a pick, never dropping him back to the list', () => {
+  it('cannot close an OPEN panel out from under him, because the flag is a module var', () => {
+    const app = loadApp();
+    app.bridge.seed([JULY, AUG], { active: JULY.id, pickerOpen: true });
+    app.bridge.paint(); app.bridge.paint();
+    expect(app.bridge.flags().pickerOpen).toBe(true);
+    expect(app.bridge.paint()).toContain('data-mgp-panel>');
+  });
+
+  it('repaints the SUB-HUB he is on after a pick, never dropping him back to the hub', () => {
     const app = loadApp();
     app.bridge.seed([JUNE, JULY, AUG], { active: JULY.id });
-    app.tap('[data-mgtl-pick]', 'data-mgtl-pick', AUG.id);
+    app.tap('[data-mgp-pick]', 'data-mgp-pick', AUG.id);
     app.tap('[data-mg-area]', 'data-mg-area', 'tournament');
     // paint() is the exact call the poll's manage branch makes into the container.
     const first = app.bridge.paint();
     const second = app.bridge.paint();
     expect(second).toBe(first);
     expect(second).toContain('class="pd-htitle">August 2026 tournament<');
-    expect(second).not.toContain('data-mgtl-pick');
+    expect(second).not.toContain('data-mgp-pick');
   });
 
   it('repaints an open SUB-VIEW rather than replacing it', () => {
@@ -661,13 +694,13 @@ describe('the 15s background poll', () => {
     bridge.seed([JULY, AUG], { manageView: 'tournament', active: AUG.id, mgtView: 'registration' });
     const html = bridge.paint();
     expect(html).toContain('class="pd-htitle">Registration<');
-    expect(html).not.toContain('data-mgtl-pick');
+    expect(html).not.toContain('data-mgp-pick');
   });
 
   it('cannot unpin an explicit pick, because the flag is a module var like every other manage toggle', () => {
     const app = loadApp();
     app.bridge.seed([JUNE, JULY, AUG], { active: JULY.id });
-    app.tap('[data-mgtl-pick]', 'data-mgtl-pick', AUG.id);
+    app.tap('[data-mgp-pick]', 'data-mgp-pick', AUG.id);
     app.bridge.paint(); app.bridge.paint();
     expect(app.bridge.flags().pinned).toBe(true);
     expect(app.bridge.after().active).toBe(AUG.id);
@@ -677,20 +710,28 @@ describe('the 15s background poll', () => {
 describe('wiring, copy, and what was deliberately NOT built', () => {
   it('every function the new call sites name is DEFINED', () => {
     const { bridge } = loadApp();
-    ['buildMgTournamentListHTML', 'buildMgTournamentNewHTML', 'mgTournamentPickerList', 'mgtlRowHTML',
-      'mgtlSeasonSub', 'mgtlFinishedSub', 'mgSwitcherCardHTML', 'mgSwitcherMetaText', 'mgTournamentPhase',
+    ['mgHubScopeHTML', 'mgHubPickerHTML', 'mgHubTrackHTML', 'mgHubActsHTML', 'mgNeedsRowsHTML',
+      'mgHubStateChip', 'mgLocalTodayStr', 'manageHubPhaseIndex', 'manageNeedsYouCtx',
+      'mgHubFlipRegistration', 'mgHubReuseRules', 'mgHubEnsureHistory',
+      'mgSaveTournamentPin', 'mgAdoptStoredTournament',
+      'buildMgTournamentNewHTML', 'mgTournamentPickerList',
+      'mgtlSeasonSub', 'mgtlFinishedSub', 'mgSwitcherMetaText', 'mgTournamentPhase',
       'mgEventDateLabel', 'mgTeamsClause', 'mgManagedTeamCount', 'mgTournamentRowStage',
       'mgPickTournament', 'mgAdoptTournament', 'mgActiveTournament', 'publicLiveTournament',
       'loadTournamentHistory', 'repaintManage', 'tdbRefreshTournaments'].forEach((fn) =>
       expect(bridge.defined(fn), fn + ' is not defined').toBe('function'));
   });
 
-  it('the interim picker’s surface is gone, so there is only ONE way to switch', () => {
+  it('the chooser SCREEN’s surface is gone, so there is only ONE way to switch', () => {
     const { bridge } = loadApp();
-    ['buildMgTournamentPickerHTML', 'mgtPickRowHTML', 'mgtHubBackToList', 'mgOpenTournamentPicker']
+    ['buildMgTournamentListHTML', 'mgtlRowHTML', 'mgSwitcherCardHTML',
+      'buildMgTournamentPickerHTML', 'mgtPickRowHTML', 'mgtHubBackToList', 'mgOpenTournamentPicker']
       .forEach((fn) => expect(bridge.defined(fn), fn + ' should have been retired').toBe('undefined'));
     bridge.seed([JULY, AUG], { active: AUG.id });
-    expect(bridge.paint()).not.toContain('data-mgt-pick');
+    const html = bridge.paint();
+    expect(html).not.toContain('data-mgt-pick');
+    expect(html).not.toContain('data-mgtl-pick');
+    expect(html).not.toContain('data-mgtl-back');
   });
 
   it('carries no em dash and no emoji anywhere in its copy', () => {
@@ -703,7 +744,7 @@ describe('wiring, copy, and what was deliberately NOT built', () => {
   });
 
   // Mike ANSWERED this in the handoff: "active" is an ORGANIZER-SIDE POINTER ONLY, and the public
-  // Tournament tab still follows the live event. So the chooser must not carry a public-visibility concept
+  // Tournament tab still follows the live event. So the picker must not carry a public-visibility concept
   // at all, and publicLiveTournament() must keep resolving by STATUS exactly as it always has.
   it('says nothing about what the public sees, and does not touch the public resolver', () => {
     const { bridge } = loadApp();
@@ -714,9 +755,6 @@ describe('wiring, copy, and what was deliberately NOT built', () => {
     const html = bridge.paint();
     expect(html).not.toContain('Players see this');
     expect(html).not.toContain('Players are not being shown');
-    // No row claims the public, and nothing on the page reads as a control over what they watch. (The one
-    // sentence that does say "public" is the create row's "nothing public until you open registration",
-    // which is about REGISTRATION, a real column, and is not a claim about the Tournament tab.)
     expect(html).not.toMatch(/players (see|are)/i);
     expect(html).not.toMatch(/public(ly)? (sees|see|visible|shown)/i);
   });

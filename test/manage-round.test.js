@@ -67,7 +67,13 @@ function loadApp() {
   sandbox.globalThis = sandbox; sandbox.self = sandbox;
   const epilogue = `
     ;globalThis.__bridge = {
-      needsYou: (t, teams, days) => manageNeedsYouModel(t, teams, days),
+      needsYou: (ctx) => manageNeedsYouModel(ctx),
+      phaseIndex: (t, today) => manageHubPhaseIndex(t, today),
+      hubSteps: () => MANAGE_HUB_STEPS.slice(),
+      // Task 2 (the hub): mgSeats loads lazily via the 0051 RPC, so the tests inject it directly, and the
+      // two hub module vars are set the way a tap would set them (they survive the container swap).
+      setSeats: (v) => { mgSeats = v; },
+      setHub: (o) => { o = o || {}; mgHubPickerOpen = !!o.pickerOpen; mgHubDoneText = o.doneText || ''; },
       buildManage: () => buildManagePageHTML(),
       buildNav: () => buildPublicNavInnerHTML(),
       getState: () => state,
@@ -253,5 +259,202 @@ describe('Task 1 foundations', () => {
     expect(count(css, '#player-edit-modal .pe-save')).toBeGreaterThanOrEqual(1);
     expect(css).toContain('@keyframes m-menu');
     expect(css).not.toMatch(/\.popup-edit-input\s*\{[^}]*!important/);
+  });
+});
+
+// ── Task 2: the Manage hub ────────────────────────────────────────────────────────────────────────────
+// The hub stopped being a directory. Seeded through the real state the builders read, with the defaults a
+// SATISFIED tournament carries so that "needs you" only fires when a test asks for it: every field the
+// model checks is filled in, one upcoming pickup day exists, and mgSeats is loaded. Anything a test wants
+// missing it passes explicitly.
+function seedHub(bridge, row, extras) {
+  const e = extras || {};
+  const t = Object.assign({
+    id: 'T', venmo_link: 'https://venmo.com/u/x', buy_in: '$80 a team',
+    rules: '## Format\n- 4s', venue: 'Washington Park', venue_address: '1 Park Rd',
+  }, row || {});
+  const st = bridge.getState();
+  Object.assign(st, {
+    tournaments: [t],
+    activeTournamentId: t.id,
+    tournamentTeams: e.teams || [],
+    tournamentPools: ('pools' in e) ? e.pools : [],
+    tournamentMatches: e.matches || [],
+    tournamentHistory: e.history,
+    players: e.players || [],
+    checkedIn: [],
+    pickupDays: ('pickupDays' in e) ? e.pickupDays : [{ id: 'd1', day: '2999-01-01' }],
+    pickupDaysLoaded: true,
+    currentSession: null,
+    teamMembers: null,
+    isAdmin: true,
+  });
+  bridge.setSeats(('seats' in e) ? e.seats : [{ email: 'a@b.co', role: 'owner' }, { email: 'c@d.co', role: 'admin' }, {}]);
+  bridge.setHub({ pickerOpen: !!e.pickerOpen, doneText: e.doneText || '' });
+  return t;
+}
+
+describe('Task 2 hub', () => {
+  it('phase index', () => {
+    const p = bridge.phaseIndex;
+    expect(p({ status: 'setup', registration_open: false }, '2026-08-20')).toBe(0);
+    expect(p({ status: 'setup', registration_open: true }, '2026-08-20')).toBe(1);
+    expect(p({ status: 'setup', registration_open: false, event_date: '2026-08-22' }, '2026-08-22')).toBe(2);
+    expect(p({ status: 'pools' }, '2026-08-22')).toBe(3);
+    expect(p({ status: 'bracket' }, '2026-08-22')).toBe(4);
+    expect(p({ status: 'completed' }, '2026-08-22')).toBe(5);
+    expect(bridge.hubSteps()).toEqual(['Setup', 'Sign-ups', 'Check-in', 'Pools', 'Bracket', 'Done']);
+  });
+
+  it('needs-you model, hub scope, order and copy', () => {
+    const items = bridge.needsYou({ t: { id: 'a', status: 'setup', registration_open: false, buy_in: '', rules: '', venue: '' },
+      teams: [{ name: 'Block Party', paid: false }, { name: 'Dig Deep', paid: false }, { name: 'X', paid: true }],
+      pickupDays: [], pools: [], matches: [], tournaments: [{ id: 'old', status: 'completed', rules: '## Format\n- 4s' }], scope: 'hub', venueLoaded: true });
+    // BRIEF FIX: the brief's expected array also carried 'venmo', but its own fixture closes registration
+    // and the shipped venmo rule (spec: "prod's Venmo item stays") only fires while registration is OPEN.
+    // The rule is kept and the fixture's expectation corrected; the open case is asserted right below.
+    expect(items.map((i) => i.id)).toEqual(['signups', 'unpaid', 'pools', 'venue', 'fee', 'rules', 'noday']);
+    expect(items[1].title).toBe("2 of 3 teams haven't paid");
+    expect(items[1].sub).toBe('Block Party · Dig Deep, the other 1 is paid');
+    expect(items[5].verb).toBe('Reuse');
+    items.forEach((i) => { expect(i.title + i.sub).not.toMatch(/—|&mdash;|night/i); });
+  });
+
+  it('the venmo item still fires only while registration is open', () => {
+    const ctx = { t: { id: 'a', status: 'setup', registration_open: true, buy_in: '$80', rules: 'x', venue: 'y', venmo_link: '' },
+      teams: [], pickupDays: [{ day: '2999-01-01' }], pools: [], matches: [], tournaments: [], scope: 'hub', venueLoaded: true };
+    expect(bridge.needsYou(ctx).map((i) => i.id)).toEqual(['venmo']);
+    expect(bridge.needsYou({ ...ctx, t: { ...ctx.t, registration_open: false } }).map((i) => i.id)).toEqual(['signups']);
+    expect(bridge.needsYou({ ...ctx, t: { ...ctx.t, venmo_link: 'https://venmo.com/u/x' } })).toEqual([]);
+  });
+
+  it('tournament scope drops the club-level items and a finished tournament lists none', () => {
+    const items = bridge.needsYou({ t: { id: 'a', status: 'completed' }, teams: [], pickupDays: [], pools: [], matches: [], tournaments: [], scope: 'tournament', venueLoaded: true });
+    expect(items).toEqual([]);
+  });
+
+  it('the hub: title block, picker, track, actions, chips; no card, no h1', () => {
+    seedHub(bridge, { status: 'setup', registration_open: true, name: 'August 2026 Tournament', event_date: '2026-08-22' });
+    const html = bridge.buildManage();
+    expect(html).toContain('class="mgh-eyebrow">Manage<');
+    expect(html).toContain('class="mgh-tname">August 2026 Tournament<');
+    expect(html).toContain('class="mgh-meta">');
+    expect(html).toContain('class="mgh-pick"');
+    expect(count(html, 'class="mgh-step')).toBe(6);
+    expect(count(html, 'is-now')).toBe(1);
+    expect(html).toContain('<span>Close registration</span>');
+    expect(html).toContain('<span>Add a team</span>');
+    expect(html).toContain('>This tournament<');
+    expect(html).toContain('>Everything<');
+    expect(html).toContain('Casual games between tournaments');
+    expect(html).not.toContain('mg-h1');
+    expect(html).not.toContain('mgv-tsw');
+    expect(html).not.toContain('mgh-undo');
+    expect(html).not.toContain('mgh-state');
+    expect(html).not.toMatch(/—|&mdash;|night/i);
+    for (const a of ['tournament', 'pickup', 'checkin', 'players', 'teams', 'admins']) expect(count(html, `data-mg-area="${a}"`)).toBe(1);
+  });
+
+  it('chips never print unloaded data', () => {
+    seedHub(bridge, { status: 'setup', registration_open: true, name: 'A' }, { seats: null });
+    const html = bridge.buildManage();
+    expect(html).not.toMatch(/\d+ seats?</);
+  });
+
+  it('the state chips read the one chip class, and the blocking one takes the warning ink', () => {
+    seedHub(bridge, { status: 'setup', registration_open: false, name: 'A', team_cap: 12 },
+      { teams: [{ id: 't1', paid: true }, { id: 't2', paid: true }], pools: [], players: [{ id: 'p1' }, { id: 'p2' }] });
+    const html = bridge.buildManage();
+    expect(html).toContain('class="mgv-rmeta is-warn">Pools not drawn<');
+    expect(html).toContain('class="mgv-rmeta">2 of 12<');
+    expect(html).toContain('class="mgv-rmeta">2 on file<');
+    expect(html).toContain('class="mgv-rmeta">2 seats<');   // an empty seat row carries no email
+  });
+
+  it('the primary action follows the phase, and a finished tournament keeps only the secondary', () => {
+    seedHub(bridge, { status: 'setup', registration_open: false, name: 'A' });
+    expect(bridge.buildManage()).toContain('<span>Open registration</span>');
+    seedHub(bridge, { status: 'pools', name: 'A' });
+    expect(bridge.buildManage()).toContain('<span>Open score sheet</span>');
+    seedHub(bridge, { status: 'completed', name: 'A' });
+    const done = bridge.buildManage();
+    expect(done).not.toContain('mgh-act is-primary');
+    expect(done).toContain('<span>Add a team</span>');
+  });
+
+  it('the confirmation strip carries no Undo, and only shows what a write actually said', () => {
+    seedHub(bridge, { status: 'setup', registration_open: true, name: 'A' }, { doneText: 'Registration is open' });
+    const html = bridge.buildManage();
+    expect(html).toContain('class="mgh-done is-under"');
+    expect(html).toContain('Registration is open');
+    expect(html).not.toContain('data-mgh-undo');
+    seedHub(bridge, { status: 'setup', registration_open: true, name: 'A' });
+    expect(bridge.buildManage()).not.toContain('mgh-done');
+  });
+
+  it('the picker groups by phase, marks exactly one row, and opens off the module var', () => {
+    const st = bridge.getState();
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: true, name: 'August 2026' });
+    st.tournaments = [{ id: 'T', status: 'setup', registration_open: true, name: 'August 2026', created_at: '2026-08-01' },
+      { id: 'J', status: 'completed', name: 'July 2026', created_at: '2026-07-01' }];
+    const shut = bridge.buildManage();
+    expect(shut).toContain('data-mgp-panel hidden');
+    expect(shut).toContain('>This season</div>');
+    expect(shut).toContain('>Finished</div>');
+    expect(count(shut, 'class="mgh-prow')).toBe(2);
+    expect(count(shut, 'mgh-prow is-on')).toBe(1);
+    expect(shut).toContain('class="mgh-pstate">Finished<');
+    expect(shut).toContain('data-mgtl-new');
+    bridge.setHub({ pickerOpen: true });
+    const open = bridge.buildManage();
+    expect(open).toContain('data-mgp-panel>');
+    expect(open).toContain('aria-expanded="true"');
+  });
+
+  it('a Finished picker row says nothing until the shared history cache has loaded', () => {
+    const st = bridge.getState();
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: true, name: 'August 2026' });
+    st.tournaments = [{ id: 'T', status: 'setup', name: 'August 2026', created_at: '2026-08-01' },
+      { id: 'J', status: 'completed', name: 'July 2026', created_at: '2026-07-01' }];
+    expect(bridge.buildManage()).not.toContain('8 teams');
+    st.tournamentHistory = [{ id: 'J', teamCount: 8, champion: { name: 'Net Gains' } }];
+    expect(bridge.buildManage()).toContain('8 teams · Net Gains won');
+  });
+
+  it('the needs-you rows carry a verb, a hook and the section count', () => {
+    seedHub(bridge, { status: 'setup', registration_open: false, name: 'A', buy_in: '' },
+      { teams: [{ id: 't1', name: 'Block Party', paid: false }] });
+    const html = bridge.buildManage();
+    expect(html).toContain('>Before you open<');
+    expect(html).toContain('class="mgh-sectn">');
+    expect(html).toContain('class="mgh-nact" data-mgh-fix="regopen"><span>Open</span>');   // a fix keeps the accent ring
+    expect(html).toContain('class="mgh-nact is-go" data-mgt-view="teams"><span>See who paid</span>');
+    expect(html).toContain('data-mgh-fix="regopen"');
+    expect(html).not.toContain('mgh-undo');
+  });
+
+  it('the retired chooser is gone from the source and from the stylesheet', () => {
+    // Needled at the DEFINITION, not the bare name: the retirement comment left behind names what it
+    // retired, and a note is not a call site.
+    expect(appSrc).not.toContain('function buildMgTournamentListHTML');
+    expect(appSrc).not.toContain('function mgtlRowHTML');
+    expect(appSrc).not.toContain('const MGTL_NEW_ROW_HTML');
+    expect(appSrc).not.toContain("closest('[data-mgtl-back]')");
+    expect(appSrc).not.toContain("if (manageView === 'tournaments')");
+    expect(appSrc).not.toContain("data-mg-area=\"tournaments\"");
+    expect(css).not.toMatch(/^\.mgv-tsw \{/m);
+    expect(css).not.toMatch(/^\.mgv-tdot \{/m);
+  });
+
+  it('the hub CSS block ships, with the chip rewritten onto the one prod chip class', () => {
+    expect(css).toContain('.mgh-tname {');
+    expect(css).toContain('.mgh-track {');
+    expect(css).toContain('.mgh-pick {');
+    expect(css).toContain('.mgv-rmeta.is-warn {');
+    expect(css).toContain('.mgh-scope > .mgh-mark {');
+    // Comments stripped: the PORT NOTES deliberately name the two classes these guards ban.
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(rules).not.toContain('.mgh-state');
+    expect(rules).not.toContain('.mgh-undo');
   });
 });

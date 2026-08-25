@@ -603,7 +603,9 @@ describe('the screen itself', () => {
     const { bridge } = loadApp();
     const html = bridge.screen([JUNE_T()]);
     expect(html).toContain('class="pd-htitle">New tournament<');
-    expect(html).toContain('data-mg-area="tournaments"');   // back → the chooser, per the design
+    // Round 2026-08-25: the chooser screen retired with the switcher card, so back goes to the Manage HUB
+    // (whose title's inline picker is where the choice lives now) instead of to a screen that no longer exists.
+    expect(html).toContain('data-mg-area="lead"');
     expect(html).toContain('data-mgtl-create');
     expect(html).toContain('id="mgnt-msg"');
   });
@@ -703,15 +705,16 @@ describe('the buttons are actually wired', () => {
   it('every function the new call sites name is DEFINED', () => {
     const { bridge } = loadApp();
     ['mgTournamentCreate', 'mgntSubmitCreate', 'buildMgTournamentNewHTML', 'mgntPresetFrom',
-      'buildMgTournamentListHTML', 'mgPickTournament', 'mgAdoptTournament',
+      'mgPickTournament', 'mgAdoptTournament',
       'tournamentHasEventDate', 'tournamentHasTeamCap', 'tournamentColumnLoaded',
       'tdbCreateTournament', 'tdbSetTournamentFields'].forEach((fn) =>
       expect(bridge.defined(fn), fn + ' is not defined').toBe('function'));
   });
 
   it('a real click on [data-mgtl-new] opens the create screen through attachHandlers’ own delegate', () => {
+    // From the HUB now (the picker panel's footer row), not from the retired chooser screen.
     const app = loadApp();
-    app.bridge.bind({ manageView: 'tournaments' });
+    app.bridge.bind({ manageView: 'lead' });
     const bound = app.click('[data-mgtl-new]');
     expect(bound).toBeGreaterThan(0);            // the delegate exists at all
     expect(app.bridge.view()).toBe('tournament-new');
@@ -736,7 +739,7 @@ describe('the buttons are actually wired', () => {
 
   it('opening the screen resets that switch to ON, however it was left last time', () => {
     const app = loadApp();
-    app.bridge.bind({ manageView: 'tournaments', makeActive: false });
+    app.bridge.bind({ manageView: 'lead', makeActive: false });
     app.click('[data-mgtl-new]');
     expect(app.bridge.switchOn()).toBe(true);
   });
