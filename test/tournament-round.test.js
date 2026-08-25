@@ -1,0 +1,197 @@
+// The Tournament design round (2026-08-25, Mike's Claude Design handoff) — locks for what the port changed:
+// "Championship, never Final" on every player-facing string, the hub row grammar, the pools row grammar
+// (A vs B with the winner in .win, DONE), the You row's net line, the pure teamNetRange helper, and
+// source-level guards against the prototype crutches the recon said must NOT ship. Same vm-sandbox harness
+// as manage-page.test.js; the suite has no DOM.
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import vm from 'node:vm';
+
+const require = createRequire(import.meta.url);
+const pure = require('../public/pure.js');
+const strip = (s) => s.replace(/\r\n/g, '\n');
+const appSrcText = strip(readFileSync(new URL('../public/app.js', import.meta.url), 'utf8'));
+const cssText = strip(readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '');
+
+function loadApp() {
+  const pureSrc = readFileSync(new URL('../public/pure.js', import.meta.url), 'utf8');
+  const appSrc = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const noop = () => {};
+  const emptyList = { forEach: noop, length: 0, item: () => null };
+  const makeEl = () => ({
+    style: {}, dataset: {},
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+    setAttribute: noop, getAttribute: () => null, removeAttribute: noop,
+    appendChild: noop, removeChild: noop, remove: noop,
+    addEventListener: noop, removeEventListener: noop,
+    querySelector: () => null, querySelectorAll: () => emptyList,
+    closest: () => null, contains: () => false,
+    textContent: '', innerHTML: '', scrollTop: 0, offsetHeight: 0,
+  });
+  const documentStub = {
+    readyState: 'loading', // keeps the bottom bootstrap from calling init() at load
+    getElementById: () => null, querySelector: () => null, querySelectorAll: () => emptyList,
+    createElement: () => makeEl(), createDocumentFragment: () => makeEl(),
+    addEventListener: noop, removeEventListener: noop,
+    head: makeEl(), body: makeEl(), documentElement: makeEl(),
+  };
+  const supaStub = {
+    auth: {
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: noop } } }),
+      getSession: async () => ({ data: { session: null } }),
+      getUser: async () => ({ data: { user: null } }),
+    },
+    from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: [], error: null }) }) }) }),
+    channel: () => ({ on: () => ({ subscribe: noop }) }),
+    removeChannel: noop, rpc: async () => ({ data: null, error: null }),
+  };
+  const windowStub = {
+    supabase: { createClient: () => supaStub },
+    addEventListener: noop, removeEventListener: noop,
+    matchMedia: () => ({ matches: false, addEventListener: noop, addListener: noop, removeEventListener: noop }),
+    location: { href: 'http://localhost/', search: '', hash: '', pathname: '/', reload: noop },
+    navigator: { onLine: true, userAgent: 'node', serviceWorker: { register: async () => ({}) } },
+    requestAnimationFrame: noop, cancelAnimationFrame: noop,
+    setTimeout: noop, clearTimeout: noop, setInterval: noop, clearInterval: noop, scrollTo: noop,
+  };
+  windowStub.window = windowStub;
+  const localStorageStub = { getItem: () => null, setItem: noop, removeItem: noop, clear: noop, key: () => null, length: 0 };
+  const sandbox = {
+    window: windowStub, document: documentStub, localStorage: localStorageStub,
+    navigator: windowStub.navigator, location: windowStub.location,
+    requestAnimationFrame: noop, cancelAnimationFrame: noop,
+    setTimeout: noop, clearTimeout: noop, setInterval: noop, clearInterval: noop,
+    console, SUPABASE_URL: 'http://localhost', SUPABASE_KEY: 'anon',
+  };
+  sandbox.globalThis = sandbox; sandbox.self = sandbox;
+  const epilogue = `
+    ;globalThis.__bridge = {
+      hub: () => buildTournamentHubHTML(),
+      pools: () => buildPoolsSchedulePageHTML(),
+      getState: () => state,
+      setPoolFilter: (v) => { pdPoolFilter = v; },
+      setTournamentView: (v) => { pdTournamentView = v; },
+    };`;
+  const context = vm.createContext(sandbox);
+  vm.runInContext(pureSrc, context, { filename: 'pure.js' });
+  vm.runInContext(appSrc + epilogue, context, { filename: 'app.js' });
+  return sandbox.__bridge;
+}
+
+const bridge = loadApp();
+
+// 2 pools, 4 teams; t1 "Ballin" is MY team (claimed player p1 on t1), 1-0 in pool A with a next game on net 2.
+const POOLS = [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }];
+const TEAMS = [
+  { id: 't1', name: 'Ballin', pool_id: 'p1' },
+  { id: 't2', name: 'Dinks', pool_id: 'p1' },
+  { id: 't3', name: 'Block Party', pool_id: 'p2' },
+  { id: 't4', name: 'Net Gains', pool_id: 'p2' },
+];
+const MATCHES = [
+  { id: 'gA1', pool_id: 'p1', phase: 'pool', net: 1, queue_order: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', winner_team_id: 't1', score_a: 15, score_b: 12 },
+  { id: 'gA2', pool_id: 'p1', phase: 'pool', net: 2, queue_order: 2, status: 'scheduled', team_a_id: 't2', team_b_id: 't1' },
+  { id: 'gB1', pool_id: 'p2', phase: 'pool', net: 3, queue_order: 1, status: 'final', team_a_id: 't3', team_b_id: 't4', winner_team_id: 't4', score_a: 18, score_b: 21 },
+];
+
+function setState(extra = {}) {
+  const st = bridge.getState();
+  Object.assign(st, {
+    tournaments: [{ id: 'T', name: 'August 2026 Tournament', status: 'pools', net_count: 3 }],
+    activeTournamentId: 'T',
+    tournamentTeams: TEAMS, tournamentMatches: MATCHES, tournamentPools: POOLS,
+    account: { id: 'u1', email: 'p@x.y' }, isAdmin: false, loaded: true,
+    // myTeamInfo() resolves through resolveMyTeam(account.id, teamMembers): the member row carries claimedBy
+    teamMembers: [{ id: 'p1', teamId: 't1', teamName: 'Ballin', name: 'Mikey Olas', initials: 'MO', claimedBy: 'u1' }],
+    ...extra,
+  });
+}
+
+describe('teamNetRange (pure) — the nets MY pool games sit on, in poolNetRange grammar', () => {
+  const g = (a, b, net) => ({ phase: 'pool', team_a_id: a, team_b_id: b, net });
+  it('contiguous, single, non-contiguous, unknown team, no net', () => {
+    expect(pure.teamNetRange('t1', [g('t1', 't2', 1), g('t1', 't3', 2), g('t2', 't3', 3)])).toBe('Nets 1-2');
+    expect(pure.teamNetRange('t1', [g('t1', 't2', 3)])).toBe('Net 3');
+    expect(pure.teamNetRange('t1', [g('t1', 't2', 1), g('t1', 't3', 3)])).toBe('Nets 1, 3');
+    expect(pure.teamNetRange('t9', [g('t1', 't2', 1)])).toBe('');
+    expect(pure.teamNetRange('t1', [g('t1', 't2', null)])).toBe('');
+  });
+});
+
+describe('"Championship, never Final" (player-facing)', () => {
+  it('the pure labels', () => {
+    expect(pure.bracketRoundLabel({ side: 'grand_final', round: 1 })).toBe('Championship');
+    expect(pure.bracketRoundLabel({ side: 'grand_final', round: 2 })).toBe('Championship (if necessary)');
+    expect(pure.bracketRoundLabel({ side: 'winners', round: 2 })).toBe('Winners round 2');
+    expect(pure.tournamentStageModel({ status: 'completed' }, []).stageLabel).toBe('Complete');
+  });
+  it('the public bracket + hub builders carry no Final string', () => {
+    const pub = appSrcText.slice(appSrcText.indexOf('function buildBracketNodeHTML('), appSrcText.indexOf('function resolveRegisterTournament('));
+    const code = pub.replace(/\/\/[^\n]*/g, ''); // comments may still mention the old word
+    expect(code).not.toMatch(/['"`]Final['"`]/);
+    expect(code).not.toContain('games final');
+    expect(code).not.toContain('in the final');
+    expect(code).toContain("['grand_final', 'Championship']");
+    expect(code).toContain("' · Done'");
+    expect(code).toContain('in the championship');
+  });
+});
+
+describe('hub rows (design round 2026-08-23)', () => {
+  it('record on the sub line, a sentence in the stat, the games-done caption, the leader kept', () => {
+    setState();
+    const html = bridge.hub();
+    expect(html).toContain('<span class="tn-rec">1-0</span>');
+    expect(html).toContain('Next on <b>net 2</b>');
+    expect(html).not.toContain('Net 2 next');
+    expect(html).toContain('<span class="tn-statsub">games done</span>');
+    expect(html).toMatch(/tn-prog-n">2 of 3 games</);
+    expect(html).toContain('<span class="tn-sub">Where teams stand</span>');
+    expect(html).toContain('Ballin'); // the leader name stays in the stat (Mike 2026-08-25)
+    expect(html).not.toContain('>Leader<');
+  });
+});
+
+describe('pools rows (design round 2026-08-22)', () => {
+  it('"A vs B" with the winner in .win, DONE, "games done", and the You net line on the pool tab only', () => {
+    setState();
+    bridge.setTournamentView('pools'); bridge.setPoolFilter('A');
+    const html = bridge.pools();
+    expect(html).toContain('<span class="win">');
+    expect(html).not.toContain('class="def"');
+    expect(html).not.toContain('def.');
+    expect(html).toContain('>DONE<');
+    expect(html).not.toContain('>FINAL<');
+    expect(html).toMatch(/games? done</);
+    expect(html).toContain('<span class="pl-youname">');
+    expect(html).toContain('<span class="pl-younet">You play at nets 1-2</span>');
+    bridge.setPoolFilter('seeding');
+    const seeding = bridge.pools();
+    expect(seeding).toContain('pl-youtag');
+    expect(seeding).not.toContain('pl-younet');
+  });
+  it('a spectator with no team sees no You line and no chip', () => {
+    setState({ account: null, myClaimedPlayer: null, tournamentPickedTeamId: null, teamMembers: [] });
+    bridge.setTournamentView('pools'); bridge.setPoolFilter('A');
+    const html = bridge.pools();
+    expect(html).not.toContain('pl-younet');
+    expect(html).not.toContain('<b>');
+  });
+});
+
+describe('port guards (things the recon said must NOT ship)', () => {
+  it('the prototype bracket shim and the retired grammar are absent from styles.css', () => {
+    expect(cssText).not.toMatch(/\.bt-pan\s*>\s*\.bt-canvas\s*\{[^}]*position:\s*relative/);
+    expect(cssText).not.toMatch(/\.pl-g \.gt \.def\b/);
+    expect(cssText).toContain('.pl-g .gt .win { color: oklch(0.40 0.09 150); }');
+    expect(cssText).toContain('.tn-statsub {');
+  });
+  it('the desktop Manage bar clamp is a real rule now (the dangling-comma bug)', () => {
+    expect(cssText).toMatch(/body\.pd-public-active \.mgp-movebar \{ left: 50%; transform: translateX\(-50%\); width: 100%; max-width: 720px; \}/);
+  });
+  it('no em dash in the new player-facing strings', () => {
+    const pub = appSrcText.slice(appSrcText.indexOf('function buildBracketHTML('), appSrcText.indexOf('function resolveRegisterTournament('));
+    expect(pub).not.toContain('&mdash;');
+  });
+});

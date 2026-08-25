@@ -1004,6 +1004,16 @@ function poolNetRange(games) {
   return 'Net' + (nets.length > 1 ? 's' : '') + ' ' + parts.join(', ');
 }
 
+// The nets ONE team's own pool games sit on, in poolNetRange's grammar ("Nets 1-2", "Net 3", "Nets 1, 3").
+// Design round 2026-08-22 ("You play at nets 1 & 2" on the standings You row) — one formatter, one answer.
+// '' when the team has no pool game with a net yet, so the caller omits the line rather than lying.
+function teamNetRange(teamId, matches) {
+  if (!teamId) return '';
+  const mine = (Array.isArray(matches) ? matches : []).filter((m) => m && (m.phase ? m.phase === 'pool' : true)
+    && (m.team_a_id === teamId || m.team_b_id === teamId));
+  return poolNetRange(mine);
+}
+
 // Bracket game numbering (Mike, 2026-06-27): ONE continuous "G" number per bracket match across the whole
 // double-elim — winners bracket first (by round, then slot), then the losers bracket, then the grand final —
 // so games read G1, G2, … GN start to finish. Render-only (no DB): derived from the match list each render.
@@ -1260,7 +1270,8 @@ function bracketOutcome(main, teams) {
 // "Grand final" / "Grand final (reset)"). Used by the live status line.
 function bracketRoundLabel(m) {
   if (!m) return null;
-  if (m.side === 'grand_final') return (Number(m.round) === 2) ? 'Grand final (reset)' : 'Grand final';
+  // Design round 2026-08-24 (Mike): "Championship, never Final" on every player-facing surface.
+  if (m.side === 'grand_final') return (Number(m.round) === 2) ? 'Championship (if necessary)' : 'Championship';
   const r = Number(m.round) || 1;
   return (m.side === 'losers' ? 'Losers round ' : 'Winners round ') + r;
 }
@@ -1774,7 +1785,7 @@ function tournamentStageModel(tournament, matches) {
     const levels = [...new Set(main.map(playRound))].sort((a, b) => a - b);
     const total = levels.length;
     if (status === 'completed') {
-      return { phase: 'completed', stageLabel: 'Final', count: total, total, pct: 100, activeView: null };
+      return { phase: 'completed', stageLabel: 'Complete', count: total, total, pct: 100, activeView: null }; // "never Final" (2026-08-24 round)
     }
     // live bracket — current round = the ordinal of the focus game's play-round level.
     const playable = main.filter((m) => m.team_a_id && m.team_b_id && m.status !== 'final');
@@ -1844,7 +1855,7 @@ if (typeof module !== "undefined" && module.exports) {
     resolveTournamentMatch, publicHubStatus,
     scoringRulesFor, gameScoreStatus,
     splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
-    layoutRoundsOnNets, assignPoolGameSlots, relayoutPoolGamesOnNets, poolNetRange,
+    layoutRoundsOnNets, assignPoolGameSlots, relayoutPoolGamesOnNets, poolNetRange, teamNetRange,
     bracketGameNumbers, bracketSourceLabel,
     shouldAutoPromptBracket, assignBracketNets,
     shapeStandingsByPool, computeAllTimeLeaderboard,

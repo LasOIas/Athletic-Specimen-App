@@ -109,8 +109,8 @@ describe('Tournament hub — Standings row folds into the Pools Seeding tab (Mik
     expect(html).not.toContain('>Standings<');
   });
 
-  it('keeps the leader value on the row once a pool game is final', () => {
-    expect(html).toContain('Leader');
+  it('keeps the leader value on the row once a pool game is final (design sub line, Mike kept the name 2026-08-25)', () => {
+    expect(html).toContain('<span class="tn-sub">Where teams stand</span>');
     expect(html).toContain('Ballin'); // the overall leader name is still shown as the row value
   });
 });

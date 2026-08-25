@@ -137,7 +137,8 @@ describe('buildPoolsSchedulePageHTML — pool tab (default = first pool)', () =>
     expect(html).toContain('class="pl-g live"');
     expect(count(html, '>LIVE<')).toBe(1);   // exactly the one live game
     expect(html).toContain('>UP NEXT<');     // the scheduled game
-    expect(html).toContain('>FINAL<');       // the completed game
+    expect(html).toContain('>DONE<');        // the completed game (design round 2026-08-22: DONE, never FINAL)
+    expect(html).not.toContain('>FINAL<');
   });
 
   it('keeps the tap-a-team peek attributes on team names in game rows', () => {

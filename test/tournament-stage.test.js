@@ -96,12 +96,12 @@ describe('tournamentStageModel — bracket (count = current round ordinal / tota
   });
 });
 
-describe('tournamentStageModel — completed (stage bar reads Final)', () => {
-  it('completed -> Final label, pct 100, no active row', () => {
+describe('tournamentStageModel — completed (stage bar reads Complete; "never Final", 2026-08-24 round)', () => {
+  it('completed -> Complete label, pct 100, no active row', () => {
     const allFinal = bracketMatches({ w3: 'final', l2: 'final', gf: 'final' });
     const m = tournamentStageModel({ status: 'completed' }, allFinal);
     expect(m.phase).toBe('completed');
-    expect(m.stageLabel).toBe('Final');
+    expect(m.stageLabel).toBe('Complete');
     expect(m.pct).toBe(100);
     expect(m.activeView).toBe(null);
     expect(m.total).toBe(3);

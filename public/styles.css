@@ -2493,7 +2493,7 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .pl-g .rd { width: 26px; flex: none; font: 700 11px var(--font-display); color: var(--muted); }
 .pl-g .gt { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .pl-g .gt b { font-weight: 700; }
-.pl-g .gt .def, .pl-g .gt .lose { color: var(--muted); font-weight: 500; }
+.pl-g .gt .lose { color: var(--muted); font-weight: 500; } /* .def retired 2026-08-25: rows read "A vs B", the winner carries the result via .win */
 .pl-g .gt .vs { font-size: 12px; font-weight: 600; color: var(--faint); }
 .pl-g .gt.up { color: var(--muted); }
 .pl-g .sc { flex: none; font: 700 15px var(--font-display); letter-spacing: -.3px; color: var(--ink); }
@@ -2898,7 +2898,9 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   /* Task 3 (§41): the Players Select-mode action bar + move-chip row are position:fixed — clamp them to the
      centered Manage column on desktop instead of spanning the full viewport. */
   body.pd-public-active .mgp-bar,
-  body.pd-public-active .mgp-movebar,
+  body.pd-public-active .mgp-movebar { left: 50%; transform: translateX(-50%); width: 100%; max-width: 720px; }
+  /* (2026-08-25: the selector list above dangled into the .pd-thero rule below, so the clamp never shipped
+     and the two bars took its 22px type — found by the Tournament recon.) */
 
   /* ---- typography: Sora titles up a notch on the surfaces that go wide (A direction) ---- */
   body.pd-public-active .pd-thero .pd-h { font-size: 22px; }
@@ -3152,6 +3154,8 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 .pl-srow.pl-you {
   margin-block: 0;
   padding: 8px 2px;
+  border-top-color: var(--border); /* 2026-08-22: "the line separating the teams still needs to show here above your team" */
+  border-radius: 0;                 /* "remove the roundness" — the You row sits square in the ladder */
 }
 
 /* Round 2026-08-03 — "have this say 'Seeding in pool …'" (standings column
@@ -3179,8 +3183,16 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 .pl-g .gt .tapname,
 .pl-g .gt .lose,
 .pl-g .gt .lose .tapname { color: oklch(0.40 0.005 75); }
+/* Round 2026-08-22 — "instead of showing the player's team in bold, why don't we highlight it": your team
+   reads as a faint blue CHIP at the normal weight; a highlighted winner keeps its green (.win, below). */
 .pl-g .gt b,
-.pl-g .gt b .tapname { font-weight: 700; }
+.pl-g .gt b .tapname { font-weight: 500; }
+.pl-g .gt b {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-bd);
+}
 .pl-g .gt b,
 .pl-g .gt b .tapname,
 .pl-g .gt .lose b,
@@ -3235,8 +3247,8 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
    yet. The loser stays inside .lose, so the winner is the only direct-child
    name. Green is the design's own positive-diff ink, dark enough to read at
    13px; it sits after the your-team rules so a win by your team is bold green. */
-.pl-g .gt:has(.def) > .tapname,
-.pl-g .gt:has(.def) > b > .tapname { color: oklch(0.40 0.09 150); }
+/* (2026-08-25: the :has(.def) pair that lived here is retired — no row emits "def." any more; the winner's
+   green now rides the explicit .win wrapper in the TOURNAMENT DESIGN ROUND block at the end of this file.) */
 
 /* Round 2026-08-03 — "change how this looks to 'Your next game… at net… vs…'"
    (My Team). Reads as a sentence now; the net tile that repeated the net number
@@ -4644,3 +4656,50 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
 @keyframes m-shake  { 10%, 90% { transform: translateX(-2px); } 20%, 80% { transform: translateX(4px); } 30%, 50%, 70% { transform: translateX(-7px); } 40%, 60% { transform: translateX(7px); } }
 @keyframes m-cheer  { from { opacity: 0; transform: translateY(12px) scale(.96); } }
 @keyframes m-trophy { 0% { opacity: 0; transform: scale(.5) rotate(-14deg); } 60% { opacity: 1; transform: scale(1.16) rotate(4deg); } 100% { opacity: 1; transform: none; } }
+
+/* ============================================================
+   TOURNAMENT DESIGN ROUND - 2026-08-25 (Mike's Claude Design handoff, "Tournament").
+   Ported from the handoff's _rounds.css (blocks dated 2026-08-22/23/24) and
+   _shared.css. Appended so order alone gives it the win. PORT NOTES inline.
+   Spec: docs/superpowers/specs/2026-08-25-tournament-handoff-design.md
+   ============================================================ */
+
+/* Round 2026-08-23 — Tournament hub, My team row: "move the record over to the
+   left … down next to pool a" (.tn-rec on the sub line) and "your next game is on
+   net 2" (the right slot is a sentence, the net carries the weight). */
+.tn-rec {
+  margin-left: 6px;
+  padding-left: 7px;
+  border-left: 1px solid var(--border);
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.tn-row[data-nav-tab="myteam"] .tn-stat b { font-weight: 700; color: var(--ink); }
+/* "under this write games done" — the unit under the fraction, in the app's field-label caps */
+.tn-row.is-now .tn-stat { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; }
+.tn-statsub {
+  margin-top: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* Round 2026-08-22 — "team 1 'vs' team 2, no more 'def.', keep the team that won
+   green": the RESULT is carried by colour alone. */
+.pl-g .gt .win { color: oklch(0.40 0.09 150); }
+.pl-g .gt .win b, .pl-g .gt .win .tapname { color: inherit; }
+
+/* Round 2026-08-22 — "add something here saying like you play at nets …"
+   (standings, your team's row). Scoped to rows that carry the net line — the
+   Seeding tab's You row stays a single flex line. */
+.pl-srow.pl-you .c2:has(.pl-younet) { display: grid; gap: 1px; }
+.pl-srow.pl-you .pl-youname { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.pl-srow.pl-you .pl-younet {
+  font: 700 10px var(--font-display);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--brand-dark); /* AA at 10px on the accent-soft ground */
+}

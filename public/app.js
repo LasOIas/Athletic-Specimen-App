@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.24.5'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3124,7 +3124,7 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam,
   const isChamp = ro && opts.champMatchId && m.id === opts.champMatchId;
   const isLiveNode = ro && m.status === 'live' && aKnown && bKnown;
   const trophy = isChamp ? '<svg class="pd-bk-trophy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg>' : '';
-  const meta = `<div class="bt-meta">${trophy}${escapeHTML(gLbl)}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Final' : ''}</div>`;
+  const meta = `<div class="bt-meta">${trophy}${escapeHTML(gLbl)}${m.net ? ' · Net ' + escapeHTML(String(m.net)) : ''}${m.status === 'final' ? ' · Done' : ''}</div>`;
   // Every caller renders the tree read-only (readOnly:true) — no node is a scoring tap target.
 
   let body;
@@ -3196,7 +3196,8 @@ function buildBracketHTML(tournament, matches, teams, opts = {}) {
   // Anyone can enter a result (Mike's "everyone scores on their own phone" model) — no team picker.
 
   // Double-elim has Winners / Losers / Final brackets — one connected tree per side.
-  const sideDefs = [['winners', 'Winners'], ['losers', 'Losers'], ['grand_final', 'Final']].filter(([s]) => main.some((m) => m.side === s));
+  // Design round 2026-08-24 (Mike): "Championship, never Final" — the third tab is the Championship.
+  const sideDefs = [['winners', 'Winners'], ['losers', 'Losers'], ['grand_final', 'Championship']].filter(([s]) => main.some((m) => m.side === s));
   // opts.side is a caller-supplied INITIAL side (public completed bracket opens on the Final so the gold game
   // shows) — used only until the viewer taps a side tab (which sets state.bracketSide). Admin passes none.
   let side = state.bracketSide || opts.side || null;
@@ -3496,7 +3497,7 @@ function buildTournamentHubHTML() {
 
   // Stage progress bar — one stage at a time (spec §2/§3). Omitted entirely pre-play (setup) — the rows carry
   // their own honest "not started" subs. countLabel: "24 of 36" (pools) / "Round 2 of 4" (bracket) / "Complete".
-  const countLabel = stage.phase === 'pools' ? (stage.count + ' of ' + stage.total)
+  const countLabel = stage.phase === 'pools' ? (stage.count + ' of ' + stage.total + ' games')
     : stage.phase === 'bracket' ? ('Round ' + stage.count + ' of ' + stage.total)
     : stage.phase === 'completed' ? 'Complete' : '';
   const progHTML = stage.stageLabel ? `<div class="tn-prog">
@@ -3530,13 +3531,16 @@ function buildTournamentHubHTML() {
     const peek = teamPeekModel(mine.teamId, { teams, matches, pools });
     const nm = (peek && peek.teamName) || mine.teamName || 'Your team';
     const poolPart = (peek && peek.poolLabel) ? ' · Pool ' + escapeHTML(peek.poolLabel) : '';
+    // Design round 2026-08-23 (Mike: "move the record over to the left … down next to pool a", "your next
+    // game is on net 2"): the record rides the sub line as .tn-rec; the right slot is a sentence.
     let stat = CHEV;
+    let recHTML = '';
     if (peek) {
-      const rec = peek.wins + '-' + peek.losses;
+      recHTML = `<span class="tn-rec">${escapeHTML(peek.wins + '-' + peek.losses)}</span>`;
       const nextNet = peek.next && peek.next.net;
-      stat = peek.live ? (rec + ' · Playing now') : (nextNet ? (rec + ' · Net ' + nextNet + ' next') : rec);
+      stat = peek.live ? 'Playing now' : (nextNet ? ('Next on <b>net ' + escapeHTML(String(nextNet)) + '</b>') : CHEV);
     }
-    rows.push(row('data-nav-tab="myteam"', '', ICON.team, 'My team', escapeHTML(nm) + poolPart, escapeHTML(stat)));
+    rows.push(row('data-nav-tab="myteam"', '', ICON.team, 'My team', escapeHTML(nm) + poolPart + recHTML, stat));
   } else if (state.identityCollision === true) {
     // Identity (spec §3): someone else already owns your name, so sign-up got no auto-link — one quiet
     // affordance to disambiguate once. Same #pd-claim id → the existing handler opens the claim page.
@@ -3556,7 +3560,8 @@ function buildTournamentHubHTML() {
   const livePool = matches.filter((m) => m.phase === 'pool' && m.status === 'live').length;
   if (stage.activeView === 'pools') {
     const sub = livePool ? ('Happening now · ' + livePool + (livePool === 1 ? ' game playing' : ' games playing')) : 'Pool play underway';
-    rows.push(row('data-tn-view="pools"', 'is-now', ICON.cal, 'Pools & schedule', sub, escapeHTML(poolDone + '/' + poolTotal)));
+    // "under this write games done" (2026-08-23): the fraction alone did not say what it counted.
+    rows.push(row('data-tn-view="pools"', 'is-now', ICON.cal, 'Pools & schedule', sub, escapeHTML(poolDone + '/' + poolTotal) + '<span class="tn-statsub">games done</span>'));
   } else if (show.status === 'setup') {
     rows.push(row('data-tn-view="pools"', '', ICON.cal, 'Pools & schedule', 'Starts when play begins', CHEV));
   } else {
@@ -3569,7 +3574,7 @@ function buildTournamentHubHTML() {
   const standings = computeStandings(teams, matches);
   const leader = (anyFinal && standings[0]) ? (standings[0].name || '') : '';
   rows.push(row('data-tn-view="pools" data-pools-tab="seeding"', '', ICON.chart, 'Seeding',
-    leader ? 'Leader' : 'Starts when games do', leader ? escapeHTML(leader) : CHEV));
+    'Where teams stand', leader ? escapeHTML(leader) : CHEV)); // design sub line; the leader name stays (Mike 2026-08-25)
 
   // Bracket — locked/faded during pools (spec §2); the active stage during bracket; the champion after.
   const mainMatches = matches.filter((m) => m.phase === 'main');
@@ -3581,7 +3586,7 @@ function buildTournamentHubHTML() {
   } else if (show.status === 'completed') {
     const oc = bracketOutcome(mainMatches, teams);
     rows.push(row('data-tn-view="bracket"', '', ICON.trophy, 'Bracket',
-      oc ? 'Champion crowned' : 'Final', oc ? escapeHTML(oc.championName || '') : CHEV));
+      oc ? 'Champion crowned' : 'Bracket complete', oc ? escapeHTML(oc.championName || '') : CHEV));
   } else {
     const sub = show.status === 'pools' ? 'Unlocks when pools finish' : 'After pool play';
     rows.push(row('data-tn-view="bracket"', 'is-locked', ICON.trophy, 'Bracket', sub, CHEV));
@@ -3664,7 +3669,7 @@ function buildBracketPageHTML() {
     const done = poolGames.filter((m) => m.status === 'final').length;
     const pct = total ? Math.round((done / total) * 100) : 0;
     const progress = total ? `<div class="pd-bk-prog">
-        <div class="pd-bk-prog-top"><span class="pd-bk-prog-l">Pool play</span><span class="pd-bk-prog-n">${done} of ${total} games final</span></div>
+        <div class="pd-bk-prog-top"><span class="pd-bk-prog-l">Pool play</span><span class="pd-bk-prog-n">${done} of ${total} games done</span></div>
         <div class="pd-bk-bar"><div class="pd-bk-bar-fill" style="width:${pct}%;"></div></div>
       </div>` : '';
     // §13.6: key the heading + body on status. Registration (setup) → honest "comes after pool play" copy
@@ -3692,7 +3697,7 @@ function buildBracketPageHTML() {
   if (stateKind === 'completed') {
     const rec = computeTeamRecord(outcome.championId, matches, teams);
     const recLine = rec.wins + '–' + rec.losses
-      + (outcome.runnerUpName ? ' · def. ' + escapeHTML(outcome.runnerUpName) + ' in the final' : '');
+      + (outcome.runnerUpName ? ' · beat ' + escapeHTML(outcome.runnerUpName) + ' in the championship' : '');
     const strip = `<div class="pd-bk-champbar">
         <span class="pd-bk-cbic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8"/><path d="M12 17v4"/><path d="M7 4h10v4a5 5 0 0 1-10 0V4Z"/><path d="M7 6H4a3 3 0 0 0 3 3"/><path d="M17 6h3a3 3 0 0 1-3 3"/></svg></span>
         <div><div class="pd-bk-cbh">Champions · ${escapeHTML(outcome.championName)}</div><div class="pd-bk-cbs">${recLine}</div></div>
@@ -4168,13 +4173,18 @@ function pdOrdinal(n) {
 // One standings-lite row (# / Team / W–L / Diff) — the shared grammar for BOTH the public Pools page and the
 // admin Manage → Pools view (Task 7). `badge` prefixes the team cell (the pool chip on the Seeding tab);
 // `myTeamId` lights the spectator's own row ("You") — admin passes null (an operator has no "You").
-function poolStandRowHTML(rank, teamId, name, wins, losses, diff, badge, myTeamId) {
+// netLine (design round 2026-08-22, "You play at nets 1 & 2"): the You row's second line, from teamNetRange —
+// pool tab only; the Seeding tab passes '' and stays one flex line. Omitted when empty (no net drawn yet).
+function poolStandRowHTML(rank, teamId, name, wins, losses, diff, badge, myTeamId, netLine) {
   const EN = '–';
   const mine = myTeamId && teamId === myTeamId;
   const diffCls = diff > 0 ? 'c4' : 'c4 n';
   const diffTxt = (diff > 0 ? '+' : '') + diff;
   const youTag = mine ? '<span class="pl-youtag">You</span>' : '';
-  return `<div class="pl-srow${mine ? ' pl-you' : ''}"><span class="c1">${escapeHTML(String(rank))}</span><span class="c2">${badge || ''}${escapeHTML(name)}${youTag}</span><span class="c3">${escapeHTML(String(wins))}${EN}${escapeHTML(String(losses))}</span><span class="${diffCls}">${escapeHTML(diffTxt)}</span></div>`;
+  const c2 = mine
+    ? `<span class="pl-youname">${badge || ''}${escapeHTML(name)}${youTag}</span>${netLine ? `<span class="pl-younet">You play at ${escapeHTML(String(netLine).toLowerCase())}</span>` : ''}`
+    : `${badge || ''}${escapeHTML(name)}`;
+  return `<div class="pl-srow${mine ? ' pl-you' : ''}"><span class="c1">${escapeHTML(String(rank))}</span><span class="c2">${c2}</span><span class="c3">${escapeHTML(String(wins))}${EN}${escapeHTML(String(losses))}</span><span class="${diffCls}">${escapeHTML(diffTxt)}</span></div>`;
 }
 
 function buildPoolsSchedulePageHTML() {
@@ -4223,7 +4233,7 @@ function buildPoolsSchedulePageHTML() {
   const curRound = Math.min(maxRound, (finalOrders.length ? Math.max(...finalOrders) : 0) + 1);
   // Design round 2026-08-03 copy sweep: "Round n" reads "Game n" everywhere on the player-facing board —
   // inside a pool each team plays one game per round, so round 4 IS your fourth game. Nothing is renumbered.
-  const meta = `<p class="pl-meta">Game ${curRound} of ${maxRound} · ${done} of ${total} game${total === 1 ? '' : 's'} final</p>`;
+  const meta = `<p class="pl-meta">Game ${curRound} of ${maxRound} · ${done} of ${total} game${total === 1 ? '' : 's'} done</p>`;
 
   const myTeam = myTeamInfo();
   const myTeamId = myTeam ? myTeam.teamId : null;
@@ -4233,8 +4243,8 @@ function buildPoolsSchedulePageHTML() {
   // One standings-lite row (# / Team / W-L / Diff). `badge` prefixes the team cell (pool chip on Seeding).
   // Task 7: the row markup is now the shared poolStandRowHTML() so the admin Manage → Pools view reuses the
   // EXACT standings-lite grammar (the "You" highlight is public-only — admin passes myTeamId null).
-  const srow = (rank, teamId, name, wins, losses, diff, badge) =>
-    poolStandRowHTML(rank, teamId, name, wins, losses, diff, badge, myTeamId);
+  const srow = (rank, teamId, name, wins, losses, diff, badge, netLine) =>
+    poolStandRowHTML(rank, teamId, name, wins, losses, diff, badge, myTeamId, netLine || '');
 
   let body;
   if (selected === 'seeding') {
@@ -4249,7 +4259,8 @@ function buildPoolsSchedulePageHTML() {
   } else {
     const pool = activePools.find((p) => (p.label || '') === selected) || activePools[0];
     const shaped = shapeStandingsByPool(pools, teams, matches).find((s) => s.poolLabel === (pool.label || ''));
-    const standRows = (shaped ? shaped.rows : []).map((r) => srow(r.rank, r.teamId, r.name, r.wins, r.losses, r.pointDiff, '')).join('');
+    const myNets = teamNetRange(myTeamId, matches.filter((m) => m.pool_id === pool.id)); // "You play at nets 1-2"
+    const standRows = (shaped ? shaped.rows : []).map((r) => srow(r.rank, r.teamId, r.name, r.wins, r.losses, r.pointDiff, '', myNets)).join('');
     const poolMatches = matches.filter((m) => m.pool_id === pool.id);
     const nets = [...new Set(poolMatches.map((m) => m.net).filter((n) => n != null))].sort((a, b) => a - b);
     // Same net range the pool's tab shows — one helper, one answer (poolNetRange already carries the
@@ -4277,7 +4288,10 @@ function buildPoolsSchedulePageHTML() {
           const w = aWin ? aTap : bTap, l = aWin ? bTap : aTap;
           // Score pair follows the displayed winner-first name order (§27 TRUE), not the stored a-b order.
           const ws = aWin ? g.score_a : g.score_b, ls = aWin ? g.score_b : g.score_a;
-          return `<div class="pl-g"><span class="rd">G${escapeHTML(String(order))}</span><span class="gt">${w} <span class="def">def.</span> <span class="lose">${l}</span></span><span class="sc">${escapeHTML(String(ws))}${EN}${escapeHTML(String(ls))}</span><span class="ftag">FINAL</span></div>`;
+          // Design round 2026-08-22 (Mike: "always just be team 1 'vs' team 2, no more 'def.', keep the team that
+          // won green"): every row reads "A vs B"; the RESULT is carried by colour alone via .win. Winner-first
+          // order kept so the score pair still reads winner–loser (§27 TRUE). The tag reads DONE, never FINAL.
+          return `<div class="pl-g"><span class="rd">G${escapeHTML(String(order))}</span><span class="gt"><span class="win">${w}</span> <span class="vs">vs</span> <span class="lose">${l}</span></span><span class="sc">${escapeHTML(String(ws))}${EN}${escapeHTML(String(ls))}</span><span class="ftag">DONE</span></div>`;
         }
         if (g.status === 'live') {
           const sa = Number(g.score_a) || 0, sb = Number(g.score_b) || 0;
@@ -9834,7 +9848,7 @@ function mgPoolGameRowHTML(g, order, teams) {
     const aWin = g.winner_team_id === g.team_a_id;
     const w = aWin ? aN : bN, l = aWin ? bN : aN;
     const ws = aWin ? g.score_a : g.score_b, ls = aWin ? g.score_b : g.score_a;
-    return `<div class="pl-g" data-mgps-score="${idAttr}">${rd}<span class="gt"><b>${w}</b> <span class="def">def.</span> <span class="lose">${l}</span></span><span class="sc">${escapeHTML(String(ws))}${EN}${escapeHTML(String(ls))}</span><span class="ftag">EDIT</span></div>`;
+    return `<div class="pl-g" data-mgps-score="${idAttr}">${rd}<span class="gt"><span class="win">${w}</span> <span class="vs">vs</span> <span class="lose">${l}</span></span><span class="sc">${escapeHTML(String(ws))}${EN}${escapeHTML(String(ls))}</span><span class="ftag">EDIT</span></div>`;
   }
   if (g.status === 'live') {
     const sa = Number(g.score_a) || 0, sb = Number(g.score_b) || 0;

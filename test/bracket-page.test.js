@@ -85,10 +85,10 @@ describe('bracketStatusLine', () => {
     expect(bracketStatusLine(main)).toBe('Winners round 2');
   });
 
-  it('labels the losers bracket and the grand final (incl. reset)', () => {
+  it('labels the losers bracket and the championship (incl. the if-necessary game) — "never Final", 2026-08-24 round', () => {
     expect(bracketStatusLine([{ id: 'l', side: 'losers', round: 3, status: 'live', team_a_id: 't1', team_b_id: 't2', queue_order: 5 }])).toBe('Losers round 3');
-    expect(bracketStatusLine([{ id: 'g', side: 'grand_final', round: 1, status: 'live', team_a_id: 't1', team_b_id: 't2', queue_order: 6 }])).toBe('Grand final');
-    expect(bracketStatusLine([{ id: 'g2', side: 'grand_final', round: 2, status: 'live', team_a_id: 't1', team_b_id: 't2', queue_order: 7 }])).toBe('Grand final (reset)');
+    expect(bracketStatusLine([{ id: 'g', side: 'grand_final', round: 1, status: 'live', team_a_id: 't1', team_b_id: 't2', queue_order: 6 }])).toBe('Championship');
+    expect(bracketStatusLine([{ id: 'g2', side: 'grand_final', round: 2, status: 'live', team_a_id: 't1', team_b_id: 't2', queue_order: 7 }])).toBe('Championship (if necessary)');
   });
 
   it('ignores games missing a team (not yet playable)', () => {
@@ -275,7 +275,7 @@ describe('buildBracketPageHTML — pre state, pools running', () => {
   });
 
   it('shows the live pool-progress line', () => {
-    expect(html).toContain('1 of 2 games final');
+    expect(html).toContain('1 of 2 games done'); // "never Final" (2026-08-24 round)
   });
 });
 
