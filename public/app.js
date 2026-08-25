@@ -22,10 +22,16 @@
 // email+password (deriveRole -> caller_role) is the only sign-in and the only admin source.
 // detectSessionInUrl is a harmless no-op for password auth (kept for a future Google redirect option).
 // autoRefreshToken keeps a real session alive.
+// Account round (2026-08-25), review fix: read the recovery marker BEFORE createClient, because
+// detectSessionInUrl consumes the fragment and this client runs the implicit flow, so the link arrives as
+// `#access_token=...&type=recovery`. On a fresh device supabase-js emits SIGNED_IN and THEN
+// PASSWORD_RECOVERY; without this flag the first event would run the whole sign-in path and stack the
+// name prompt over the reset screen.
+let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.18'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.19'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6309,19 +6315,22 @@ function renderAuthPageInner() {
   // block; the sent states are the design's confirmation screens (mark, title, address, Resend) and drop
   // the brand the way the handoff drew it. .auth-back stays on the shell in every state so the overlay
   // always has an exit.
-  // The sent screen is the branch signUp takes when it comes back with no session, i.e. when the
-  // project has Confirm email ON. It is dormant while that setting is OFF, and correct the moment Mike
-  // flips it. The typed address lives in memory only, so a reload lands on sign-in, which is what the
-  // copy tells them to do anyway.
-  const sentInner = `<div class="au-mark is-mail">${AUTH_MAIL_SVG}</div>
+  // Both sent screens are the same design part with a different sentence: the mark, the title, the
+  // error line the design forgot to draw, the Resend and the way back. The typed address lives in
+  // memory only, so a reload lands on sign-in, which is what both sentences tell people to do anyway.
+  const sentScreenHTML = (subHTML) => `<div class="au-mark is-mail">${AUTH_MAIL_SVG}</div>
       <h2 class="auth-title">Check your email</h2>
-      <p class="auth-sub">We sent a link to <span class="au-em">${escapeHTML(authSentEmail)}</span>. Tap it, then sign in.</p>
+      <p class="auth-sub">${subHTML}</p>
       <div class="auth-err" id="auth-err" role="alert" hidden></div>
       <button type="button" class="auth-alt" id="auth-resend">Didn't get it? Resend</button>
       <button type="button" class="au-alt2" id="auth-alt">Back to sign in</button>`;
-  // The forgot pair. Supabase answers "success" to resetPasswordForEmail for an address it has never
-  // seen (on purpose, so nobody can probe for accounts), so the sent copy says the app ASKED for a
+  // signup-sent is the branch signUp takes when it comes back with no session, i.e. when the project
+  // has Confirm email ON. It is dormant while that setting is OFF, and correct the moment Mike flips it.
+  const sentInner = sentScreenHTML(`We sent a link to <span class="au-em">${escapeHTML(authSentEmail)}</span>. Tap it, then sign in.`);
+  // forgot-sent is live today. Supabase answers "success" to resetPasswordForEmail for an address it has
+  // never seen (on purpose, so nobody can probe for accounts), so this sentence says the app ASKED for a
   // link and never that one was delivered.
+  const forgotSentInner = sentScreenHTML(`If <span class="au-em">${escapeHTML(authSentEmail)}</span> has an account, a reset link is on its way.`);
   const forgotInner = `${AUTH_BRAND_HTML}
       <form id="auth-form" novalidate autocomplete="on">
         <h2 class="auth-title">Reset your password</h2>
@@ -6332,12 +6341,6 @@ function renderAuthPageInner() {
         <button type="submit" class="auth-submit" id="auth-submit">Send reset link</button>
         <button type="button" class="auth-alt" id="auth-alt">Back to sign in</button>
       </form>`;
-  const forgotSentInner = `<div class="au-mark is-mail">${AUTH_MAIL_SVG}</div>
-      <h2 class="auth-title">Check your email</h2>
-      <p class="auth-sub">If <span class="au-em">${escapeHTML(authSentEmail)}</span> has an account, a reset link is on its way.</p>
-      <div class="auth-err" id="auth-err" role="alert" hidden></div>
-      <button type="button" class="auth-alt" id="auth-resend">Didn't get it? Resend</button>
-      <button type="button" class="au-alt2" id="auth-alt">Back to sign in</button>`;
   const formInner = `${AUTH_BRAND_HTML}
       <form id="auth-form" novalidate autocomplete="on">
         <h2 class="auth-title">${signup ? 'Create account' : 'Welcome'}</h2>
@@ -6358,8 +6361,9 @@ function renderAuthPageInner() {
   // The forgot screens are steps INSIDE this overlay, so their chevron walks one step back instead of
   // closing it (the design's data-auth-view on each back control).
   const backStep = forgot ? 'signin' : (forgotSent ? 'forgot' : '');
+  const backLabel = forgot ? 'Back to sign in' : (forgotSent ? 'Back' : 'Close sign in');
   el.innerHTML = `
-    <button type="button" class="auth-back" id="auth-back" aria-label="${backStep ? 'Back' : 'Close sign in'}">${AUTH_BACK_SVG}</button>
+    <button type="button" class="auth-back" id="auth-back" aria-label="${backLabel}">${AUTH_BACK_SVG}</button>
     <div class="auth-inner">
       ${sent ? sentInner : (forgot ? forgotInner : (forgotSent ? forgotSentInner : formInner))}
     </div>`;
@@ -6651,7 +6655,8 @@ async function onForgotSubmit() {
     authSentEmail = email;
     authMode = 'forgot-sent';
     renderAuthPageInner();
-  } catch (_) {
+  } catch (err) {
+    console.error('resetPasswordForEmail', err);   // the failure only; the typed address stays out of the log
     showErr('Something went wrong. Try again.');
     if (btn) { btn.disabled = false; btn.textContent = orig; }
   }
@@ -6760,7 +6765,9 @@ function closeResetPage() {
 }
 
 function openResetPage(session) {
-  closeResetPage(); // never stack
+  // Idempotent: the two events of one recovery link both route here, and rebuilding the screen under
+  // someone who is already typing would wipe the field (review fix).
+  if (document.getElementById('reset-page')) return;
   const email = (session && session.user && session.user.email) || (state.account && state.account.email) || '';
   const el = document.createElement('div');
   el.id = 'reset-page';
@@ -6820,9 +6827,12 @@ async function onResetSave(e) {
     }
     // The router deliberately skipped the heavy path (a recovery is not a sign-in), so it runs HERE,
     // once: an organizer who recovered on a device that was already signed in gets Manage back without
-    // a reload, and a fresh device gets its role, tournaments and claimed player.
+    // a reload, and a fresh device gets its role, tournaments and claimed player. The recovery is over,
+    // so a later SIGNED_IN is a plain sign-in again.
+    authRecoveryPending = false;
     void runPostSignInWork();
-  } catch (_) {
+  } catch (err) {
+    console.error('updateUser (password reset)', err);   // never the password itself
     showErr('Something went wrong. Try again.');
     if (btn) { btn.disabled = false; btn.textContent = orig; }
   }
@@ -7012,12 +7022,17 @@ async function onAuthEvent(event, session) {
   // (auth/rpc/from) INLINE here races/deadlocks (role came back null even though caller_role is fine).
   // So any supabase call below is deferred with setTimeout(0) per Supabase's own guidance.
   if (session) {
-    if (event === 'PASSWORD_RECOVERY') {
-      // Account round 2026-08-25: a recovery link is NOT a sign-in. Keep the session (updateUser needs it),
-      // never run the heavy path yet, and open the reset screen out-of-band (a DOM write is safe here;
-      // no supabase call happens inside the callback). Above the isNewSignIn gate on purpose: the link
-      // usually opens in the browser that already holds this account's session, and that gate would
-      // swallow the event.
+    // Account round 2026-08-25: a recovery link is NOT a sign-in. Keep the session (updateUser needs it),
+    // never run the heavy path yet, and open the reset screen out-of-band (a DOM write is safe here;
+    // no supabase call happens inside the callback). Above the isNewSignIn gate on purpose: the link
+    // usually opens in the browser that already holds this account's session, and that gate would
+    // swallow the event.
+    // Review fix: a FRESH device gets SIGNED_IN first and PASSWORD_RECOVERY second, so the fragment flag
+    // routes that first event here too. Whichever event arrives first latches the flag, so its partner
+    // takes this branch as well and openResetPage (idempotent) keeps the one screen the person is typing
+    // into. The flag is cleared once the new password is saved, and on sign-out.
+    if (event === 'PASSWORD_RECOVERY' || (authRecoveryPending && event === 'SIGNED_IN')) {
+      authRecoveryPending = true;
       state.authSession = session;
       state.account = { id: session.user.id, email };
       setTimeout(() => { try { closeAuthPage(); closeGatePage(); openResetPage(session); } catch (_) {} }, 0);
@@ -7061,6 +7076,7 @@ async function onAuthEvent(event, session) {
     state.teamMembers = null; // the personal layer signs out with the account (anon can't read claims)
     state.myClaimedPlayer = null; // Round 2 §12.3: clear the check-in hero on the SIGNED_OUT path too
     claimIntent = false;
+    authRecoveryPending = false; // an abandoned recovery must not route the next sign-in (review fix)
     closeClaimPage(); // a claim page can't outlive its session (harmless no-op when not open)
     if (state.isAdmin) {
       state.isAdmin = false;

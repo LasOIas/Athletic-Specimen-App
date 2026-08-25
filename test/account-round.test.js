@@ -176,6 +176,11 @@ function loadApp() {
     runPostSignInWork = async function () { __postRuns += 1; return __postWork(); };
     ;globalThis.__bridge = {
       authEvent: (event, session) => onAuthEvent(event, session),
+      // The sandbox's location.hash is empty, so the fragment flag a real recovery link sets is set here.
+      setRecoveryPending: (v) => { authRecoveryPending = !!v; },
+      recoveryPending: () => authRecoveryPending,
+      getClaimIntent: () => claimIntent,
+      setClaimIntent: (v) => { claimIntent = !!v; },
       resetSave: () => onResetSave({ preventDefault() {} }),
       postSignInRuns: () => __postRuns,
       resetPostRuns: () => { __postRuns = 0; },
@@ -202,8 +207,9 @@ function loadApp() {
   bridge.hook = (sel, node) => { hooks[sel] = node; };
   bridge.supaCalls = () => supaCalls;
   bridge.supaNext = (name, value) => { supaScript[name] = value; };
-  // The sandbox stubs setTimeout to a noop, so a cooldown callback never runs. A case that wants to see
-  // the far side of the cooldown swaps in an immediate one and restores it with the returned undo.
+  // The sandbox QUEUES setTimeout work (see above) and only flushTimers runs it, so a cooldown callback
+  // never fires on its own. A case that wants to see the far side of the cooldown swaps in an immediate
+  // setTimeout and restores the queue with the returned undo.
   bridge.swapTimeout = (fn) => { const prev = sandbox.setTimeout; sandbox.setTimeout = fn; return () => { sandbox.setTimeout = prev; }; };
   // Drains the queued setTimeout(0) work. Callbacks are CALLED, never awaited: the post-sign-in retry
   // loop parks on a timer promise by design, and awaiting it would hang the suite. The cap is a guard
@@ -218,6 +224,8 @@ function loadApp() {
   bridge.reset = () => {
     timers.length = 0;
     bridge.resetPostRuns();
+    bridge.setRecoveryPending(false);
+    bridge.setClaimIntent(false);
     for (const k of Object.keys(registry)) delete registry[k];
     for (const k of Object.keys(hooks)) delete hooks[k];
     for (const k of Object.keys(supaScript)) delete supaScript[k];
@@ -654,6 +662,91 @@ describe('Account round Task 2 - forgot, reset and the recovery router', () => {
     expect(bridge.registry['reset-save'].disabled).toBe(false);
     expect(bridge.registry['reset-page'].innerHTML).not.toContain('Password changed');
     expect(bridge.postSignInRuns()).toBe(0);
+  });
+
+  it('a fresh device that gets SIGNED_IN before PASSWORD_RECOVERY lands on ONE reset screen and never runs the sign-in path', async () => {
+    // The real ordering on a device with no prior session: supabase-js consumes `#...&type=recovery`,
+    // emits SIGNED_IN, then PASSWORD_RECOVERY. Gating on the second event alone let the first one run
+    // the whole sign-in path and stack the name prompt over the reset screen (review, fix round 1).
+    bridge.setSignedOut();
+    bridge.setRecoveryPending(true);   // what the fragment sets at module load
+    const session = { user: { id: 'u1', email: 'a@b.co' } };
+
+    await bridge.authEvent('SIGNED_IN', session);
+    await bridge.flushTimers();
+    const page = bridge.registry['reset-page'];
+    expect(page).toBeTruthy();
+    expect(bridge.postSignInRuns()).toBe(0);
+    expect(bridge.registry['namefill-page']).toBeFalsy();
+
+    await bridge.authEvent('PASSWORD_RECOVERY', session);
+    await bridge.flushTimers();
+    // The SAME element: a rebuild would wipe whatever is already typed into it.
+    expect(bridge.registry['reset-page']).toBe(page);
+    expect(bridge.postSignInRuns()).toBe(0);
+    expect(bridge.registry['namefill-page']).toBeFalsy();
+
+    // The heavy work runs once, on the far side of the save, and the flag stops routing after that.
+    bridge.registry['rs-new'].value = 'Passw0rd!';
+    bridge.registry['rs-again'].value = 'Passw0rd!';
+    bridge.supaNext('updateUser', { data: {}, error: null });
+    await bridge.resetSave();
+    expect(bridge.postSignInRuns()).toBe(1);
+    expect(bridge.recoveryPending()).toBe(false);
+  });
+
+  it('the reverse order (PASSWORD_RECOVERY first) routes the trailing SIGNED_IN to the same screen', async () => {
+    bridge.setSignedOut();
+    const session = { user: { id: 'u1', email: 'a@b.co' } };
+    await bridge.authEvent('PASSWORD_RECOVERY', session);
+    await bridge.flushTimers();
+    const page = bridge.registry['reset-page'];
+    expect(page).toBeTruthy();
+    expect(bridge.recoveryPending()).toBe(true);   // latched by whichever event arrives first
+
+    await bridge.authEvent('SIGNED_IN', session);
+    await bridge.flushTimers();
+    expect(bridge.registry['reset-page']).toBe(page);
+    expect(bridge.postSignInRuns()).toBe(0);
+    expect(bridge.registry['namefill-page']).toBeFalsy();
+  });
+
+  it('a plain SIGNED_IN with no recovery pending still runs the sign-in path', async () => {
+    bridge.setSignedOut();
+    await bridge.authEvent('SIGNED_IN', { user: { id: 'u1', email: 'a@b.co' } });
+    await bridge.flushTimers();
+    expect(bridge.registry['reset-page']).toBeFalsy();
+    expect(bridge.postSignInRuns()).toBe(1);
+  });
+
+  it('signing out drops a pending recovery so the next sign-in is a plain one', async () => {
+    bridge.setRecoveryPending(true);
+    await bridge.authEvent('SIGNED_OUT', null);
+    expect(bridge.recoveryPending()).toBe(false);
+  });
+
+  it('the chevron walks back a step on the forgot screens and still closes the overlay on sign-in', async () => {
+    bridge.openAuth('forgot');
+    expect(bridge.registry['auth-page'].innerHTML).toContain('aria-label="Back to sign in"');
+    bridge.registry['auth-back'].listeners.click[0]();
+    expect(bridge.registry['auth-page'].innerHTML).toContain('Sign in to claim your team and follow your games.');
+
+    // forgot-sent walks back to the forgot form, the way the design drew its chevron.
+    bridge.openAuth('forgot');
+    bridge.registry['fg-email'].value = 'a@b.co';
+    bridge.supaNext('resetPasswordForEmail', { data: {}, error: null });
+    await bridge.authSubmit();
+    expect(bridge.registry['auth-page'].innerHTML).toContain('aria-label="Back"');
+    bridge.registry['auth-back'].listeners.click[0]();
+    expect(bridge.registry['auth-page'].innerHTML).toContain('Send reset link');
+
+    // Sign-in's chevron is still the exit, and it still abandons a pending claim.
+    bridge.openAuth('signin');
+    bridge.setClaimIntent(true);
+    expect(bridge.registry['auth-page'].innerHTML).toContain('aria-label="Close sign in"');
+    bridge.registry['auth-back'].listeners.click[0]();
+    expect(bridge.registry['auth-page']).toBeFalsy();
+    expect(bridge.getClaimIntent()).toBe(false);
   });
 
   it('the reset path never trims the password', async () => {
