@@ -44,6 +44,11 @@ const AUTH_CONTROL_IDS = [
   // Task 6: the Password screen's three fields and its way out to a forgotten current one. The form and
   // the submit are the shared 'acct-form' / 'acct-save' above - every screen on this overlay reuses them.
   'ap-cur', 'ap-new', 'ap-again', 'ap-forgot',
+  // Task 8: the OAuth button, the name overlay's controls (openNameFillOverlay binds #namefill-form back
+  // after its innerHTML swap, so the id has to exist before the bind), and the claim page's three, so
+  // #claim-page renders for real instead of relying on a swallowed throw.
+  'auth-google', 'namefill-form', 'namefill-first', 'namefill-last', 'namefill-err', 'namefill-save',
+  'claim-back', 'claim-search', 'claim-results',
 ];
 
 function matches(node, sel) {
@@ -161,6 +166,7 @@ function loadApp() {
       resetPasswordForEmail: rec('resetPasswordForEmail'),
       updateUser: rec('updateUser'),
       signOut: rec('signOut'),
+      signInWithOAuth: rec('signInWithOAuth'),
     },
     // maybeSingle is the profile read promptNameFillIfNeeded makes. Scriptable like the auth calls, so a
     // case can hand it a name (Task 3 review: the header chip has to repaint when that name lands).
@@ -168,7 +174,13 @@ function loadApp() {
     // argument of the chain, so a case can assert the exact statement, and its answer is scriptable via
     // supaNext('profileUpdate', value) - zero rows and a hard error are both drivable without a network.
     from: (table) => ({
-      select: () => ({ eq: () => ({ limit: async () => ({ data: [], error: null }), maybeSingle: rec('profileRead') }) }),
+      select: () => ({
+        eq: () => ({ limit: async () => ({ data: [], error: null }), maybeSingle: rec('profileRead') }),
+        // Task 8: the claim page reads the two unclaimed lists with .is(col, null) and awaits both through
+        // Promise.allSettled, so .is has to answer with a THENABLE. It never chains .eq here, because
+        // fetchCommunityId resolves to null in this sandbox (its maybeSingle answers { data: {} }).
+        is: () => Promise.resolve({ data: [], error: null }),
+      }),
       update: (patch) => ({
         eq: (col, val) => ({ select: (cols) => rec('profileUpdate')({ table, patch, col, val, cols }) }),
       }),
@@ -178,17 +190,38 @@ function loadApp() {
     // path did NOT reach for an RPC (the name save must never touch connect_profile_by_name).
     removeChannel: noop, rpc: rec('rpc', { data: null, error: null }),
   };
+  // Task 8: every navigation the sandbox is asked for, recorded. signInWithOAuth navigates the document
+  // ITSELF inside the library, so a case has to be able to prove the app never reaches for location.
+  const assigns = [];
   const windowStub = {
     supabase: { createClient: () => supaStub },
     addEventListener: noop, removeEventListener: noop, dispatchEvent: noop,
     matchMedia: () => ({ matches: false, addEventListener: noop, addListener: noop, removeEventListener: noop }),
-    location: { href: 'http://localhost/', origin: 'http://localhost', search: '', hash: '', pathname: '/', reload: noop },
+    location: {
+      href: 'http://localhost/', origin: 'http://localhost', search: '', hash: '', pathname: '/', reload: noop,
+      assign: (u) => { assigns.push(String(u)); }, replace: (u) => { assigns.push(String(u)); },
+    },
     navigator: { onLine: true, userAgent: 'node', serviceWorker: { register: async () => ({}) } },
     requestAnimationFrame: noop, cancelAnimationFrame: noop,
     setTimeout: noop, clearTimeout: noop, setInterval: noop, clearInterval: noop, scrollTo: noop,
   };
   windowStub.window = windowStub;
   const storageStub = () => ({ getItem: () => null, setItem: noop, removeItem: noop, clear: noop, key: () => null, length: 0 });
+  // sessionStorage is REAL from Task 8 on: the OAuth redirect tears the page down, so the claim intent has
+  // to survive in storage and a test has to be able to see what was written. localStorage stays inert on
+  // purpose, nothing in this round reads it. Blast radius, checked: the app touches bare sessionStorage in
+  // loadLocal, which readyState 'loading' keeps from running at load, and in activateMainTab, so the
+  // Task 1 case that calls bridge.tab(...) now writes a real key. That is why EVERY assertion below reads
+  // a NAMED key and none of them reads length.
+  const sessionMap = new Map();
+  const sessionStorageStub = {
+    getItem: (k) => (sessionMap.has(String(k)) ? sessionMap.get(String(k)) : null),
+    setItem: (k, v) => { sessionMap.set(String(k), String(v)); },
+    removeItem: (k) => { sessionMap.delete(String(k)); },
+    clear: () => sessionMap.clear(),
+    key: (i) => (Array.from(sessionMap.keys())[i] ?? null),
+    get length() { return sessionMap.size; },
+  };
   // Task 4 review: the screen never shows a raw server error, so console.error is the ONLY place one
   // goes. Recorded rather than forwarded: a case asserts exactly what was logged, and a case that
   // asserts an EMPTY log is a stronger silence guarantee than a quiet stderr in the scrollback.
@@ -196,7 +229,7 @@ function loadApp() {
   const consoleStub = Object.assign(Object.create(console), { error: (...a) => { errorLog.push(a); } });
   const sandbox = {
     window: windowStub, document: documentStub,
-    localStorage: storageStub(), sessionStorage: storageStub(),
+    localStorage: storageStub(), sessionStorage: sessionStorageStub,
     navigator: windowStub.navigator, location: windowStub.location,
     requestAnimationFrame: noop, cancelAnimationFrame: noop,
     setTimeout: noop, clearTimeout: noop, setInterval: noop, clearInterval: noop,
@@ -220,6 +253,11 @@ function loadApp() {
     ;let __renders = 0;
     const __render = render;
     render = function () { __renders += 1; return __render(); };
+    // Task 8 spy: nothing may be claimed on a roster until the person taps Save, and
+    // connect_profile_by_name is the call that would do it. The real function still runs; this counts.
+    ;let __connects = 0;
+    const __connect = connectProfileByName;
+    connectProfileByName = async function (...a) { __connects += 1; return __connect(...a); };
     ;globalThis.__bridge = {
       authEvent: (event, session) => onAuthEvent(event, session),
       // The sandbox's location.hash is empty, so the fragment flag a real recovery link sets is set here.
@@ -262,6 +300,22 @@ function loadApp() {
       acctPending: () => acctPendingEmail,
       // The two gates every post-boot repaint sits behind.
       setPainted: (v) => { state.loaded = !!v; bootPaintDone = !!v; },
+      // Task 8: the boot restore, called on demand.
+      restoreClaimIntent: () => authRestoreClaimIntent(),
+      // H17: the handler is called DIRECTLY, because windowStub.addEventListener is a noop and a
+      // recording window stub would be a bigger change than this task needs. One source assertion in the
+      // Task 8 block proves the app actually subscribes.
+      pageshow: (persisted) => onAuthPageShow({ persisted: !!persisted }),
+      // The never-on-a-signed-in-surface case renders all three edit views for real.
+      openAcct: (view) => openAcctPage(view),
+      getAccountName: () => accountName,
+      connectRuns: () => __connects,
+      splitName: (v) => splitFullName(v),   // the pure helper, the way bridge.meter exposes passwordMeterScore
+      resetConnects: () => { __connects = 0; },
+      // identityConnectAttempted is a module flag with no reset today, so whichever case runs the
+      // both-names path first silently disarms every later one. reset() clears it (nothing in Tasks 1 to 6
+      // depends on it being sticky).
+      setConnectAttempted: (v) => { identityConnectAttempted = !!v; },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -274,6 +328,14 @@ function loadApp() {
   bridge.supaCalls = () => supaCalls;
   bridge.errors = () => errorLog;
   bridge.supaNext = (name, value) => { supaScript[name] = value; };
+  bridge.assigns = () => assigns;
+  // A named-key view of the real sessionStorage. get() answers null (never undefined) for a missing key,
+  // so an assertion reads the same way as the DOM API it stands in for.
+  bridge.session = {
+    get: (k) => (sessionMap.has(String(k)) ? sessionMap.get(String(k)) : null),
+    set: (k, v) => { sessionMap.set(String(k), String(v)); },
+    keys: () => Array.from(sessionMap.keys()),
+  };
   // The sandbox QUEUES setTimeout work (see above) and only flushTimers runs it, so a cooldown callback
   // never fires on its own. A case that wants to see the far side of the cooldown swaps in an immediate
   // setTimeout and restores the queue with the returned undo.
@@ -297,6 +359,10 @@ function loadApp() {
     for (const k of Object.keys(hooks)) delete hooks[k];
     for (const k of Object.keys(supaScript)) delete supaScript[k];
     supaCalls.length = 0;
+    sessionMap.clear();
+    assigns.length = 0;
+    bridge.resetConnects();
+    bridge.setConnectAttempted(false);
     errorLog.length = 0;
     documentStub.body.children = [];
     bridge.resetAuthVars();
@@ -1837,5 +1903,305 @@ describe('Account round Task 6 - Change password', () => {
     // file is the sign-in form's own submit, and the wrong-password sentence has exactly one home.
     expect(count(appSrc, 'signInWithPassword(')).toBe(2);
     expect(count(appSrc, "'That password is wrong.'")).toBe(1);
+  });
+});
+
+describe('Account round Task 8 - Continue with Google', () => {
+  beforeEach(() => bridge.reset());
+
+  it('splitFullName splits on the LAST space and refuses a single word', () => {
+    const s = bridge.splitName;
+    expect(s('Morgan Reyes')).toEqual({ first: 'Morgan', last: 'Reyes' });
+    expect(s('  Morgan   Reyes ')).toEqual({ first: 'Morgan', last: 'Reyes' });
+    expect(s('Mary Jo Van Der Berg')).toEqual({ first: 'Mary Jo Van Der', last: 'Berg' });
+    expect(s('Morgan')).toBe(null);
+    expect(s('')).toBe(null);
+    expect(s(null)).toBe(null);
+    expect(s(undefined)).toBe(null);
+  });
+
+  it('the Google button renders once on sign in and once on create account, with the current gradient mark', () => {
+    for (const mode of ['signin', 'signup']) {
+      bridge.reset();
+      bridge.openAuth(mode);
+      const html = bridge.registry['auth-page'].innerHTML;
+      expect(count(html, 'id="auth-google"')).toBe(1);            // one button, never one per render
+      expect(html).toContain('<button type="button" class="au-google" id="auth-google">');
+      expect(html).toContain('Continue with Google');
+      expect(count(html, 'class="au-or"')).toBe(1);
+      // Under the primary, never above it: the rank this round spent six tasks establishing.
+      expect(html.indexOf('id="auth-submit"')).toBeLessThan(html.indexOf('id="auth-google"'));
+      // The mark is Google's CURRENT asset, a masked conic gradient. The flat four-color G is the
+      // "outdated Google G" their guidelines list under Don't, and it is in none of the 24 official SVGs.
+      // Either the gradient SVG or, if WebKit forced the documented fallback, the official PNG. The
+      // negative below is NOT either/or: the outdated G is never allowed, on any platform.
+      expect(html.includes('conic-gradient(') || html.includes('data:image/png;base64,')).toBe(true);
+      if (html.includes('conic-gradient(')) expect(html).toContain('mask0_g');
+      for (const dead of ['#4285F4', '#34A853', '#FBBC05', '#EA4335']) expect(html).not.toContain(dead);
+      expect(html).not.toMatch(/\u2014|&mdash;|night/i);          // the round's standing copy guard
+    }
+  });
+
+  it('the Google button never appears on forgot, forgot-sent or signup-sent', async () => {
+    bridge.openAuth('forgot');
+    expect(bridge.registry['auth-page'].innerHTML).not.toContain('id="auth-google"');
+    bridge.registry['fg-email'].value = 'a@b.co';
+    bridge.supaNext('resetPasswordForEmail', { data: {}, error: null });
+    await bridge.authSubmit();
+    expect(bridge.registry['auth-page'].innerHTML).toContain('Check your email');
+    expect(bridge.registry['auth-page'].innerHTML).not.toContain('id="auth-google"');
+    bridge.reset();
+    bridge.openAuth('signup');
+    fillSignup();
+    bridge.supaNext('signUp', { data: { user: {}, session: null }, error: null });
+    await bridge.authSubmit();
+    expect(bridge.registry['auth-page'].innerHTML).toContain('Check your email');
+    expect(bridge.registry['auth-page'].innerHTML).not.toContain('id="auth-google"');
+  });
+
+  it('no signed-in surface carries it, and the wall does not either', () => {
+    bridge.setSignedOut();
+    bridge.openGate();
+    expect(bridge.registry['gate-page'].innerHTML).not.toContain('auth-google');
+    // The real reason, not a style rule: signInWithOAuth removes the session before it builds a URL and
+    // that removal notifies nobody, so a signed-in person who taps it and backs out at Google looks signed
+    // in until their next reload (H4). So this asserts the RENDERED signed-in surfaces, not the source.
+    bridge.reset();
+    bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, { first: 'Morgan', last: 'Blake' });
+    bridge.openMenu();
+    expect(bridge.registry['account-menu'].innerHTML).not.toContain('auth-google');
+    for (const view of ['name', 'email', 'password']) {
+      bridge.openAcct(view);
+      expect(bridge.registry['acct-page'].innerHTML).not.toContain('auth-google');
+    }
+    // One emission site in the whole file: the helper called from formInner, and nothing else.
+    expect(count(appSrc, 'id="auth-google"')).toBe(1);
+  });
+
+  it('a bfcache restore hands the dead button back (H17)', async () => {
+    bridge.openAuth('signin');
+    const btn = bridge.registry['auth-google'];
+    bridge.setClaimIntent(true);
+    let release;
+    bridge.supaNext('signInWithOAuth', new Promise((r) => { release = r; }));
+    const inFlight = btn.listeners.click[0]();
+    release({ data: { provider: 'google', url: 'https://accounts.google.com/x' }, error: null });
+    await inFlight;
+    expect(btn.disabled).toBe(true);                    // left disabled on purpose: the page was leaving
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe('1');
+
+    bridge.pageshow(false);                             // a plain pageshow is not a restore
+    expect(btn.disabled).toBe(true);
+
+    bridge.pageshow(true);                              // iOS Back from the consent screen
+    expect(btn.disabled).toBe(false);                   // the dead button is alive again
+    expect(btn.listeners.click.length).toBe(1);         // and bound exactly once by the repaint
+    expect(bridge.registry['auth-err'].hidden).toBe(true);
+    // Nothing completed, so nothing waits in storage for the next boot; the memory flag still serves the
+    // email path the person can fall back to.
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+    expect(bridge.getClaimIntent()).toBe(true);
+    // The bridge proves the behaviour; only the SOURCE proves the app subscribes at all.
+    expect(appSrc).toContain("window.addEventListener('pageshow', onAuthPageShow)");
+  });
+
+  it('a tap calls signInWithOAuth with google and the origin, exactly once, and disables while it awaits', async () => {
+    bridge.openAuth('signin');
+    const btn = bridge.registry['auth-google'];
+    expect(btn.listeners.click.length).toBe(1);   // bound by the render, once, by id
+    expect(btn.disabled).toBe(false);
+    let release;
+    bridge.supaNext('signInWithOAuth', new Promise((r) => { release = r; }));
+    const inFlight = btn.listeners.click[0]();
+    expect(btn.disabled).toBe(true);              // set synchronously, before the first await
+    release({ data: { provider: 'google', url: 'https://accounts.google.com/o/oauth2/v2/auth?x=1' }, error: null });
+    await inFlight;
+    const calls = bridge.supaCalls().filter((c) => c[0] === 'signInWithOAuth');
+    expect(calls.length).toBe(1);
+    expect(calls[0][1]).toEqual({ provider: 'google', options: { redirectTo: 'http://localhost' } });
+    expect(bridge.supaCalls().map((c) => c[0])).toEqual(['signInWithOAuth']);
+    expect(btn.disabled).toBe(true);              // left disabled on the success path: the page is leaving
+    // The LIBRARY navigates, never the app. These spies exist to prove the app does not.
+    expect(bridge.assigns()).toEqual([]);
+  });
+
+  it('a second tap while the first is in flight does not send a second signInWithOAuth', async () => {
+    bridge.openAuth('signin');
+    const btn = bridge.registry['auth-google'];
+    let release;
+    bridge.supaNext('signInWithOAuth', new Promise((r) => { release = r; }));
+    const first = btn.listeners.click[0]();
+    const second = btn.listeners.click[0]();
+    release({ data: { provider: 'google', url: 'https://accounts.google.com/x' }, error: null });
+    await Promise.all([first, second]);
+    expect(bridge.supaCalls().filter((c) => c[0] === 'signInWithOAuth').length).toBe(1);
+  });
+
+  it('a failed signInWithOAuth shows a visible error line and hands the button back', async () => {
+    bridge.openAuth('signin');
+    const btn = bridge.registry['auth-google'];
+    const err = bridge.registry['auth-err'];
+    bridge.supaNext('signInWithOAuth', { data: { provider: 'google', url: null }, error: { message: 'Unsupported provider: provider is not enabled' } });
+    await btn.listeners.click[0]();
+    expect(err.hidden).toBe(false);
+    expect(err.textContent).toBe('Google did not answer. Try again, or use your email.');
+    expect(err.textContent).not.toContain('provider is not enabled');   // never the raw server string
+    expect(btn.disabled).toBe(false);
+    expect(bridge.registry['auth-page'].innerHTML).toContain('class="auth-err" id="auth-err"');
+  });
+
+  it('a thrown signInWithOAuth reads the same way', async () => {
+    bridge.openAuth('signin');
+    const btn = bridge.registry['auth-google'];
+    bridge.supaNext('signInWithOAuth', Promise.reject(new Error('network down')));
+    await btn.listeners.click[0]();
+    expect(bridge.registry['auth-err'].hidden).toBe(false);
+    expect(bridge.registry['auth-err'].textContent).toBe('Google did not answer. Try again, or use your email.');
+    expect(btn.disabled).toBe(false);
+  });
+
+  it('a pending claim intent is written to sessionStorage before the OAuth call, and only then', async () => {
+    bridge.openAuth('signin');
+    bridge.setClaimIntent(true);
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+    let release;
+    bridge.supaNext('signInWithOAuth', new Promise((r) => { release = r; }));
+    const inFlight = bridge.registry['auth-google'].listeners.click[0]();
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe('1');   // before the await resolves
+    release({ data: { provider: 'google', url: 'https://accounts.google.com/x' }, error: null });
+    await inFlight;
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe('1');
+  });
+
+  it('no pending intent writes nothing, and a failed call drops the key but keeps the intent', async () => {
+    bridge.openAuth('signin');
+    expect(bridge.getClaimIntent()).toBe(false);
+    bridge.supaNext('signInWithOAuth', { data: { provider: 'google', url: 'https://x' }, error: null });
+    await bridge.registry['auth-google'].listeners.click[0]();
+    expect(bridge.session.keys()).not.toContain('athletic_specimen_claim_intent');
+    bridge.reset();
+    bridge.openAuth('signin');
+    bridge.setClaimIntent(true);
+    bridge.supaNext('signInWithOAuth', { data: null, error: { message: 'nope' } });
+    await bridge.registry['auth-google'].listeners.click[0]();
+    // No redirect happened, so no key may outlive the tap. The MEMORY flag stays armed on purpose: the
+    // same person can now finish with email and password and still land on the claim page they asked for.
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+    expect(bridge.getClaimIntent()).toBe(true);
+  });
+
+  it('a persisted intent is restored by the boot restore, and the key is consumed', () => {
+    expect(bridge.getClaimIntent()).toBe(false);
+    bridge.session.set('athletic_specimen_claim_intent', '1');
+    bridge.restoreClaimIntent();
+    expect(bridge.getClaimIntent()).toBe(true);
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+  });
+
+  it('the restore runs at boot, below the declaration', () => {
+    // The bridge can call the function; only the SOURCE proves the app calls it, and the call MUST sit
+    // below `let claimIntent` or the temporal dead zone throws at load and the whole app is dead.
+    const decl = appSrc.indexOf('let claimIntent = false');
+    const call = appSrc.indexOf('\nauthRestoreClaimIntent();');
+    expect(decl).toBeGreaterThan(-1);
+    expect(call).toBeGreaterThan(decl);
+  });
+
+  it('an absent or junk key leaves the flag alone', () => {
+    bridge.restoreClaimIntent();
+    expect(bridge.getClaimIntent()).toBe(false);
+    bridge.session.set('athletic_specimen_claim_intent', 'nonsense');
+    bridge.restoreClaimIntent();
+    expect(bridge.getClaimIntent()).toBe(false);
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);   // junk is consumed too
+  });
+
+  it('a restored intent opens the claim page once, and a second SIGNED_IN does not reopen it', async () => {
+    bridge.setSignedOut();
+    bridge.session.set('athletic_specimen_claim_intent', '1');
+    bridge.restoreClaimIntent();
+    const session = { user: { id: 'u1', email: 'a@b.co' } };
+    await bridge.authEvent('SIGNED_IN', session);
+    await bridge.flushTimers();
+    expect(bridge.registry['claim-page']).toBeTruthy();
+    expect(bridge.getClaimIntent()).toBe(false);
+    bridge.registry['claim-page'].remove();
+    await bridge.authEvent('SIGNED_IN', session);
+    await bridge.flushTimers();
+    expect(bridge.registry['claim-page']).toBeFalsy();      // not a new sign-in, no intent
+  });
+
+  it('signing out and dismissing the overlay both drop a persisted intent', async () => {
+    bridge.session.set('athletic_specimen_claim_intent', '1');
+    bridge.setClaimIntent(true);
+    await bridge.authEvent('SIGNED_OUT', null);
+    expect(bridge.getClaimIntent()).toBe(false);
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+    bridge.reset();
+    bridge.openAuth('signin');
+    bridge.setClaimIntent(true);
+    bridge.session.set('athletic_specimen_claim_intent', '1');
+    bridge.registry['auth-back'].listeners.click[0]();
+    expect(bridge.registry['auth-page']).toBeFalsy();
+    expect(bridge.getClaimIntent()).toBe(false);
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+  });
+
+  it('a Google user with no profile names gets the name prompt, PREFILLED from full_name', async () => {
+    bridge.setSignedIn({ id: 'g1', email: 'morgan@gmail.com' });
+    bridge.getState().authSession.user.user_metadata = { full_name: 'Morgan Reyes', name: 'Morgan Reyes' };
+    bridge.supaNext('profileRead', { data: { first_name: null, last_name: null }, error: null });
+    await bridge.nameFill();
+    const page = bridge.registry['namefill-page'];
+    expect(page).toBeTruthy();                               // still ASKED, never assumed
+    expect(page.innerHTML).toContain("What's your name?");
+    expect(page.innerHTML).toContain('value="Morgan"');
+    expect(page.innerHTML).toContain('value="Reyes"');
+    expect(page.innerHTML).not.toMatch(/\u2014|&mdash;|night/i);
+    // Nothing is claimed until Save: connect_profile_by_name inserts APPROVED player_claims, and that is
+    // not a claim to make from a string the person never typed here.
+    expect(bridge.connectRuns()).toBe(0);
+    expect(bridge.getAccountName()).toBe(null);
+  });
+
+  it('a one-word or missing Google name prefills nothing and still asks', async () => {
+    for (const meta of [{ full_name: 'Morgan' }, { name: 'Morgan' }, {}, undefined]) {
+      bridge.reset();
+      bridge.setSignedIn({ id: 'g1', email: 'm@gmail.com' });
+      bridge.getState().authSession.user.user_metadata = meta;
+      bridge.supaNext('profileRead', { data: { first_name: null, last_name: null }, error: null });
+      await bridge.nameFill();
+      expect(bridge.registry['namefill-page']).toBeTruthy();
+      expect(bridge.registry['namefill-page'].innerHTML).not.toContain('value="Morgan"');
+      expect(bridge.connectRuns()).toBe(0);
+    }
+  });
+
+  it('a Google user whose profile already carries both names is never prompted', async () => {
+    bridge.setSignedIn({ id: 'g1', email: 'morgan@gmail.com' });
+    bridge.getState().authSession.user.user_metadata = { full_name: 'Morgan Reyes' };
+    bridge.supaNext('profileRead', { data: { first_name: 'Morgan', last_name: 'Reyes' }, error: null });
+    await bridge.nameFill();
+    expect(bridge.registry['namefill-page']).toBeFalsy();
+    expect(bridge.getAccountName()).toEqual({ first: 'Morgan', last: 'Reyes' });
+    expect(bridge.connectRuns()).toBe(1);                    // names the person DID confirm, once
+  });
+
+  it('the CSS block ships once, with Google\'s own values and no new !important', () => {
+    expect(count(css, '.au-google {')).toBe(1);
+    expect(count(css, '.au-or {')).toBe(1);
+    // Google's Light theme values, verbatim and deliberately NOT tokenised: they are not ours to theme.
+    expect(css).toMatch(/\.au-google \{[^}]*background: #FFFFFF/);
+    expect(css).toMatch(/\.au-google \{[^}]*border: 1px solid #747775/);
+    expect(css).toMatch(/\.au-google \{[^}]*border-radius: 11px/);
+    expect(css).toMatch(/\.au-google \{[^}]*min-height: 48px/);
+    expect(css).toMatch(/\.au-google span \{[^}]*font-size: 14px/);
+    expect(css).not.toMatch(/\.au-google[^}]*!important/);
+    expect(css).not.toMatch(/\.au-or[^}]*!important/);
+    // The only saturated colour this round adds is Google's, inside their mark and their fill. Nothing in
+    // the block may reach for a colour of our own beyond the app's tokens (the divider's rule and label).
+    const blk = css.slice(css.indexOf('.au-google {'), css.indexOf('.au-or::before'));
+    const ours = (blk.match(/#[0-9A-Fa-f]{3,8}\b/g) || []).filter((h) => !['#FFFFFF', '#747775', '#1F1F1F', '#F2F2F2'].includes(h));
+    expect(ours).toEqual([]);
   });
 });

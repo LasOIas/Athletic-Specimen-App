@@ -683,6 +683,18 @@ function splitFullNameParts(first, last) {
   return { ok: true, first: f, last: l };
 }
 
+// Account round Task 8 (2026-08-25) - the Google prefill split. Google supplies ONE display string and
+// never given_name / family_name, so first and last have to be guessed by splitting it. Last space, not
+// first: "Mary Jo Van Der Berg" is a person, and putting the whole run in `first` is the guess a human
+// can correct in one field instead of two. Returns null rather than a half-answer for one word or
+// nothing, so the caller asks instead of guessing.
+function splitFullName(full) {
+  const whole = String(full == null ? '' : full).trim().replace(/\s+/g, ' ');
+  const cut = whole.lastIndexOf(' ');
+  if (cut < 1) return null;
+  return { first: whole.slice(0, cut), last: whole.slice(cut + 1) };
+}
+
 // C28 Slice 1 — the admin AI co-pilot's READ context. PURE shaping + REDACTION (no DOM / no state global):
 // the caller assembles `input` from state + getPublicLiveData(); this returns the compact, skill-free
 // snapshot the edge function passes to Claude. Skill is admin-only and must NEVER reach the model (§AS-1),
@@ -2026,7 +2038,7 @@ if (typeof module !== "undefined" && module.exports) {
     countSharedTeammatePairs, pickMostDifferentTeams,
     generateRoundRobin, decideWinner, computeStandings, applyHeadToHeadGroups,
     nextPow2, seedOrder, computeSeeding, computeChampion, resolveHistoryChampion, generateDoubleElim,
-    disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName, splitFullNameParts,
+    disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName, splitFullNameParts, splitFullName,
     copilotRosterNames, copilotUpNextByNet, buildCopilotContext,
     resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
     resolveTournamentMatch, publicHubStatus,

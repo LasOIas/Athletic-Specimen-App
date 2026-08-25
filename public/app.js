@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.28'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.29'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6217,6 +6217,19 @@ let authResendUntil = 0;                 // cooldown deadline (ms) shared by eve
 const AUTH_BACK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
 const AUTH_MAIL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/></svg>';
 const AUTH_OK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5l4.5 4.5L19.5 6.5"/></svg>';
+// Google sign-in (Account round 2026-08-25, Mike's call 3). The mark is Google's CURRENT asset: a masked
+// conic gradient. The flat four-color G that every older tutorial shows is the "outdated Google G" their
+// guidelines list under Don't, and it appears in ZERO of the 24 SVGs in the official bundle. Do not swap
+// it for a hand-drawn one: the size and the color of the G are the two things the guidelines say outright
+// may not be changed, and a monochrome G is listed under Don't as well. Taken verbatim from their own
+// bundle (signin-assets.zip, Light / no text / square), with only the two button chrome paths removed,
+// the viewBox cropped to the mark and the Figma ids renamed; no path, color or gradient stop was touched.
+const AUTH_GOOGLE_SVG = '<svg viewBox="10 10 20 20" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><mask id="mask0_g" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="10" y="10" width="20" height="20"><path d="M29.3987 18.1814H19.9849V22.0445H25.3598C25.1286 23.294 24.4294 24.3596 23.3676 25.0712C22.4746 25.6716 21.3266 26.0211 19.9849 26.0211C17.3864 26.0211 15.1823 24.2666 14.3947 21.9004C14.1952 21.2989 14.0853 20.6599 14.0853 19.9983C14.0853 19.3367 14.1952 18.6966 14.3947 18.0962C15.1823 15.7311 17.3864 13.9755 19.9849 13.9755C21.4524 13.9755 22.767 14.4816 23.8039 15.4713L26.6653 12.6057C24.936 10.9908 22.6786 10 19.9849 10C16.0832 10 12.705 12.2414 11.0618 15.5076C10.383 16.8592 10 18.3834 10 19.9994C10 21.6155 10.383 23.1396 11.0618 24.4913C12.705 27.7597 16.0832 30 19.9849 30C22.6797 30 24.9485 29.1137 26.6018 27.5861C28.4887 25.8452 29.5732 23.2702 29.5732 20.2275C29.5732 19.5182 29.5131 18.835 29.3987 18.1825V18.1814Z" fill="#E94FFF"/></mask><g mask="url(#mask0_g)"><g filter="url(#filter0_f_g)"><g clip-path="url(#paint0_angular_g_clip_path)" data-figma-skip-parse="true"><g transform="matrix(0.00804129 -0.00805186 0.00804128 0.00805186 19.6819 19.7927)"><foreignObject x="-2105.64" y="-2105.64" width="4211.29" height="4211.29"><div xmlns="http://www.w3.org/1999/xhtml" style="background:conic-gradient(from 90deg,rgba(255, 70, 65, 1) 0deg,rgba(255, 70, 65, 1) 4.14555deg,rgba(49, 134, 255, 1) 39.154deg,rgba(49, 134, 255, 1) 72.0044deg,rgba(0, 165, 183, 1) 96.7463deg,rgba(14, 188, 95, 1) 120.897deg,rgba(14, 188, 95, 1) 154.722deg,rgba(108, 196, 0, 1) 179.136deg,rgba(255, 204, 0, 1) 203.588deg,rgba(255, 211, 20, 1) 226.915deg,rgba(255, 204, 0, 1) 251.688deg,rgba(255, 106, 43, 1) 273.129deg,rgba(253, 70, 65, 1) 289.305deg,rgba(255, 70, 65, 1) 359.593deg,rgba(255, 70, 65, 1) 360deg);height:100%;width:100%;opacity:1"></div></foreignObject></g></g><path d="M7.25922 19.7927C7.25922 12.6759 13.0209 6.90668 20.1283 6.90668C27.2357 6.90668 32.9973 12.6759 32.9973 19.7927C32.9973 26.9094 27.2357 32.6786 20.1283 32.6786C13.0209 32.6786 7.25921 26.9094 7.25922 19.7927Z" data-figma-gradient-fill="{&#34;type&#34;:&#34;GRADIENT_ANGULAR&#34;,&#34;stops&#34;:[{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.011515417136251926},{&#34;color&#34;:{&#34;r&#34;:0.19215686619281769,&#34;g&#34;:0.52549022436141968,&#34;b&#34;:1.0,&#34;a&#34;:1.0},&#34;position&#34;:0.10876122117042542},{&#34;color&#34;:{&#34;r&#34;:0.19215686619281769,&#34;g&#34;:0.52549022436141968,&#34;b&#34;:1.0,&#34;a&#34;:1.0},&#34;position&#34;:0.20001229643821716},{&#34;color&#34;:{&#34;r&#34;:0.0,&#34;g&#34;:0.64705884456634521,&#34;b&#34;:0.71764707565307617,&#34;a&#34;:1.0},&#34;position&#34;:0.26873961091041565},{&#34;color&#34;:{&#34;r&#34;:0.054901961237192154,&#34;g&#34;:0.73725491762161255,&#34;b&#34;:0.37254902720451355,&#34;a&#34;:1.0},&#34;position&#34;:0.33582508563995361},{&#34;color&#34;:{&#34;r&#34;:0.054901961237192154,&#34;g&#34;:0.73725491762161255,&#34;b&#34;:0.37254902720451355,&#34;a&#34;:1.0},&#34;position&#34;:0.42978334426879883},{&#34;color&#34;:{&#34;r&#34;:0.42528781294822693,&#34;g&#34;:0.77231442928314209,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.49760133028030396},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.80000001192092896,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.56552332639694214},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.82745099067687988,&#34;b&#34;:0.078431375324726105,&#34;a&#34;:1.0},&#34;position&#34;:0.63031959533691406},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.80000001192092896,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.69913208484649658},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.41842123866081238,&#34;b&#34;:0.16917318105697632,&#34;a&#34;:1.0},&#34;position&#34;:0.75869029760360718},{&#34;color&#34;:{&#34;r&#34;:0.99215686321258545,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.80362409353256226},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.99887031316757202}],&#34;stopsVar&#34;:[{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.011515417136251926},{&#34;color&#34;:{&#34;r&#34;:0.19215686619281769,&#34;g&#34;:0.52549022436141968,&#34;b&#34;:1.0,&#34;a&#34;:1.0},&#34;position&#34;:0.10876122117042542},{&#34;color&#34;:{&#34;r&#34;:0.19215686619281769,&#34;g&#34;:0.52549022436141968,&#34;b&#34;:1.0,&#34;a&#34;:1.0},&#34;position&#34;:0.20001229643821716},{&#34;color&#34;:{&#34;r&#34;:0.0,&#34;g&#34;:0.64705884456634521,&#34;b&#34;:0.71764707565307617,&#34;a&#34;:1.0},&#34;position&#34;:0.26873961091041565},{&#34;color&#34;:{&#34;r&#34;:0.054901961237192154,&#34;g&#34;:0.73725491762161255,&#34;b&#34;:0.37254902720451355,&#34;a&#34;:1.0},&#34;position&#34;:0.33582508563995361},{&#34;color&#34;:{&#34;r&#34;:0.054901961237192154,&#34;g&#34;:0.73725491762161255,&#34;b&#34;:0.37254902720451355,&#34;a&#34;:1.0},&#34;position&#34;:0.42978334426879883},{&#34;color&#34;:{&#34;r&#34;:0.42528781294822693,&#34;g&#34;:0.77231442928314209,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.49760133028030396},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.80000001192092896,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.56552332639694214},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.82745099067687988,&#34;b&#34;:0.078431375324726105,&#34;a&#34;:1.0},&#34;position&#34;:0.63031959533691406},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.80000001192092896,&#34;b&#34;:0.0,&#34;a&#34;:1.0},&#34;position&#34;:0.69913208484649658},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.41842123866081238,&#34;b&#34;:0.16917318105697632,&#34;a&#34;:1.0},&#34;position&#34;:0.75869029760360718},{&#34;color&#34;:{&#34;r&#34;:0.99215686321258545,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.80362409353256226},{&#34;color&#34;:{&#34;r&#34;:1.0,&#34;g&#34;:0.27450981736183167,&#34;b&#34;:0.25490197539329529,&#34;a&#34;:1.0},&#34;position&#34;:0.99887031316757202}],&#34;transform&#34;:{&#34;m00&#34;:16.082571029663086,&#34;m01&#34;:16.082569122314453,&#34;m02&#34;:3.5993347167968750,&#34;m10&#34;:-16.103721618652344,&#34;m11&#34;:16.103721618652344,&#34;m12&#34;:19.792665481567383},&#34;opacity&#34;:1.0,&#34;blendMode&#34;:&#34;NORMAL&#34;,&#34;visible&#34;:true}"/></g><g filter="url(#filter1_f_g)"><ellipse cx="20.0496" cy="20.2413" rx="5.39634" ry="2.83537" transform="rotate(24.4473 20.0496 20.2413)" fill="#3186FF"/></g><g filter="url(#filter2_f_g)"><ellipse cx="33.3538" cy="18.2155" rx="7.43918" ry="3.09357" fill="#3186FF"/></g><g filter="url(#filter3_f_g)"><ellipse cx="25.2744" cy="16.2195" rx="7.40854" ry="2.37805" fill="#FF4641"/></g><g filter="url(#filter4_f_g)"><ellipse cx="29.5427" cy="12.9268" rx="7.40854" ry="2.37805" fill="#FF5B8B"/></g><g filter="url(#filter5_f_g)"><ellipse cx="24.4817" cy="19.878" rx="8.5061" ry="3.10976" fill="#3186FF"/></g><g filter="url(#filter6_f_g)"><ellipse cx="25.1842" cy="14.0197" rx="4.53882" ry="2.37805" transform="rotate(-28.6599 25.1842 14.0197)" fill="#FF4641"/></g></g><defs><filter id="filter0_f_g" x="5.25922" y="4.90668" width="29.7381" height="29.772" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/></filter><clipPath id="paint0_angular_g_clip_path"><path d="M7.25922 19.7927C7.25922 12.6759 13.0209 6.90668 20.1283 6.90668C27.2357 6.90668 32.9973 12.6759 32.9973 19.7927C32.9973 26.9094 27.2357 32.6786 20.1283 32.6786C13.0209 32.6786 7.25921 26.9094 7.25922 19.7927Z"/></clipPath><filter id="filter1_f_g" x="12.9977" y="14.828" width="14.1038" height="10.8265" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/></filter><filter id="filter2_f_g" x="23.9146" y="13.1219" width="18.8784" height="10.1871" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/></filter><filter id="filter3_f_g" x="15.8659" y="11.8415" width="18.8171" height="8.7561" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/></filter><filter id="filter4_f_g" x="20.1341" y="8.54878" width="18.8171" height="8.7561" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/></filter><filter id="filter5_f_g" x="13.9756" y="14.7683" width="21.0122" height="10.2195" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/></filter><filter id="filter6_f_g" x="19.0404" y="9.00419" width="12.2878" height="10.0309" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB"><feFlood flood-opacity="0" result="BackgroundImageFix"/><feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/><feGaussianBlur stdDeviation="1" result="effect1_foregroundBlur_g"/></filter></defs></svg>';
+// One of Google's three approved strings ("Sign in with Google" / "Sign up with Google" / "Continue with
+// Google"). "Continue" is the only one that is honest on BOTH screens: a Supabase OAuth redirect has no
+// separate sign-up, the first redirect creates the user, so a button that said "Sign up with Google" on
+// one screen would lie to the returning player who taps it and lands in their existing account.
+const AUTH_GOOGLE_LABEL = 'Continue with Google';
 const AUTH_BRAND_HTML = `<div class="auth-brand">
         <img class="auth-logo" src="logo-mark.png" alt="Athletic Specimen" />
         <div class="auth-wm"><div class="auth-wm-1">ATHLETIC SPECIMEN</div><div class="auth-wm-2">COLORADO</div></div>
@@ -6281,6 +6294,16 @@ function authFieldHTML(id, attrs, withMeter) {
   return `<div class="au-field"><input class="auth-input" id="${id}" type="password" required ${attrs} />`
     + `<button type="button" class="au-reveal" data-reveal="${id}" aria-pressed="false">Show</button></div>`
     + (withMeter ? `<div class="au-strength" data-sbox><span class="au-sbar"><span class="au-sfill"></span></span><span class="au-slab"></span></div>` : '');
+}
+
+// The OR rule and the provider button, as one part, because they are never useful apart. The label rides
+// in a SPAN on purpose: production ships button { font-size: 16px !important } (styles.css:241) as a
+// blanket iOS guard, and a span is not a button, so Google's 14/20 lands with plain specificity and this
+// round adds no fifth !important counter. The divider's text is lowercase in the markup and uppercased by
+// .au-or, exactly the way .auth-label already uppercases "Email" and "Password".
+function authGoogleButtonHTML() {
+  return `<div class="au-or">or</div>
+        <button type="button" class="au-google" id="auth-google">${AUTH_GOOGLE_SVG}<span>${AUTH_GOOGLE_LABEL}</span></button>`;
 }
 
 function authMeterUpdate(input) {
@@ -6378,6 +6401,7 @@ function renderAuthPageInner() {
         ${authFieldHTML('auth-pass', `autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="${signup ? 'At least ' + AUTH_PASSWORD_MIN + ' characters' : 'Your password'}"${signup ? ' data-strength' : ''}`, signup)}
         <div class="auth-err" id="auth-err" role="alert" hidden></div>
         <button type="submit" class="auth-submit" id="auth-submit">${signup ? 'Create account' : 'Sign in'}</button>
+        ${authGoogleButtonHTML()}
         ${signup ? '' : '<button type="button" class="au-alt2" data-auth-view="forgot">Forgot your password?</button>'}
         <button type="button" class="auth-alt" id="auth-alt">${signup ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>
       </form>`;
@@ -6397,7 +6421,7 @@ function renderAuthPageInner() {
     if (backStep) { authMode = backStep; renderAuthPageInner(); return; }
     // A signed-in person reached the forgot screen from the account card, so the card is where back goes.
     if (forgot && signedIn) { closeAuthPage(); openAccountMenu(); return; }
-    claimIntent = false; // dismissing sign-in abandons a pending claim intent (review: it leaked into a later sign-in)
+    authClearClaimIntent(); // dismissing sign-in abandons a pending claim intent (review: it leaked into a later sign-in)
     closeAuthPage();
   });
   const altBtn = el.querySelector('#auth-alt');
@@ -6408,6 +6432,16 @@ function renderAuthPageInner() {
     authMode = authMode === 'signin' ? 'signup' : 'signin';   // every other state's alt is "Back to sign in"
     renderAuthPageInner();
   });
+  // Per-paint id bind, the same shape as #auth-alt above and #auth-resend below. The innerHTML swap
+  // replaces the child nodes, so this cannot stack. NOT a delegate on the overlay and NOT data-auth-view:
+  // openAuthPage already binds one click delegate on the element itself and it consumes data-auth-view,
+  // so a Google control carrying that attribute would set authMode = 'google' and repaint an unknown
+  // mode, while a SECOND delegate on the element would stack one more handler per repaint (the comment
+  // above openAuthPage records that incident). The `if (g)` is what keeps forgot, forgot-sent and
+  // signup-sent from throwing: those markups never declare the id, and addEventListener on null is a
+  // TypeError inside the paint.
+  const g = el.querySelector('#auth-google');
+  if (g) g.addEventListener('click', () => onGoogleSignIn());
   const resendBtn = el.querySelector('#auth-resend');
   if (resendBtn) resendBtn.addEventListener('click', () => (forgotSent ? authResend('reset', authSentEmail) : authResend('signup')));
   const form = el.querySelector('#auth-form');
@@ -6423,7 +6457,37 @@ function renderAuthPageInner() {
 // Data = a one-shot read of team_members for the claimable tournament; the page
 // only opens signed-in (anon lacks SELECT on players.claimed_by_profile).
 // ─────────────────────────────────────────────────────────────────────────────
-let claimIntent = false;      // a signed-out "claim" tap — auto-open the page after sign-in
+// A Google sign-in is a full page navigation away and back, so app.js is re-evaluated from scratch and
+// every module `let` is back at its initializer. claimIntent is the one that matters: without this, the
+// person who tapped "claim your team", signed in with Google, and came back, lands on the hub with no
+// claim page and no explanation. Password sign-in never had this problem because the page never unloads.
+// sessionStorage, not localStorage: the redirect returns to the SAME tab, and an abandoned intent should
+// die with the tab instead of haunting a visit next week. Every access is wrapped: Safari private mode
+// and several in-app browsers throw on sessionStorage outright, and the restore runs at module scope,
+// where a throw is fatal instead of merely broken. (The app's own sessionStorage calls in loadLocal and
+// activateMainTab are unwrapped and predate this task; widening that is not this task's job.)
+const AUTH_CLAIM_INTENT_KEY = 'athletic_specimen_claim_intent';
+function authPersistClaimIntent() {
+  if (!claimIntent) return;
+  try { sessionStorage.setItem(AUTH_CLAIM_INTENT_KEY, '1'); } catch (_) {}
+}
+function authForgetClaimIntent() {
+  // The KEY only. The in-memory flag is deliberately left alone, so a Google call that FAILS still lets
+  // the same person finish with email and password and land on the claim page they asked for.
+  try { sessionStorage.removeItem(AUTH_CLAIM_INTENT_KEY); } catch (_) {}
+}
+function authRestoreClaimIntent() {
+  let v = null;
+  try { v = sessionStorage.getItem(AUTH_CLAIM_INTENT_KEY); } catch (_) { return; }
+  authForgetClaimIntent();   // consumed on read: a reload that never reaches SIGNED_IN must not leave it armed
+  if (v === '1') claimIntent = true;
+}
+function authClearClaimIntent() {
+  claimIntent = false;
+  authForgetClaimIntent();
+}
+let claimIntent = false;      // a signed-out "claim" tap, auto-open the page after sign-in
+authRestoreClaimIntent();     // must sit BELOW the declaration: `let` has a temporal dead zone
 let claimCandidates = null;   // null = loading; [] = loaded-empty; [rows] = loaded
 let claimFetchFailed = false; // a failed read must not masquerade as the "no players yet" empty state
 
@@ -6698,6 +6762,64 @@ async function onForgotSubmit() {
   }
 }
 
+// The whole Google path, in one function. signInWithOAuth returns { data: { provider, url }, error } and
+// NEVER a session (gotrue-js 2.62.2 GoTrueClient.ts:1786): in a browser it calls
+// window.location.assign(url) itself unless skipBrowserRedirect is set (:1783-1785), so on the success
+// path the lines after the await may never run. flowType stays the client default, which is implicit
+// (DEFAULT_OPTIONS at GoTrueClient.ts:95-104): the client at the top of this file sets no flowType, the
+// tokens come back in the URL FRAGMENT, and detectSessionInUrl already consumes them. Switching to pkce
+// would put a ?code= in the query that this build never exchanges.
+async function onGoogleSignIn() {
+  const btn = document.getElementById('auth-google');
+  // Belt and suspenders: a disabled <button> emits no click in a real browser, but the test fires the
+  // bound closure directly, and a double tap must never send two authorize requests.
+  if (btn && btn.disabled) return;
+  const errEl = document.getElementById('auth-err');
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
+  if (errEl) errEl.hidden = true;
+  if (!supabaseClient) { showErr('Sign-in is unavailable right now.'); return; }
+  if (btn) btn.disabled = true;
+  // Written BEFORE the call, never after: the library navigates the document itself.
+  authPersistClaimIntent();
+  const fail = () => {
+    // Deliberately NOT routed through friendlyAuthError: that map has no OAuth arm, so "Unsupported
+    // provider: provider is not enabled" would fall through its final `return m` and put a raw server
+    // string in front of a player. This line is the ONLY feedback there is, because an OAuth failure is
+    // never delivered to onAuthStateChange (_initialize returns the error and notifies nobody,
+    // GoTrueClient.ts:305-320).
+    showErr('Google did not answer. Try again, or use your email.');
+    authForgetClaimIntent();   // no redirect happened, so no key should outlive this tap
+    if (btn) btn.disabled = false;
+  };
+  try {
+    const res = await supabaseClient.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: location.origin },   // the round's law, and the only value the allow-list
+                                                  // accepts beside the Site URL
+    });
+    if (res && res.error) fail();
+  } catch (_) { fail(); }
+  // The button is deliberately left DISABLED on the success path: the page is leaving.
+}
+
+// H17. A bfcache restore is the one way back from Google that does NOT re-evaluate app.js, so the module
+// state the redirect was supposed to destroy is all still here, including the disabled button. Repaint
+// the overlay, which hands back a fresh enabled control and clears any stale error line. The button is
+// re-enabled explicitly as well, because in a real browser the repaint replaces the node while the test
+// harness reuses one registry node per id, and the assertion has to see the same thing in both.
+// The key goes too: no redirect completed, so nothing should be waiting in storage for the next boot.
+// The in-memory flag stays, exactly as on the failure path in onGoogleSignIn.
+function onAuthPageShow(event) {
+  if (!event || !event.persisted) return;
+  authForgetClaimIntent();
+  const btn = document.getElementById('auth-google');
+  if (btn) btn.disabled = false;
+  if (document.getElementById('auth-page')) renderAuthPageInner();
+}
+// Module scope on purpose: ensureAuthorityRefreshHooks runs from init, which readyState 'loading' keeps
+// from running in the harness, so a listener added there could not be reached by a test.
+window.addEventListener('pageshow', onAuthPageShow);
+
 async function onAuthSubmit(e) {
   e.preventDefault();
   if (authMode === 'forgot') { await onForgotSubmit(); return; }
@@ -6954,6 +7076,20 @@ async function connectProfileByName(first, last) {
   return res.data;
 }
 
+// full_name and name are the two aliases both Google provider paths carry; given_name and family_name are
+// carried by NEITHER. The halves run through the app's own splitFullNameParts so a prefill can never seed
+// something the Save button would then refuse. Named for what it does and not for Google: it reads
+// user_metadata, and it fires for ANY session that reaches the ask, which includes an older password
+// account whose signUp wrote full_name but never first_name / last_name. That is intended, not a leak:
+// the prefill is just as right for them, and it only ever runs on the branch that was already going to ask.
+function nameFromSessionMetadata(session) {
+  const md = (session && session.user && session.user.user_metadata) || {};
+  const nm = splitFullName(md.full_name || md.name || '');
+  if (!nm) return null;
+  const parts = splitFullNameParts(nm.first, nm.last);
+  return parts.ok ? { first: parts.first, last: parts.last } : null;
+}
+
 async function promptNameFillIfNeeded() {
   if (!supabaseClient || !state.account) return;
   const uid = state.account.id;
@@ -6980,11 +7116,21 @@ async function promptNameFillIfNeeded() {
     }
     return;
   }
-  openNameFillOverlay(); // either name missing → ask once (reopens next session if skipped)
+  // Every new Google user reaches this line today with ZERO code changes: handle_new_user seeds
+  // display_name from raw_user_meta_data->>'full_name' but first_name / last_name ONLY from the
+  // first_name / last_name keys the app's own signUp writes, and Google sends neither. So the prompt is
+  // unavoidable; prefilling it is what makes it one tap.
+  openNameFillOverlay(nameFromSessionMetadata(state.authSession)); // either name missing, ask once
 }
 
-function openNameFillOverlay() {
+function openNameFillOverlay(prefill) {
   if (document.getElementById('namefill-page')) return; // never stack
+  // Account round Task 8: an OPTIONAL seed, used only by the Google path. The other caller (the register
+  // success screen) passes nothing and renders exactly as it did. Escaped, because it is a string from an
+  // identity provider going straight into an attribute.
+  const seed = prefill || {};
+  const firstVal = seed.first ? ` value="${escapeHTML(seed.first)}"` : '';
+  const lastVal = seed.last ? ` value="${escapeHTML(seed.last)}"` : '';
   const el = document.createElement('div');
   el.id = 'namefill-page';
   el.className = 'auth-page';
@@ -6997,9 +7143,9 @@ function openNameFillOverlay() {
         <h2 class="auth-title">What's your name?</h2>
         <p class="auth-sub">So the app can connect you to your teams.</p>
         <label class="auth-label" for="namefill-first">First name</label>
-        <input class="auth-input" id="namefill-first" type="text" autocomplete="given-name" autocapitalize="words" spellcheck="false" placeholder="First" />
+        <input class="auth-input" id="namefill-first" type="text" autocomplete="given-name" autocapitalize="words" spellcheck="false" placeholder="First"${firstVal} />
         <label class="auth-label" for="namefill-last">Last name</label>
-        <input class="auth-input" id="namefill-last" type="text" autocomplete="family-name" autocapitalize="words" spellcheck="false" placeholder="Last" />
+        <input class="auth-input" id="namefill-last" type="text" autocomplete="family-name" autocapitalize="words" spellcheck="false" placeholder="Last"${lastVal} />
         <div class="auth-err" id="namefill-err" role="alert" hidden></div>
         <button type="submit" class="auth-submit" id="namefill-save">Save</button>
       </form>
@@ -7129,7 +7275,7 @@ async function onAuthEvent(event, session) {
     // Slice 3b: a signed-out "claim your team" tap routed through sign-in — finish the journey.
     // Deferred: openClaimPage does a .from() read, and supabase calls inline in this callback deadlock.
     if (claimIntent) {
-      claimIntent = false;
+      authClearClaimIntent();
       setTimeout(() => { try { openClaimPage(); } catch (_) {} }, 0);
     }
     // Derive the community role out-of-band, then re-render (the account menu shows the role).
@@ -7148,7 +7294,7 @@ async function onAuthEvent(event, session) {
     state.role = null;
     state.teamMembers = null; // the personal layer signs out with the account (anon can't read claims)
     state.myClaimedPlayer = null; // Round 2 §12.3: clear the check-in hero on the SIGNED_OUT path too
-    claimIntent = false;
+    authClearClaimIntent();
     accountName = null; // the name cache belongs to the account: the next chip/card must not wear it
     authRecoveryPending = false; // an abandoned recovery must not route the next sign-in (review fix)
     closeClaimPage(); // a claim page can't outlive its session (harmless no-op when not open)

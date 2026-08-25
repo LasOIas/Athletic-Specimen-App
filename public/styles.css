@@ -6139,3 +6139,59 @@ input.pc-nin:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--accent),
 @media (hover: hover) and (pointer: fine) { .acc-out:hover { background: var(--surface-3); border-color: var(--border-2); } }
 .acc-close { background: var(--accent); border: 0; color: #fff; }
 @media (hover: hover) and (pointer: fine) { .acc-close:hover { background: var(--brand-dark); } }
+
+/* ===== CONTINUE WITH GOOGLE ===== */
+/* PORT NOTE: this is NOT a port. Mike's Account handoff draws no Google button on any of its 14 screens
+   (grep -rn -i google over docs/design-handoffs/2026-08-24/account/ returns only the webfont links), so
+   this block is new and the geometry is matched to .auth-submit (styles.css:2084) on purpose: same 48px
+   box, same 11px radius, same Inter face, so the two read as one pair. That match is also what Google's
+   guidelines ask for in words ("approximately the same size and similar visual weight").
+   GOOGLE'S RULES, not ours: #FFFFFF, #747775 and #1F1F1F are their Light theme values verbatim, from
+   developers.google.com/identity/branding-guidelines and from the SVGs in signin-assets.zip. They are
+   deliberately NOT tokenised and must not follow our palette: the guidelines forbid a background other
+   than their light, dark or neutral, forbid recoloring the mark, and forbid an outdated G. That is also
+   why the most saturated object on a deliberately matte screen is allowed to stay: it is held at 18px on
+   a white field, which are the only two levers we have and both are already at the quiet end.
+   NOTE 1: the label rides in a SPAN. Production ships button { font-size: 16px !important }
+   (styles.css:241) as a blanket iOS guard, and a span is not a button, so Google's 14/20 lands with plain
+   specificity and this block adds no fifth !important counter.
+   NOTE 2: no transition is declared here on purpose. The global rule at styles.css:4472-4479 already
+   transitions background-color, border-color, color and transform on the motion tokens, and :4481
+   supplies the press. Declaring our own would opt out of the token system.
+   NOTE 3: the face is Inter, not Google Sans. Documented deviation: the app loads Inter, Sora and Barlow
+   only (index.html:23) and a fourth family for one button is not worth the bytes on tournament wifi. */
+.au-google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;       /* the .auth-submit box, so the pair reads as one */
+  margin-top: 0;          /* the .au-or row owns the 18px above and below */
+  padding: 0 12px;        /* Google's Web spec: 12px left, 10px after the logo, 12px right */
+  background: #FFFFFF;
+  border: 1px solid #747775;
+  border-radius: 11px;
+  color: #1F1F1F;
+  cursor: pointer;
+}
+.au-google svg { flex: none; width: 18px; height: 18px; }
+.au-google span { font-family: inherit; font-size: 14px; line-height: 20px; font-weight: 500; }
+/* #F2F2F2 is Google's own Neutral fill, so even the hover stays inside their palette. */
+@media (hover: hover) and (pointer: fine) { .au-google:hover { background: #F2F2F2; } }
+.au-google:disabled { opacity: .65; cursor: default; }
+
+/* The OR rule between the primary and the provider button. Same type spec as .auth-label
+   (styles.css:2076), so this adds a component and not a new vocabulary. */
+.au-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.au-or::before, .au-or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
