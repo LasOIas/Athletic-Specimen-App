@@ -153,7 +153,9 @@ function loadApp() {
       if (v instanceof Error) throw v;
       return v;
     }
-    return dflt || { data: {}, error: null };
+    // `dflt === undefined`, never `dflt || ...`: a default of null, '' or 0 is a default somebody chose,
+    // and the truthiness test would have quietly swapped it for the generic answer (final review).
+    return dflt === undefined ? { data: {}, error: null } : dflt;
   };
   const supaStub = {
     auth: {
@@ -287,6 +289,9 @@ function loadApp() {
       },
       // Task 3: the account card reads the cached name for its initial, its title and its Name row.
       openMenu: () => openAccountMenu(),
+      // Final review: reset() has to be able to drop the claim page's own module vars (claimCandidates
+      // and claimFetchFailed), and closeClaimPage is the only thing that owns them.
+      closeClaim: () => closeClaimPage(),
       // Task 6 review: which state #auth-page is in, so a case can prove that a way OUT of the forgot
       // pair never repainted the overlay into the sign-in form on its way.
       authModeNow: () => authMode,
@@ -366,6 +371,13 @@ function loadApp() {
     errorLog.length = 0;
     documentStub.body.children = [];
     bridge.resetAuthVars();
+    // Final review: three more module vars that outlived a case. closeClaimPage nulls claimCandidates
+    // and claimFetchFailed (a loaded roster leaking into the next case reads as "already loaded"), the
+    // tournament sub-view is put back on the hub through the app's own setter, and the derived role is
+    // dropped so a case that never signs in cannot inherit an admin from the one before it.
+    bridge.closeClaim();
+    bridge.setView('hub');
+    bridge.getState().role = null;
     bridge.getState().authSession = null;
     bridge.getState().account = null;
     bridge.setAccountName(null);   // the cached name outlives a render, so it has to be cleared per case
@@ -432,7 +444,7 @@ describe('Account round Task 1 - the auth page and the wall', () => {
     expect(count(html, ' required')).toBe(4);
     expect(html).toContain('placeholder="At least 8 characters"');
     expect(html).toContain('One account for every tournament you play.');
-    expect(html).not.toMatch(/—|&mdash;|night/i);
+    expect(html).not.toMatch(/\u2014|&mdash;|night/i);
   });
 
   it('sign in renders no meter and keeps its sub-line', () => {
@@ -480,8 +492,10 @@ describe('Account round Task 1 - the auth page and the wall', () => {
   });
 
   it('the meter delegate scores the typed value and paints its step, with no form in scope', () => {
-    // The reset and change-password screens put the password OUTSIDE a <form>, so input.form is null and
-    // the meter has to fall back to the overlay wrapper.
+    // The fallback branch, not a shipped screen: EVERY password field this round renders sits inside a
+    // form (#auth-form, #reset-form, #acct-form), so input.form is never null in production. The input
+    // below is built by the harness and deliberately left detached, which is the only way to reach the
+    // `.auth-inner` scope the delegate falls back to when a field has no form of its own (final review).
     bridge.openAuth('signup');
     const page = bridge.registry['auth-page'];
     const inner = bridge.node('div');
@@ -573,7 +587,7 @@ describe('Account round Task 1 - the auth page and the wall', () => {
     expect(html).toContain('Check your email');
     expect(html).toContain('morgan@email.com');
     expect(html).toContain('Back to sign in');
-    expect(html).not.toMatch(/—|&mdash;|night/i);
+    expect(html).not.toMatch(/\u2014|&mdash;|night/i);
 
     // The sent render is the ONLY thing that declares #auth-resend, so it owns the one handler on it.
     const btn = bridge.registry['auth-resend'];
@@ -640,6 +654,10 @@ describe('Account round Task 1 - the auth page and the wall', () => {
     expect(html).not.toContain('Pools, bracket, scores');
     expect(appSrc).not.toContain('tn-gate-cta');
     expect(css.replace(/\/\*[\s\S]*?\*\//g, '')).not.toContain('.tn-gate');
+    // .tn-gate-slot has no rule, so it has no size either: the comment above buildTournamentGateHTML
+    // says exactly that now, instead of crediting the slot with holding the tab open (final review).
+    expect(appSrc).toContain('.tn-gate-slot has NO CSS rule');
+    expect(appSrc).not.toContain('stable, non-collapsing body');
 
     const alt = bridge.node('button');
     alt.setAttribute('data-auth-view', 'signup');
@@ -724,7 +742,7 @@ describe('Account round Task 2 - forgot, reset and the recovery router', () => {
     expect(html).toContain('a@b.co');
     expect(html).not.toContain('expires in an hour');
     expect(html).not.toContain('Open the link from the email');
-    expect(html).not.toMatch(/—|&mdash;|night/i);
+    expect(html).not.toMatch(/\u2014|&mdash;|night/i);
   });
 
   it('the forgot screen refuses an empty and a malformed address before the network', async () => {
@@ -798,7 +816,7 @@ describe('Account round Task 2 - forgot, reset and the recovery router', () => {
     expect(page.innerHTML).toContain('Password changed');
     expect(page.innerHTML).toContain("You're signed in.");
     expect(page.innerHTML).toContain('Go to the tournament');
-    expect(page.innerHTML).not.toMatch(/—|&mdash;|night/i);
+    expect(page.innerHTML).not.toMatch(/\u2014|&mdash;|night/i);
     // The heavy path waits for the way out: it can open the name-fill overlay, and the done state has
     // to be the only thing on screen (review, fix round 2).
     expect(bridge.postSignInRuns()).toBe(0);
@@ -882,10 +900,13 @@ describe('Account round Task 2 - forgot, reset and the recovery router', () => {
     expect(bridge.postSignInRuns()).toBe(1);
   });
 
-  it('signing out drops a pending recovery so the next sign-in is a plain one', async () => {
+  it('signing out drops a pending recovery, and the screen it was routing to, so the next sign-in is a plain one', async () => {
+    const page = await recover();
+    expect(page).toBeTruthy();
     bridge.setRecoveryPending(true);
     await bridge.authEvent('SIGNED_OUT', null);
     expect(bridge.recoveryPending()).toBe(false);
+    expect(bridge.registry['reset-page']).toBeFalsy();   // a recovery form cannot outlive its session
   });
 
   it('the chevron walks back a step on the forgot screens and still closes the overlay on sign-in', async () => {
@@ -920,6 +941,101 @@ describe('Account round Task 2 - forgot, reset and the recovery router', () => {
     bridge.supaNext('updateUser', { data: {}, error: null });
     await bridge.resetSave();
     expect(bridge.supaCalls().at(-1)).toEqual(['updateUser', { password: typed }]);
+  });
+
+  // ── Final review: the recovery branch keys off the FLAG, not the event name ──────────────────────
+  it('an INITIAL_SESSION during a recovery lands on the one reset screen and never the heavy path', async () => {
+    // A reload mid-recovery emits INITIAL_SESSION and nothing else. Gating on the event name sent that
+    // reload down the whole sign-in path and stacked the name prompt over a form being typed into.
+    bridge.setSignedOut();
+    bridge.setRecoveryPending(true);   // what the fragment latched at module load
+    const session = { user: { id: 'u1', email: 'a@b.co' } };
+
+    await bridge.authEvent('INITIAL_SESSION', session);
+    await bridge.flushTimers();
+    const page = bridge.registry['reset-page'];
+    expect(page).toBeTruthy();
+    expect(bridge.postSignInRuns()).toBe(0);
+    expect(bridge.registry['namefill-page']).toBeFalsy();
+
+    await bridge.authEvent('PASSWORD_RECOVERY', session);
+    await bridge.flushTimers();
+    expect(bridge.registry['reset-page']).toBe(page);     // the SAME element, not a second one
+    expect(bridge.doc.body.children.filter((c) => c.id === 'reset-page').length).toBe(1);
+    expect(bridge.postSignInRuns()).toBe(0);
+    expect(bridge.registry['namefill-page']).toBeFalsy();
+
+    // The heavy path still waits for the way out, and the flag stops routing at the same moment.
+    bridge.registry['rs-new'].value = 'Passw0rd!';
+    bridge.registry['rs-again'].value = 'Passw0rd!';
+    bridge.supaNext('updateUser', { data: {}, error: null });
+    await bridge.resetSave();
+    expect(bridge.postSignInRuns()).toBe(0);
+    bridge.registry['reset-go'].listeners.click[0]();
+    expect(bridge.postSignInRuns()).toBe(1);
+    expect(bridge.recoveryPending()).toBe(false);
+  });
+
+  it('a TOKEN_REFRESHED for the same account with no recovery pending repaints nothing and runs nothing', async () => {
+    const session = { user: { id: 'u1', email: 'a@b.co' } };
+    bridge.setSignedIn(session.user);
+    bridge.openMenu();
+    const card = bridge.registry['account-menu'];
+    const painted = card.innerHTML;
+    const calls = bridge.supaCalls().length;
+
+    await bridge.authEvent('TOKEN_REFRESHED', session);
+    await bridge.flushTimers();
+    expect(bridge.registry['reset-page']).toBeFalsy();     // the flag is down, so no recovery screen
+    expect(bridge.registry['namefill-page']).toBeFalsy();
+    expect(bridge.registry['account-menu']).toBe(card);
+    expect(card.innerHTML).toBe(painted);
+    expect(bridge.postSignInRuns()).toBe(0);
+    expect(bridge.supaCalls().length).toBe(calls);
+  });
+
+  it('a USER_UPDATED carrying a new_email re-derives the pending address and runs nothing heavy', async () => {
+    const user = { id: 'u1', email: 'a@b.co' };
+    bridge.setSignedIn(user);
+    expect(bridge.getState().account.pendingEmail).toBe(null);
+
+    await bridge.authEvent('USER_UPDATED', { user: { ...user, new_email: 'new@b.co' } });
+    await bridge.flushTimers();
+    expect(bridge.getState().account.pendingEmail).toBe('new@b.co');
+    expect(bridge.postSignInRuns()).toBe(0);
+    expect(bridge.registry['reset-page']).toBeFalsy();
+
+    // And the event the confirmation link emits, with new_email gone, takes the tag down with it.
+    await bridge.authEvent('USER_UPDATED', { user: { id: 'u1', email: 'new@b.co' } });
+    await bridge.flushTimers();
+    expect(bridge.getState().account.pendingEmail).toBe(null);
+    expect(bridge.getState().account.email).toBe('new@b.co');
+    expect(bridge.postSignInRuns()).toBe(0);
+  });
+
+  it('signing out closes every session-bound overlay', async () => {
+    // Three of the five outlived their session: the recovery screen kept a live "set a new password"
+    // form on a signed-out app, and so did the one-time name prompt and the account card.
+    const session = { user: { id: 'u1', email: 'a@b.co' } };
+    bridge.setRecoveryPending(true);
+    await bridge.authEvent('SIGNED_IN', session);
+    await bridge.flushTimers();
+    expect(bridge.registry['reset-page']).toBeTruthy();
+
+    bridge.supaNext('profileRead', { data: { first_name: null, last_name: null }, error: null });
+    await bridge.nameFill();
+    expect(bridge.registry['namefill-page']).toBeTruthy();
+
+    bridge.openMenu();
+    expect(bridge.registry['account-menu']).toBeTruthy();
+
+    await bridge.authEvent('SIGNED_OUT', null);
+    expect(bridge.registry['reset-page']).toBeFalsy();
+    expect(bridge.registry['namefill-page']).toBeFalsy();
+    expect(bridge.registry['account-menu']).toBeFalsy();
+    expect(bridge.registry['claim-page']).toBeFalsy();
+    expect(bridge.registry['acct-page']).toBeFalsy();
+    expect(bridge.doc.body.children.map((c) => c.id)).toEqual([]);
   });
 });
 
@@ -956,7 +1072,7 @@ describe('Account round Task 3 - the account card and the sign-out confirm', () 
     // Nothing waiting -> no tag. And the design's Close-jumps-to-Home is a canvas artifact, not shipped.
     expect(html).not.toContain('acc-tag');
     expect(html).not.toContain('data-nav-tab="home"');
-    expect(html).not.toMatch(/—|&mdash;|night/i);
+    expect(html).not.toMatch(/\u2014|&mdash;|night/i);
 
     bridge.registry['am-close'].listeners.click[0]();
     expect(bridge.registry['account-menu']).toBeFalsy();
@@ -1013,7 +1129,7 @@ describe('Account round Task 3 - the account card and the sign-out confirm', () 
     expect(confirmHTML).toContain('Sign out?');
     expect(confirmHTML).toContain('need your email and password to get back in.');
     expect(confirmHTML).toContain('kc-confirm-danger');
-    expect(confirmHTML).not.toMatch(/—|&mdash;|night/i);
+    expect(confirmHTML).not.toMatch(/\u2014|&mdash;|night/i);
     expect(bridge.supaCalls().length).toBe(0);
     expect(bridge.getState().authSession).toBeTruthy();
 
@@ -1149,7 +1265,7 @@ describe('Account round Task 4 - Your name', () => {
     expect(count(html, 'id="acct-err"')).toBe(1);
     expect(html).toContain('id="acct-save"');
     expect(html).toContain('>Save<');
-    expect(html).not.toMatch(/—|&mdash;|night/i);
+    expect(html).not.toMatch(/\u2014|&mdash;|night/i);
 
     // No name cached yet: empty fields, never the string "null" wearing a value attribute.
     bridge.reset();
@@ -1220,6 +1336,23 @@ describe('Account round Task 4 - Your name', () => {
     expect(toasts().length).toBe(0);
     expect(bridge.errors()).toEqual([['profiles name update', { message: 'permission denied for table profiles' }]]);
     expect(bridge.registry['acct-err'].textContent).not.toContain('permission denied');
+  });
+
+  it('a THROWN name save ends on the generic sentence, not on the signed-in one', async () => {
+    // A dead network is a rejected promise, not an { error } answer, and it says nothing about whether
+    // the person is signed in. The signed-in sentence stays for the zero-row read-back above, which
+    // really is about that (final review).
+    openName();
+    type('Ada', 'Blake');
+    bridge.supaNext('profileUpdate', new Error('Failed to fetch'));
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('Something went wrong. Try again.');
+    expect(bridge.registry['acct-err'].textContent).not.toBe(FAIL_LINE);
+    expect(bridge.registry['acct-save'].disabled).toBe(false);
+    expect(bridge.registry['acct-page']).toBeTruthy();
+    expect(toasts().length).toBe(0);
+    expect(bridge.errors().length).toBe(1);
+    expect(bridge.errors()[0][0]).toBe('profiles name update');
   });
 
   it('a saved name updates the cache, repaints the chip, reopens the card and toasts once', async () => {
@@ -1305,7 +1438,7 @@ describe('Account round Task 5 - Change email and the pending screen', () => {
     // screen never grades it.
     expect(html).not.toContain('data-sbox');
     expect(html).not.toContain('data-strength');
-    expect(html).not.toMatch(/—|&mdash;|night/i);
+    expect(html).not.toMatch(/\u2014|&mdash;|night/i);
     expect(bridge.errors()).toEqual([]);
   });
 
@@ -1360,7 +1493,10 @@ describe('Account round Task 5 - Change email and the pending screen', () => {
     type(NEW, SECRET);
     bridge.supaNext('signInWithPassword', { data: {}, error: { message: 'Request rate limit reached' } });
     await submit();
-    expect(bridge.registry['acct-err'].textContent).toBe('Too many emails just now. Wait a minute, then try again.');
+    // Its OWN sentence: this road to the cap sends no email, so "too many emails" was a lie about what
+    // the person had just done (final review).
+    expect(bridge.registry['acct-err'].textContent).toBe('Too many tries just now. Wait a minute, then try again.');
+    expect(bridge.registry['acct-err'].textContent).not.toContain('emails');
     expect(bridge.registry['acct-err'].textContent).not.toBe('That password is wrong.');
     expect(bridge.supaCalls().map((c) => c[0])).toEqual(['signInWithPassword']);
     expect(bridge.getState().account.pendingEmail).toBe(null);
@@ -1397,7 +1533,7 @@ describe('Account round Task 5 - Change email and the pending screen', () => {
     // screen ships none at all.
     expect(html).not.toContain('<form');
     expect(html).not.toContain('id="acct-form"');
-    expect(html).not.toMatch(/—|&mdash;|night/i);
+    expect(html).not.toMatch(/\u2014|&mdash;|night/i);
 
     expect(bridge.getState().account.pendingEmail).toBe(NEW);
     expect(bridge.acctPending()).toBe(NEW);
@@ -1569,8 +1705,11 @@ describe('Account round Task 5 - Change email and the pending screen', () => {
 
     // One copy of the sentence: the Resend controls and the error map read the same const.
     expect(count(appSrc, "'Too many emails just now. Wait a minute, then try again.'")).toBe(1);
-    // Task 6 review adds the fourth: the shared current-password check answers a throttle with it too.
-    expect(count(appSrc, 'AUTH_RATE_LIMIT')).toBe(4);   // the declaration, friendlyAuthError, authResend, checkCurrentPassword
+    // The final review took the fourth back out: the current-password check spends the auth cap without
+    // sending anything, so it answers with AUTH_TOO_MANY_TRIES and this const is email-only again.
+    expect(count(appSrc, 'AUTH_RATE_LIMIT')).toBe(3);   // the declaration, friendlyAuthError, authResend
+    expect(count(appSrc, "'Too many tries just now. Wait a minute, then try again.'")).toBe(1);
+    expect(count(appSrc, 'AUTH_TOO_MANY_TRIES')).toBe(2);   // the declaration and checkCurrentPassword
   });
 
   it('the SIGNED_IN the password check emits for the same account runs nothing', async () => {
@@ -1664,7 +1803,7 @@ describe('Account round Task 6 - Change password', () => {
     // #acct-page: the attribute here would be dead markup, so the control is bound by id instead.
     expect(html).not.toContain('data-auth-view');
 
-    expect(html).not.toMatch(/—|&mdash;|night/i);
+    expect(html).not.toMatch(/\u2014|&mdash;|night/i);
     expect(bridge.errors()).toEqual([]);
   });
 
@@ -1893,7 +2032,8 @@ describe('Account round Task 6 - Change password', () => {
     bridge.supaNext('signInWithPassword', { data: {}, error: { message: 'Request rate limit reached' } });
     await submit();
 
-    expect(bridge.registry['acct-err'].textContent).toBe('Too many emails just now. Wait a minute, then try again.');
+    expect(bridge.registry['acct-err'].textContent).toBe('Too many tries just now. Wait a minute, then try again.');
+    expect(bridge.registry['acct-err'].textContent).not.toContain('emails');
     expect(bridge.registry['acct-err'].textContent).not.toBe('That password is wrong.');
     expect(bridge.supaCalls().map((c) => c[0])).toEqual(['signInWithPassword']);
     expect(bridge.registry['acct-save'].disabled).toBe(false);
@@ -2188,6 +2328,37 @@ describe('Account round Task 8 - Continue with Google', () => {
     }
   });
 
+  it('the Google return stacks the name prompt ON TOP of the claim page, and saving leaves the claim page', async () => {
+    // The two halves of a Google return land from the same event: the restored claim intent opens
+    // #claim-page, and the heavy path's name check appends #namefill-page. Order is the whole story -
+    // the prompt has to be the later sibling or it renders underneath the page it is blocking.
+    bridge.setSignedOut();
+    bridge.session.set('athletic_specimen_claim_intent', '1');
+    bridge.restoreClaimIntent();
+    // No profile read is scripted on purpose: the sandbox's default answer carries no names, which is
+    // exactly the nameless identity Google hands back (handle_new_user seeds display_name only).
+
+    await bridge.authEvent('SIGNED_IN', {
+      user: { id: 'g1', email: 'morgan@gmail.com', user_metadata: { full_name: 'Morgan Reyes' } },
+    });
+    // The heavy path parks on a timer promise between its role retries, so one drain of the queue only
+    // gets as far as the claim page. Drain and yield until it has run all the way to the name check.
+    for (let i = 0; i < 40; i++) { await bridge.flushTimers(); await Promise.resolve(); }
+
+    const ids = bridge.doc.body.children.map((c) => c.id);
+    expect(ids).toContain('claim-page');
+    expect(ids).toContain('namefill-page');
+    expect(ids.indexOf('namefill-page')).toBeGreaterThan(ids.indexOf('claim-page'));
+
+    // The stub keeps innerHTML as a string, so the prefill the markup carries is not a live value here.
+    bridge.registry['namefill-first'].value = 'Morgan';
+    bridge.registry['namefill-last'].value = 'Reyes';
+    bridge.supaNext('rpc', { data: {}, error: null });
+    await bridge.registry['namefill-form'].listeners.submit[0]({ preventDefault() {} });
+    expect(bridge.registry['namefill-page']).toBeFalsy();
+    expect(bridge.registry['claim-page']).toBeTruthy();
+  });
+
   it('a Google user whose profile already carries both names is never prompted', async () => {
     bridge.setSignedIn({ id: 'g1', email: 'morgan@gmail.com' });
     bridge.getState().authSession.user.user_metadata = { full_name: 'Morgan Reyes' };
@@ -2210,10 +2381,23 @@ describe('Account round Task 8 - Continue with Google', () => {
     expect(css).not.toMatch(/\.au-google[^}]*!important/);
     expect(css).not.toMatch(/\.au-or[^}]*!important/);
     // The only saturated colour this round adds is Google's, inside their mark and their fill. Nothing in
-    // the block may reach for a colour of our own beyond the app's tokens (the divider's rule and label).
-    const blk = css.slice(css.indexOf('.au-google {'), css.indexOf('.au-or::before'));
-    const ours = (blk.match(/#[0-9A-Fa-f]{3,8}\b/g) || []).filter((h) => !['#FFFFFF', '#747775', '#1F1F1F', '#F2F2F2'].includes(h));
+    // the WHOLE account block may reach for a colour of our own beyond the app's tokens.
+    // Final review: the sweep used to stop at the Google button and to look for hex only, so the two raw
+    // oklch() values further up (the meter track and the done mark's ring) were invisible to it. Google's
+    // four Light-theme values are the only exemption, and #fff normalises into their #FFFFFF: plain white
+    // on a coloured field is how this stylesheet has always written it, in ninety-odd other places.
+    const GOOGLE = ['#FFFFFF', '#747775', '#1F1F1F', '#F2F2F2'];
+    const norm = (h) => {
+      const v = h.slice(1).toUpperCase();
+      return '#' + (v.length === 3 ? v.split('').map((c) => c + c).join('') : v);
+    };
+    const blk = css.slice(css.indexOf('/* ===== ACCOUNT DESIGN ROUND')).replace(/\/\*[\s\S]*?\*\//g, '');
+    const ours = (blk.match(/#[0-9A-Fa-f]{3,8}\b/g) || []).filter((h) => !GOOGLE.includes(norm(h)));
     expect(ours).toEqual([]);
+    expect(blk.match(/oklch\(/g)).toBe(null);
+    // The two that were raw, by name, so a revert reads as the regression it would be.
+    expect(css).toContain('.au-sbar { flex: 1; height: 4px; border-radius: 999px; background: var(--border);');
+    expect(css).toContain('box-shadow: 0 0 0 6px var(--live-soft);');
   });
 
   // ── Fix round 1 ──────────────────────────────────────────────────────────────────
@@ -2279,5 +2463,66 @@ describe('Account round Task 8 - Continue with Google', () => {
     expect(s(42)).toBe(null);
     expect(s(['Morgan', 'Reyes'])).toBe(null);
     expect(s(true)).toBe(null);
+  });
+});
+
+// The round's copy guard, turned on the file that carries it. Twelve cases assert that no screen ships
+// an em dash or the word this project never uses, and every one of them writes the character as an
+// escape - so the guard cannot be satisfied by a regex that quietly carries the very character it bans.
+describe('Account round - the copy guard is written the way it asks the app to be written', () => {
+  const testSrc = readFileSync(new URL('./account-round.test.js', import.meta.url), 'utf8');
+
+  it('every copy guard is escaped, and this file carries no em dash of its own', () => {
+    expect(testSrc.indexOf('\u2014')).toBe(-1);
+    expect(count(testSrc, '/\\u2014|&mdash;|night/i')).toBe(12);
+  });
+
+  it('one sentence per failure: every shared refusal is written down once', () => {
+    // Each of these was typed out at two to six call sites. The const is the single copy now, so the
+    // literal appears exactly once in app.js: inside its own declaration.
+    expect(count(appSrc, "'Something went wrong. Try again.'")).toBe(1);
+    expect(count(appSrc, '"That email doesn\'t look right."')).toBe(1);
+    expect(count(appSrc, '"Those two passwords don\'t match."')).toBe(1);
+    // The declaration plus its call sites: six catches and one dead-address guard for the generic
+    // sentence, three email-shape gates, two password-match gates.
+    expect(count(appSrc, 'AUTH_GENERIC_FAIL')).toBe(8);
+    expect(count(appSrc, 'AUTH_EMAIL_BAD')).toBe(4);
+    expect(count(appSrc, 'AUTH_PASSWORDS_DIFFER')).toBe(3);
+    // And the save failure that is NOT generic keeps only the places a session really is the question:
+    // the three not-signed-in guards and the zero-row read-back it was written for.
+    expect(count(appSrc, 'ACCT_SAVE_FAIL')).toBe(5);
+  });
+});
+
+// The harness is shared state: ONE vm context, one registry, one set of module vars, and every case in
+// this file runs against it. What reset() forgets to clear is what makes a case pass because of the case
+// before it, so the cleanup has guards of its own.
+describe('Account round - the harness starts every case from the same place', () => {
+  beforeEach(() => bridge.reset());
+
+  it('reset() hands the next case no role and no stale tournament view', () => {
+    // A derived role outlived its case (nothing but the SIGNED_OUT branch ever cleared it), and so did
+    // the tournament sub-view, which decides whether the wall is even allowed to stand (final review).
+    bridge.getState().role = 'owner';
+    bridge.setView('register');
+    bridge.setSignedOut();
+    bridge.tab('tournament');
+    expect(bridge.registry['gate-page']).toBeFalsy();   // register is never walled
+
+    bridge.reset();
+    expect(bridge.getState().role).toBe(null);
+    bridge.setSignedOut();
+    bridge.tab('tournament');
+    expect(bridge.registry['gate-page']).toBeTruthy();  // back on the hub, so the wall stands again
+  });
+
+  it('reset() drops the claim page with the app own closer, and a default answer is the one it was given', () => {
+    const harness = readFileSync(new URL('./account-round.test.js', import.meta.url), 'utf8');
+    // closeClaimPage is what owns claimCandidates, so clearing the registry was never enough.
+    expect(harness).toContain('bridge.closeClaim();');
+    // `dflt === undefined`, not `dflt || ...`: a default of null, '' or 0 is a default somebody chose.
+    // The banned form is spelled in two pieces because this file is grepping itself.
+    expect(harness).toContain('return dflt === undefined ? { data: {}, error: null } : dflt;');
+    expect(harness).not.toContain('return dflt ' + '|| {');
   });
 });

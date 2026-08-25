@@ -6063,7 +6063,7 @@ input.pc-nin:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--accent),
 
 /* password meter - three states, no score theatre */
 .au-strength { display: flex; align-items: center; gap: 10px; margin: 9px 0 2px; }
-.au-sbar { flex: 1; height: 4px; border-radius: 999px; background: oklch(0.90 0.005 75); overflow: hidden; }
+.au-sbar { flex: 1; height: 4px; border-radius: 999px; background: var(--border); overflow: hidden; }
 /* PORT NOTE: the design's .18s ease is not one of the five shipped durations, so the fill moves on the
    app's own --m-state / --e-settle pair, scaled by --m-scale so reduced motion is honoured. */
 .au-sfill {
@@ -6080,7 +6080,10 @@ input.pc-nin:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--accent),
 .au-mark { width: 62px; height: 62px; margin: 0 auto 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 .au-mark svg { width: 28px; height: 28px; }
 .au-mark.is-mail { background: var(--accent-soft); color: var(--accent); }
-.au-mark.is-ok { background: var(--live-soft); color: var(--live-ink); box-shadow: 0 0 0 6px oklch(0.62 0.16 152 / .10); }
+/* The ring is the SAME token as the disc, so the mark simply reads 6px larger. The design's
+   10%-alpha green composited over the page to within a hair of --live-soft anyway, and a raw
+   oklch() here was the one colour in this block that could not follow a theme (final review). */
+.au-mark.is-ok { background: var(--live-soft); color: var(--live-ink); box-shadow: 0 0 0 6px var(--live-soft); }
 
 /* third-level link under the two production buttons */
 /* PORT NOTE: the same iOS counter as .au-reveal - the 16px !important on every button would

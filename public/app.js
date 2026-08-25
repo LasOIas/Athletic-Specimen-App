@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.30'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.31'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3513,8 +3513,9 @@ let pdPoolFilter = 'all'; // Pools & schedule tab: 'seeding' | a pool label | 'a
 
 // The signed-out gate. Account round (2026-08-25): Mike picked the design's full-screen wall over the
 // old in-tab "This page is yours" block, so the panel behind it renders EMPTY and #gate-page (opened by
-// syncGatePage at navigation time) carries the copy and the two auth affordances. The slot stays so the
-// tab has a stable, non-collapsing body under the overlay.
+// syncGatePage at navigation time) carries the copy and the two auth affordances. The wall is that
+// body-appended overlay and nothing else: .tn-gate-slot has NO CSS rule and no size of its own, it is
+// only an empty, aria-hidden placeholder for the panel the overlay covers (final review).
 function buildTournamentGateHTML() {
   return '<div class="tn-gate-slot" aria-hidden="true"></div>';
 }
@@ -6205,6 +6206,19 @@ const AUTH_EMAIL_RE = /^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/;
 // like a bug report. Both roads to that cap read the same: the Resend controls below, and
 // friendlyAuthError, which is where a signUp, a reset and an email change land.
 const AUTH_RATE_LIMIT = 'Too many emails just now. Wait a minute, then try again.';
+// The same throttle, worded for the one road to it that sends NO email: proving a current password is a
+// second signInWithPassword, and it spends the auth cap. Telling someone their attempt was too fast is
+// true; telling them it was "too many emails" when they were changing a password is not (final review).
+const AUTH_TOO_MANY_TRIES = 'Too many tries just now. Wait a minute, then try again.';
+// The one sentence every unexpected failure ends on. Seven sites: the six catches (the auth submit,
+// forgot, the reset save, the name save, the email save, the password save) and the Resend control's
+// dead-address guard. A dead network, a thrown client or a shape nobody predicted cannot be answered
+// with anything more useful than this, and the server's own words are logged instead of shown.
+const AUTH_GENERIC_FAIL = 'Something went wrong. Try again.';
+// The client's two shared refusals, hoisted the same way: the email shape (sign-in, create-account,
+// forgot, the email change) and the two-password mismatch (the reset screen and the change screen).
+const AUTH_EMAIL_BAD = "That email doesn't look right.";
+const AUTH_PASSWORDS_DIFFER = "Those two passwords don't match.";
 // The short-password refusal for a password being SET, in one place (review, fix round 1): the reset
 // screen and the change-password screen both say it, so the number and the wording can never drift
 // apart. Sign-in and create-account keep their own sentence, which has no "new" in it: nothing there is.
@@ -6749,7 +6763,7 @@ async function onForgotSubmit() {
   const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
   if (errEl) errEl.hidden = true;
   if (!email) { showErr(AUTH_FILL_ALL); return; }
-  if (!AUTH_EMAIL_RE.test(email)) { showErr("That email doesn't look right."); return; }
+  if (!AUTH_EMAIL_RE.test(email)) { showErr(AUTH_EMAIL_BAD); return; }
   if (!supabaseClient) { showErr('Sending is unavailable right now.'); return; }
   const orig = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
@@ -6763,7 +6777,7 @@ async function onForgotSubmit() {
     renderAuthPageInner();
   } catch (err) {
     console.error('resetPasswordForEmail', err);   // the failure only; the typed address stays out of the log
-    showErr('Something went wrong. Try again.');
+    showErr(AUTH_GENERIC_FAIL);
     if (btn) { btn.disabled = false; btn.textContent = orig; }
   }
 }
@@ -6850,7 +6864,7 @@ async function onAuthSubmit(e) {
   // first, then the email shape (before the server ever sees it), then the length gate (create-account
   // only), because sign-in must never guess at what an existing password is allowed to be.
   if (!email || !password || (signup && (!(firstEl && firstEl.value.trim()) || !(lastEl && lastEl.value.trim())))) { showErr(AUTH_FILL_ALL); return; }
-  if (!AUTH_EMAIL_RE.test(email)) { showErr("That email doesn't look right."); return; }
+  if (!AUTH_EMAIL_RE.test(email)) { showErr(AUTH_EMAIL_BAD); return; }
   if (signup && password.length < AUTH_PASSWORD_MIN) { showErr('Your password needs at least ' + AUTH_PASSWORD_MIN + ' characters.'); return; }
   // Identity (spec §2): create-account captures the person. Validate first+last BEFORE we disable the
   // button (same grammar as the password-length gate above); the cleaned parts ride the signUp metadata.
@@ -6878,7 +6892,7 @@ async function onAuthSubmit(e) {
     }
     closeAuthPage(); // success -> onAuthStateChange sets state + re-renders the header
   } catch (_) {
-    showErr('Something went wrong. Try again.');
+    showErr(AUTH_GENERIC_FAIL);
     if (btn) { btn.disabled = false; btn.textContent = orig; }
   }
 }
@@ -6904,7 +6918,7 @@ async function authResend(kind, emailOverride) {
   if (Date.now() < authResendUntil) { note('Give it a minute, then try again.'); return; }
   const email = emailOverride || authSentEmail;
   // A lost address (a reload dropped it) or a dead client must not read as a tap that did nothing.
-  if (!email || !supabaseClient) { note('Something went wrong. Try again.'); return; }
+  if (!email || !supabaseClient) { note(AUTH_GENERIC_FAIL); return; }
   const btn = button();
   // The label the cooldown hands back is read off THIS control before it is overwritten, never a literal
   // here: the sent screens and the pending email screen word their Resend differently, and the next
@@ -6992,7 +7006,7 @@ async function onResetSave(e) {
   // The design's order: empty, then length, then match.
   if (!password || !again) { showErr(AUTH_FILL_ALL); return; }
   if (password.length < AUTH_PASSWORD_MIN) { showErr(AUTH_NEW_PASSWORD_SHORT); return; }
-  if (password !== again) { showErr("Those two passwords don't match."); return; }
+  if (password !== again) { showErr(AUTH_PASSWORDS_DIFFER); return; }
   if (!supabaseClient) { showErr('Saving is unavailable right now.'); return; }
   const orig = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
@@ -7024,7 +7038,7 @@ async function onResetSave(e) {
     }
   } catch (err) {
     console.error('updateUser (password reset)', err);   // never the password itself
-    showErr('Something went wrong. Try again.');
+    showErr(AUTH_GENERIC_FAIL);
     if (btn) { btn.disabled = false; btn.textContent = orig; }
   }
 }
@@ -7258,11 +7272,13 @@ async function onAuthEvent(event, session) {
     // no supabase call happens inside the callback). Above the isNewSignIn gate on purpose: the link
     // usually opens in the browser that already holds this account's session, and that gate would
     // swallow the event.
-    // Review fix: a FRESH device gets SIGNED_IN first and PASSWORD_RECOVERY second, so the fragment flag
-    // routes that first event here too. Whichever event arrives first latches the flag, so its partner
-    // takes this branch as well and openResetPage (idempotent) keeps the one screen the person is typing
-    // into. The flag is cleared once the new password is saved, and on sign-out.
-    if (event === 'PASSWORD_RECOVERY' || (authRecoveryPending && event === 'SIGNED_IN')) {
+    // Final review fix: the FLAG is the gate, not the event name. The flag is set only when the URL
+    // carried type=recovery, it clears on the reset save's way out and on sign-out, and openResetPage is
+    // idempotent - so every session-bearing event a recovery can produce (SIGNED_IN on a fresh device,
+    // PASSWORD_RECOVERY, INITIAL_SESSION on a reload, TOKEN_REFRESHED while someone types) routes to the
+    // one screen and none of them can reach the heavy path. Naming the events instead left INITIAL_SESSION
+    // running the whole sign-in path and stacking the name prompt over a half-typed password.
+    if (authRecoveryPending || event === 'PASSWORD_RECOVERY') {
       authRecoveryPending = true;
       state.authSession = session;
       state.account = accountFromSession(session);
@@ -7309,8 +7325,17 @@ async function onAuthEvent(event, session) {
     authClearClaimIntent();
     accountName = null; // the name cache belongs to the account: the next chip/card must not wear it
     authRecoveryPending = false; // an abandoned recovery must not route the next sign-in (review fix)
-    closeClaimPage(); // a claim page can't outlive its session (harmless no-op when not open)
-    closeAcctPage(); // neither can an account edit screen (same no-op when it isn't open)
+    // Nothing a session opened can outlive it. All five, and each line is a harmless no-op when that
+    // overlay is not on screen: the claim page, an account edit screen, the recovery form (a live
+    // "set a new password" on a signed-out app was the worst of them), the one-time name prompt and
+    // the account card itself.
+    closeClaimPage();
+    closeAcctPage();
+    closeResetPage();
+    const nameFillEl = document.getElementById('namefill-page');
+    if (nameFillEl) nameFillEl.remove();
+    const acctMenuEl = document.getElementById('account-menu');
+    if (acctMenuEl) acctMenuEl.remove();
     if (state.isAdmin) {
       state.isAdmin = false;
       state.masterAdminAuthenticated = false;
@@ -7621,7 +7646,10 @@ async function onAcctNameSave(e) {
     settleSaveToast(makeSaveToast('Name saved'), true, 'Name saved');
   } catch (err) {
     console.error('profiles name update', err);
-    failed(ACCT_SAVE_FAIL);
+    // A thrown call is a dead network or a dead client, not a row the policy missed, so it ends on the
+    // generic sentence like every other catch site. The zero-row read-back above keeps the sentence
+    // about being signed in, because that is the one thing it really can be (final review).
+    failed(AUTH_GENERIC_FAIL);
   }
 }
 
@@ -7629,7 +7657,8 @@ async function onAcctNameSave(e) {
 // verify-my-password endpoint, so proving a password means signing in with it again, against the account
 // that is already signed in - and that spends an auth rate-limit slot. Answering a throttle with "That
 // password is wrong." would send someone hunting for a typo that is not the problem, so the limit gets
-// its own sentence. Returns '' when the password is right and the line to show when it is not. It
+// its own sentence - and its own WORDS (final review): this road to the cap sends no email at all, so
+// it says "too many tries". Returns '' when the password is right and the line to show when it is not. It
 // deliberately does NOT catch: a thrown error propagates to the caller's own catch, which is where a dead
 // network is already handled, and where nothing typed is ever logged.
 async function checkCurrentPassword(password) {
@@ -7637,7 +7666,7 @@ async function checkCurrentPassword(password) {
   if (!(chk && chk.error)) return '';
   // Everything else reads the same to the person holding the phone: the password they typed is not the
   // one on the account. The server's own words stay out of it (they name the email too).
-  return /rate|limit/i.test((chk.error && chk.error.message) || '') ? AUTH_RATE_LIMIT : 'That password is wrong.';
+  return /rate|limit/i.test((chk.error && chk.error.message) || '') ? AUTH_TOO_MANY_TRIES : 'That password is wrong.';
 }
 
 // The Email screen's save (Account handoff 2026-08-25, spec §5). Two calls, in this order and no other:
@@ -7661,7 +7690,7 @@ async function onAcctEmailSave(e) {
   // the one refusal only this screen can make. Asking GoTrue to send a confirmation link to the address
   // someone is already using would "succeed" and confuse them, so it never leaves the client.
   if (!newEmail || !password) { showErr(AUTH_FILL_ALL); return; }
-  if (!AUTH_EMAIL_RE.test(newEmail)) { showErr("That email doesn't look right."); return; }
+  if (!AUTH_EMAIL_RE.test(newEmail)) { showErr(AUTH_EMAIL_BAD); return; }
   const current = (state.account && state.account.email) || '';
   if (newEmail.toLowerCase() === current.toLowerCase()) { showErr("That's already your email."); return; }
   if (!supabaseClient || !state.account) { showErr(ACCT_SAVE_FAIL); return; }
@@ -7691,7 +7720,7 @@ async function onAcctEmailSave(e) {
     renderAcctPageInner();
   } catch (err) {
     console.error('email change', err);   // the failure only; the typed password never reaches a log
-    failed('Something went wrong. Try again.');
+    failed(AUTH_GENERIC_FAIL);
   }
 }
 
@@ -7721,7 +7750,7 @@ async function onAcctPasswordSave(e) {
   // account and answers "saved", which would be a lie about what changed.
   if (!current || !next || !again) { showErr(AUTH_FILL_ALL); return; }
   if (next.length < AUTH_PASSWORD_MIN) { showErr(AUTH_NEW_PASSWORD_SHORT); return; }
-  if (next !== again) { showErr("Those two passwords don't match."); return; }
+  if (next !== again) { showErr(AUTH_PASSWORDS_DIFFER); return; }
   if (next === current) { showErr("Pick a password you haven't used here."); return; }
   if (!supabaseClient || !state.account) { showErr(ACCT_SAVE_FAIL); return; }
   const orig = btn ? btn.textContent : '';
@@ -7742,7 +7771,7 @@ async function onAcctPasswordSave(e) {
     settleSaveToast(makeSaveToast('Password saved'), true, 'Password saved');
   } catch (err) {
     console.error('password change', err);   // the failure only; a typed password never reaches a log
-    failed('Something went wrong. Try again.');
+    failed(AUTH_GENERIC_FAIL);
   }
 }
 
