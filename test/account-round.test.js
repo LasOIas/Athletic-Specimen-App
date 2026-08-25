@@ -2562,7 +2562,7 @@ describe('Motion - the page entrance plays once per navigation, not once per ren
     body.classList.remove('m-enter');
     bridge.tab('home');
     expect(body.classList.contains('m-enter')).toBe(true);
-    body.classList.remove('m-enter');
+    // a same-tab re-render while the entrance is still up CLOSES it (the fresh DOM must not fade in again)
     bridge.tab('home');
     expect(body.classList.contains('m-enter')).toBe(false);
     bridge.tab('tournament');
@@ -2576,6 +2576,7 @@ describe('Motion - the page entrance plays once per navigation, not once per ren
     const i = appSrc.indexOf('function activateMainTab(');
     const slice = appSrc.slice(i, i + 1600);
     expect(slice).toContain('tab !== prevTab || !activateMainTab._entered');
+    expect(slice).toContain('else mEnterEnd();');
     expect(slice).not.toMatch(/\n\s*mEnter\(\)\;/);
   });
 });
