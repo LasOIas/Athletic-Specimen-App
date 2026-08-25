@@ -41,6 +41,9 @@ const AUTH_CONTROL_IDS = [
   'acct-form', 'an-first', 'an-last', 'acct-save',
   // Task 5: the Email screen's two fields, and the pending screen's Done and Resend.
   'ae-new', 'ae-pass', 'acct-done', 'acct-resend',
+  // Task 6: the Password screen's three fields and its way out to a forgotten current one. The form and
+  // the submit are the shared 'acct-form' / 'acct-save' above - every screen on this overlay reuses them.
+  'ap-cur', 'ap-new', 'ap-again', 'ap-forgot',
 ];
 
 function matches(node, sel) {
@@ -1102,10 +1105,10 @@ describe('Account round Task 4 - Your name', () => {
     expect(bridge.supaCalls().length).toBe(0);
     expect(bridge.registry['acct-page']).toBeTruthy();
     expect(bridge.errors()).toEqual([]);
-    // One copy of the copy: every submit that can meet a blank field reads the same const (Task 5 made
-    // it five - the email change is the newest of them).
+    // One copy of the copy: every submit that can meet a blank field reads the same const (Task 6 made
+    // it six - the password change is the newest of them).
     expect(count(appSrc, "'Fill in every field.'")).toBe(1);
-    expect(count(appSrc, 'showErr(AUTH_FILL_ALL)')).toBe(5);
+    expect(count(appSrc, 'showErr(AUTH_FILL_ALL)')).toBe(6);
   });
 
   it('a valid save is a plain profiles update with display_name in step and a read-back', async () => {
@@ -1506,5 +1509,252 @@ describe('Account round Task 5 - Change email and the pending screen', () => {
     // the round trip), and the screen names it from its own module var either way.
     expect(bridge.getState().account.pendingEmail).toBe(NEW);
     expect(bridge.acctPending()).toBe(NEW);
+  });
+});
+
+// Task 6 (2026-08-25): Change password (the design's screen 13, plus the "Type it again" its reset screen
+// had and its change screen did not). Guards the three fields and the meter that grades only the one being
+// chosen, the four client refusals IN ORDER with nothing on the wire until they all pass, the
+// current-password check that runs before updateUser, an update that carries the password and nothing
+// else, the toast and the card behind it, the way out to the forgot flow, and the three password
+// promises: never trimmed, never on state, never logged.
+describe('Account round Task 6 - Change password', () => {
+  beforeEach(() => bridge.reset());
+
+  const synth = (sel, node) => ({ closest: (s) => (s === sel ? node : null) });
+  const fireClick = (node, ev) => (node.listeners.click || []).forEach((fn) => fn(ev));
+  const MORGAN = { id: 'u1', email: 'morgan@email.com' };
+  const CUR = 'old horse 42';
+  const NEXT = 'a brand new one 9';
+
+  // The real route in: the card's Password row tears the card down and hands the view to #acct-page.
+  const openPassword = () => {
+    bridge.setSignedIn(MORGAN, { first: 'Morgan', last: 'Blake' });
+    bridge.openMenu();
+    fireClick(bridge.registry['account-menu'], { target: synth('[data-acct-view]', { getAttribute: () => 'password' }) });
+    return bridge.registry['acct-page'];
+  };
+  const type = (cur, next, again) => {
+    bridge.registry['ap-cur'].value = cur;
+    bridge.registry['ap-new'].value = next;
+    bridge.registry['ap-again'].value = again;
+  };
+  const submit = () => bridge.registry['acct-form'].listeners.submit[0]({ preventDefault() {} });
+  const toasts = () => bridge.doc.body.children.filter((n) => n.className === 'save-toast');
+
+  it('the screen is the design: three fields, a meter on the new one only, one error line, one Save and a way out', () => {
+    const html = openPassword().innerHTML;
+    expect(html).toContain('<h2 class="auth-title">Change password</h2>');
+    // True, and the only reassurance this screen can honestly give: updateUser answers with a refreshed
+    // session, so the person holding the phone is not signed out by their own change.
+    expect(html).toContain('You stay signed in on this phone.');
+    expect(html).toContain('id="acct-form"');
+
+    expect(html).toContain('id="ap-cur"');
+    expect(html).toContain('data-reveal="ap-cur"');
+    expect(html).toContain('autocomplete="current-password"');
+    expect(html).toContain('placeholder="Current password"');
+
+    expect(html).toContain('id="ap-new"');
+    expect(html).toContain('data-reveal="ap-new"');
+    expect(html).toContain('data-strength');
+    expect(html).toContain('data-min="8"');
+    expect(html).toContain('placeholder="At least 8 characters"');
+
+    expect(html).toContain('id="ap-again"');
+    expect(html).toContain('>Type it again<');
+    expect(html).toContain('data-match="ap-new"');
+    expect(html).toContain('placeholder="Same password"');
+    expect(count(html, 'autocomplete="new-password"')).toBe(2);
+
+    // ONE meter, on the password being chosen. Grading a password being recalled would be noise.
+    expect(count(html, 'data-sbox')).toBe(1);
+    expect(count(html, 'id="acct-err"')).toBe(1);
+    expect(count(html, 'required')).toBe(3);
+    expect(html).toContain('id="acct-save"');
+    expect(labelOf(html, 'acct-save')).toBe('Save password');
+
+    expect(html).toContain('id="ap-forgot"');
+    expect(labelOf(html, 'ap-forgot')).toBe('Forgot your current one?');
+    // The design put data-auth-view on this control, but that delegate is bound on #auth-page and this is
+    // #acct-page: the attribute here would be dead markup, so the control is bound by id instead.
+    expect(html).not.toContain('data-auth-view');
+
+    expect(html).not.toMatch(/—|&mdash;|night/i);
+    expect(bridge.errors()).toEqual([]);
+  });
+
+  it('the four refusals run in order and nothing reaches the network until they all pass', async () => {
+    openPassword();
+    const err = bridge.registry['acct-err'];
+
+    type('', '', '');
+    await submit();
+    expect(err.textContent).toBe('Fill in every field.');
+    expect(err.hidden).toBe(false);
+
+    // A missing "type it again" is still an empty field, never a save.
+    type(CUR, NEXT, '');
+    await submit();
+    expect(err.textContent).toBe('Fill in every field.');
+
+    // Length BEFORE match: answering a short password with "they don't match" would send someone hunting
+    // for a typo that is not the problem.
+    type(CUR, 'short1', 'short2');
+    await submit();
+    expect(err.textContent).toBe('Your new password needs at least 8 characters.');
+
+    type(CUR, NEXT, NEXT + '!');
+    await submit();
+    expect(err.textContent).toBe("Those two passwords don't match.");
+
+    // The one refusal only this screen can make: GoTrue takes a re-save of the same password and answers
+    // "saved", which would be a lie about what changed.
+    type(CUR, CUR, CUR);
+    await submit();
+    expect(err.textContent).toBe("Pick a password you haven't used here.");
+
+    expect(bridge.supaCalls().length).toBe(0);
+    expect(bridge.registry['acct-page']).toBeTruthy();
+    expect(bridge.errors()).toEqual([]);
+  });
+
+  it('a wrong current password stops before updateUser and hands the button back', async () => {
+    const page = openPassword();
+    bridge.registry['acct-save'].textContent = labelOf(page.innerHTML, 'acct-save');
+    type('not it', NEXT, NEXT);
+    bridge.supaNext('signInWithPassword', { data: {}, error: { message: 'Invalid login credentials' } });
+    await submit();
+
+    expect(bridge.registry['acct-err'].textContent).toBe('That password is wrong.');
+    expect(bridge.registry['acct-err'].hidden).toBe(false);
+    // The check ran against the account that is already signed in, and NOTHING else ran.
+    expect(bridge.supaCalls().map((c) => c[0])).toEqual(['signInWithPassword']);
+    expect(bridge.supaCalls()[0][1]).toEqual({ email: 'morgan@email.com', password: 'not it' });
+    expect(bridge.registry['acct-save'].disabled).toBe(false);
+    expect(bridge.registry['acct-save'].textContent).toBe('Save password');
+    expect(bridge.registry['acct-page'].innerHTML).toContain('id="ap-cur"');
+    expect(toasts().length).toBe(0);
+    expect(bridge.errors()).toEqual([]);
+  });
+
+  it('a right current password updates the password and nothing else, reopens the card and toasts once', async () => {
+    openPassword();
+    type(CUR, NEXT, NEXT);
+    bridge.supaNext('signInWithPassword', { data: { user: MORGAN }, error: null });
+    bridge.supaNext('updateUser', { data: { user: MORGAN }, error: null });
+    await submit();
+
+    expect(bridge.supaCalls().map((c) => c[0])).toEqual(['signInWithPassword', 'updateUser']);
+    const upd = bridge.supaCalls().find((c) => c[0] === 'updateUser');
+    expect(upd[1]).toEqual({ password: NEXT });
+    // No second argument: a password change emails nobody, so it carries no redirect option either.
+    expect(upd.length).toBe(2);
+
+    expect(bridge.registry['acct-page']).toBeFalsy();
+    const card = bridge.registry['account-menu'];
+    expect(card).toBeTruthy();
+    expect(card.innerHTML).toContain('morgan@email.com');
+
+    const t = toasts();
+    expect(t.length).toBe(1);
+    expect(t[0].textContent).toBe('Password saved');
+    expect(bridge.errors()).toEqual([]);
+  });
+
+  it('a refused updateUser keeps the form and answers in the app words, not the servers', async () => {
+    const page = openPassword();
+    bridge.registry['acct-save'].textContent = labelOf(page.innerHTML, 'acct-save');
+    type(CUR, NEXT, NEXT);
+    bridge.supaNext('signInWithPassword', { data: { user: MORGAN }, error: null });
+    bridge.supaNext('updateUser', { data: null, error: { message: 'Password should be at least 6 characters.' } });
+    await submit();
+
+    // The server names its own minimum; the client is stricter, so the map answers with the only number
+    // this app ever shows.
+    expect(bridge.registry['acct-err'].textContent).toBe('Your password needs at least 8 characters.');
+    expect(bridge.registry['acct-err'].textContent).not.toContain('6');
+    expect(bridge.registry['acct-page']).toBeTruthy();
+    expect(bridge.registry['acct-page'].innerHTML).toContain('id="ap-new"');
+    expect(bridge.registry['acct-save'].disabled).toBe(false);
+    expect(bridge.registry['acct-save'].textContent).toBe('Save password');
+    expect(toasts().length).toBe(0);
+  });
+
+  it('Forgot your current one? leaves the account overlay and opens the forgot screen', () => {
+    const page = openPassword();
+    expect(page.innerHTML).toContain('id="ap-forgot"');
+    bridge.registry['ap-forgot'].listeners.click[0]();
+
+    // It LEAVES: the account page is gone and the card is not rebuilt behind it (that is the back
+    // control's job). resetPasswordForEmail works while signed in, and the link the email carries lands
+    // on the recovery router this round already ships.
+    expect(bridge.registry['acct-page']).toBeFalsy();
+    expect(bridge.registry['account-menu']).toBeFalsy();
+    const auth = bridge.registry['auth-page'];
+    expect(auth).toBeTruthy();
+    expect(auth.innerHTML).toContain('Reset your password');
+    expect(auth.innerHTML).toContain('id="fg-email"');
+    expect(auth.innerHTML).toContain('Send reset link');
+  });
+
+  it('the passwords are never trimmed, never on state, never in the markup and never logged', async () => {
+    openPassword();
+    const RAW_CUR = '  old spaces  ';
+    const RAW_NEW = '  new spaces  ';
+    type(RAW_CUR, RAW_NEW, RAW_NEW);
+    bridge.supaNext('signInWithPassword', { data: { user: MORGAN }, error: null });
+    bridge.supaNext('updateUser', { data: { user: MORGAN }, error: null });
+    await submit();
+
+    const chk = bridge.supaCalls().find((c) => c[0] === 'signInWithPassword');
+    expect(chk[1].password).toBe(RAW_CUR);   // exactly as typed: a space is a character someone chose
+    const upd = bridge.supaCalls().find((c) => c[0] === 'updateUser');
+    expect(upd[1].password).toBe(RAW_NEW);
+    expect(JSON.stringify(bridge.getState())).not.toContain('spaces');
+    expect(bridge.registry['account-menu'].innerHTML).not.toContain('spaces');
+    expect(bridge.errors()).toEqual([]);
+
+    // The catch path is the ONLY one that logs, so it is the only one that could ever log a password. A
+    // dead network gets it running (a rejected promise, not an { error } answer).
+    bridge.reset();
+    openPassword();
+    type(RAW_CUR, RAW_NEW, RAW_NEW);
+    bridge.supaNext('signInWithPassword', new Error('Failed to fetch'));
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('Something went wrong. Try again.');
+    expect(bridge.errors().length).toBe(1);
+    expect(bridge.errors()[0][0]).toBe('password change');
+    expect(JSON.stringify(bridge.errors())).not.toContain('spaces');
+    expect(String(bridge.errors())).not.toContain('spaces');
+    expect(bridge.registry['acct-save'].disabled).toBe(false);
+  });
+
+  it('the meter grades the new password on this screen too, through the one overlay delegate', () => {
+    const page = openPassword();
+    const box = bridge.node('div');
+    const lab = bridge.node('span');
+    bridge.hook('[data-sbox]', box);
+    bridge.hook('.au-slab', lab);
+    const inp = bridge.registry['ap-new'];
+    inp.setAttribute('data-strength', '');
+    inp.form = bridge.registry['acct-form'];   // unlike the reset screen, this field IS inside a form
+    const key = (v) => { inp.value = v; page.listeners.input[0]({ target: inp }); };
+
+    key('abc');
+    expect(lab.textContent).toBe('Too short');
+    expect(box.classList.contains('is-1')).toBe(true);
+
+    key('password');
+    expect(lab.textContent).toBe('OK');
+    expect(box.classList.contains('is-1')).toBe(false);
+    expect(box.classList.contains('is-2')).toBe(true);
+
+    key('Passw0rd!');
+    expect(lab.textContent).toBe('Good');
+    expect(box.classList.contains('is-2')).toBe(false);
+    expect(box.classList.contains('is-3')).toBe(true);
+    // Never "Strong": the meter reads length and variety, and neither one knows whether a password is.
+    expect(lab.textContent).not.toBe('Strong');
   });
 });

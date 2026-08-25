@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.26'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.27'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7254,8 +7254,8 @@ async function confirmSignOut() {
 // One body-appended .auth-page for all three edit screens, the same pattern as #auth-page and
 // #reset-page so partialRender can never wipe it. Its back control always rebuilds the card, the
 // email-sent state included: the design's "back to email" would re-enter a form whose password field
-// is gone. Task 4 filled the Name body, Task 5 the email pair; Task 6 fills the password one. This
-// scaffold owns the overlay, the view and the way back.
+// is gone. Task 4 filled the Name body, Task 5 the email pair, Task 6 the password one. This scaffold
+// owns the overlay, the view and the way back.
 let acctView = 'name';   // 'name' | 'email' | 'email-sent' | 'password'
 // The address the pending screen names and resends to. Memory only, like authSentEmail: a reload lands
 // back on the card, where the Pending tag (read from the session) still says a change is half-finished.
@@ -7331,7 +7331,24 @@ function renderAcctPageInner() {
         <button type="button" class="auth-alt" id="acct-resend">Resend the link</button>`;
       break;
     case 'password':
-      inner = '<h2 class="auth-title">Change password</h2>' + ACCT_ERR_HTML;
+      // The design's screen 13, plus the "Type it again" it forgot: its own reset screen has one, and a
+      // password nobody can read back is exactly where a typo goes unnoticed until the next sign-in.
+      // Only the NEW field is graded (the meter is advice for a password being chosen); the current one
+      // gets the reveal and nothing else. The sub-line is a fact, not reassurance: updateUser answers
+      // with a refreshed session, so this change does not sign anyone out of the phone in their hand.
+      inner = `<form id="acct-form" novalidate autocomplete="on">
+        <h2 class="auth-title">Change password</h2>
+        <p class="auth-sub">You stay signed in on this phone.</p>
+        <label class="auth-label" for="ap-cur">Current password</label>
+        ${authFieldHTML('ap-cur', 'data-current autocomplete="current-password" placeholder="Current password"', false)}
+        <label class="auth-label" for="ap-new">New password</label>
+        ${authFieldHTML('ap-new', `data-min="${AUTH_PASSWORD_MIN}" data-strength autocomplete="new-password" placeholder="At least ${AUTH_PASSWORD_MIN} characters"`, true)}
+        <label class="auth-label" for="ap-again">Type it again</label>
+        <input class="auth-input" id="ap-again" type="password" required data-match="ap-new" autocomplete="new-password" placeholder="Same password" />
+        ${ACCT_ERR_HTML}
+        <button type="submit" class="auth-submit" id="acct-save">Save password</button>
+        <button type="button" class="auth-alt" id="ap-forgot">Forgot your current one?</button>
+      </form>`;
       break;
     case 'name':
     default:
@@ -7359,7 +7376,16 @@ function renderAcctPageInner() {
   const form = el.querySelector('#acct-form');
   if (form) {
     if (acctView === 'email') form.addEventListener('submit', onAcctEmailSave);
+    else if (acctView === 'password') form.addEventListener('submit', onAcctPasswordSave);
     else if (acctView === 'name') form.addEventListener('submit', onAcctNameSave);
+  }
+  // The design gave this control data-auth-view="forgot", but that delegate is bound on #auth-page and
+  // this is #acct-page, so the attribute would be dead markup here. It is bound by id instead, once per
+  // paint like every other control on this overlay, and it LEAVES: resetPasswordForEmail works while
+  // signed in, and the link it sends lands on this round's recovery router.
+  if (acctView === 'password') {
+    const forgot = el.querySelector('#ap-forgot');
+    if (forgot) forgot.addEventListener('click', () => { closeAcctPage(); openAuthPage('forgot'); });
   }
   // The pending screen has no form, so its two controls are bound the same way: by id, after the swap,
   // once per paint. Resend RETURNS its promise so the caller (and a test) can await the real send.
@@ -7474,6 +7500,59 @@ async function onAcctEmailSave(e) {
     renderAcctPageInner();
   } catch (err) {
     console.error('email change', err);   // the failure only; the typed password never reaches a log
+    failed('Something went wrong. Try again.');
+  }
+}
+
+// The Password screen's save (Account handoff 2026-08-25, spec §6). Four client refusals in a deliberate
+// order, then the same two-call shape the email change uses: the current password is PROVEN with a second
+// signInWithPassword (Secure password change is OFF, so updateUser would otherwise take a new password on
+// nothing but an open session, and GoTrue has no verify-my-password endpoint). That success emits a
+// SIGNED_IN for the SAME account, which isNewSignIn reads as a repeat, so nothing re-runs. Only then does
+// updateUser go, carrying the password and nothing else.
+async function onAcctPasswordSave(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const curEl = document.getElementById('ap-cur');
+  const newEl = document.getElementById('ap-new');
+  const againEl = document.getElementById('ap-again');
+  const errEl = document.getElementById('acct-err');
+  const btn = document.getElementById('acct-save');
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
+  if (errEl) errEl.hidden = true;
+  // NEVER trimmed, on any of the three: a space is a character someone chose, and trimming one of them
+  // would make the match rule lie about two strings that really are different.
+  const current = (curEl && curEl.value) || '';
+  const next = (newEl && newEl.value) || '';
+  const again = (againEl && againEl.value) || '';
+  // The order matters. Empties first, in the shared words. Length before match, because answering a short
+  // password with "they don't match" sends someone hunting for a typo that is not the problem. Then the
+  // one refusal only this screen can make: GoTrue accepts a re-save of the password already on the
+  // account and answers "saved", which would be a lie about what changed.
+  if (!current || !next || !again) { showErr(AUTH_FILL_ALL); return; }
+  if (next.length < AUTH_PASSWORD_MIN) { showErr('Your new password needs at least ' + AUTH_PASSWORD_MIN + ' characters.'); return; }
+  if (next !== again) { showErr("Those two passwords don't match."); return; }
+  if (next === current) { showErr("Pick a password you haven't used here."); return; }
+  if (!supabaseClient || !state.account) { showErr(ACCT_SAVE_FAIL); return; }
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  const failed = (msg) => {
+    showErr(msg);
+    if (btn) { btn.disabled = false; btn.textContent = orig; }
+  };
+  try {
+    const chk = await supabaseClient.auth.signInWithPassword({ email: state.account.email, password: current });
+    // Every reason this can fail reads the same to the person holding the phone: the password they typed
+    // is not the one on the account. The server's own words stay out of it.
+    if (chk && chk.error) { failed('That password is wrong.'); return; }
+    const res = await supabaseClient.auth.updateUser({ password: next });
+    if (res && res.error) { failed(friendlyAuthError(res.error)); return; }
+    // Nothing to cache and nothing to repaint: the card shows "Change" on this row either way, and a
+    // password never appears on a surface. So it is the toast that carries the whole confirmation.
+    closeAcctPage();
+    openAccountMenu();
+    settleSaveToast(makeSaveToast('Password saved'), true, 'Password saved');
+  } catch (err) {
+    console.error('password change', err);   // the failure only; a typed password never reaches a log
     failed('Something went wrong. Try again.');
   }
 }
