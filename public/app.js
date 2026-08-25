@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.23'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.24'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -5066,7 +5066,10 @@ function makeSaveToast(text) {
     const t = document.createElement('div');
     t.className = 'save-toast';
     t.textContent = text;
-    t.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 12px;border-radius:var(--r-sm);box-shadow:var(--shadow-md);z-index:10000;font-size:14px;';
+    // z-index 12500 (Account round review, 2026-08-25): ABOVE .popup-overlay and .pd-reg-scrim at 12000,
+    // so a toast fired while a card is open is not painted under its scrim and blur, and below
+    // .live-overlay at 13000, which is the one surface that owns the screen outright.
+    t.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:8px 12px;border-radius:var(--r-sm);box-shadow:var(--shadow-md);z-index:12500;font-size:14px;';
     document.body.appendChild(t);
     return t;
   } catch { return null; }
@@ -6191,6 +6194,9 @@ function appPrompt({ title, message, value, confirmText, placeholder, danger } =
 let authMode = 'signin';                 // 'signin' | 'signup' | 'signup-sent' | 'forgot' | 'forgot-sent'
 const AUTH_PASSWORD_MIN = 8;             // Mike 2026-08-25: one number for sign-up, reset and change (the server minimum is 6)
 const AUTH_RESEND_MS = 60000;            // how long a Resend control waits before it can send again
+// The empties line, in one place: sign-in, create-account, forgot, the reset save and the name save all
+// refuse a blank field in the same words, so the copy can only ever be changed for all of them at once.
+const AUTH_FILL_ALL = 'Fill in every field.';
 // The client's email shape gate, in one place: sign-in, create-account and forgot all refuse a malformed
 // address in the same words before the server ever sees it (Account round 2026-08-25).
 const AUTH_EMAIL_RE = /^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/;
@@ -6642,7 +6648,7 @@ async function onForgotSubmit() {
   const email = (emailEl && emailEl.value || '').trim();
   const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
   if (errEl) errEl.hidden = true;
-  if (!email) { showErr('Fill in every field.'); return; }
+  if (!email) { showErr(AUTH_FILL_ALL); return; }
   if (!AUTH_EMAIL_RE.test(email)) { showErr("That email doesn't look right."); return; }
   if (!supabaseClient) { showErr('Sending is unavailable right now.'); return; }
   const orig = btn ? btn.textContent : '';
@@ -6679,7 +6685,7 @@ async function onAuthSubmit(e) {
   // Account round (2026-08-25): the design's three client rules, in its words and its order. Empties
   // first, then the email shape (before the server ever sees it), then the length gate (create-account
   // only), because sign-in must never guess at what an existing password is allowed to be.
-  if (!email || !password || (signup && (!(firstEl && firstEl.value.trim()) || !(lastEl && lastEl.value.trim())))) { showErr('Fill in every field.'); return; }
+  if (!email || !password || (signup && (!(firstEl && firstEl.value.trim()) || !(lastEl && lastEl.value.trim())))) { showErr(AUTH_FILL_ALL); return; }
   if (!AUTH_EMAIL_RE.test(email)) { showErr("That email doesn't look right."); return; }
   if (signup && password.length < AUTH_PASSWORD_MIN) { showErr('Your password needs at least ' + AUTH_PASSWORD_MIN + ' characters.'); return; }
   // Identity (spec §2): create-account captures the person. Validate first+last BEFORE we disable the
@@ -6804,7 +6810,7 @@ async function onResetSave(e) {
   const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
   if (errEl) errEl.hidden = true;
   // The design's order: empty, then length, then match.
-  if (!password || !again) { showErr('Fill in every field.'); return; }
+  if (!password || !again) { showErr(AUTH_FILL_ALL); return; }
   if (password.length < AUTH_PASSWORD_MIN) { showErr('Your new password needs at least ' + AUTH_PASSWORD_MIN + ' characters.'); return; }
   if (password !== again) { showErr("Those two passwords don't match."); return; }
   if (!supabaseClient) { showErr('Saving is unavailable right now.'); return; }
@@ -7311,7 +7317,7 @@ async function onAcctNameSave(e) {
   if (errEl) errEl.hidden = true;
   // The round's order: empties in the design's words first, then the name rule sign-up already uses, so
   // one blank field never gets answered with a sentence about how long a name has to be.
-  if (!(firstEl && firstEl.value.trim()) || !(lastEl && lastEl.value.trim())) { showErr('Fill in every field.'); return; }
+  if (!(firstEl && firstEl.value.trim()) || !(lastEl && lastEl.value.trim())) { showErr(AUTH_FILL_ALL); return; }
   const nm = splitFullNameParts(firstEl.value, lastEl.value);
   if (!nm.ok) { showErr(nm.message); return; }
   if (!supabaseClient || !state.account) { showErr(ACCT_SAVE_FAIL); return; }
@@ -7336,8 +7342,9 @@ async function onAcctNameSave(e) {
     if (state.loaded && bootPaintDone) { try { render(); } catch (_) {} }
     openAccountMenu();
     // The card behind the toast already shows the new name, so the toast only has to say the write landed.
-    // It is created and settled together: the in-flight state is the disabled "Saving…" button, not a toast.
-    settleSaveToast(makeSaveToast('Saving…'), true, 'Name saved');
+    // It is created and settled in one breath: the in-flight state is the disabled "Saving…" button, so the
+    // toast never has a pending phase to show and carries its final words from the moment it exists.
+    settleSaveToast(makeSaveToast('Name saved'), true, 'Name saved');
   } catch (err) {
     console.error('profiles name update', err);
     failed(ACCT_SAVE_FAIL);

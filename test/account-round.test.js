@@ -126,10 +126,10 @@ function loadApp() {
   // failure without a network anywhere near it.
   const supaCalls = [];
   const supaScript = {};
-  const rec = (name) => async (...a) => {
+  const rec = (name, dflt) => async (...a) => {
     supaCalls.push([name, ...a]);
     if (name in supaScript) { const v = supaScript[name]; delete supaScript[name]; return v; }
-    return { data: {}, error: null };
+    return dflt || { data: {}, error: null };
   };
   const supaStub = {
     auth: {
@@ -155,7 +155,9 @@ function loadApp() {
       }),
     }),
     channel: () => ({ on: () => ({ subscribe: noop }) }),
-    removeChannel: noop, rpc: async () => ({ data: null, error: null }),
+    // Task 4 review: recorded like every other call, keeping its old answer, so a case can assert that a
+    // path did NOT reach for an RPC (the name save must never touch connect_profile_by_name).
+    removeChannel: noop, rpc: rec('rpc', { data: null, error: null }),
   };
   const windowStub = {
     supabase: { createClient: () => supaStub },
@@ -168,6 +170,11 @@ function loadApp() {
   };
   windowStub.window = windowStub;
   const storageStub = () => ({ getItem: () => null, setItem: noop, removeItem: noop, clear: noop, key: () => null, length: 0 });
+  // Task 4 review: the screen never shows a raw server error, so console.error is the ONLY place one
+  // goes. Recorded rather than forwarded: a case asserts exactly what was logged, and a case that
+  // asserts an EMPTY log is a stronger silence guarantee than a quiet stderr in the scrollback.
+  const errorLog = [];
+  const consoleStub = Object.assign(Object.create(console), { error: (...a) => { errorLog.push(a); } });
   const sandbox = {
     window: windowStub, document: documentStub,
     localStorage: storageStub(), sessionStorage: storageStub(),
@@ -175,7 +182,7 @@ function loadApp() {
     requestAnimationFrame: noop, cancelAnimationFrame: noop,
     setTimeout: noop, clearTimeout: noop, setInterval: noop, clearInterval: noop,
     Event: class { constructor(type) { this.type = type; } },
-    console, SUPABASE_URL: 'http://localhost', SUPABASE_KEY: 'anon',
+    console: consoleStub, SUPABASE_URL: 'http://localhost', SUPABASE_KEY: 'anon',
   };
   sandbox.globalThis = sandbox; sandbox.self = sandbox;
   // Task 2: the deferred sites (the recovery router, the focus nudges) are setTimeout(0) callbacks, so a
@@ -234,6 +241,7 @@ function loadApp() {
   bridge.node = mkNode;
   bridge.hook = (sel, node) => { hooks[sel] = node; };
   bridge.supaCalls = () => supaCalls;
+  bridge.errors = () => errorLog;
   bridge.supaNext = (name, value) => { supaScript[name] = value; };
   // The sandbox QUEUES setTimeout work (see above) and only flushTimers runs it, so a cooldown callback
   // never fires on its own. A case that wants to see the far side of the cooldown swaps in an immediate
@@ -258,6 +266,7 @@ function loadApp() {
     for (const k of Object.keys(hooks)) delete hooks[k];
     for (const k of Object.keys(supaScript)) delete supaScript[k];
     supaCalls.length = 0;
+    errorLog.length = 0;
     documentStub.body.children = [];
     bridge.resetAuthVars();
     bridge.getState().authSession = null;
@@ -881,6 +890,8 @@ describe('Account round Task 3 - the account card and the sign-out confirm', () 
     for (const [view, title] of [['email', 'Change email'], ['password', 'Change password']]) {
       fireClick(bridge.registry['account-menu'], { target: synth('[data-acct-view]', { getAttribute: () => view }) });
       expect(bridge.registry['acct-page'].innerHTML).toContain(title);
+      // The registry pre-seeds every id, so only a MARKUP assertion proves the line actually ships.
+      expect(bridge.registry['acct-page'].innerHTML).toContain('id="acct-err"');
       fireClick(bridge.registry['acct-page'], { target: synth('[data-acct-back]', {}) });
     }
   });
@@ -1039,6 +1050,7 @@ describe('Account round Task 4 - Your name', () => {
     const empty = openName(null).innerHTML;
     expect(empty).toContain('id="an-first" type="text" required value=""');
     expect(empty).toContain('id="an-last" type="text" required value=""');
+    expect(bridge.errors()).toEqual([]);
   });
 
   it('an empty field is refused before the name rule, and neither rule touches the network', async () => {
@@ -1055,6 +1067,10 @@ describe('Account round Task 4 - Your name', () => {
     expect(bridge.registry['acct-err'].textContent).toBe('Enter your real first and last name.');
     expect(bridge.supaCalls().length).toBe(0);
     expect(bridge.registry['acct-page']).toBeTruthy();
+    expect(bridge.errors()).toEqual([]);
+    // One copy of the copy: the four submits that can meet a blank field all read the same const.
+    expect(count(appSrc, "'Fill in every field.'")).toBe(1);
+    expect(count(appSrc, 'showErr(AUTH_FILL_ALL)')).toBe(4);
   });
 
   it('a valid save is a plain profiles update with display_name in step and a read-back', async () => {
@@ -1069,10 +1085,10 @@ describe('Account round Task 4 - Your name', () => {
     }]);
 
     // NEVER connect_profile_by_name: that RPC relinks roster rows to the new name and unlinks nothing,
-    // so a rename would drag other people's rows along with it.
-    const from = appSrc.indexOf('async function onAcctNameSave');
-    expect(from).toBeGreaterThan(-1);
-    expect(appSrc.slice(from, appSrc.indexOf('\n}', from))).not.toContain('connect_profile_by_name');
+    // so a rename would drag other people's rows along with it. Every rpc is recorded, so this is the
+    // behaviour of the save and not a grep over the source.
+    expect(bridge.supaCalls().filter((c) => c[0] === 'rpc')).toEqual([]);
+    expect(bridge.errors()).toEqual([]);
   });
 
   it('a write that matched no row, and a write that errored, both fail visibly and toast nothing', async () => {
@@ -1088,12 +1104,15 @@ describe('Account round Task 4 - Your name', () => {
     expect(bridge.registry['account-menu']).toBeFalsy();
     expect(bridge.authInitial()).toBe('M');
     expect(bridge.registry['acct-save'].disabled).toBe(false);
+    expect(bridge.errors()).toEqual([]);   // zero rows is not an error object, so there is nothing to log
 
-    // A hard error reads the same: the Postgres text is logged, never shown.
+    // A hard error reads the same: the Postgres text is logged ONCE, and never shown.
     bridge.supaNext('profileUpdate', { data: null, error: { message: 'permission denied for table profiles' } });
     await submit();
     expect(bridge.registry['acct-err'].textContent).toBe(FAIL_LINE);
     expect(toasts().length).toBe(0);
+    expect(bridge.errors()).toEqual([['profiles name update', { message: 'permission denied for table profiles' }]]);
+    expect(bridge.registry['acct-err'].textContent).not.toContain('permission denied');
   });
 
   it('a saved name updates the cache, repaints the chip, reopens the card and toasts once', async () => {
@@ -1116,5 +1135,13 @@ describe('Account round Task 4 - Your name', () => {
     const t = toasts();
     expect(t.length).toBe(1);
     expect(t[0].textContent).toBe('Name saved');
+    // The card it reopens is a .popup-overlay at 12000 with a scrim and a blur, so a 10000 toast was
+    // painted UNDER the thing it was confirming. It has to clear that and stay under .live-overlay.
+    const z = Number((/z-index:\s*(\d+)/.exec(t[0].style.cssText) || [])[1]);
+    expect(z).toBeGreaterThan(12000);
+    expect(z).toBeLessThan(13000);
+    expect(css).toMatch(/\.popup-overlay \{[^}]*z-index: 12000/);
+    expect(css).toMatch(/\.live-overlay \{[^}]*z-index: 13000/);
+    expect(bridge.errors()).toEqual([]);
   });
 });
