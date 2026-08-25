@@ -67,12 +67,18 @@ function loadApp(opts0) {
   const contentListeners = {};
   const appContentEl = makeEl();
   appContentEl.addEventListener = (type, fn) => { (contentListeners[type] = contentListeners[type] || []).push(fn); };
+  // The picker's Escape handler is bound on DOCUMENT, not on #app-content (a keypress with focus back on
+  // <body> would never reach a container-scoped listener), so document's listeners are captured the same
+  // way — otherwise the only thing a test could check is that the source string exists, which proves
+  // nothing about whether the key actually closes the panel.
+  const docListeners = {};
   const documentStub = {
     readyState: 'loading',
     getElementById: (id) => (id === 'app-content' ? appContentEl : null),
     querySelector: () => null, querySelectorAll: () => emptyList,
     createElement: () => makeEl(), createDocumentFragment: () => makeEl(),
-    addEventListener: noop, removeEventListener: noop,
+    addEventListener: (type, fn) => { (docListeners[type] = docListeners[type] || []).push(fn); },
+    removeEventListener: noop,
     head: makeEl(), body: makeEl(), documentElement: makeEl(),
   };
   const client = {
@@ -96,7 +102,7 @@ function loadApp(opts0) {
   };
   const windowStub = {
     supabase: { createClient: () => client },
-    addEventListener: noop, removeEventListener: noop,
+    addEventListener: noop, removeEventListener: noop, dispatchEvent: noop,
     matchMedia: () => ({ matches: false, addEventListener: noop, addListener: noop, removeEventListener: noop }),
     location: { href: 'http://localhost/', search: '', hash: '', pathname: '/', reload: noop },
     navigator: { onLine: true, userAgent: 'node', serviceWorker: { register: async () => ({}) } },
@@ -115,10 +121,20 @@ function loadApp(opts0) {
   };
   const sandbox = {
     window: windowStub, document: documentStub, localStorage: localStorageStub,
+    // activateMainTab records the tab; without this the boot-paint test cannot travel the real path.
+    sessionStorage: { getItem: () => null, setItem: noop, removeItem: noop, clear: noop, key: () => null, length: 0 },
     navigator: windowStub.navigator, location: windowStub.location,
     requestAnimationFrame: noop, cancelAnimationFrame: noop,
     setTimeout: noop, clearTimeout: noop, setInterval: noop, clearInterval: noop,
     console, SUPABASE_URL: 'http://localhost', SUPABASE_KEY: 'anon',
+    // Now that document's listeners are captured, a dispatched keydown reaches EVERY handler the app binds
+    // there, including the co-pilot's `t instanceof Element` guard. A browser has Element; the vm does not.
+    // A bare constructor is the honest stub: a plain-object target is not an instance, so that handler bails
+    // exactly as it does in the browser when the key was not typed into #copilot-input.
+    Element: function Element() {},
+    // activateMainTab fires window.dispatchEvent(new Event('as-tab-changed')); windowStub.dispatchEvent is a
+    // noop, but the constructor still has to exist for the argument to be built.
+    Event: function Event(type) { this.type = type; },
   };
   sandbox.globalThis = sandbox; sandbox.self = sandbox;
   const epilogue = `
@@ -147,6 +163,8 @@ function loadApp(opts0) {
         loadTournamentHistory = async () => { globalThis.__historyLoads++; };
       },
       setActive: (id) => { state.activeTournamentId = id; },
+      // The BOOT paint: first paint runs activateMainTab(activeMainTab) with the tab restored from storage.
+      activateTab: (t) => { activateMainTab(t); },
       adoptStored: () => mgAdoptStoredTournament(),
       // What the Manage container paints right now — the same call the 15s poll makes.
       paint: () => manageContainerHTML(),
@@ -184,6 +202,11 @@ function loadApp(opts0) {
       };
       (contentListeners.click || []).forEach((fn) => fn({ target: hit, preventDefault: noop, stopPropagation: noop }));
       return (contentListeners.click || []).length;
+    },
+    // THE KEYPRESS. Same idea, on the document-level keydown the Escape close is bound to.
+    press(key) {
+      (docListeners.keydown || []).forEach((fn) => fn({ key, preventDefault: noop, stopPropagation: noop }));
+      return (docListeners.keydown || []).length;
     },
   };
 }
@@ -474,6 +497,17 @@ describe('the Finished rows read the public history, not a second derivation', (
     expect(html).toContain('&lt;b&gt;x&lt;/b&gt;');
   });
 
+  it('warms that history on the BOOT paint of the Manage tab, not only when he opens the panel', () => {
+    const app = loadApp();
+    app.bridge.seed([JUNE, AUG], { manageView: 'lead', active: AUG.id });
+    app.bridge.activateTab('manage');
+    expect(app.bridge.after().historyLoads).toBe(1);
+    // and the tab being re-entered later cannot double-fetch it
+    app.bridge.seed([JUNE, AUG], { manageView: 'lead', active: AUG.id, history: [] });
+    app.bridge.activateTab('manage');
+    expect(app.bridge.after().historyLoads).toBe(1);
+  });
+
   it('loads that history lazily on entering the hub, once, and only when a finished row needs it', () => {
     const app = loadApp();
     app.bridge.seed([JUNE, AUG], { manageView: 'players', active: AUG.id });
@@ -554,12 +588,17 @@ describe('picking a tournament', () => {
 });
 
 describe('the panel closes the way a menu closes', () => {
-  it('a tap outside it shuts it, without eating the tap that did it', () => {
+  it('a tap outside it shuts it, and does ONLY that', () => {
     const app = loadApp();
     app.bridge.seed([JULY, AUG], { active: AUG.id, pickerOpen: true });
     app.tap('[data-mg-area]', 'data-mg-area', 'players');
     expect(app.bridge.flags().pickerOpen).toBe(false);
-    expect(app.bridge.flags().manageView).toBe('players');   // the tap still navigated
+    // Dismissing a menu costs the tap that dismissed it: falling through would repaint two or three times
+    // for one tap and leave the later branches calling closest() on a node the first repaint detached.
+    expect(app.bridge.flags().manageView).toBe('lead');
+    // and the very next tap does act, so nothing is stuck
+    app.tap('[data-mg-area]', 'data-mg-area', 'players');
+    expect(app.bridge.flags().manageView).toBe('players');
   });
 
   it('the toggle closes it again on a second tap', () => {
@@ -569,8 +608,27 @@ describe('the panel closes the way a menu closes', () => {
     expect(app.bridge.flags().pickerOpen).toBe(false);
   });
 
-  it('Escape closes it, bound on document so a keypress anywhere lands', () => {
-    expect(APP_SRC).toContain("document.addEventListener('keydown', (e) => {\n      if (e.key !== 'Escape' || !mgHubPickerOpen) return;");
+  it('Escape closes it, through the real document-level keydown listener', () => {
+    const app = loadApp();
+    app.bridge.seed([JULY, AUG], { active: AUG.id, pickerOpen: true });
+    expect(app.bridge.paint()).toContain('data-mgp-panel>');     // open before the key
+    const bound = app.press('Escape');
+    expect(bound).toBeGreaterThan(0);                            // the listener exists at all
+    expect(app.bridge.flags().pickerOpen).toBe(false);
+    expect(app.bridge.paint()).toContain('data-mgp-panel hidden');
+  });
+
+  it('leaves every other key alone, and is a no-op when the panel is already shut', () => {
+    const open = loadApp();
+    open.bridge.seed([JULY, AUG], { active: AUG.id, pickerOpen: true });
+    open.press('a');
+    open.press('Enter');
+    expect(open.bridge.flags().pickerOpen).toBe(true);
+
+    const shut = loadApp();
+    shut.bridge.seed([JULY, AUG], { active: AUG.id });
+    expect(() => shut.press('Escape')).not.toThrow();
+    expect(shut.bridge.flags().pickerOpen).toBe(false);
   });
 
   it('entering any Manage area leaves it shut, so it never reopens behind a screen', () => {

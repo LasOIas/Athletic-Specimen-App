@@ -5143,6 +5143,20 @@ body.m-enter .mgh-pick:not([hidden]) > * {
   animation: m-rise calc(var(--m-elem) * var(--m-scale)) var(--e-settle) backwards;
   animation-delay: calc(var(--m-surface) * .45 * var(--m-scale) + var(--m-i, 0) * 34ms * var(--m-scale));
 }
+/* PORT NOTE: the body.m-enter pair above is the NAVIGATION case (arriving on Manage with the panel
+   already open). It cannot cover the tap that OPENS the panel: mEnter() is set only by a real
+   navigation, and leaving the rule ungated would replay the menu on every 15s poll repaint while it is
+   open. So the open gesture plays the same two animations through prod's explicit player instead -
+   mPlay(panel, 'm-in', 300) in the [data-mgp-toggle] branch - and .m-in is already on the motion-port
+   guard's allow-list. Named selectors only; no wildcard is introduced. */
+.mgh-pick.m-in {
+  transform-origin: top center;
+  animation: m-menu calc(var(--m-surface) * var(--m-scale)) var(--e-arrive) backwards;
+}
+.mgh-pick.m-in > * {
+  animation: m-rise calc(var(--m-elem) * var(--m-scale)) var(--e-settle) backwards;
+  animation-delay: calc(var(--m-surface) * .45 * var(--m-scale) + var(--m-i, 0) * 34ms * var(--m-scale));
+}
 
 /* PORT NOTE: _rounds.css:1592-1625, verbatim (the round's own comment included).
    Ships app-wide as authored, so it also restyles the public register form and the

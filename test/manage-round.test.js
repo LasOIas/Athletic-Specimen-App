@@ -371,6 +371,31 @@ describe('Task 2 hub', () => {
     expect(html).toContain('class="mgv-rmeta">2 seats<');   // an empty seat row carries no email
   });
 
+  it('the Check-in chip carries the DATE, says Today on the day, and nothing once it is past', () => {
+    const today = new Date();
+    const iso = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const shift = (n) => { const d = new Date(today); d.setDate(d.getDate() + n); return d; };
+    // A bare weekday reads identically for this Saturday and one five weeks out, so the chip names the day.
+    const soon = shift(3);
+    seedHub(bridge, { status: 'setup', registration_open: true, name: 'A', event_date: iso(soon) });
+    const label = soon.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    expect(bridge.buildManage()).toContain(`class="mgv-rmeta">Opens ${label}<`);
+    expect(bridge.buildManage()).not.toMatch(/Opens (Mon|Tue|Wed|Thu|Fri|Sat|Sun)</);
+
+    seedHub(bridge, { status: 'setup', registration_open: true, name: 'A', event_date: iso(today) });
+    expect(bridge.buildManage()).toContain('class="mgv-rmeta">Today<');
+
+    // Past, and absent: the row says nothing rather than counting backwards.
+    seedHub(bridge, { status: 'setup', registration_open: true, name: 'A', event_date: iso(shift(-2)) });
+    let html = bridge.buildManage();
+    expect(html).not.toContain('Opens ');
+    expect(html).not.toContain('>Today<');
+    seedHub(bridge, { status: 'setup', registration_open: true, name: 'A' });
+    html = bridge.buildManage();
+    expect(html).not.toContain('Opens ');
+    expect(html).not.toContain('>Today<');
+  });
+
   it('the primary action follows the phase, and a finished tournament keeps only the secondary', () => {
     seedHub(bridge, { status: 'setup', registration_open: false, name: 'A' });
     expect(bridge.buildManage()).toContain('<span>Open registration</span>');
@@ -451,6 +476,16 @@ describe('Task 2 hub', () => {
     expect(css).toContain('.mgh-track {');
     expect(css).toContain('.mgh-pick {');
     expect(css).toContain('.mgv-rmeta.is-warn {');
+    // The panel opens on a TAP, and body.m-enter is only ever set by a real navigation, so the open gesture
+    // plays through prod's explicit player (mPlay(panel, 'm-in', 300)) instead of the entrance gate.
+    expect(css).toContain('.mgh-pick.m-in {');
+    expect(css).toContain('.mgh-pick.m-in > * {');
+    expect(appSrc).toContain("mPlay(document.querySelector('#tab-manage [data-mgp-panel]'), 'm-in', 300)");
+    // and no prototype wildcard came along with it (comments stripped: the PORT NOTE names the wildcards it
+    // rewrote away, and a note is not a rule)
+    for (const bad of ['[class*="-pick"]', '[class*="-menu"]', '[class*="dropdown"]']) {
+      expect(css.replace(/\/\*[\s\S]*?\*\//g, '')).not.toContain(bad);
+    }
     expect(css).toContain('.mgh-scope > .mgh-mark {');
     // Comments stripped: the PORT NOTES deliberately name the two classes these guards ban.
     const rules = css.replace(/\/\*[\s\S]*?\*\//g, '');

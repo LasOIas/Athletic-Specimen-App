@@ -7347,9 +7347,10 @@ function mgHubActsHTML(t) {
     + `<p class="mgr-status" id="mgh-status" role="status" aria-live="polite"></p></div>`;
 }
 
-// Needs you, with the fix in the row. Shared with the tournament page (headLabel differs). Titles are
-// model-controlled (counts and fixed copy) so they emit raw; subs may embed team or tournament NAMES and are
-// escaped. `.is-go` = a jump (neutral ring); the accent ring is reserved for the two items that write.
+// Needs you, with the fix in the row. Shared with the tournament page (headLabel differs). Titles emit RAW:
+// they are fixed copy plus counts, and the one value interpolated from a DB row is `matches.net`, a numeric
+// column ("Net 3 has no score"). Subs may embed team or tournament NAMES and are escaped. `.is-go` = a jump
+// (neutral ring); the accent ring is reserved for the two items that write.
 function mgNeedsRowsHTML(items, headLabel) {
   if (!items.length) return '';
   const hook = (it) => it.target.view ? ` data-mgt-view="${it.target.view}"`
@@ -7419,12 +7420,14 @@ function buildManagePageHTML() {
   const pickupChip = days.length
     ? (days.length === 1 ? 'Next up ' + mgHubShortDate(days[0].day || days[0].date) : days.length + ' scheduled')
     : 'None yet';
-  // Check-in is the day itself: event_date in the future names the weekday, today says Today, and a past or
-  // absent date says nothing. There is no check-in OPEN time column, so no hour is ever printed.
+  // Check-in is the day itself: today says Today, a future date names the DAY, and a past or absent date
+  // says nothing. The weekday alone ("Opens Sat") reads identically for this Saturday and for one five
+  // weeks out, so the chip carries the same short date the Pickup chip does. There is no check-in OPEN
+  // time column, so no hour is ever printed.
   const today = mgLocalTodayStr();
   const ed = (t && tournamentHasEventDate() && t.event_date) ? String(t.event_date).slice(0, 10) : '';
   const checkinChip = ed
-    ? (ed === today ? 'Today' : (ed > today ? 'Opens ' + (mgEventDateLabel(ed).split(' ')[0] || '') : ''))
+    ? (ed === today ? 'Today' : (ed > today ? 'Opens ' + mgHubShortDate(ed) : ''))
     : '';
   // The CLUB roster, honestly — Players is not a per-tournament screen.
   const roster = (state.players || []).length;
@@ -11768,6 +11771,11 @@ function activateMainTab(tab) {
   // e2e catch 2026-07-11: entering Manage glues the loaded tournament data to the resolved tournament
   // (activeTournamentId only ever followed the old shell's select flow before this).
   if (tab === 'manage' && state.isAdmin) mgSyncActiveTournament();
+  // Round 2026-08-25: the hub's picker names finished tournaments from state.tournamentHistory. This is the
+  // BOOT paint too (first paint runs activateMainTab(activeMainTab)), so the cache is warm before he opens
+  // the panel rather than after. Guarded inside by tournamentHistoryLoading + Array.isArray, so the area
+  // entry and the toggle can never double-fetch behind it.
+  if (tab === 'manage' && state.isAdmin) mgHubEnsureHistory();
   // Slice 1: lazy-load completed-tournament history the first time History opens (read-only, cached on state).
   if (tab === 'history' && typeof state.tournamentHistory === 'undefined' && !state.tournamentHistoryLoading) {
     loadTournamentHistory().then(() => {
@@ -11974,6 +11982,11 @@ function attachHandlers() {
         mgHubPickerOpen = !mgHubPickerOpen;
         if (mgHubPickerOpen) mgHubEnsureHistory();   // Finished rows want the shared history cache
         repaintManage();
+        // The panel is a MENU, not a page entrance. body.m-enter is set only by a real navigation, so the
+        // CSS entrance would never fire on the tap that opens it — and leaving it ungated would replay the
+        // panel on every 15s poll repaint while it is open. Played explicitly on the freshly painted node
+        // instead, which is exactly what mPlay exists for.
+        if (mgHubPickerOpen) mPlay(document.querySelector('#tab-manage [data-mgp-panel]'), 'm-in', 300);
         return;
       }
       const mgpPick = e.target.closest('[data-mgp-pick]');
@@ -11982,9 +11995,14 @@ function attachHandlers() {
         mgPickTournament(mgpPick.getAttribute('data-mgp-pick') || '');
         return;
       }
-      // A tap anywhere outside the panel closes it. Deliberately does NOT return: the tap still does
-      // whatever it was going to do, so dismissing the picker never costs a second tap.
-      if (mgHubPickerOpen && !e.target.closest('[data-mgp-panel]')) { mgHubPickerOpen = false; repaintManage(); }
+      // A tap anywhere outside the panel closes it, and that is ALL it does. Falling through instead would
+      // repaint two or three times for one tap and leave every later branch calling closest() on a node the
+      // first repaint already detached. Dismissing a menu costing one tap is the platform-normal behaviour.
+      if (mgHubPickerOpen && !e.target.closest('[data-mgp-panel]')) {
+        mgHubPickerOpen = false;
+        repaintManage();
+        return;
+      }
       // The quick actions + the two needs-you FIXES. Both write and read back (mgHubFlipRegistration /
       // mgHubReuseRules); #mgh-status carries a refusal so a denied write is never silent.
       const mghReg = e.target.closest('[data-mgh-reg]');
