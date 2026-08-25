@@ -296,12 +296,36 @@ describe('the Save button writes every dirty field in ONE call', () => {
 });
 
 describe('the Save button is inert until something changed', () => {
-  it('issues NO write and says nothing when every field still matches the tournament', async () => {
+  it('issues NO write and claims nothing new when every field still matches the tournament', async () => {
     const h = openRegistration({ row: { venmo_link: 'https://venmo.com/u/as', buy_in: '$80 a team' } });
     const ok = await h.bridge.saveAll('registration');
     expect(ok).toBe(false);
     expect(h.writes().length).toBe(0);
-    expect(h.st.textContent).toBe('');
+    // (2026-08-25) The status line is the screen's RESTING state now, seeded "Saved" in the builder and
+    // flipped to "Unsaved changes" by mgSyncSaveButton the moment a value differs. Nothing was written, so
+    // it stays exactly where it was — a clean screen says "Saved", not "Saving…" and not an error.
+    expect(h.st.textContent).toBe('Saved');
+    expect(h.st.classList.contains('is-bad')).toBe(false);
+  });
+
+  it('the status line says Unsaved changes the moment a value differs, and Saved when it matches again', () => {
+    const h = openRegistration();
+    h.venmo.value = 'https://venmo.com/u/as';
+    h.bridge.syncBtn();
+    expect(h.st.textContent).toBe('Unsaved changes');
+    h.venmo.value = '';
+    h.bridge.syncBtn();
+    expect(h.st.textContent).toBe('Saved');
+  });
+
+  it('never talks over an error line: a refused write stays on screen through the next sync', async () => {
+    const h = openRegistration({ applyWrites: false });
+    h.venmo.value = 'https://venmo.com/u/as';
+    await h.bridge.saveAll('registration');
+    expect(h.st.textContent).toBe(FAILED);
+    h.bridge.syncBtn();                      // the value is still dirty — but the failure outranks it
+    expect(h.st.textContent).toBe(FAILED);
+    expect(h.st.classList.contains('is-bad')).toBe(true);
   });
 
   it('renders disabled and wakes only when a value differs from the LOADED tournament', () => {

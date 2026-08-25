@@ -751,7 +751,9 @@ describe('the 15s background poll', () => {
     const { bridge } = loadApp();
     bridge.seed([JULY, AUG], { manageView: 'tournament', active: AUG.id, mgtView: 'registration' });
     const html = bridge.paint();
-    expect(html).toContain('class="pd-htitle">Registration<');
+    // (2026-08-25) The screen is titled "Registration & public page" now — the row that opens it says
+    // the same thing, because what the admin edits there is what a player sees.
+    expect(html).toContain('class="pd-htitle">Registration &amp; public page<');
     expect(html).not.toContain('data-mgp-pick');
   });
 

@@ -2329,11 +2329,11 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgco-pickname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ── Manage → Tournament (Task 5, pick R2 sub-hub + pick R7 Registration) — r10-manage t-b + r-b mockups.
-   The sub-hub REUSES the mg-row grammar; the mgt-stage line + mgt-on green word are the additions. The
+   The sub-hub REUSES the mg-row grammar; the mgt-on green word is the addition. The
    Registration view adds the mgr-* announcement box, the mg-sw 44×26 switch, and reuses pk-fld/pk-fl/pk-fv
-   underline fields for venmo/buy-in/team size. Flat on stone, §51 matte (soft shadow, no glow). ── */
-.mgt-stage { font-size: 12.5px; color: var(--muted); margin: -2px 0 6px 41px; }
-.mgt-stage + .mg-row { border-top: none; }
+   underline fields for venmo/buy-in/team size. Flat on stone, §51 matte (soft shadow, no glow).
+   (The .mgt-stage sub-line pair was deleted with the markup on 2026-08-25 — the six-step track states
+   where the tournament is now, and a rule matching nothing is a rule someone re-derives later.) ── */
 .mgt-on { color: var(--live-ink); font-weight: 600; }
 /* §38 pick C (2026-07-12): the announcement is a clean read block (tap anywhere → the full-screen editor)
    with a quiet Edit affordance, not an inline textarea. Plain text, line breaks preserved. */
@@ -5258,6 +5258,71 @@ body.m-enter .mgh-pick:not([hidden]) > * {
    here and the geometry stays prod's. The round's .mgs-b:hover accent wash is already
    live verbatim as #mgss-sheet .mgv-scb:hover.
    The .mgh-* members are ported as authored and match nothing until the hub lands. */
+
+/* PORT NOTE: _rounds.css:2247-2305 verbatim (the round's own comment included) — Manage › Tournament,
+   the page's own furniture. Placed HERE, inside the 2026-08-25 hub block and ABOVE the button restyle
+   below, for the same reason the hub's title block is: the restyle is written to sit on top of this
+   geometry, and appending after it would silently undo it. Nothing is dropped — every member below has
+   markup emitted by buildManageTournamentHTML. The four-column .tv-stats grid is the round's; the track
+   above the tiles is the hub's .mgh-track, already ported, so it is not restated here. */
+/* ============================================================
+   Round 2026-08-24 — "i want to redo this whole page, make it better, look
+   cleaner and cover everything imaginable related to the tournament"
+   (Manage › Tournament).
+
+   It was seven undifferentiated rows. No sense of where the tournament was,
+   no numbers, no priority, and half of what running one actually takes —
+   check-in, the QR sign at the door, the roster, admins, the activity log,
+   the player's-eye view — lived on other pages entirely.
+
+   It is now one page for one tournament, in the Manage hub's own vocabulary:
+   where it is (the same phase track), what it adds up to (four numbers),
+   what wants you now, then every surface grouped by the question it answers
+   — sign-ups, play, people, the event, after it ends — and the two
+   irreversible things last, behind their own rule.
+   ============================================================ */
+.tv-when {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.tv-when b { color: var(--ink); font-weight: 700; }
+
+.tv-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 7px;
+  margin: 14px 0 2px;
+}
+.tv-stat {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px 10px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .05), 0 0 0 1px oklch(0.91 0.005 75);
+}
+.tv-sn {
+  font-family: var(--font-display, 'Barlow Semi Condensed', sans-serif);
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.tv-sn small { font-size: 12.5px; font-weight: 700; color: var(--muted); }
+.tv-sl {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tv-stat.is-attn .tv-sn { color: var(--accent); }
+.tv-stat.is-live .tv-sn { color: var(--live-ink); }
+.tv-note { margin: 14px 2px 0; font-size: 12px; color: var(--muted); text-wrap: pretty; }
+
 /* ============================================================
    Round 2026-08-23 — "redo the styling of the buttons, highlighting, checkmarks"
    (the app itself, every screen). The controls were drawn as outlines: a flat

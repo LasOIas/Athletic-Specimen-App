@@ -595,3 +595,110 @@ describe('Task 3 live strip', () => {
     expect(css.replace(/\/\*[\s\S]*?\*\//g, '')).not.toContain('.mgh-lnm');
   });
 });
+
+// ── Task 4: Manage › Tournament — the one-page control room (screen 25, mgts-hub) ────────────────────
+// It was seven undifferentiated rows under a stage word. It is now: the when-line, the SAME six-step
+// track the hub draws, four numbers, a tournament-scoped Needs-you list, then every surface grouped by
+// the question it answers, and the two irreversible things last behind their own rule.
+describe('Task 4 the tournament page', () => {
+  it('the tournament page: when-line, track, four tiles, scoped needs, grouped rows, note, danger last', () => {
+    seedHub(bridge, { status: 'setup', registration_open: true, name: 'August 2026 Tournament', event_date: '2026-08-22', venue: 'Washington Park', team_size: 4, buy_in: '$80 a team', net_count: 3, team_cap: 12 },
+      { teams: [{ id: 't1', name: 'Block Party', paid: false }, { id: 't2', name: 'X', paid: true }] });
+    const html = bridge.buildTournament();
+    expect(html).toContain('class="tv-when"><b>Sat Aug 22</b> · Washington Park · 4s co-ed · $80 a team<');
+    expect(html).not.toContain('10:00');
+    expect(count(html, 'class="mgh-step')).toBe(6);
+    expect(html).toMatch(/class="tv-stat[^"]*"><span class="tv-sn">2<small>\/12<\/small><\/span><span class="tv-sl">Teams in/);
+    expect(html).toContain('<span class="tv-sn">1<small>/2</small></span><span class="tv-sl">Paid</span>');
+    expect(html).toContain('<span class="tv-sn">3</span><span class="tv-sl">Nets</span>');
+    expect(html).toContain('<span class="tv-sn">0</span><span class="tv-sl">Games</span>');
+    expect(html).not.toContain('/18');
+    for (const h of ['Sign-ups', 'Play', 'The event', 'After it ends']) expect(html).toContain(`>${h}<`);
+    expect(html).toContain('Registration &amp; public page');
+    expect(html).toContain('data-mgt-view="teamadd"');
+    expect(html).not.toContain('data-mgt-view="scoresheet"'); // omitted before the draw
+    expect(html).toContain('data-mgt-announce');
+    expect(html).not.toContain('closes ');
+    expect(html).toContain('12-team cap');
+    expect(html).toContain('Everything on this page edits August 2026 Tournament only. Switch tournaments from the title on Manage.');
+    expect(html.indexOf('data-mgtl-new')).toBeGreaterThan(html.indexOf('data-mgt-view="closeout"'));
+    expect(html.indexOf('mgv-danger')).toBeGreaterThan(html.indexOf('data-mgtl-new'));
+    expect(html).not.toContain('mgt-stage');
+  });
+
+  // The Needs-you list here is the TOURNAMENT scope: the club-level items (the Venmo link, "no pickup day
+  // set") belong to the hub and must not follow the admin into a page that edits one event.
+  it('the Needs-you list is tournament-scoped, so the hub-only items never appear here', () => {
+    seedHub(bridge, { status: 'setup', registration_open: true, name: 'August', venmo_link: '', buy_in: '' },
+      { teams: [], pickupDays: [] });
+    const html = bridge.buildTournament();
+    expect(html).toContain('>Needs you<');
+    expect(html).toContain("Entry fee isn't set");   // titles emit RAW (fixed copy + counts)
+    expect(html).not.toContain('Add the Venmo link');
+    expect(html).not.toContain('No pickup day set');
+  });
+
+  // The Score sheet row is the SAME destination as Pools & schedule, so it only earns its own row once
+  // there are pool games to enter. Before the draw it would open an empty board.
+  it('the Score sheet row appears only once pool matches exist, and shares the pools destination', () => {
+    const seedPools = (matches) => seedHub(bridge, { status: 'pools', name: 'August', net_count: 2 }, {
+      teams: [{ id: 't1', name: 'A', paid: true }, { id: 't2', name: 'B', paid: true }],
+      pools: [{ id: 'p1', label: 'A' }], matches,
+    });
+    seedPools([]);
+    expect(bridge.buildTournament()).not.toContain('Score sheet');
+    seedPools([{ id: 'g1', phase: 'pool', pool_id: 'p1', net: 1, queue_order: 1, status: 'scheduled', team_a_id: 't1', team_b_id: 't2' }]);
+    const html = bridge.buildTournament();
+    expect(html).toContain('Enter pool results as each game finishes');
+    expect(count(html, 'data-mgt-view="pools"')).toBeGreaterThanOrEqual(2);
+    expect(html).toContain('<span class="tv-sn">0<small>/1</small></span><span class="tv-sl">Games</span>');
+  });
+
+  it('Player view renders only when the active tournament is the public one', () => {
+    seedHub(bridge, { id: 'A', status: 'setup', registration_open: true, name: 'August' });
+    bridge.getState().tournaments.push({ id: 'B', name: 'The live one', status: 'pools' });
+    expect(bridge.buildTournament()).not.toContain('data-nav-tab="tournament"');
+    seedHub(bridge, { id: 'A', status: 'pools', name: 'August' });
+    const html = bridge.buildTournament();
+    expect(html).toContain('data-nav-tab="tournament"');
+    expect(html).toContain('Open this tournament the way players see it');
+  });
+
+  // Every clause the schema cannot back is DROPPED rather than invented (Mike's standing ruling). A
+  // tournament loaded WITHOUT the 0057/0058 columns prints no date, no cap and no venue at all.
+  it('drops the date, the cap and the venue when their columns are not loaded', () => {
+    const st = bridge.getState();
+    Object.assign(st, {
+      tournaments: [{ id: 'T', name: 'August', status: 'setup', registration_open: true, team_size: 4, buy_in: '$80 a team', net_count: 2 }],
+      activeTournamentId: 'T', tournamentTeams: [], tournamentPools: [], tournamentMatches: [],
+      players: [], checkedIn: [], pickupDays: [], isAdmin: true,
+    });
+    const html = bridge.buildTournament();
+    expect(html).toContain('class="tv-when">4s co-ed · $80 a team<');
+    expect(html).not.toContain('-team cap');
+    expect(html).not.toContain('Washington Park');
+    expect(html).toContain('<span class="tv-sn">0</span><span class="tv-sl">Teams in</span>');
+  });
+
+  it('the Announcement row opens the editor, and the delete confirm is red', () => {
+    expect(appSrc).toContain("data-mgt-announce]')) { openManageEditor('announcement')");
+    expect(appSrc).toMatch(/function appPrompt\(\{[^}]*danger[^}]*\}/);
+    expect(appSrc).toContain("(danger ? ' mgv-del' : '')");
+    expect(appSrc).toMatch(/confirmText: 'Delete tournament',\s*\n\s*danger: true,/);
+    expect(css).toContain('.kc-confirm.mgv-del');
+  });
+
+  it('the Registration screen is titled for the public page and rests on a Saved status line', () => {
+    seedHub(bridge, { status: 'setup', registration_open: true, name: 'August' });
+    const reg = bridge.buildReg();
+    expect(reg).toContain('class="pd-htitle">Registration &amp; public page<');
+    expect(reg).toContain('class="mgr-status" id="mgr-status" role="status" aria-live="polite">Saved<');
+    expect(bridge.buildSettings()).toContain('id="mges-status" role="status" aria-live="polite">Saved<');
+  });
+
+  it('the page CSS ships', () => {
+    ['.tv-when {', '.tv-stats {', '.tv-stat {', '.tv-sn {', '.tv-sl {', '.tv-note {',
+      '.tv-stat.is-attn .tv-sn', '.tv-stat.is-live .tv-sn'].forEach((sel) => expect(css).toContain(sel));
+    expect(css.replace(/\/\*[\s\S]*?\*\//g, '')).not.toContain('.mgt-stage');
+  });
+});

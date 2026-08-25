@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.8'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6123,7 +6123,12 @@ function appNotice({ title, message, okText } = {}) {
 
 // A styled text-input dialog (mirrors appConfirm; reuses the .kc-card modal) — resolves to the entered
 // string, or null on cancel. Used for the NF-3 team rename (no native prompt()).
-function appPrompt({ title, message, value, confirmText, placeholder } = {}) {
+// `danger` (round 2026-08-25) paints the confirm button red, the way appConfirm's own danger flag does.
+// The type-the-name prompts are the app's only irreversible controls, and an accent button on a dialog
+// headed "Delete this tournament" said the opposite of what the button was about to do. It rides
+// .kc-confirm.mgv-del — the same red the Delete button in the danger zone already carries — so the
+// control the admin taps last looks like the one he tapped first.
+function appPrompt({ title, message, value, confirmText, placeholder, danger } = {}) {
   return new Promise((resolve) => {
     const prev = document.getElementById('app-prompt-modal');
     if (prev) prev.remove();
@@ -6136,7 +6141,7 @@ function appPrompt({ title, message, value, confirmText, placeholder } = {}) {
       + (title ? '<div class="kc-name">' + escapeHTML(title) + '</div>' : '')
       + (message ? '<div class="kc-q">' + escapeHTML(message) + '</div>' : '')
       + '<input type="text" id="app-prompt-input" class="reg-input" style="width:100%;margin:8px 0;" value="' + escapeHTML(value || '') + '" placeholder="' + escapeHTML(placeholder || '') + '" autocapitalize="words" autocomplete="off" />'
-      + '<button type="button" class="kc-confirm" id="app-prompt-ok">' + escapeHTML(confirmText || 'Save') + '</button>'
+      + '<button type="button" class="kc-confirm' + (danger ? ' mgv-del' : '') + '" id="app-prompt-ok">' + escapeHTML(confirmText || 'Save') + '</button>'
       + '<button type="button" class="kc-cancel" id="app-prompt-cancel">Cancel</button>';
     document.body.appendChild(el);
     const input = el.querySelector('#app-prompt-input');
@@ -8435,7 +8440,7 @@ function mgtGenerateTeams() {
 
 // ── Task 5: Tournament sub-hub (session-10 pick R2) + Registration (pick R7) ─────────────────────────
 // Mockups r10-manage/t-b (sub-hub) + r-b (registration). The sub-hub reuses the mg-row grammar (extend,
-// don't duplicate) with a data-mgt-view delegate; the header + stage sub-line are the mgt-* additions. The
+// don't duplicate) with a data-mgt-view delegate; the header is the mgt-* addition. The
 // Registration view leads with an EDITABLE announcement textarea, a Copy-for-GroupMe CTA, the Registration-
 // open switch (mg-sw pill → the tdbSetTournamentFields write path), and venmo/buy-in/team-size
 // fields (pk-fld underline grammar, save-on-blur via tdbSetTournamentFields). The lead tournament is the T1
@@ -8458,9 +8463,12 @@ function mgAnnouncementValue(t) {
   return (typeof a === 'string' && a.trim()) ? a : mgDefaultAnnouncement(t);
 }
 
-// The muted stage sub-line under the sub-hub title, by tournament status.
-const MGT_STAGE_SUBLINE = { setup: 'Setup · registration phase', pools: 'Pool play', bracket: 'Bracket', completed: 'Completed' };
-const MGT_SUB_TITLES = { registration: 'Registration', teams: 'Teams & payment', pools: 'Pools & schedule', bracket: 'Bracket & scores', settings: 'Event settings', rules: 'Rules sheet', closeout: 'Close out' };
+// The sub-view titles. (The muted MGT_STAGE_SUBLINE line that used to sit under the page title retired
+// with the 2026-08-25 round: the six-step track states where the tournament is in the hub's own
+// vocabulary, and a second word for the same fact could only ever be a place for the two to disagree.)
+// `teamadd` has no builder until the Add-a-team screen lands, so it is here to TITLE the honest
+// placeholder rather than let it fall through to the generic "Tournament".
+const MGT_SUB_TITLES = { registration: 'Registration & public page', teams: 'Teams & payment', teamadd: 'Add a team', pools: 'Pools & schedule', bracket: 'Bracket & scores', settings: 'Event settings', rules: 'Rules sheet', closeout: 'Close out' };
 
 // One sub-hub row. Mirrors mgRowHTML but carries data-mgt-view (opens a tournament sub-view) instead of
 // data-mg-area. subHTML is emitted RAW — callers pre-escape any user-derived content. metaHTML is the
@@ -8611,8 +8619,20 @@ function buildMgTournamentNewHTML() {
     + `<p class="pk-msg" id="mgnt-msg" role="alert"></p>`;
 }
 
-// The plain sub-hub (mockup t-b): header (back + the active tournament name, Barlow 22 via
-// pd-htitle) + a muted stage sub-line + SEVEN status-inline rows. No cards, no inline controls at this level.
+// ── The tournament's control page (design round 2026-08-24, screen mgts-hub; built 2026-08-25) ────────
+// Mike: "i want to redo this whole page, make it better, look cleaner and cover everything imaginable
+// related to the tournament". It was seven undifferentiated rows under a stage word: no sense of where the
+// tournament was, no numbers, no priority.
+//
+// It is one page for ONE tournament, in the Manage hub's own vocabulary: the when-line (which event this
+// is), the SAME six-step track the hub draws (mgHubTrackHTML — one source, so the two surfaces can never
+// disagree about where the event stands), four numbers, what wants him now (the hub's attention engine at
+// tournament scope), then every surface grouped by the question it answers — sign-ups, play, the event,
+// after it ends — the create control, the scope sentence, and the two irreversible things last inside
+// their own rule.
+//
+// The design's "people" group is NOT built here: check-in, the roster and the admins are Manage-level
+// areas that belong to the club rather than to one event, and the QR sign still carries C81's dead URL.
 function buildManageTournamentHTML() {
   const t = mgActiveTournament();
   // Round 2026-08-04: back is the Manage hub again, unconditionally. The interim picker sat INSIDE this
@@ -8634,7 +8654,6 @@ function buildManageTournamentHTML() {
   const teams = state.tournamentTeams || [];
   const nTeams = teams.length;
   const unpaid = teams.filter((x) => !x.paid).length;
-  const stage = MGT_STAGE_SUBLINE[t.status] || MGT_STAGE_SUBLINE.setup;
   // Round 2026-08-03: every subtitle carries REAL status and every row a right-hand state word. Mike's
   // ruling on the prototype's "6 of 12 teams · closes Fri 6 PM" and "$480 of $640 collected": there is no
   // team-cap column, no registration-close-time column, and buy_in is free display TEXT ("$80 per team"),
@@ -8648,14 +8667,54 @@ function buildManageTournamentHTML() {
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const nets = Number(t.net_count) > 0 ? Number(t.net_count) : 0;
 
-  const regSub = t.registration_open
-    ? `<span class="mgt-on">Open</span> · ${plural(nTeams, 'team')} in`
-    : `Closed · ${plural(nTeams, 'team')} in`;
+  // ── The when-line (round 2026-08-25): the facts that answer "which event am I looking at" ───────────
+  // DROPPED from the design's line, each for the same reason — no column behind it: the time of day
+  // (there is no start_time) and "closes Fri Aug 21" (there is no registration_close_at). The date and
+  // the venue are gated on their migrations having landed (0057 / 0058), so a row loaded without them
+  // prints neither rather than an empty slot or an invented one.
+  const size = Number(t.team_size) || 4;
+  const buyIn = (t.buy_in != null && String(t.buy_in).trim()) ? String(t.buy_in).trim() : '';
+  const when = [
+    (tournamentHasEventDate() && mgEventDateLabel(t.event_date)) ? `<b>${escapeHTML(mgEventDateLabel(t.event_date))}</b>` : '',
+    (tournamentHasVenue() && t.venue && String(t.venue).trim()) ? escapeHTML(String(t.venue).trim()) : '',
+    `${size}s co-ed`,
+    buyIn ? escapeHTML(buyIn) : '',
+  ].filter(Boolean).join(' · ');
+
+  // ── The four numbers ───────────────────────────────────────────────────────────────────────────────
+  // Teams in carries its cap ONLY behind the 0057 column holding a real value — "2/undefined" is worse
+  // than "2". Games carries a denominator only once matches EXIST: before the draw the schedule has no
+  // length, and the design's "0/18" was arithmetic over a pool count nobody had entered yet. Paid turns
+  // accent while anyone still owes; Games turns live-green only while the event is actually being played.
+  const paid = nTeams - unpaid;
+  const cap = (tournamentHasTeamCap() && Number(t.team_cap) > 0) ? Number(t.team_cap) : 0;
+  const gamesDone = finalCt(matches);
+  const gamesTotal = matches.length;
+  const tile = (n, label, cls) => `<div class="tv-stat${cls || ''}"><span class="tv-sn">${n}</span><span class="tv-sl">${label}</span></div>`;
+  const stats = `<div class="tv-stats">`
+    + tile(`${nTeams}${cap ? `<small>/${cap}</small>` : ''}`, 'Teams in')
+    + tile(`${paid}<small>/${nTeams}</small>`, 'Paid', unpaid ? ' is-attn' : '')
+    + tile(String(nets), 'Nets')
+    + tile(gamesTotal ? `${gamesDone}<small>/${gamesTotal}</small>` : '0', 'Games', (t.status === 'pools' || t.status === 'bracket') ? ' is-live' : '')
+    + `</div>`;
+
+  // Needs you, TOURNAMENT scope: the same engine the hub runs, minus the club-level items (the Venmo
+  // link, "no pickup day set"). This page edits one event, and a club chore listed here would be a
+  // to-do none of the rows below can action.
+  const needs = mgNeedsRowsHTML(manageNeedsYouModel(manageNeedsYouCtx('tournament')), 'Needs you');
+
+  const regSub = (t.registration_open ? `<span class="mgt-on">Open</span>` : 'Closed') + ' · what players see';
   const teamsSub = nTeams
-    ? `${plural(nTeams, 'team')} registered · ${unpaid ? plural(unpaid, 'team') + ' unpaid' : 'all paid'}`
-    : 'No teams yet';
+    ? `${nTeams} registered · ${unpaid ? unpaid + ' unpaid' : 'all paid'} · rosters and buy-in`
+    : 'No teams yet · rosters and buy-in';
   let poolsSub, poolsMeta;
-  if (!pools.length) { poolsSub = nets ? `Not drawn · ${plural(nets, 'net')} ready` : 'Not drawn'; poolsMeta = 'To do'; }
+  if (!pools.length) {
+    // Pre-draw, the row states what the draw WILL do — mgPoolsSplitClause runs tdbDrawPools' own clamp —
+    // rather than echoing a pool count nobody has set yet. '' (fewer than two teams) drops the clause.
+    const split = mgPoolsSplitClause(nTeams, Number(t.pool_count) > 0 ? Number(t.pool_count) : Math.max(1, Math.round(nTeams / 6)), nets || 1);
+    poolsSub = split ? `Not drawn · ${escapeHTML(split)}` : 'Not drawn';
+    poolsMeta = 'To do';
+  }
   else if (!poolMatches.length) { poolsSub = `Drawn, not started · ${plural(pools.length, 'pool')}`; poolsMeta = 'Ready'; }
   else {
     const done = finalCt(poolMatches);
@@ -8669,24 +8728,42 @@ function buildManageTournamentHTML() {
     bracketSub = `${done} of ${plural(mainMatches.length, 'game')} final`;
     bracketMeta = (t.status === 'completed' || done === mainMatches.length) ? 'Done' : 'Live';
   }
-  const size = Number(t.team_size) || 4;
-  const buyIn = (t.buy_in != null && String(t.buy_in).trim()) ? String(t.buy_in).trim() : '';
-  const settingsSub = `${size}s co-ed${buyIn ? ' · ' + escapeHTML(buyIn) : ''} · ${escapeHTML(mgRuleLine(scoringRulesFor('main', t)))}`;
+  // Event settings states the shape of the event. The cap clause is column-gated the same way the tile is,
+  // and the nets clause drops when net_count is unset rather than printing "0 nets".
+  const settingsSub = [`${size}s co-ed`, buyIn ? escapeHTML(buyIn) : '', cap ? `${cap}-team cap` : '', nets ? plural(nets, 'net') : ''].filter(Boolean).join(' · ');
   // "N sections" is real: rulesToHTML treats a "## " line as a section heading, so the count is the sheet's
   // own structure. The prototype's "updated Jul 28" is NOT rendered — tournaments.updated_at moves on any
-  // field write, so dating the rules from it would be a lie.
+  // field write, so dating the rules from it would be a lie. Both scoring lines are stated because pool
+  // play and the bracket are played to different numbers and the sheet is where that is settled.
   const rulesText = typeof t.rules === 'string' ? t.rules : '';
   const rulesSections = rulesText ? rulesText.split(/\r?\n/).filter((l) => l.trim().startsWith('## ')).length : 0;
-  const rulesSub = rulesText
-    ? (rulesSections ? `${plural(rulesSections, 'section')} · live on the Rules page` : 'Live on the Rules page')
-    : 'Not written yet';
-  const rows = mgtRowHTML('registration', 'Registration', regSub, t.registration_open ? 'Open' : 'Closed')
+  const rulesSub = `${escapeHTML(mgRuleLine(scoringRulesFor('pool', t)))} · ${escapeHTML(mgRuleLine(scoringRulesFor('main', t)))}`
+    + (rulesText ? ` · ${rulesSections ? plural(rulesSections, 'section') + ' live' : 'live'}` : ' · not written yet');
+  // The players'-eye view is offered only when THIS tournament is the one the public page resolves to
+  // (publicLiveTournament). Anything else and the row would open a different event under this one's name.
+  const showPlayerView = (publicLiveTournament() || {}).id === t.id;
+  // Every surface grouped by the question it answers, in the order the day runs. The Score sheet row is
+  // the SAME destination as Pools & schedule and earns its own row only once there are pool games to
+  // enter — before the draw it would open an empty board. Announcement and Player view are not sub-views
+  // at all (one opens the full-screen editor, one leaves Manage), so they are written out by hand.
+  const rows = `<div class="pl-sect">Sign-ups</div>`
+    + mgtRowHTML('registration', 'Registration &amp; public page', regSub, t.registration_open ? 'Open' : 'Closed')
     + mgtRowHTML('teams', 'Teams &amp; payment', teamsSub, unpaid ? `${unpaid} unpaid` : (nTeams ? 'All paid' : ''))
+    + mgtRowHTML('teamadd', 'Add a team', 'For the pair who paid you at the net')
+    + `<div class="pl-sect">Play</div>`
     + mgtRowHTML('pools', 'Pools &amp; schedule', poolsSub, poolsMeta)
+    + (poolMatches.length ? mgtRowHTML('pools', 'Score sheet', 'Enter pool results as each game finishes') : '')
     + mgtRowHTML('bracket', 'Bracket &amp; scores', bracketSub, bracketMeta)
-    + mgtRowHTML('settings', 'Event settings', settingsSub)
     + mgtRowHTML('rules', 'Rules sheet', rulesSub)
+    + `<div class="pl-sect">The event</div>`
+    + mgtRowHTML('settings', 'Event settings', settingsSub)
+    + `<a class="mg-row" data-mgt-announce><div class="mg-rb"><div class="mg-rn">Announcement</div><div class="mg-rs">The note at the top of the public page</div></div>${MG_CHEV}</a>`
+    + (showPlayerView ? `<a class="mg-row" data-nav-tab="tournament"><div class="mg-rb"><div class="mg-rn">Player view</div><div class="mg-rs">Open this tournament the way players see it</div></div>${MG_CHEV}</a>` : '')
+    + `<div class="pl-sect">After it ends</div>`
     + mgtRowHTML('closeout', 'Close out', 'Crowns the champion and archives the event', t.status === 'completed' ? 'Done' : 'Not yet');
+  // The scope sentence. The hub's title picker is where a tournament is switched, and this page carries no
+  // switcher of its own, so it says out loud both what these rows edit and where the other one lives.
+  const note = `<p class="tv-note">Everything on this page edits ${escapeHTML(t.name || 'this tournament')} only. Switch tournaments from the title on Manage.</p>`;
   // Start the NEXT event (2026-08-03). Deliberately NOT in the Danger zone below: that red box is for Reset
   // and Delete, and putting a constructive action in it would teach the wrong thing about the box. This is
   // the quiet dashed affordance the Teams screen already uses for "Add a team yourself" (.pk-add), sat under
@@ -8712,7 +8789,7 @@ function buildManageTournamentHTML() {
       + `</span><button type="button" class="mgts-danger mgv-dbtn mgv-del" data-mgt-delete>Delete</button></div>`
       + `<div class="mgv-dnote">Both ask you to type the tournament name before anything happens.</div>`
     + `</div>`;
-  return header + `<div class="mgt-stage">${escapeHTML(stage)}</div>` + rows + create + danger;
+  return header + `<div class="tv-when">${when}</div>` + mgHubTrackHTML(t) + stats + needs + rows + create + note + danger;
 }
 
 // The Registration view (mockup r-b): THE ANNOUNCEMENT (editable textarea prefilled from the persisted value
@@ -8722,7 +8799,7 @@ function buildMgRegistrationHTML() {
   const t = mgActiveTournament();
   const header = `<div class="pd-pagehdr">`
     + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
-    + `<div class="pd-htitle">Registration</div></div>`;
+    + `<div class="pd-htitle">${escapeHTML(MGT_SUB_TITLES.registration)}</div></div>`;
   if (!t) {
     return header + `<div class="pd-empty">No tournament to manage registration for yet.</div>`;
   }
@@ -8758,7 +8835,11 @@ function buildMgRegistrationHTML() {
     // 2026-08-04: the explicit Save these three fields never had. Blur still saves (the phone safety net), so
     // this is the affordance that says the edit IS applied, plus the status line that proves it landed.
     + mgSaveBtnHTML('registration')
-    + `<p class="mgr-status" id="mgr-status" role="status" aria-live="polite"></p>`;
+    // 2026-08-25: the line is SEEDED "Saved" rather than blank. A fresh build reads its inputs straight off
+    // the tournament, so "Saved" is the true resting state, and it gives mgSyncSaveButton a line to flip to
+    // "Unsaved changes" the moment a value differs — the question the disabled/enabled button alone
+    // answers only if you already know what a greyed-out Save means.
+    + `<p class="mgr-status" id="mgr-status" role="status" aria-live="polite">Saved</p>`;
 }
 
 // A tournament sub-view placeholder (Tasks 6-10 fill these). Its back button returns to the SUB-HUB
@@ -9062,12 +9143,28 @@ function mgSaveBtnHTML(screen) {
   return `<button type="button" class="pk-cta" data-mg-save="${escapeHTML(screen)}" disabled>Save</button>`;
 }
 
+// True from the moment a save's first await is issued until its read-back lands. mgSyncSaveButton reads it
+// so a keystroke during the write cannot overwrite "Saving…" with "Unsaved changes" — the field IS dirty
+// at that instant, and saying so would contradict the write that is already carrying it.
+let mgSaveInFlight = false;
+
+// 2026-08-25: this also writes the status line beside the button. The disabled/enabled Save answers "is
+// there anything to save" only to someone who already reads a greyed-out button that way; the line says it
+// in words. Two things it must never talk over: a write in flight (its own "Saving…"), and an error line —
+// mgNoteStatus marks those .is-bad, and replacing "Could not save" with "Unsaved changes" would downgrade a
+// refused write into a routine one.
 function mgSyncSaveButton() {
   const btn = document.querySelector('[data-mg-save]');
   if (!btn) return;
   const screen = btn.getAttribute('data-mg-save');
   const ids = screen === 'settings' ? MGES_FIELD_IDS : MGR_FIELD_IDS;
-  btn.disabled = mgDirtyFieldIds(ids, mgActiveTournament()).length === 0;
+  const dirty = mgDirtyFieldIds(ids, mgActiveTournament()).length > 0;
+  btn.disabled = !dirty;
+  if (mgSaveInFlight) return;
+  const el = document.getElementById(screen === 'settings' ? 'mges-status' : 'mgr-status');
+  if (!el) return;
+  if (el.classList && el.classList.contains('is-bad')) return;
+  el.textContent = dirty ? 'Unsaved changes' : 'Saved';
 }
 
 // A tap on Save blurs the focused field FIRST (focusout fires before click), which would fire the per-field
@@ -9119,6 +9216,7 @@ async function mgSaveScreenFields(screen, onlyId) {
   if (!fields) { mgSyncSaveButton(); return false; } // nothing changed — the button stays quiet
   const btn = document.querySelector('[data-mg-save="' + screen + '"]');
   if (btn) btn.disabled = true;                      // no double-tap while the write is in flight
+  mgSaveInFlight = true;                             // …and typing during it never overwrites "Saving…"
   mgNoteStatus(statusId, 'Saving…');
   const sent = Object.assign({}, fields);            // everything we will PROVE, atomic net_count included
   try {
@@ -9132,6 +9230,7 @@ async function mgSaveScreenFields(screen, onlyId) {
     }
     if (Object.keys(fields).length) await tdbSetTournamentFields(t.id, fields);
     const unsaved = await mgVerifyTournamentFields(t.id, sent);
+    mgSaveInFlight = false;                          // every await on this path is behind us
     if (unsaved.length) {
       mgNoteStatus(statusId, MG_SAVE_FAILED, true);
       mgSyncSaveButton();                            // still dirty → Save stays lit, the typed text stays put
@@ -9142,6 +9241,7 @@ async function mgSaveScreenFields(screen, onlyId) {
     mgSyncSaveButton();
     return true;
   } catch (err) {
+    mgSaveInFlight = false;
     console.warn('mgSaveScreenFields', screen, err);
     mgNoteStatus(statusId, MG_SAVE_OFFLINE, true);
     mgSyncSaveButton();
@@ -9281,7 +9381,7 @@ function buildMgSettingsHTML() {
     // 2026-08-04: one Save for the whole sheet — every dirty knob in ONE write. The two switches above are
     // deliberately NOT behind it (flipping one is already the instruction); they apply and prove on tap.
     + mgSaveBtnHTML('settings')
-    + `<p class="mgr-status" id="mges-status" role="status" aria-live="polite"></p>`;
+    + `<p class="mgr-status" id="mges-status" role="status" aria-live="polite">Saved</p>`;
 }
 
 // The Rules sheet (§38 pick C, 2026-07-12): VIEW mode renders the rules EXACTLY as the public Rules page
@@ -10156,6 +10256,22 @@ function mgPoolsDrawHint(teamCt, pools, nets) {
   return `${n} teams split into ${real} pool${real === 1 ? '' : 's'} of ${rem ? base + ' or ' + (base + 1) : base}, ${netPart}.`;
 }
 
+// The same fact as a ROW CLAUSE rather than a sentence: "2 pools of 3 across 3 nets". Sits under the
+// tournament page's Pools & schedule row before the draw, where mgPoolsDrawHint's full sentence (with its
+// leading team count and its full stop) would repeat the Teams-in tile and read as prose in a subtitle.
+// Same clamp as mgPoolsDrawHint and tdbDrawPools, so the three can never promise different splits.
+// '' when there are fewer than two teams — there is nothing to split yet and the caller drops the clause.
+function mgPoolsSplitClause(teamCt, pools, nets) {
+  const n = Math.max(0, Math.floor(Number(teamCt) || 0));
+  if (n < 2) return '';
+  const p = Math.max(1, Math.floor(Number(pools) || 1));
+  const k = Math.max(1, Math.floor(Number(nets) || 1));
+  const real = Math.max(1, Math.min(p, Math.floor(n / 2)));
+  const base = Math.floor(n / real);
+  const rem = n % real;
+  return `${real} pool${real === 1 ? '' : 's'} of ${rem ? base + ' or ' + (base + 1) : base} ${k === 1 ? 'on 1 net' : `across ${k} nets`}`;
+}
+
 // A ± tap: clamp at min 1, write straight into the input and re-state the hint IN PLACE. No repaint — a
 // container swap would re-read the tournament defaults and throw away what the admin just dialled in.
 function mgpStepCount(inputId, d) {
@@ -10988,6 +11104,7 @@ async function mgTournamentDelete() {
     message: `This removes ${what}, for players too. It cannot be undone. Type the tournament name to confirm.`,
     placeholder: nm,
     confirmText: 'Delete tournament',
+    danger: true,
   });
   if (String(typed || '').trim() !== nm) return;
   try {
@@ -12265,6 +12382,11 @@ function attachHandlers() {
         // (The sub-hub's create control carries data-mgtl-new now — round 2026-08-04 — and is handled with
         // the switcher's other routes below, outside this block, so the ONE create screen is reachable from
         // the chooser and from here alike.)
+        // Announcement (round 2026-08-25): the page's own row for the note at the top of the public page.
+        // It is NOT a sub-view — it opens the same body-appended full-screen editor the Registration
+        // screen's read block opens (openManageEditor), so there is one editor and one saved value.
+        // Checked before the generic rows below; it carries no data-mgt-view, so it cannot match one.
+        if (e.target.closest('[data-mgt-announce]')) { openManageEditor('announcement'); return; }
         if (e.target.closest('[data-mgt-back]')) { mgtView = null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }
         const mgtRow = e.target.closest('[data-mgt-view]');
         if (mgtRow) { mgtView = mgtRow.getAttribute('data-mgt-view') || null; repaintManage(); const p = document.getElementById('tab-manage'); if (p) p.scrollTop = 0; return; }

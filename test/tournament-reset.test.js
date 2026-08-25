@@ -269,9 +269,11 @@ describe('the Reset the whole tournament control on the sub-hub', () => {
     // Neither may carry data-mgt-view, or tapping would open a sub-view instead of acting.
     expect(html).not.toContain('data-mgt-view="fullreset"');
     expect(html).not.toContain('data-mgt-view="delete"');
-    // The seven real sub-view rows are still exactly seven.
-    ['registration', 'teams', 'pools', 'bracket', 'settings', 'rules', 'closeout'].forEach((v) =>
-      expect(html.split(`data-mgt-view="${v}"`).length - 1).toBe(1));
+    // Every real sub-view row is still reachable. (2026-08-25: no longer an exact count of one — the page
+    // regrouped, Needs-you sits above the rows and its items hook the same sub-views, and Score sheet is a
+    // second door onto Pools. What matters here is that neither danger control became one of them.)
+    ['registration', 'teams', 'teamadd', 'pools', 'bracket', 'settings', 'rules', 'closeout'].forEach((v) =>
+      expect(html.split(`data-mgt-view="${v}"`).length - 1).toBeGreaterThanOrEqual(1));
   });
 
   it('says what each action takes and keeps, in plain copy with no em dash and no emoji', () => {

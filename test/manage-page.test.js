@@ -703,27 +703,33 @@ function setTournamentState(t, extra = {}) {
 }
 const setupOpen = { id: 'T', name: 'July 2026', status: 'setup', registration_open: true, venmo_link: '', buy_in: '$80', team_size: 4 };
 
+// Round 2026-08-25 re-point: the muted stage sub-line is gone. Where the tournament stands is drawn by the
+// SAME six-step track the Manage hub uses (mgHubTrackHTML), so these three assertions read the track now.
+// The rows are no longer "seven": they are grouped by the question they answer and Needs-you sits above
+// them, which is why a per-view COUNT of 1 no longer holds — a needs-you item hooks the same view.
 describe('buildManageTournamentHTML — the tournament sub-hub (pick R2, mockup t-b)', () => {
-  it('renders the tournament name header, the stage sub-line, and all seven rows', () => {
+  it('renders the tournament name header, the phase track, and every sub-view row', () => {
     setTournamentState(setupOpen);
     const html = bridge.buildTournament();
     expect(html).toContain('class="pd-htitle">July 2026<');
-    expect(html).toContain('class="mgt-stage">Setup · registration phase<');
-    ['registration', 'teams', 'pools', 'bracket', 'settings', 'rules', 'closeout'].forEach((v) =>
-      expect(count(html, `data-mgt-view="${v}"`)).toBe(1));
+    expect(html).not.toContain('mgt-stage');
+    expect(count(html, 'class="mgh-step')).toBe(6);            // the track replaces the stage word
+    expect(html).toContain('class="mgh-step is-now">Sign-ups'); // setup + registration open
+    ['registration', 'teams', 'teamadd', 'pools', 'bracket', 'settings', 'rules', 'closeout'].forEach((v) =>
+      expect(count(html, `data-mgt-view="${v}"`)).toBeGreaterThanOrEqual(1));
     expect(html).toContain('data-mg-area="lead"');   // back to the Manage lead
     expect(html).not.toContain('pd-card');
   });
 
-  it('shows the green Open word + team count on the Registration row when open', () => {
+  it('shows the green Open word on the Registration row when open, with no unbacked clause', () => {
     setTournamentState(setupOpen);
     const html = bridge.buildTournament();
     expect(html).toContain('class="mgt-on">Open<');
-    // Round 2026-08-03 (README §7): subtitles carry real status. The prototype's "6 of 12
-    // teams · closes Fri 6 PM" is NOT rendered - there is no team-cap or close-time column,
-    // and Mike's ruling was to drop unbacked clauses rather than invent a figure.
-    expect(html).toContain('3 teams in');
-    expect(html).not.toMatch(/of \d+ teams/);   // no invented cap
+    // Round 2026-08-03 (README §7), still law: subtitles carry real status. The prototype's "6 of 12
+    // teams · closes Fri 6 PM" is NOT rendered - there is no team-cap column loaded on this row and no
+    // close-time column at all, and Mike's ruling was to drop unbacked clauses rather than invent a figure.
+    expect(html).toContain('Open</span> · what players see');
+    expect(html).not.toContain('-team cap');    // team_cap is not on the loaded row
     expect(html).not.toMatch(/closes \w+ \d/);  // no invented close time
     expect(html).toContain('class="mgv-rmeta"'); // the right-hand state word
   });
@@ -734,13 +740,13 @@ describe('buildManageTournamentHTML — the tournament sub-hub (pick R2, mockup 
     const html = bridge.buildTournament();
     expect(html).not.toContain('class="mgt-on"');
     expect(html).toContain('>Closed<');
-    expect(html).toContain('class="mgt-stage">Pool play<'); // stage sub-line follows status
+    expect(html).toContain('class="mgh-step is-now">Pools');   // the track follows status
   });
 
   it('teams-and-payment + stage-honest subs read from state', () => {
     setTournamentState(setupOpen);
     const html = bridge.buildTournament();
-    expect(html).toContain('3 teams registered · 2 teams unpaid');
+    expect(html).toContain('3 registered · 2 unpaid · rosters and buy-in');
     expect(html).not.toContain('collected');   // no invented money total
     // Round 2026-08-03: the pools/bracket subs carry real status plus a state word.
     expect(html).toContain('Not drawn');                       // pools sub in setup
@@ -750,7 +756,7 @@ describe('buildManageTournamentHTML — the tournament sub-hub (pick R2, mockup 
     expect(html).toContain('4s co-ed · $80');  // settings one-liner from real fields
     // Rules sub reports real content state. It deliberately does NOT date the sheet: tournaments
     // .updated_at moves on any field write, so "updated Jul 28" would be a lie.
-    expect(html).toContain('Not written yet');
+    expect(html).toContain('· not written yet');
     expect(html).not.toMatch(/updated \w+ \d/);
     expect(html).toContain('Crowns the champion and archives the event');
   });
