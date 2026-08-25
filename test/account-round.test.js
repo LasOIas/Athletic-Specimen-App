@@ -34,6 +34,9 @@ const AUTH_CONTROL_IDS = [
   'auth-first', 'auth-last', 'auth-err', 'auth-submit', 'auth-resend',
   // Task 2: the forgot screen's field and every control on #reset-page.
   'fg-email', 'reset-form', 'rs-new', 'rs-again', 'reset-err', 'reset-save', 'reset-go',
+  // Task 3: the account card's two footer buttons, #acct-page's error line, and the two buttons of the
+  // REAL appConfirm - the sign-out confirm is driven through prod's own dialog, never a stub of it.
+  'am-signout', 'am-close', 'acct-err', 'app-confirm-yes', 'app-confirm-no',
 ];
 
 function matches(node, sel) {
@@ -196,6 +199,9 @@ function loadApp() {
       // The module vars the overlays keep between renders. reset() clears them so a cooldown or a typed
       // address can never leak from one case into the next (this suite shares one vm context).
       resetAuthVars: () => { authMode = 'signin'; authSentEmail = ''; authResendUntil = 0; },
+      // Task 3: the account card reads the cached name for its initial, its title and its Name row.
+      openMenu: () => openAccountMenu(),
+      setAccountName: (n) => { accountName = n; },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -234,6 +240,7 @@ function loadApp() {
     bridge.resetAuthVars();
     bridge.getState().authSession = null;
     bridge.getState().account = null;
+    bridge.setAccountName(null);   // the cached name outlives a render, so it has to be cleared per case
     // FRESH nodes, not cleared ones: a control carries listeners, classes and a value, and every one of
     // those has to start empty or a case inherits the previous case's bindings.
     for (const id of AUTH_CONTROL_IDS) { const n = mkNode('div'); n.id = id; registry[id] = n; }
@@ -241,10 +248,15 @@ function loadApp() {
   bridge.setSignedOut = () => { bridge.getState().authSession = null; bridge.getState().account = null; };
   // A device that is ALREADY signed in: both halves of the state a real session leaves behind, so the
   // listener's isNewSignIn gate reads false for the same account (Task 2's recovery case).
-  bridge.setSignedIn = (user) => {
+  // Task 3 widens it the way onAuthEvent does (emailVerified / pendingEmail) and takes an optional
+  // cached name; the one-argument form is unchanged.
+  bridge.setSignedIn = (user, name) => {
     const u = user || { id: 'u1', email: 'a@b.co' };
     bridge.getState().authSession = { user: u };
-    bridge.getState().account = { id: u.id, email: u.email };
+    bridge.getState().account = {
+      id: u.id, email: u.email, emailVerified: !!u.emailVerified, pendingEmail: u.pendingEmail || null,
+    };
+    if (name !== undefined) bridge.setAccountName(name);
   };
   bridge.openAuth = (mode) => { bridge.openAuthPage(mode); return registry['auth-page']; };
   return bridge;
@@ -770,5 +782,148 @@ describe('Account round Task 2 - forgot, reset and the recovery router', () => {
     bridge.supaNext('updateUser', { data: {}, error: null });
     await bridge.resetSave();
     expect(bridge.supaCalls().at(-1)).toEqual(['updateUser', { password: typed }]);
+  });
+});
+
+// Account handoff round (2026-08-25), Task 3: the account card as a navigation root.
+// Guards the third push: the card the design drew (initial from the NAME, three rows, the Pending tag
+// only while an address is waiting, Close dismissing in place), a row that tears the card down and opens
+// the #acct-page overlay Tasks 4-6 fill, the back that rebuilds the card, and Sign out behind prod's own
+// confirm dialog. state.account widens to the four keys the rows read off the session.
+describe('Account round Task 3 - the account card and the sign-out confirm', () => {
+  beforeEach(() => bridge.reset());
+
+  // A delegate reads ev.target.closest(sel); there is no parser here, so the target is synthesised with
+  // exactly the answer the real DOM would give for the control being tapped.
+  const synth = (sel, node) => ({ closest: (s) => (s === sel ? node : null) });
+  // Real dispatch runs EVERY listener on the element, and each overlay carries more than one delegate.
+  const fireClick = (node, ev) => (node.listeners.click || []).forEach((fn) => fn(ev));
+  // Drains the microtasks an awaited appConfirm leaves behind (the click handler never awaits it).
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+
+  const MORGAN = { id: 'u1', email: 'morgan@email.com' };
+
+  it('the card: the initial from the name, three rows, a Pending tag only with a pending address, and Close dismisses in place', () => {
+    bridge.setSignedIn(MORGAN, { first: 'Morgan', last: 'Blake' });
+    bridge.openMenu();
+    const html = bridge.registry['account-menu'].innerHTML;
+    expect(html).toContain('class="acc-av">M<');
+    expect(html).toContain('class="acc-nm">Morgan Blake<');
+    expect(count(html, 'class="acc-row"')).toBe(3);
+    expect(count(html, 'class="acc-chev"')).toBe(3);
+    expect(html).toContain('data-acct-view="name"');
+    expect(html).toContain('data-acct-view="email"');
+    expect(html).toContain('data-acct-view="password"');
+    expect(html).toContain('class="acc-rv">morgan@email.com<');
+    // Nothing waiting -> no tag. And the design's Close-jumps-to-Home is a canvas artifact, not shipped.
+    expect(html).not.toContain('acc-tag');
+    expect(html).not.toContain('data-nav-tab="home"');
+    expect(html).not.toMatch(/—|&mdash;|night/i);
+
+    bridge.registry['am-close'].listeners.click[0]();
+    expect(bridge.registry['account-menu']).toBeFalsy();
+
+    bridge.setSignedIn({ ...MORGAN, pendingEmail: 'm@work.com' }, { first: 'Morgan', last: 'Blake' });
+    bridge.openMenu();
+    expect(bridge.registry['account-menu'].innerHTML).toContain('class="acc-tag">Pending<');
+  });
+
+  it('the initial and the title fall back to the email when no name is cached', () => {
+    bridge.setSignedIn(MORGAN, null);
+    bridge.openMenu();
+    const html = bridge.registry['account-menu'].innerHTML;
+    expect(html).toContain('class="acc-av">M<');
+    expect(html).toContain('class="acc-nm">morgan@email.com<');
+    expect(html).toContain('class="acc-rv">Add your name<');
+  });
+
+  it('a row tears the card down and opens #acct-page; its back rebuilds the card', () => {
+    bridge.setSignedIn(MORGAN, { first: 'Morgan', last: 'Blake' });
+    bridge.openMenu();
+    fireClick(bridge.registry['account-menu'], { target: synth('[data-acct-view]', { getAttribute: () => 'name' }) });
+    expect(bridge.registry['account-menu']).toBeFalsy();
+
+    const page = bridge.registry['acct-page'];
+    expect(page).toBeTruthy();
+    expect(page.className).toBe('auth-page');
+    expect(page.innerHTML).toContain('Your name');
+    expect(page.innerHTML).toContain('aria-label="Back to account"');
+    expect(page.innerHTML).toContain('id="acct-err"');
+
+    fireClick(page, { target: synth('[data-acct-back]', {}) });
+    expect(bridge.registry['acct-page']).toBeFalsy();
+    expect(bridge.registry['account-menu']).toBeTruthy();
+
+    // Each row opens its own screen, and opening one never stacks a second overlay.
+    for (const [view, title] of [['email', 'Change email'], ['password', 'Change password']]) {
+      fireClick(bridge.registry['account-menu'], { target: synth('[data-acct-view]', { getAttribute: () => view }) });
+      expect(bridge.registry['acct-page'].innerHTML).toContain(title);
+      fireClick(bridge.registry['acct-page'], { target: synth('[data-acct-back]', {}) });
+    }
+  });
+
+  it('Sign out asks first, then runs the optimistic sign-out', async () => {
+    bridge.setSignedIn(MORGAN, { first: 'Morgan', last: 'Blake' });
+    bridge.openMenu();
+    bridge.registry['am-signout'].listeners.click[0]();
+
+    // The card is gone, the confirm is up, and nothing has been signed out yet.
+    expect(bridge.registry['account-menu']).toBeFalsy();
+    const confirmHTML = bridge.registry['app-confirm-modal'].innerHTML;
+    expect(confirmHTML).toContain('Sign out?');
+    expect(confirmHTML).toContain('need your email and password to get back in.');
+    expect(confirmHTML).toContain('kc-confirm-danger');
+    expect(confirmHTML).not.toMatch(/—|&mdash;|night/i);
+    expect(bridge.supaCalls().length).toBe(0);
+    expect(bridge.getState().authSession).toBeTruthy();
+
+    // Cancel puts the card back and signs nothing out.
+    bridge.registry['app-confirm-no'].listeners.click[0]();
+    await tick();
+    expect(bridge.supaCalls().length).toBe(0);
+    expect(bridge.getState().authSession).toBeTruthy();
+    expect(bridge.registry['account-menu']).toBeTruthy();
+
+    // Confirming runs prod's optimistic clear, then the local-scope signOut.
+    bridge.registry['am-signout'].listeners.click[0]();
+    bridge.registry['app-confirm-yes'].listeners.click[0]();
+    await tick();
+    expect(bridge.supaCalls()).toContainEqual(['signOut', { scope: 'local' }]);
+    expect(bridge.getState().authSession).toBeNull();
+    expect(bridge.getState().account).toBeNull();
+  });
+
+  it('an auth event widens state.account with the verified flag and the pending address', async () => {
+    bridge.setSignedOut();
+    await bridge.authEvent('SIGNED_IN', {
+      user: { id: 'u1', email: 'a@b.co', email_confirmed_at: '2026-08-25T00:00:00Z', new_email: 'new@b.co' },
+    });
+    expect(bridge.getState().account).toEqual({
+      id: 'u1', email: 'a@b.co', emailVerified: true, pendingEmail: 'new@b.co',
+    });
+
+    // The recovery branch sets the same shape, so a card opened after a reset reads the same keys.
+    bridge.setSignedOut();
+    await bridge.authEvent('PASSWORD_RECOVERY', { user: { id: 'u2', email: 'c@d.co' } });
+    expect(bridge.getState().account).toEqual({
+      id: 'u2', email: 'c@d.co', emailVerified: false, pendingEmail: null,
+    });
+  });
+
+  it('the account-card CSS ships once, keeps the press dip, and the dead .am-* rules are retired', () => {
+    for (const sel of ['.acc-card {', '.acc-top {', '.acc-av {', '.acc-row {', '.acc-rv {', '.acc-tag {', '.acc-foot {']) {
+      expect(count(css, sel)).toBe(1);
+    }
+    // The app's own press-dip stays: the design's transform: none is not ported.
+    expect(css).toContain('.acc-row:active { background: var(--accent-soft); }');
+    expect(css).not.toMatch(/\.acc-row:active \{[^}]*transform/);
+    expect(css).toMatch(/\.acc-rv \{[^}]*white-space: normal/);
+    expect(css).toMatch(/\.acc-out, \.acc-close \{[^}]*font-size: 15px !important/);
+    // The old account-menu kit is dead the moment the card renders .acc-*; a PORT NOTE keeps the record.
+    const noComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const dead of ['.am-card', '.am-avatar', '.am-role']) {
+      expect(noComments).not.toContain(dead);
+      expect(appSrc).not.toContain(dead.slice(1));
+    }
   });
 });

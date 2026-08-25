@@ -2087,10 +2087,7 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .auth-alt { display: block; width: 100%; margin-top: 14px; padding: 8px; background: transparent; border: 0; color: var(--accent); font-size: 13.5px; font-weight: 600; cursor: pointer; }
 /* signed-in header chip: the account initial in the accent tint */
 .pd-avic.is-signedin { background: var(--accent-soft); border-color: var(--accent-bd); color: var(--accent); font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 15px; }
-/* account menu (reuses .kc-card chrome) */
-.am-card { }
-.am-avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-family: 'Sora','Inter',sans-serif; font-weight: 800; font-size: 22px; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; }
-.am-role { color: var(--muted); font-size: 13px; margin: 4px 0 20px; }
+/* PORT NOTE (2026-08-25): the .am-card / .am-avatar / .am-role account-menu kit was retired here - the account card renders .acc-* (end of file) and app.js emits none of the three any more. */
 
 /* ── Slice 3b (2026-07-09): claim-your-team page (Mike's LOCKED Option A, search-your-name)
    + the admin player-editor Account row. Reuses the .auth-page overlay shell + the .cik-* kiosk
@@ -6096,3 +6093,46 @@ input.pc-nin:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--accent),
 @media (hover: hover) and (pointer: fine) { .au-alt2:hover { background: none; color: var(--ink); } }
 .au-alt2.is-danger { color: var(--danger); }
 @media (hover: hover) and (pointer: fine) { .au-alt2.is-danger:hover { background: none; color: var(--danger-dark); } }
+
+/* PORT NOTE: the account card, from the handoff's _rounds.css:2351-2381. Three raises off the design.
+   (1) .acc-row keeps the app's shipped press-dip (button:active translateY(1px)) - the design's
+   transform: none would have cancelled Mike's own motion round. (2) .acc-rv adds white-space: normal
+   beside overflow-wrap: anywhere, so a long address wraps instead of clipping (the .ckx-nm precedent).
+   (3) .acc-out / .acc-close carry the 15px !important iOS counter: production's button rule ships
+   font-size: 16px !important, which the design's shorthand alone could never have beaten, and 15px is
+   what the desktop capture actually shows. The chevron inside .acc-chev is the app's own MG_CHEV, so
+   .acc-chev svg (higher specificity than .mg-chev) is what sizes it to the design's 15px. */
+.acc-card { width: min(380px, calc(100vw - 2rem)); padding: 24px 20px 18px; text-align: left; }
+.acc-top { display: flex; align-items: center; gap: 13px; padding-bottom: 15px; }
+.acc-av {
+  flex: none; width: 52px; height: 52px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent);
+  font: 800 20px 'Sora', 'Inter', sans-serif;
+  display: flex; align-items: center; justify-content: center;
+}
+.acc-who { min-width: 0; }
+.acc-nm { font: 800 20px/1.15 var(--font-display); letter-spacing: .01em; color: var(--ink); overflow-wrap: anywhere; }
+.acc-sub { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.acc-list { display: flex; flex-direction: column; }
+.acc-row {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; min-height: 58px; padding: 13px 2px;
+  text-align: left; background: none; border: 0; border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+@media (hover: hover) and (pointer: fine) { .acc-row:hover { background: var(--accent-soft); } }
+.acc-row:active { background: var(--accent-soft); }
+.acc-rl { flex: none; min-width: 76px; font: 700 11px 'Inter', sans-serif; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.acc-rv { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--ink); white-space: normal; overflow-wrap: anywhere; }
+.acc-tag { flex: none; font: 800 10px 'Inter', sans-serif; letter-spacing: .04em; padding: 3px 8px; border-radius: 999px; background: var(--danger-soft); color: var(--danger); }
+.acc-chev { flex: none; display: flex; color: var(--faint); }
+.acc-chev svg { width: 15px; height: 15px; }
+.acc-foot { display: flex; flex-direction: column; gap: 9px; margin-top: 17px; }
+.acc-out, .acc-close {
+  width: 100%; min-height: 46px; border-radius: var(--r-md); font: 600 15px 'Inter', sans-serif;
+  font-size: 15px !important;   /* wins over the shorthand above regardless of order */
+}
+.acc-out { background: var(--card); border: 1px solid var(--border); color: var(--ink); }
+@media (hover: hover) and (pointer: fine) { .acc-out:hover { background: var(--surface-3); border-color: var(--border-2); } }
+.acc-close { background: var(--accent); border: 0; color: #fff; }
+@media (hover: hover) and (pointer: fine) { .acc-close:hover { background: var(--brand-dark); } }

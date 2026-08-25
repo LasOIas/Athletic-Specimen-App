@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.20'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.21'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7020,9 +7020,21 @@ async function runPostSignInWork() {
   } catch (err) { console.error('Role derive error', err); }
 }
 
-async function onAuthEvent(event, session) {
-  const email = (session && session.user && session.user.email) || '';
+// Account round 2026-08-25: the ONE shape of state.account, read straight off the session user so the
+// recovery branch and the sign-in branch below can never drift. emailVerified and pendingEmail are free
+// on every auth event; pendingEmail (GoTrue's new_email) is what puts the Pending tag on the card's
+// Email row, and it clears itself the moment the confirmation link is tapped.
+function accountFromSession(session) {
+  const u = (session && session.user) || {};
+  return {
+    id: u.id,
+    email: u.email || '',
+    emailVerified: !!u.email_confirmed_at,
+    pendingEmail: u.new_email || null,
+  };
+}
 
+async function onAuthEvent(event, session) {
   // NOTE: supabase-js holds an internal lock during this callback — calling other supabase methods
   // (auth/rpc/from) INLINE here races/deadlocks (role came back null even though caller_role is fine).
   // So any supabase call below is deferred with setTimeout(0) per Supabase's own guidance.
@@ -7039,7 +7051,7 @@ async function onAuthEvent(event, session) {
     if (event === 'PASSWORD_RECOVERY' || (authRecoveryPending && event === 'SIGNED_IN')) {
       authRecoveryPending = true;
       state.authSession = session;
-      state.account = { id: session.user.id, email };
+      state.account = accountFromSession(session);
       setTimeout(() => { try { closeAuthPage(); closeGatePage(); openResetPage(session); } catch (_) {} }, 0);
       return;
     }
@@ -7050,7 +7062,7 @@ async function onAuthEvent(event, session) {
     // TOKEN_REFRESHED / repeat events just keep the session object fresh and stop.
     const isNewSignIn = !state.authSession || !state.account || state.account.id !== session.user.id;
     state.authSession = session;
-    state.account = { id: session.user.id, email };
+    state.account = accountFromSession(session);
     if (!isNewSignIn) return;
     closeAuthPage();
     closeGatePage(); // Account round: signing in from the wall drops it; the tab behind is theirs now
@@ -7104,7 +7116,23 @@ async function onAuthEvent(event, session) {
 // Task 13 (2026-07-11): the legacy admin code login is DELETED.
 // Email+password is the only sign-in; owner/organizer role sets isAdmin in onAuthStateChange.
 
-// Signed-in: a small centered card with the account email + role + Sign out.
+// One row of the account card: the label, the value, an optional tag, and the chevron that says the row
+// goes somewhere. MG_CHEV is the app's own chevron and is the same drawing the design put in .acc-chev,
+// so the card reuses it instead of shipping a second copy of the same path.
+function accRow(view, label, value, tag) {
+  return '<button type="button" class="acc-row" data-acct-view="' + view + '">'
+    + '<span class="acc-rl">' + escapeHTML(label) + '</span>'
+    + '<span class="acc-rv">' + escapeHTML(value) + '</span>'
+    + tag
+    + '<span class="acc-chev">' + MG_CHEV + '</span>'
+    + '</button>';
+}
+
+// Signed-in: the account card (Account handoff 2026-08-25). It stopped being a dead end and became the
+// navigation root of the account: the avatar + name + role sit on top, then one row each for Name, Email
+// and Password (a row tears the card down and opens #acct-page), then Sign out behind a confirm and a
+// Close that just dismisses. The design's Close jumps to Home; that is a canvas artifact and is not
+// ported, and neither is its Unverified tag (Confirm email is OFF, so nothing is ever unverified).
 function openAccountMenu() {
   const prev = document.getElementById('account-menu'); if (prev) prev.remove();
   const el = document.createElement('div');
@@ -7123,33 +7151,115 @@ function openAccountMenu() {
     roleLabel = mine ? ('Player · ' + mine.teamName) : (state.myClaimedPlayer ? 'Player' : 'Spectator');
   }
   // Identity (spec §2): show "First Last" prominently when we have it (cached in promptNameFillIfNeeded);
-  // the email drops to a muted secondary line so the account stays identifiable. No name → email as before.
+  // the email drops to the Email row so the account stays identifiable. No name → email as the title.
   const fullName = (accountName && accountName.first && accountName.last)
     ? (accountName.first + ' ' + accountName.last) : '';
+  // The tag is the ONLY thing that says an email change is half-finished, so it renders only while
+  // GoTrue is actually holding a new address for this account.
+  const pendingTag = (state.account && state.account.pendingEmail) ? '<span class="acc-tag">Pending</span>' : '';
   el.innerHTML =
-    '<div class="popup-card card kc-card am-card" role="dialog" aria-modal="true">'
-    + '<div class="am-avatar">' + escapeHTML(authInitial()) + '</div>'
-    + '<div class="kc-name">' + escapeHTML(fullName || email) + '</div>'
-    + (fullName ? '<div class="am-role">' + escapeHTML(email) + '</div>' : '')
-    + '<div class="am-role">' + escapeHTML(roleLabel) + '</div>'
-    + '<button type="button" class="kc-confirm" id="am-signout">Sign out</button>'
-    + '<button type="button" class="kc-cancel" id="am-close">Close</button>'
-    + '</div>';
+    '<div class="popup-card card acc-card" role="dialog" aria-modal="true">'
+    + '<div class="acc-top">'
+    + '<div class="acc-av">' + escapeHTML(authInitial()) + '</div>'
+    + '<div class="acc-who">'
+    + '<div class="acc-nm">' + escapeHTML(fullName || email) + '</div>'
+    + '<div class="acc-sub">' + escapeHTML(roleLabel) + '</div>'
+    + '</div></div>'
+    + '<div class="acc-list">'
+    + accRow('name', 'Name', fullName || 'Add your name', '')
+    + accRow('email', 'Email', email, pendingTag)
+    + accRow('password', 'Password', 'Change', '')
+    + '</div>'
+    + '<div class="acc-foot">'
+    + '<button type="button" class="acc-out" id="am-signout">Sign out</button>'
+    + '<button type="button" class="acc-close" id="am-close">Close</button>'
+    + '</div></div>';
   document.body.appendChild(el);
   el.querySelector('#am-close').addEventListener('click', () => el.remove());
   el.addEventListener('click', (ev) => { if (ev.target === el) el.remove(); });
-  el.querySelector('#am-signout').addEventListener('click', () => {
+  // A row hands the screen over to #acct-page: the card is torn down first because the z-index stack
+  // allows nothing above it, and its back control builds this card again.
+  el.addEventListener('click', (ev) => {
+    const row = ev.target.closest('[data-acct-view]');
+    if (!row) return;
     el.remove();
-    // Optimistic: clear local auth state + re-render NOW so sign-out feels instant. A local-scope
-    // signOut normally resolves immediately, but under a slow/flaky network the supabase-js auth lock
-    // (waiting on an in-flight token refresh) can delay it — we don't make the user wait on that.
-    state.authSession = null; state.account = null; state.role = null;
-    state.myClaimedPlayer = null; // Round 2 §12.3: the hero signs out with the account
-    try { render(); } catch (_) {}
-    // Fire the real signOut in the background to clear the persisted token. The SIGNED_OUT event
-    // re-runs the same cleanup (a no-op by then).
-    try { supabaseClient.auth.signOut({ scope: 'local' }); } catch (_) {}
+    openAcctPage(row.getAttribute('data-acct-view'));
   });
+  el.querySelector('#am-signout').addEventListener('click', () => { el.remove(); void confirmSignOut(); });
+}
+
+// Signing out is one tap from a card people open to read their own email, so it asks first (the design's
+// screen 14). Cancel puts the card back exactly as it was; only a Yes runs prod's optimistic sign-out.
+async function confirmSignOut() {
+  const ok = await appConfirm({
+    title: 'Sign out?',
+    message: "You'll need your email and password to get back in.",
+    confirmText: 'Sign out',
+    danger: true,
+  });
+  if (!ok) { openAccountMenu(); return; }
+  // Optimistic: clear local auth state + re-render NOW so sign-out feels instant. A local-scope
+  // signOut normally resolves immediately, but under a slow/flaky network the supabase-js auth lock
+  // (waiting on an in-flight token refresh) can delay it, and we don't make the user wait on that.
+  state.authSession = null; state.account = null; state.role = null;
+  state.myClaimedPlayer = null; // Round 2 §12.3: the hero signs out with the account
+  try { render(); } catch (_) {}
+  // Fire the real signOut in the background to clear the persisted token. The SIGNED_OUT event
+  // re-runs the same cleanup (a no-op by then).
+  try { supabaseClient.auth.signOut({ scope: 'local' }); } catch (_) {}
+}
+
+// ── The account edit overlay (Account handoff 2026-08-25) ──────────────────────────────────────────
+// One body-appended .auth-page for all three edit screens, the same pattern as #auth-page and
+// #reset-page so partialRender can never wipe it. Its back control always rebuilds the card, the
+// email-sent state included: the design's "back to email" would re-enter a form whose password field
+// is gone. Tasks 4-6 fill the three bodies; this scaffold owns the overlay, the view and the way back.
+let acctView = 'name';   // 'name' | 'email' | 'email-sent' | 'password'
+
+function closeAcctPage() {
+  const el = document.getElementById('acct-page');
+  if (el) el.remove();
+}
+
+function openAcctPage(view) {
+  closeAcctPage();
+  acctView = view;
+  const el = document.createElement('div');
+  el.id = 'acct-page';
+  el.className = 'auth-page';
+  document.body.appendChild(el);
+  // Bound ONCE, on the overlay, never inside renderAcctPageInner: that repaints THIS element, so a
+  // bind there would stack a second handler per render (the #auth-page lesson).
+  authBindOverlay(el);
+  el.addEventListener('click', (ev) => {
+    if (!ev.target.closest('[data-acct-back]')) return;
+    closeAcctPage();
+    openAccountMenu();
+  });
+  renderAcctPageInner();
+}
+
+function renderAcctPageInner() {
+  const el = document.getElementById('acct-page');
+  if (!el) return;
+  let inner;
+  switch (acctView) {
+    case 'email':
+      inner = '<h2 class="auth-title">Change email</h2>';
+      break;
+    case 'password':
+      inner = '<h2 class="auth-title">Change password</h2>';
+      break;
+    case 'name':
+    default:
+      inner = '<h2 class="auth-title">Your name</h2>';
+  }
+  el.innerHTML = `
+    <button type="button" class="auth-back" data-acct-back aria-label="Back to account">${AUTH_BACK_SVG}</button>
+    <div class="auth-inner">
+      ${inner}
+      <div class="auth-err" id="acct-err" role="alert" hidden></div>
+    </div>`;
 }
 
 // Mike pick X (task-#10, 2026-07-10): the in-app Check In tab is ANON-ONLY kiosk content — NO
@@ -7232,10 +7342,14 @@ function buildPublicHeaderHTML() {
     </div>`;
 }
 
-// The single glyph shown in the signed-in account chip: first letter of the account email, uppercased.
+// The single glyph shown in the signed-in account chip and on the account card. Account round
+// (2026-08-25): the NAME comes first, the way the design drew it, so the chip reads as the person and
+// not as their inbox. The email is the fallback until a name is cached.
 function authInitial() {
-  const e = (state.account && state.account.email) || '';
-  return (e.trim()[0] || '?').toUpperCase();
+  const n = (accountName && accountName.first)
+    ? accountName.first
+    : ((state.account && state.account.email) || '');
+  return (n.trim()[0] || '?').toUpperCase();
 }
 
 // Slice 1 sub-pages reached from Home tiles (no bottom-nav button; nav highlight anchors to Home).
