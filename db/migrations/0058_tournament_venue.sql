@@ -14,7 +14,9 @@
 -- tournament predates this migration and there is no honest venue to backfill; NULL is the truthful
 -- "not set", and the render path already treats it as "keep the fallback row, render no Copy button".
 --
--- NOT APPLIED. Authored only — applying is Mike's call. The app runs correctly before AND after: reads
+-- APPLIED 2026-08-24 via the Supabase MCP on Mike's word (C96): both columns verified text / nullable /
+-- no default with comments intact, and the anon select('*') returned both keys (null) on every row.
+-- The app runs correctly before AND after: reads
 -- go through select('*') so a missing column is simply undefined, the Event settings fields are not even
 -- rendered until the loaded rows carry the keys, and the Home row falls back until then.
 alter table public.tournaments add column if not exists venue text;
