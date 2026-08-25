@@ -21,8 +21,10 @@ const {
   shapeClaimCandidates, filterClaimCandidates,
   resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
   checkinHeroModel, resolveHistoryChampion,
-  settingsRuleSummary,
+  settingsRuleSummary, rulesToHTML, rulesToSections,
 } = pure;
+
+const count = (hay, needle) => String(hay).split(needle).length - 1;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
   it('accepts a normal first and last name', () => {
@@ -1153,5 +1155,94 @@ describe('settingsRuleSummary (Manage handoff 2026-08-25 — the derived Event s
   it('never throws on a missing tournament', () => {
     expect(typeof settingsRuleSummary(null)).toBe('string');
     expect(typeof settingsRuleSummary(undefined)).toBe('string');
+  });
+});
+
+// ── rulesToSections (Manage handoff 2026-08-25, Task 7) ───────────────────────────────────────────────
+// The rules document as SECTIONS, for the organizer's card view. It has to group exactly the way
+// rulesToHTML does (that formatter still renders the public page and Home's sheet, byte for byte), carry
+// the character offset of each section's first line so an editor can drop the caret there, and hand back
+// the section's lines already formatted so the card inherits the shipped .rl-* styling.
+describe('rulesToSections — the rules document as cards (Manage handoff 2026-08-25)', () => {
+  it('mirrors rulesToHTML grouping and carries offsets', () => {
+    const md = '## Format\n- 4s co-ed\n\nWoodmen Valley Park · $80 a team';
+    const s = rulesToSections(md);
+    expect(s.length).toBe(2);
+    expect(s[0].head).toBe('Format');
+    expect(s[0].startOffset).toBe(0);
+    expect(s[1].head).toBe('');
+    expect(s[1].startOffset).toBe(md.indexOf('Woodmen'));
+    expect(s[0].bodyHTML).toContain('rl-li');
+  });
+
+  it('groups on blank lines exactly like rulesToHTML — one section per .rl-sect it would emit', () => {
+    const md = '## A\n- one\n\n## B\n1. two\n\nloose line';
+    expect(rulesToSections(md).length).toBe(count(rulesToHTML(md), '<div class="rl-sect">'));
+  });
+
+  it('the head is lifted OUT of bodyHTML — the card draws it once, in its own header row', () => {
+    // The card renders `head` in .rlv-hd and bodyHTML in .rlv-lines; leaving the "## " line in the body
+    // too would print the section title twice in every card.
+    const s = rulesToSections('## Format\n- 4s co-ed\n- Pool play to 15');
+    expect(s[0].head).toBe('Format');
+    expect(s[0].bodyHTML).not.toContain('rl-h');
+    expect(count(s[0].bodyHTML, 'rl-li')).toBe(2);
+  });
+
+  it('strips the single outer .rl-sect wrapper, keeping the lines rulesToHTML produced', () => {
+    const s = rulesToSections('## Scoring\n- Rally to 21');
+    expect(s[0].bodyHTML).not.toContain('rl-sect');
+    expect(s[0].bodyHTML).toBe('<div class="rl-li"><span class="rl-dot"></span><span>Rally to 21</span></div>');
+  });
+
+  it('a headless section carries head "" and its body verbatim (no invented heading)', () => {
+    const s = rulesToSections('Bring cash or Venmo');
+    expect(s.length).toBe(1);
+    expect(s[0].head).toBe('');
+    expect(s[0].bodyHTML).toBe('<p class="rl-p">Bring cash or Venmo</p>');
+  });
+
+  it('a head with no lines under it still counts as a section (an empty card, not a dropped one)', () => {
+    const s = rulesToSections('## Format\n\n- loose');
+    expect(s.length).toBe(2);
+    expect(s[0].head).toBe('Format');
+    expect(s[0].bodyHTML).toBe('');
+    expect(s[1].head).toBe('');
+  });
+
+  it('offsets count \r\n as the TWO characters it is — a CRLF document still points at the right line', () => {
+    const md = '## Format\r\n- 4s\r\n\r\n## Between games\r\n1. Winners stay';
+    const s = rulesToSections(md);
+    expect(s.length).toBe(2);
+    expect(s[1].startOffset).toBe(md.indexOf('## Between games'));
+    expect(md.slice(s[1].startOffset).startsWith('## Between games')).toBe(true);
+  });
+
+  it('a "## " line only heads a section when it OPENS it (mid-section it stays a line)', () => {
+    const s = rulesToSections('- first\n## Format');
+    expect(s.length).toBe(1);
+    expect(s[0].head).toBe('');
+    expect(s[0].bodyHTML).toContain('rl-h');   // rulesToHTML still formats it as a heading line
+  });
+
+  it('escapes exactly as rulesToHTML does — the column can never inject markup', () => {
+    const s = rulesToSections('## Heads up\n- <script>alert(1)</script>');
+    expect(s[0].head).toBe('Heads up');        // raw; the caller escapes it into the card head
+    expect(s[0].bodyHTML).toContain('&lt;script&gt;');
+    expect(s[0].bodyHTML).not.toContain('<script>');
+  });
+
+  it('runs of blank lines collapse, and an empty document has no sections', () => {
+    expect(rulesToSections('## A\n\n\n\n- loose').length).toBe(2);
+    expect(rulesToSections('')).toEqual([]);
+    expect(rulesToSections('   \n \n  ')).toEqual([]);
+    expect(rulesToSections(null)).toEqual([]);
+    expect(rulesToSections(undefined)).toEqual([]);
+  });
+
+  it('leaves rulesToHTML alone — the public page still gets its .rl-sect wrappers', () => {
+    expect(rulesToHTML('## Teams\n- 4 players\n\n## Scoring\n- To 21'))
+      .toBe('<div class="rl-sect"><div class="rl-h">Teams</div><div class="rl-li"><span class="rl-dot"></span><span>4 players</span></div></div>'
+        + '<div class="rl-sect"><div class="rl-h">Scoring</div><div class="rl-li"><span class="rl-dot"></span><span>To 21</span></div></div>');
   });
 });

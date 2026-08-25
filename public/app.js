@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.10'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.11'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -9447,11 +9447,25 @@ function buildMgSettingsHTML() {
     + `<p class="mgr-status" id="mges-status" role="status" aria-live="polite">Saved</p></div>`;
 }
 
-// The Rules sheet (§38 pick C, 2026-07-12): VIEW mode renders the rules EXACTLY as the public Rules page
-// (rulesToHTML — the same escape-first formatter), flat on the stone with an Edit affordance in the header;
-// tapping the header Edit OR anywhere on the rendered sheet opens the full-screen editor (openManageEditor).
-// Empty rules → an honest admin prompt (never the public "coming soon" stub). The old inline textarea/Save
-// CTA moved into the body-appended overlay (poll-clobber-immune); mgSaveRules is retired for mgEditorSave.
+// The pencil the round draws on every "this is yours to change" pill (design screens/mgts-rules-view.html:34).
+// One const, so the rules header pill, the per-section pills and the empty state's Write pill can never drift.
+const MG_PENCIL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+
+// The Rules sheet. §38 pick C (2026-07-12) made the VIEW the public render with ONE full-screen editor
+// behind it; the Manage handoff (2026-08-25, Task 7) gave that view the card look Mike asked for — his
+// banner on the screen was "this page needs help, make it look like its editable, right now its really
+// bland". A flat bulleted document with one 13px "Edit" link in the header said nothing about who owned
+// the words. Now every section is a card with its own Edit pill.
+//
+// The pill does NOT open an inline field. Spec decision 2: the card LOOK, the SAME one editor. Tapping a
+// section's Edit opens the existing full-screen editor with the caret already on that section (the offset
+// comes from rulesToSections, counted in the stored text). "Edit all" opens it at the top; "+ Add a section"
+// opens it with a "## New section" scaffold appended. The design's inline editing is deliberately NOT
+// ported: it never saved anything, and its own serializer rewrote numbered lists as bullets — one editor
+// and one serializer is the whole point.
+//
+// Empty rules → the honest admin prompt (never the public "coming soon" stub), now inside a single card so
+// the page still reads as the same object it will become.
 function buildMgRulesHTML() {
   const t = mgSettingsTournament();
   const backBtn = `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`;
@@ -9461,15 +9475,27 @@ function buildMgRulesHTML() {
   }
   const header = `<div class="pd-pagehdr">${backBtn}`
     + `<div class="pd-htitle">Rules sheet</div>`
-    + `<button type="button" class="pd-hdr-edit" data-mgru-edit>Edit</button></div>`;
-  const body = rulesToHTML(typeof t.rules === 'string' ? t.rules : '');
-  if (!body) {
-    return header
+    + `<button type="button" class="pd-hdr-edit rlv-hedit" data-mgru-edit>${MG_PENCIL_SVG}Edit all</button></div>`;
+  const foot = `<p class="rlv-foot">Saved changes show up on the players' Rules page straight away.</p>`;
+  const sections = rulesToSections(typeof t.rules === 'string' ? t.rules : '');
+  if (!sections.length) {
+    // The prompt keeps its own tap-anywhere hook (a blank editor) and gains the pill that seeds the first
+    // section, so the empty page offers the same two doors the written one does.
+    return header + `<div class="rl-body mgru-view"><div class="rlv-card">`
       + `<div class="mgru-empty" data-mgru-edit><div class="mgru-empty-h">No rules yet</div>`
-      + `<div class="mgru-empty-s">Tap Edit to write the house rules. Players read them on the Rules page the moment you save.</div></div>`;
+      + `<div class="mgru-empty-s">Tap Write to start the house rules. Players read them on the Rules page the moment you save.</div>`
+      + `<button type="button" class="rlv-edit" data-rlv-add>${MG_PENCIL_SVG}Write</button></div>`
+      + `</div>${foot}</div>`;
   }
-  // The whole rendered sheet is tappable to edit (Mike: "click anywhere and edit it").
-  return header + `<div class="rl-body mgru-view" data-mgru-edit>${body}</div>`;
+  const cards = sections.map((s) => `<div class="rlv-card${s.head ? '' : ' is-note'}">`
+    + `<div class="rlv-hd">${s.head ? `<div class="rl-h">${escapeHTML(s.head)}</div>` : ''}`
+    + `<button type="button" class="rlv-edit" data-rlv-edit="${s.startOffset}">${MG_PENCIL_SVG}Edit</button></div>`
+    + `<div class="rlv-lines rl-body">${s.bodyHTML}</div></div>`).join('');
+  return header
+    + `<p class="rlv-intro">This is the page players read. Every section here is yours to edit. Tap one to change its wording or bullets.</p>`
+    + `<div class="rl-body mgru-view">${cards}`
+    + `<button type="button" class="rlv-add" data-rlv-add><span class="rlv-plus">+</span> Add a section</button>`
+    + `${foot}</div>`;
 }
 
 // True when the Event settings view has an in-progress edit (a focused input in #tab-manage) the background
@@ -9535,9 +9561,17 @@ function closeManageEditor() {
   if (el) el.remove();
 }
 
-function openManageEditor(kind) {
+// opts (2026-08-25, Task 7) — both optional, and every existing one-argument caller behaves exactly as before:
+//   caret   a character offset in the stored text; the editor opens with the caret there, scrolled into view.
+//           That is how a rules card's Edit pill opens THIS editor "at" its section.
+//   append  text pushed onto the end of the document, caret left after it — how "+ Add a section" seeds a
+//           new "## " block. The document's trailing whitespace is trimmed first so the scaffold's own blank
+//           line is the only gap, and an EMPTY document drops that leading gap entirely rather than opening
+//           with two blank lines above the first word.
+function openManageEditor(kind, opts) {
   const t = mgActiveTournament();
   if (!t || !state.isAdmin) return;
+  const o = opts || {};
   const isRules = kind === 'rules';
   const initial = isRules ? ((typeof t.rules === 'string') ? t.rules : '') : mgAnnouncementValue(t);
   closeManageEditor();               // clears any prior editor + resets mgEditorKind
@@ -9566,8 +9600,35 @@ function openManageEditor(kind) {
   el.querySelector('#mged-cancel').addEventListener('click', closeManageEditor);
   el.querySelector('#mged-save').addEventListener('click', () => { void mgEditorSave(); });
   const ta = el.querySelector('#mged-ta');
-  // Focus at the END (caret ready to type, not select-all).
-  setTimeout(() => { if (ta) { ta.focus(); const n = ta.value.length; try { ta.setSelectionRange(n, n); } catch (_) {} } }, 60);
+  // The append happens NOW, not in the focus timeout: mgEditorSave reads the textarea, so the document has
+  // to be complete the moment the overlay is on screen.
+  const append = (typeof o.append === 'string' && o.append) ? o.append : '';
+  if (ta && append) {
+    const kept = String(ta.value == null ? '' : ta.value).replace(/\s+$/, '');
+    ta.value = kept ? kept + append : append.replace(/^\n+/, '');
+  }
+  // Where the caret lands: after an appended scaffold, at the requested offset, else the END (ready to type,
+  // never select-all — the behaviour every existing caller has had since 2026-07-12).
+  const want = append ? null : (Number.isFinite(Number(o.caret)) && o.caret != null ? Number(o.caret) : null);
+  setTimeout(() => {
+    if (!ta) return;
+    const n = ta.value.length;
+    const at = want == null ? n : Math.max(0, Math.min(want, n));
+    // The range is set BEFORE focus on purpose: focusing a textarea scrolls its caret into view, so this
+    // ordering is what makes a deep section actually visible rather than merely selected.
+    try { ta.setSelectionRange(at, at); } catch (_) {}
+    ta.focus();
+    // …and lift that line toward the top of the box, so the section opens with its own lines under it
+    // instead of pinned to the bottom edge. Skipped whenever the line height is not a resolvable number.
+    try {
+      const cs = (typeof window !== 'undefined' && window.getComputedStyle) ? window.getComputedStyle(ta) : null;
+      const lh = cs ? parseFloat(cs.lineHeight) : NaN;
+      if (at < n && Number.isFinite(lh) && lh > 0) {
+        const line = ta.value.slice(0, at).split('\n').length - 1;
+        ta.scrollTop = Math.max(0, (line * lh) - (ta.clientHeight / 3));
+      }
+    } catch (_) {}
+  }, 60);
 }
 
 // Persist the open editor → refresh → close → repaint the underlying Manage view (now showing the update).
@@ -12627,9 +12688,20 @@ function attachHandlers() {
           const mgesToggle = e.target.closest('[data-mges-toggle]');
           if (mgesToggle) { void mgToggleSettingsField(mgesToggle.getAttribute('data-mges-toggle')); return; }
         }
-        // Rules sheet (§38 pick C, 2026-07-12): the header Edit button OR a tap anywhere on the rendered sheet
-        // opens the full-screen editor. Checked before the generic hub rows so the tap never falls through.
+        // Rules sheet (§38 pick C, 2026-07-12; cards 2026-08-25 Task 7): every control here opens the SAME
+        // full-screen editor, only at a different place in the one document — a section's Edit pill at that
+        // section's offset, "+ Add a section" (and the empty state's Write pill) with a "## " scaffold on the
+        // end, the header's "Edit all" at the top. The two rlv-* hooks are checked FIRST because the empty
+        // state's Write pill sits inside a block that also carries data-mgru-edit. Before the generic hub
+        // rows, so no tap falls through to a sub-view.
         if (mgtView === 'rules') {
+          const rlvEdit = e.target.closest('[data-rlv-edit]');
+          if (rlvEdit) {
+            const off = Number(rlvEdit.getAttribute('data-rlv-edit'));
+            openManageEditor('rules', { caret: Number.isFinite(off) ? off : 0 });
+            return;
+          }
+          if (e.target.closest('[data-rlv-add]')) { openManageEditor('rules', { append: '\n\n## New section\n- ' }); return; }
           if (e.target.closest('[data-mgru-edit]')) { openManageEditor('rules'); return; }
         }
         // Close out (Task 10, pick R12, the June fix): CHANGE opens the body-level champion picker; End the

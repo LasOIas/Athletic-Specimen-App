@@ -1550,11 +1550,16 @@ describe('buildMgRulesHTML — one-sheet rules editor (pick R11b, mockup ru-d)',
     // §38 pick C (2026-07-12): view = the public render (rl-body), no inline textarea/Save CTA.
     expect(html).not.toContain('id="mgru-ta"');
     expect(html).not.toContain('data-mgru-save');
-    expect(html).toContain('rl-body mgru-view');    // the public formatter output, flat on stone
-    expect(html).toContain('rl-h');                 // "## Format" → a heading
+    // 2026-08-25 (Manage handoff, Task 7): the flat sheet became a card per section. Same formatter, same
+    // ONE editor — each card's Edit pill opens it at that section's offset, and the header opens it at the top.
+    expect(html).toContain('class="rl-body mgru-view"'); // the sheet wrapper, still the public formatter's
+    expect(html).toContain('class="rlv-card"');      // one card per section
+    expect(html).toContain('rl-h');                  // "## Format" → a heading, now in the card's header row
     expect(html).toContain('4s co-ed — 1 guy + 1 girl');
-    expect(html).toContain('data-mgru-edit');       // header Edit button AND the whole sheet tap → the editor
-    expect(html).toContain('class="pd-hdr-edit" data-mgru-edit>Edit');
+    expect(html).toContain('data-mgru-edit');        // header "Edit all" → the editor at the top
+    expect(html).toContain('class="pd-hdr-edit rlv-hedit" data-mgru-edit>');
+    expect(html).toContain('Edit all');
+    expect(html).toContain('data-rlv-edit="0"');     // the section's own pill, carrying its caret offset
     expect(html).toContain('data-mgt-back');
     expect(html).not.toContain('pd-card');
   });

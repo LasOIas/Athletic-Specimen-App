@@ -110,6 +110,11 @@ function loadApp() {
       // context, so the app sees it as a global exactly the way the browser does).
       ruleSummary: (t) => settingsRuleSummary(t),
       buildRules: () => { manageView = 'tournament'; mgtView = 'rules'; return buildMgRulesHTML(); },
+      // Task 7: the pure helper the rules cards are built from (pure.js loads into this same context),
+      // and the one editor every card's Edit pill opens, with its new { caret, append } options.
+      rulesSections: (t) => rulesToSections(t),
+      openEditor: (kind, opts) => openManageEditor(kind, opts),
+      rulesDirty: () => manageRulesDirty(),
       buildCloseout: (opts) => {
         opts = opts || {};
         manageView = 'tournament'; mgtView = 'closeout';
@@ -1183,5 +1188,172 @@ describe('Task 6 Event settings', () => {
     expect(css).toMatch(/input\.set-in \{[^}]*font:[^;]*16px/);  // iOS zoom guard, not the design's 15px
     expect(css).toContain('Round 2026-08-24 — "this entire page looks awful, fix it"');
     expect(css).not.toMatch(/\.set-(in|num|money|wide)[^{]*\{[^}]*!important/);
+  });
+});
+
+// ── Task 7: the Rules sheet as cards ──────────────────────────────────────────────────────────────────
+// Mike's banner on the handoff was "this page needs help, make it look like its editable". Spec decision 2
+// takes the card LOOK with ONE editor: a card per section, an Edit pill that opens the existing full-screen
+// editor AT that section, "Edit all" in the header, "+ Add a section" at the end. Deliberately NOT ported:
+// the design's inline field editing — it never saved, and its serializer rewrote numbered lists as bullets.
+describe('Task 7 rules cards', () => {
+  it('rulesToSections mirrors rulesToHTML grouping and carries offsets', () => {
+    const md = '## Format\n- 4s co-ed\n\nWoodmen Valley Park · $80 a team';
+    const s = bridge.rulesSections(md);
+    expect(s.length).toBe(2);
+    expect(s[0].head).toBe('Format'); expect(s[0].startOffset).toBe(0);
+    expect(s[1].head).toBe(''); expect(s[1].startOffset).toBe(md.indexOf('Woodmen'));
+    expect(s[0].bodyHTML).toContain('rl-li');
+  });
+
+  it('the rules view: a card per section, Edit pills, Edit all, Add a section, no inline inputs', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', rules: '## Format\n- 4s\n\n## Between games\n1. Winners stay\n\nBring cash' });
+    const html = bridge.buildRules();
+    expect(count(html, 'class="rlv-card')).toBe(3);
+    expect(count(html, 'data-rlv-edit=')).toBe(3);
+    expect(html).toContain('class="rlv-card is-note"');
+    expect(html).toContain('data-mgru-edit>');
+    expect(html).toContain('Edit all');
+    expect(html).toContain('data-rlv-add');
+    expect(html).toContain('Every section here is yours to edit. Tap one to change its wording or bullets.');
+    expect(html).not.toContain('<input');
+    expect(html).not.toMatch(/—|&mdash;/);
+    expect(html).toContain('rl-num');
+  });
+
+  it("each Edit pill carries its own section's offset, and the head is drawn once", () => {
+    const rules = '## Format\n- 4s\n\n## Between games\n1. Winners stay\n\nBring cash';
+    seedHub(bridge, { status: 'setup', name: 'A', rules });
+    const html = bridge.buildRules();
+    // the offsets are the REAL character positions in the stored text, so the caret lands on the section
+    [0, rules.indexOf('## Between games'), rules.indexOf('Bring cash')]
+      .forEach((off) => expect(html).toContain(`data-rlv-edit="${off}"`));
+    // "Format" appears in the card head and nowhere else — the "## " line is lifted out of the body
+    expect(count(html, '>Format<')).toBe(1);
+    expect(count(html, 'class="rl-h"')).toBe(2);   // two headed sections; the note card has no head
+    expect(html).toContain('class="rlv-lines rl-body"');
+    expect(html).toContain('class="rlv-foot">Saved changes show up on the players\' Rules page straight away.<');
+  });
+
+  it('the view stays read-only markup: no textarea, no second serializer, no inline field kit', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', rules: '## Format\n- 4s' });
+    const html = bridge.buildRules();
+    expect(html).not.toContain('<textarea');
+    expect(html).not.toMatch(/rlv-tin\b/);
+    expect(html).not.toMatch(/rlv-lin\b/);   // the \b so the ported .rlv-lines never reads as .rlv-lin
+    expect(html).not.toContain('contenteditable');
+    expect(bridge.rulesDirty()).toBe(false);   // nothing on the panel for a background poll to clobber
+  });
+
+  it('escapes the section head — a rules column can never inject markup into a card', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', rules: '## Heads up <script>alert(1)</script>\n- be cool' });
+    const html = bridge.buildRules();
+    expect(html).not.toContain('<script>alert(1)</script>');
+    expect(count(html, '&lt;script&gt;')).toBe(1);
+  });
+
+  it('empty rules: the honest prompt lives inside one card, with a Write pill that seeds a section', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', rules: null });
+    const html = bridge.buildRules();
+    expect(html).toContain('mgru-empty');
+    expect(html).toContain('No rules yet');
+    expect(html).toContain('data-mgru-edit');    // the block itself still opens the editor
+    expect(count(html, 'class="rlv-card')).toBe(1);
+    expect(html).toContain('data-rlv-add');
+    expect(html).not.toContain('data-rlv-edit=');
+    expect(html).not.toContain('undefined');
+  });
+
+  it('the rules-card CSS ships, with the iOS font-size guard countered on every pill', () => {
+    ['.rlv-intro {\n', '.rlv-card {\n', '.rlv-hd {\n', '\n.rlv-lines {', '.rlv-add {\n', '.rlv-plus {', '.rlv-foot {']
+      .forEach((sel) => expect(count(css, sel)).toBe(1));
+    expect(css).toContain('.rlv-card.is-note .rlv-lines');
+    expect(css).toContain('.rlv-hd .rl-h::after { content: none;');   // the card divider replaces the rule
+    expect(css).toContain('.rlv-card.is-note .rlv-hd { justify-content: flex-end; }'); // a headless card
+    // prod ships button { font-size: 16px !important } as an iOS zoom guard, so each pill says its size back
+    expect(css).toContain('.rlv-add { min-height: 46px; height: 46px; font-size: 13.5px !important; }');
+    expect(css).toMatch(/\.rlv-edit,\n\.rlv-hedit \{ min-height: 30px; height: 30px; font-size: 12px !important; \}/);
+    // the whole-sheet text cursor is gone with the whole-sheet tap target
+    expect(css).toContain('.mgru-view { cursor: default; }');
+    expect(css).not.toContain('.mgru-view { cursor: text; }');
+    // the inline-editing kit is NOT ported — no RULE may reference it (a PORT NOTE names what it bans, so
+    // the comments come out first; §41 lesson, 2026-08-24)
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    [/\.rlv-tin\b/, /\.rlv-lin\b/, /\.rlv-more\b/, /\.rlv-card\.is-new\b/].forEach((re) => expect(rules).not.toMatch(re));
+  });
+});
+
+// The one editor, opened at a section. openManageEditor mounts on document.body through createElement, so
+// the shared harness stub (querySelector → null) cannot see the textarea. This installs the smallest
+// element stub that can: it builds its textarea's value out of the markup openManageEditor writes, which is
+// exactly what a browser does, so the append maths is driven for real rather than simulated.
+function withEditorDOM(fn) {
+  const doc = bridge.doc;
+  const realCreate = doc.createElement;
+  const noop = () => {};
+  const ta = { value: '', scrollTop: 0, clientHeight: 0, focus: noop, blur: noop, setSelectionRange: noop };
+  const unesc = (s) => String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+  const el = {
+    id: '', className: '', style: {}, dataset: {},
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+    appendChild: noop, remove: noop, addEventListener: noop,
+    set innerHTML(html) {
+      const m = String(html).match(/<textarea[^>]*>([\s\S]*?)<\/textarea>/);
+      ta.value = m ? unesc(m[1]) : '';
+    },
+    get innerHTML() { return ''; },
+    querySelector: (sel) => (sel === '#mged-ta' ? ta : { addEventListener: noop }),
+  };
+  doc.createElement = () => el;
+  try { return fn(ta); } finally { doc.createElement = realCreate; }
+}
+
+describe('Task 7 the one editor, opened at a section', () => {
+  it('Add a section appends the scaffold to a written document, keeping what is already there', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', rules: '## Format\n- 4s\n' });
+    withEditorDOM((ta) => {
+      bridge.openEditor('rules', { append: '\n\n## New section\n- ' });
+      expect(ta.value).toBe('## Format\n- 4s\n\n## New section\n- ');
+    });
+  });
+
+  it('Add a section on an EMPTY document opens with the scaffold alone, not two blank lines above it', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', rules: '' });
+    withEditorDOM((ta) => {
+      bridge.openEditor('rules', { append: '\n\n## New section\n- ' });
+      expect(ta.value).toBe('## New section\n- ');
+    });
+    seedHub(bridge, { status: 'setup', name: 'A', rules: '   \n\n ' });
+    withEditorDOM((ta) => {
+      bridge.openEditor('rules', { append: '\n\n## New section\n- ' });
+      expect(ta.value).toBe('## New section\n- ');
+    });
+  });
+
+  it('an Edit pill opens the SAME document untouched — a caret is not an edit', () => {
+    const rules = '## Format\n- 4s\n\n## Between games\n1. Winners stay';
+    seedHub(bridge, { status: 'setup', name: 'A', rules });
+    withEditorDOM((ta) => {
+      bridge.openEditor('rules', { caret: rules.indexOf('## Between games') });
+      expect(ta.value).toBe(rules);
+    });
+  });
+
+  it('the existing one-argument callers are untouched: the document opens exactly as stored', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', rules: '## Format\n- 4s\n' });
+    withEditorDOM((ta) => {
+      bridge.openEditor('rules');
+      expect(ta.value).toBe('## Format\n- 4s\n');
+    });
+  });
+
+  it('the delegates route the pills to the one editor: caret from the offset, scaffold from Add', () => {
+    // the wiring itself lives in the click delegate, which needs a real event target; assert the shape the
+    // delegate hands over so a rename of either hook cannot pass silently
+    expect(appSrc).toContain("openManageEditor('rules', { caret:");
+    expect(appSrc).toContain("openManageEditor('rules', { append: '\\n\\n## New section\\n- ' })");
+    expect(appSrc).toContain("e.target.closest('[data-rlv-edit]')");
+    expect(appSrc).toContain("e.target.closest('[data-rlv-add]')");
   });
 });

@@ -1911,6 +1911,61 @@ function rulesToHTML(text) {
   return sections.join('');
 }
 
+// The rules document as SECTIONS, for the organizer's card view (Manage handoff 2026-08-25, Task 7).
+// Grouping is EXACTLY rulesToHTML's — a blank line ends a section, a leading "## " line is its head — so a
+// card can never disagree with the page players read. rulesToHTML itself is untouched: it still renders the
+// public Rules page and Home's sheet, and this helper CALLS it rather than re-implementing the formatter,
+// so there is one serializer, not two.
+//
+// Each section carries:
+//   head        the "## " text, RAW (the caller escapes it into its own header row) — '' when the section
+//               opens with an ordinary line, which is what draws a headless "note" card. No head is invented.
+//   startOffset the character offset of the section's FIRST line in the ORIGINAL text, so tapping the card's
+//               Edit pill can drop the editor's caret exactly there. Counted off the real separators, so a
+//               CRLF document (\r\n is two characters) still points at the right line.
+//   bodyHTML    rulesToHTML's output for the section's remaining lines, with the single outer
+//               <div class="rl-sect"> wrapper stripped, so the card's own .rlv-lines inherits the shipped
+//               .rl-li / .rl-dot / .rl-num / .rl-p styling. The "## " line is LIFTED OUT rather than left in
+//               the body — the card already draws the head in .rlv-hd, and leaving it would print it twice.
+// Pure — no DOM / no DB / no app state.
+function rulesToSections(text) {
+  if (text == null) return [];
+  const src = String(text);
+  // The capturing split keeps the line separators, which is the only way an offset can know whether a break
+  // cost one character or two. The pattern is rulesToHTML's own /\r?\n/, so the lines match line for line.
+  const chunks = src.split(/(\r?\n)/);
+  const out = [];
+  let cur = null;
+  let pos = 0;
+  const flush = () => {
+    if (cur && cur.any) {
+      const html = rulesToHTML(cur.body.join('\n'));
+      out.push({
+        head: cur.head,
+        startOffset: cur.start,
+        bodyHTML: html.replace(/^<div class="rl-sect">/, '').replace(/<\/div>$/, ''),
+      });
+    }
+    cur = null;
+  };
+  for (let i = 0; i < chunks.length; i += 2) {
+    const raw = chunks[i];
+    const sep = chunks[i + 1] || '';
+    const line = raw.trim();
+    if (!line) { flush(); pos += raw.length + sep.length; continue; }
+    if (!cur) cur = { head: '', start: pos, any: false, body: [] };
+    // A "## " line heads the section only when it OPENS it, and only when it actually says something —
+    // a bare "## " stays a line so no text is ever silently swallowed.
+    const isHead = !cur.any && line.startsWith('## ') && !!line.slice(3).trim();
+    if (isHead) cur.head = line.slice(3).trim();
+    else cur.body.push(raw);
+    cur.any = true;
+    pos += raw.length + sep.length;
+  }
+  flush();
+  return out;
+}
+
 // The Event settings rule line (Manage handoff 2026-08-25, screen 39). The Scoring card's four knobs
 // restated as ONE sentence, in the grammar the score card already prints, so the organizer reads the
 // line players will read before he leaves the page.
@@ -1964,7 +2019,7 @@ if (typeof module !== "undefined" && module.exports) {
     computeTeamRunEnded, sessionIsUpcoming, sessionIsToday,
     manageNeedsYouModel, manageHubPhaseIndex, MANAGE_HUB_STEPS,
     publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel,
-    tournamentStageModel, rulesToHTML,
+    tournamentStageModel, rulesToHTML, rulesToSections,
     settingsRuleSummary
   };
 }
