@@ -1501,8 +1501,11 @@ describe('buildMgSettingsHTML — all-knobs-flat event settings (pick R11, mocku
     expect(html).toContain('value="20"'); // pool cap
     expect(html).toContain('value="21"'); // bracket target
     expect(html).toContain('value="25"'); // bracket cap
-    // the short fields sit two-across
-    expect(count(html, 'class="mges-half"')).toBeGreaterThanOrEqual(3);
+    // 2026-08-25 (Manage handoff, Task 6): the flat wall became named groups on cards. This fixture carries
+    // no venue columns, so the guarded "Where" group is absent and three cards ship.
+    expect(count(html, 'class="set-card"')).toBe(3);
+    expect(html).not.toContain('>Where<');
+    expect(html).not.toContain('mges-half');
   });
 
   it('gives every numeric input the iOS numeric keyboard + 16px guard', () => {
@@ -1510,8 +1513,10 @@ describe('buildMgSettingsHTML — all-knobs-flat event settings (pick R11, mocku
     const html = bridge.buildSettings();
     // one inputmode="numeric" per numeric field (6: team size, nets, pool to/cap, bracket to/cap)
     expect(count(html, 'inputmode="numeric"')).toBe(6);
-    // the pk-fv field grammar carries the 16px font (styles.css) — assert we reuse it, not a bespoke input
-    expect(html).toContain('class="pk-fv"');
+    // 2026-08-25 (Task 6): the fields moved off .pk-fv onto the card kit's own .set-in. The 16px iOS zoom
+    // guard travelled with them — it is asserted against styles.css in manage-round.test.js, which reads it.
+    expect(count(html, 'class="set-in set-num"')).toBe(6);
+    expect(html).not.toContain('class="pk-fv"');
   });
 
   it('renders win-by-2 and grand-final-reset as mg-sw switches (not text), reflecting the booleans', () => {

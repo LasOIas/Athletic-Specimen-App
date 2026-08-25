@@ -81,6 +81,9 @@ describe('venue columns are gated on the loaded rows (0057 pattern)', () => {
     const html = bridge.buildSettings();
     expect(html).not.toContain('id="mges-venue"');
     expect(html).not.toContain('id="mges-venueaddr"');
+    // 2026-08-25 (Manage handoff, Task 6): the two fields live in a "Where" group of their own, so the
+    // whole group has to disappear with them — an empty named card would advertise a setting that is not there.
+    expect(html).not.toContain('>Where<');
   });
   it('reports present only when BOTH keys are on the row', () => {
     bridge.setTournaments([{ ...base, venue: null }]);
@@ -96,6 +99,10 @@ describe('venue columns are gated on the loaded rows (0057 pattern)', () => {
     expect(html).toContain('id="mges-venueaddr"');
     expect(html).toContain('value="1000 Woodmen Valley Rd, Colorado Springs, CO"');
     expect(bridge.settingsIds()).toEqual(expect.arrayContaining(['mges-venue', 'mges-venueaddr']));
+    // both fields sit under one named group, each with the sentence that says where the value shows up
+    expect(html).toContain('>Where<');
+    expect(html).toContain('The park players see on the front page');
+    expect(html).toContain('What Copy address puts on their clipboard');
   });
 });
 

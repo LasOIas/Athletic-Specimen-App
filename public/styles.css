@@ -5405,6 +5405,130 @@ body.m-enter .mgh-pick:not([hidden]) > * {
 .mgv-tanote { margin: 10px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
 .mgv-tapay { margin-top: 4px; }
 
+/* PORT NOTE: _shared.css:206-297 (the round's own banner comment kept) — Manage › Tournament › Event
+   settings. Placed HERE, inside the 2026-08-25 Manage block and ABOVE the 2026-08-23 button restyle below,
+   for the same reason the hub's title block is: the restyle is written to sit ON TOP of this geometry, and
+   appending after it would silently undo it. FOUR substitutions, none of them cosmetic:
+   (1) every field rule is authored `input.set-in` / `input.set-num` / `input.set-money` / `input.set-wide`,
+       never the bare class. Production's `input[type="text"], input[type="number"], …` block (this file,
+       "Inputs & selects") has specificity (0,1,1) and beats a bare `.set-in` at (0,1,0) on padding, border,
+       border-radius, background and height. With the type prefix the two tie and source order — this block
+       is later — decides.
+   (2) `flex: none; min-width: auto;` is declared OUT LOUD on all four. That same production block declares
+       `flex: 1; min-width: 0`, and a property the round never mentions cannot override anything: the 62px
+       number field would have stretched to fill its row.
+   (3) font-size stays 16px, NOT the round's 15px. Production carries `font-size: 16px !important` on that
+       block as the iOS focus-zoom guard, so 15px could not have won — and writing it would be a lie in the
+       source. No new !important is introduced here.
+   (4) the round's `transition` on .set-in is DROPPED: production's motion layer already gives
+       `input, select, textarea` box-shadow / border-color / background-color transitions on the same
+       --m-state + --e-settle pair, and does it through --m-scale, so reduced motion stays honoured.
+   NOT ported: nothing. The .mges-half / .mges-swfield kit this screen used to render on stays in the file —
+   the CREATE-a-tournament dialog still ships on it. */
+/* ============================================================
+   Round 2026-08-24 — "this entire page looks awful, fix it" (Event settings).
+   It was eleven bare underlined inputs in a wall: shouting caps labels, "POOL
+   TO" and "POOL CAP" with no hint of what either means, and two switches
+   wedged into a field row. Nothing said what a setting DOES.
+
+   Now: named groups on cards, one row per setting, every row a plain label
+   with a sentence under it, controls right-aligned and sized to their job —
+   and the scoring rules restated in the one line players will read.
+   ============================================================ */
+.set-intro {
+  margin: 2px 2px 4px;
+  font-size: 13px;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.set-card {
+  margin: 0 0 2px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .05), 0 0 0 1px oklch(0.91 0.005 75);
+  overflow: hidden;
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 14px;
+}
+.set-row + .set-row { border-top: 1px solid var(--border); }
+.set-row.is-stack { display: grid; gap: 8px; }
+.set-l {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.set-h {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.set-ctl { flex: none; display: flex; align-items: center; gap: 10px; }
+.set-pair { display: flex; align-items: center; gap: 6px; }
+.set-mini {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+input.set-in {
+  flex: none;
+  min-width: auto;
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 11px;
+  background: oklch(0.975 0.003 75);
+  box-shadow: inset 0 0 0 1px oklch(0.90 0.005 75);
+  font: 600 16px 'Inter', system-ui, sans-serif;
+  color: var(--ink);
+}
+input.set-in:focus {
+  outline: none;
+  background: #fff;
+  box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 0 4px var(--accent-soft);
+}
+input.set-num {
+  flex: none;
+  min-width: auto;
+  width: 62px;
+  padding: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+input.set-num::-webkit-outer-spin-button,
+input.set-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input.set-wide {
+  flex: none;
+  min-width: auto;
+  width: 100%;
+}
+input.set-money {
+  flex: none;
+  min-width: auto;
+  width: 148px;
+  text-align: right;
+}
+.set-u { font-size: 12.5px; color: var(--muted); }
+.set-sum {
+  margin: 8px 2px 0;
+  font-size: 12.5px;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.set-foot { display: grid; gap: 8px; margin-top: 22px; }
+.set-foot .mgr-status { margin: 0; text-align: center; }
+
 /* ============================================================
    Round 2026-08-23 — "redo the styling of the buttons, highlighting, checkmarks"
    (the app itself, every screen). The controls were drawn as outlines: a flat

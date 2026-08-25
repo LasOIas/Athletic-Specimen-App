@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.9'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.10'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -9365,36 +9365,80 @@ function buildMgSettingsHTML() {
     + `<button type="button" class="pd-back" data-mgt-back aria-label="Back to Tournament">${PK_BACK_SVG}</button>`
     + `<div class="pd-htitle">Event settings</div></div>`;
   if (!t) return header + `<div class="pd-empty">No tournament to edit settings for yet.</div>`;
-  const numFld = (id, label, val) =>
-    `<div class="pk-fld"><label class="pk-fl" for="${id}">${label}</label>`
-    + `<input class="pk-fv" id="${id}" type="number" min="1" inputmode="numeric" value="${escapeHTMLText(val == null ? '' : String(val))}" /></div>`;
-  const swFld = (field, label, on) =>
-    `<div class="pk-fld mges-swfield"><span class="pk-fl">${escapeHTML(label)}</span>`
+  // 2026-08-25 (Manage handoff, screen 39). Mike on the shipped version: "this entire page looks awful, fix
+  // it." It was eleven bare underlined inputs in one wall — shouting caps labels, "POOL TO" and "POOL CAP"
+  // with no hint of what either means, two switches wedged into a field row, and nothing anywhere saying
+  // what a setting DOES. Now: four named groups on cards, ONE row per setting, every row a plain label with
+  // a sentence under it, and the scoring knobs restated as the one line players read on a score card.
+  // Every input id, the two data-mges-toggle switches and the data-mg-save hook are byte-identical to what
+  // shipped — mgSaveScreenFields, the mges- input delegate, the focusout safety net, the toggle handler and
+  // mgFieldWrite all key on them, so this is a re-layout and nothing else.
+  //
+  // A row's label is a <label for> wherever the row owns exactly one input. The two-input scoring rows and
+  // the switch rows take a <span> instead: "for" can only point at one control, and a button is not one
+  // (their inner .set-mini labels carry the association for the pair).
+  const lb = (id, label, hint) =>
+    `<label class="set-l" for="${id}">${escapeHTML(label)}<span class="set-h">${escapeHTML(hint)}</span></label>`;
+  const sp = (label, hint) =>
+    `<span class="set-l">${escapeHTML(label)}<span class="set-h">${escapeHTML(hint)}</span></span>`;
+  const val = (v) => escapeHTMLText(v == null ? '' : String(v));
+  const num = (id, v) =>
+    `<input class="set-in set-num" id="${id}" type="number" min="1" inputmode="numeric" value="${val(v)}" />`;
+  const txt = (id, v, extra) =>
+    `<input class="set-in set-wide" id="${id}" type="text" autocomplete="off" ${extra}value="${val(v)}" />`;
+  const pair = (id, mini, v) => `<span class="set-pair"><label class="set-mini" for="${id}">${mini}</label>${num(id, v)}</span>`;
+  // a free-text value gets the label above it and the full width below — an address has nowhere to go on one line
+  const stack = (id, label, hint, input) => `<div class="set-row is-stack">${lb(id, label, hint)}${input}</div>`;
+  const unit = (id, label, hint, v, u) =>
+    `<div class="set-row">${lb(id, label, hint)}<span class="set-ctl">${num(id, v)}<span class="set-u">${u}</span></span></div>`;
+  const twin = (label, hint, aId, aV, bId, bV) =>
+    `<div class="set-row">${sp(label, hint)}<span class="set-ctl">${pair(aId, 'to', aV)}${pair(bId, 'cap', bV)}</span></div>`;
+  // The switch markup itself is UNCHANGED (2026-08-04: a switch is tap-to-apply, never behind Save — flipping
+  // one is already the instruction). Only the row around it moved.
+  const sw = (field, label, hint, on) =>
+    `<div class="set-row">${sp(label, hint)}`
     + `<button type="button" class="mg-sw${on ? ' on' : ''}" data-mges-toggle="${field}" role="switch" aria-checked="${on ? 'true' : 'false'}" aria-label="${escapeHTML(label)}"></button></div>`;
   const bracketTo = (t.bracket_target != null ? t.bracket_target : t.match_cap);
   const winBy2 = (t.win_by_2 == null || !!t.win_by_2); // default on (matches the create/modal contract)
   return header
-    + `<div class="pk-fld"><label class="pk-fl" for="mges-name">Tournament name</label>`
-      + `<input class="pk-fv" id="mges-name" type="text" autocomplete="off" autocapitalize="words" value="${escapeHTMLText(t.name == null ? '' : String(t.name))}" /></div>`
-    + `<div class="mges-half">${numFld('mges-teamsize', 'Team size', t.team_size)}${numFld('mges-nets', 'Nets', t.net_count)}</div>`
-    + `<div class="mges-half">${numFld('mges-pooltarget', 'Pool to', t.pool_target)}${numFld('mges-poolcap', 'Pool cap', t.pool_cap)}</div>`
-    + `<div class="mges-half">${numFld('mges-brackettarget', 'Bracket to', bracketTo)}${numFld('mges-bracketcap', 'Bracket cap', t.bracket_cap)}</div>`
-    + `<div class="mges-half">${swFld('win_by_2', 'Win by 2', winBy2)}${swFld('grand_final_reset', 'Grand final reset', !!t.grand_final_reset)}</div>`
-    + `<div class="pk-fld"><label class="pk-fl" for="mges-buyin">Buy-in</label>`
-      + `<input class="pk-fv" id="mges-buyin" type="text" autocomplete="off" placeholder="$80 a team" value="${escapeHTMLText(t.buy_in == null ? '' : String(t.buy_in))}" /></div>`
+    + `<p class="set-intro">These decide how the day runs. Scoring here sets the rule line on every score card.</p>`
+    + `<div class="pl-sect">The basics</div><div class="set-card">`
+      + stack('mges-name', 'Name', 'What players see on the front page',
+        txt('mges-name', t.name, 'autocapitalize="words" '))
+      + unit('mges-teamsize', 'Team size', 'Players per side on the court', t.team_size, 'a side')
+      + unit('mges-nets', 'Nets', 'Courts you have for the day', t.net_count, 'courts')
+    + `</div>`
+    + `<div class="pl-sect">Scoring</div><div class="set-card">`
+      + twin('Pool play', 'First to the target, capped so a close game ends',
+        'mges-pooltarget', t.pool_target, 'mges-poolcap', t.pool_cap)
+      + twin('Bracket', 'Longer, because they decide the day',
+        'mges-brackettarget', bracketTo, 'mges-bracketcap', t.bracket_cap)
+      + sw('win_by_2', 'Win by 2', 'A game ends on a two-point lead', winBy2)
+      + sw('grand_final_reset', 'Grand final reset', 'The losers-bracket team gets a second championship game', !!t.grand_final_reset)
+    + `</div>`
+    // The four knobs above, restated in the grammar the score card prints. Derived (settingsRuleSummary, in
+    // pure.js) rather than typed, so it cannot drift from the switch sitting directly above it.
+    + `<p class="set-sum">${escapeHTML(settingsRuleSummary(t))}</p>`
     // COLUMN-GUARDED (migration 0058). The venue fields render only once the loaded rows carry both keys —
     // an input that cannot save is worse than an absent one (the 0057 rule). Home's Details card reads the
-    // same two columns; until they exist it keeps its "Posted in GroupMe" row.
+    // same two columns; until they exist it keeps its "Posted in GroupMe" row. The GROUP is inside the
+    // guard with them: a named card with nothing in it would advertise a setting that is not there.
     + (tournamentHasVenue()
-      ? `<div class="pk-fld"><label class="pk-fl" for="mges-venue">Venue</label>`
-        + `<input class="pk-fv" id="mges-venue" type="text" autocomplete="off" autocapitalize="words" placeholder="Woodmen Valley Park" value="${escapeHTMLText(t.venue == null ? '' : String(t.venue))}" /></div>`
-        + `<div class="pk-fld"><label class="pk-fl" for="mges-venueaddr">Address</label>`
-        + `<input class="pk-fv" id="mges-venueaddr" type="text" autocomplete="off" placeholder="1000 Woodmen Valley Rd, Colorado Springs, CO" value="${escapeHTMLText(t.venue_address == null ? '' : String(t.venue_address))}" /></div>`
+      ? `<div class="pl-sect">Where</div><div class="set-card">`
+        + stack('mges-venue', 'Venue', 'The park players see on the front page',
+          txt('mges-venue', t.venue, 'autocapitalize="words" placeholder="Woodmen Valley Park" '))
+        + stack('mges-venueaddr', 'Address', 'What Copy address puts on their clipboard',
+          txt('mges-venueaddr', t.venue_address, 'placeholder="1000 Woodmen Valley Rd, Colorado Springs, CO" '))
+        + `</div>`
       : '')
-    // 2026-08-04: one Save for the whole sheet — every dirty knob in ONE write. The two switches above are
-    // deliberately NOT behind it (flipping one is already the instruction); they apply and prove on tap.
-    + mgSaveBtnHTML('settings')
-    + `<p class="mgr-status" id="mges-status" role="status" aria-live="polite">Saved</p>`;
+    + `<div class="pl-sect">Money</div><div class="set-card">`
+      + `<div class="set-row">${lb('mges-buyin', 'Buy-in', 'Per team, as free text')}`
+      + `<input class="set-in set-money" id="mges-buyin" type="text" autocomplete="off" placeholder="$80 a team" value="${val(t.buy_in)}" /></div>`
+    + `</div>`
+    // 2026-08-04: one Save for the whole sheet — every dirty knob in ONE write. Task 4 (2026-08-25) gave the
+    // line beside it words: "Unsaved changes" the moment a field differs, "Saved" at rest.
+    + `<div class="set-foot">${mgSaveBtnHTML('settings')}`
+    + `<p class="mgr-status" id="mges-status" role="status" aria-live="polite">Saved</p></div>`;
 }
 
 // The Rules sheet (§38 pick C, 2026-07-12): VIEW mode renders the rules EXACTLY as the public Rules page

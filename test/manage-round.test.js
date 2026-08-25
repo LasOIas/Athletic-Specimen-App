@@ -106,6 +106,9 @@ function loadApp() {
       buildScoreSheet: (m, w) => buildMgScoreSheetHTML(m, w),
       buildBracket: (opts) => { opts = opts || {}; manageView = 'tournament'; mgtView = 'bracket'; state.seedOverride = (opts.seedOverride === undefined ? null : opts.seedOverride); mgBracketShowDone = !!opts.showDone; return buildMgBracketHTML(); },
       buildSettings: () => { manageView = 'tournament'; mgtView = 'settings'; return buildMgSettingsHTML(); },
+      // Task 6: the pure helper the Scoring card's summary line derives from (pure.js loads into this same
+      // context, so the app sees it as a global exactly the way the browser does).
+      ruleSummary: (t) => settingsRuleSummary(t),
       buildRules: () => { manageView = 'tournament'; mgtView = 'rules'; return buildMgRulesHTML(); },
       buildCloseout: (opts) => {
         opts = opts || {};
@@ -1091,5 +1094,80 @@ describe('Task 5 add a team', () => {
     expect(count(css, '.mgv-taform {')).toBe(1);
     expect(count(css, '.mgv-tamenu {')).toBe(1);
     expect(css).toContain('Round 2026-08-05 - organizer "Add a team"');
+  });
+});
+
+// ── Task 6: Event settings (screen 39, mgts-settings) ─────────────────────────────────────────────────
+// Mike on the shipped screen: "this entire page looks awful, fix it." It was eleven bare underlined inputs
+// in one wall — shouting caps labels, "POOL TO" and "POOL CAP" with no hint of what either means, and two
+// switches wedged into a field row. Nothing on it said what a setting DOES.
+// Now: four named groups on cards, one row per setting, every row a plain label with a sentence under it,
+// the live venue columns given a group of their own (the design handoff forgot them), and the scoring
+// knobs restated as the one line players read on a score card. Every input id and every save hook is
+// byte-identical — the save engine, the input delegate, the focusout safety net and the toggle handler all
+// key on them, so restyling the page must not move a single one of them.
+describe('Task 6 Event settings', () => {
+  it('settingsRuleSummary', () => {
+    const s = bridge.ruleSummary;
+    expect(s({ pool_target: 15, pool_cap: 20, bracket_target: 21, bracket_cap: 25, win_by_2: true })).toBe('Pool to 15, cap 20 · bracket to 21, cap 25 · win by 2.');
+    expect(s({ pool_target: 15, pool_cap: null, bracket_target: 21, bracket_cap: null, win_by_2: false })).toBe('Pool to 15 · bracket to 21.');
+  });
+
+  it('settings: four cards, every id kept, Where guarded, Saved at rest, the true intro', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', team_size: 4, net_count: 3, pool_target: 15, pool_cap: 20, bracket_target: 21, bracket_cap: 25, win_by_2: true, buy_in: '$80 a team', venue: 'P', venue_address: 'Q' });
+    const html = bridge.buildSettings();
+    for (const h of ['The basics', 'Scoring', 'Where', 'Money']) expect(html).toContain(`>${h}<`);
+    for (const id of ['mges-name', 'mges-teamsize', 'mges-nets', 'mges-pooltarget', 'mges-poolcap', 'mges-brackettarget', 'mges-bracketcap', 'mges-buyin', 'mges-venue', 'mges-venueaddr']) expect(html).toContain(`id="${id}"`);
+    expect(html).toContain('Scoring here sets the rule line on every score card.');
+    expect(html).toContain('class="set-sum">Pool to 15, cap 20 · bracket to 21, cap 25 · win by 2.<');
+    expect(html).toContain('id="mges-status" role="status" aria-live="polite">Saved<');
+    expect(html).toContain('data-mges-toggle="win_by_2"');
+    expect(html).not.toContain('mges-half');
+  });
+
+  it('every row carries its sentence, the switches keep their shipped markup, and the copy holds the line', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', team_size: 4, net_count: 3, pool_target: 15, pool_cap: 20, bracket_target: 21, bracket_cap: 25, win_by_2: true, grand_final_reset: false, buy_in: '$80 a team', venue: 'P', venue_address: 'Q' });
+    const html = bridge.buildSettings();
+    // one sentence per row: ten settings on this screen once the venue columns are loaded
+    expect(count(html, 'class="set-h"')).toBe(10);
+    expect(count(html, 'class="set-row')).toBe(10);
+    expect(count(html, 'class="set-card"')).toBe(4);
+    ['What players see on the front page', 'Players per side on the court', 'Courts you have for the day',
+      'First to the target, capped so a close game ends', 'A game ends on a two-point lead',
+      'The losers-bracket team gets a second championship game', 'The park players see on the front page',
+      'What Copy address puts on their clipboard', 'Per team, as free text']
+      .forEach((s) => expect(html).toContain(s));
+    // the two switches are the SAME element the toggle handler has always found (tap-to-apply, 2026-08-04)
+    expect(html).toContain('<button type="button" class="mg-sw on" data-mges-toggle="win_by_2" role="switch" aria-checked="true" aria-label="Win by 2"></button>');
+    expect(html).toContain('<button type="button" class="mg-sw" data-mges-toggle="grand_final_reset" role="switch" aria-checked="false" aria-label="Grand final reset"></button>');
+    expect(html).toContain('Grand final reset<'); // the design's own label, kept
+    // the Save hook the edit engine resolves, once, inside the foot
+    expect(count(html, 'data-mg-save="settings"')).toBe(1);
+    expect(html).toContain('<div class="set-foot">');
+    expect(html).not.toMatch(/—|&mdash;/); // §51 copy law
+  });
+
+  it('the Where group is gated on the loaded columns, and the summary follows the knobs', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', pool_target: 15, pool_cap: null, bracket_target: 21, bracket_cap: null, win_by_2: false });
+    const st = bridge.getState();
+    st.tournaments = [{ id: 'T', name: 'A', status: 'setup', pool_target: 15, pool_cap: null, bracket_target: 21, bracket_cap: null, win_by_2: false }];
+    const html = bridge.buildSettings();
+    expect(html).not.toContain('>Where<');
+    expect(html).not.toContain('id="mges-venue"');
+    expect(count(html, 'class="set-card"')).toBe(3);
+    expect(html).toContain('class="set-sum">Pool to 15 · bracket to 21.<');
+  });
+
+  it('the Event settings CSS ships, authored to beat prod input[type=...]', () => {
+    ['.set-intro {', '.set-card {', '.set-row {', '.set-l {', '.set-h {', '.set-ctl {', '.set-pair {',
+      '.set-mini {', 'input.set-in {', 'input.set-num {', 'input.set-wide {', 'input.set-money {',
+      '.set-u {', '.set-sum {', '.set-foot {'].forEach((sel) => expect(css).toContain(sel));
+    expect(count(css, 'input.set-in {')).toBe(1);      // ported ONCE
+    expect(css).toContain('input.set-in:focus');       // the accent ring survives the port
+    // prod's input[type=...] block declares flex:1/min-width:0, so the port has to say the opposite out loud
+    expect(count(css, 'flex: none;\n  min-width: auto;')).toBe(4);
+    expect(css).toMatch(/input\.set-in \{[^}]*font:[^;]*16px/);  // iOS zoom guard, not the design's 15px
+    expect(css).toContain('Round 2026-08-24 — "this entire page looks awful, fix it"');
+    expect(css).not.toMatch(/\.set-(in|num|money|wide)[^{]*\{[^}]*!important/);
   });
 });

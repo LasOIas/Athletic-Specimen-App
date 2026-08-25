@@ -21,6 +21,7 @@ const {
   shapeClaimCandidates, filterClaimCandidates,
   resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
   checkinHeroModel, resolveHistoryChampion,
+  settingsRuleSummary,
 } = pure;
 
 describe('isValidFullName (C47 — first+last name enforcement)', () => {
@@ -1113,5 +1114,30 @@ describe('resolveHistoryChampion — stored champion wins over computed', () => 
   it('falls back to computed when the stored id points at no known team', () => {
     const c = resolveHistoryChampion({ champion_team_id: 'ghost' }, teams, gf);
     expect(c.teamId).toBe('a'); // ghost not in teams → computed wins
+  });
+});
+
+describe('settingsRuleSummary (Manage handoff 2026-08-25 — the derived Event settings rule line)', () => {
+  it('states both targets, both caps and win by 2', () => {
+    expect(settingsRuleSummary({ pool_target: 15, pool_cap: 20, bracket_target: 21, bracket_cap: 25, win_by_2: true }))
+      .toBe('Pool to 15, cap 20 · bracket to 21, cap 25 · win by 2.');
+  });
+  it('a missing cap drops its own clause and a false win_by_2 drops the last one', () => {
+    expect(settingsRuleSummary({ pool_target: 15, pool_cap: null, bracket_target: 21, bracket_cap: null, win_by_2: false }))
+      .toBe('Pool to 15 · bracket to 21.');
+    expect(settingsRuleSummary({ pool_target: 15, pool_cap: '', bracket_target: 21, bracket_cap: 'x', win_by_2: false }))
+      .toBe('Pool to 15 · bracket to 21.');
+  });
+  it('an unset win_by_2 counts as ON — the same default buildMgSettingsHTML renders the switch with', () => {
+    expect(settingsRuleSummary({ pool_target: 15, bracket_target: 21 })).toBe('Pool to 15 · bracket to 21 · win by 2.');
+  });
+  it('falls back to match_cap for the bracket target (NF-1 back-compat, the builder does the same)', () => {
+    expect(settingsRuleSummary({ pool_target: 15, match_cap: 21 })).toBe('Pool to 15 · bracket to 21 · win by 2.');
+    // bracket_target wins when both are present
+    expect(settingsRuleSummary({ pool_target: 15, bracket_target: 21, match_cap: 99 })).toBe('Pool to 15 · bracket to 21 · win by 2.');
+  });
+  it('never throws on a missing tournament', () => {
+    expect(typeof settingsRuleSummary(null)).toBe('string');
+    expect(typeof settingsRuleSummary(undefined)).toBe('string');
   });
 });

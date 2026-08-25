@@ -1911,6 +1911,21 @@ function rulesToHTML(text) {
   return sections.join('');
 }
 
+// The Event settings rule line (Manage handoff 2026-08-25, screen 39). The Scoring card's four knobs
+// restated as ONE sentence, in the grammar the score card already prints, so the organizer reads the
+// line players will read before he leaves the page. A cap that is not set drops its own clause rather
+// than printing "cap" with nothing after it, bracket_target falls back to match_cap (the NF-1 back-compat
+// pair buildMgSettingsHTML reads the same way), and win_by_2 unset counts as ON — the same default the
+// builder renders the switch with, so the summary can never contradict the switch above it.
+function settingsRuleSummary(t) {
+  const x = t || {};
+  const cap = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? ', cap ' + Number(v) : '';
+  const parts = ['Pool to ' + (x.pool_target != null ? x.pool_target : '') + cap(x.pool_cap),
+    'bracket to ' + (x.bracket_target != null ? x.bracket_target : (x.match_cap != null ? x.match_cap : '')) + cap(x.bracket_cap)];
+  if (x.win_by_2 == null || !!x.win_by_2) parts.push('win by 2');
+  return parts.join(' · ') + '.';
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -1937,6 +1952,7 @@ if (typeof module !== "undefined" && module.exports) {
     computeTeamRunEnded, sessionIsUpcoming, sessionIsToday,
     manageNeedsYouModel, manageHubPhaseIndex, MANAGE_HUB_STEPS,
     publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel,
-    tournamentStageModel, rulesToHTML
+    tournamentStageModel, rulesToHTML,
+    settingsRuleSummary
   };
 }
