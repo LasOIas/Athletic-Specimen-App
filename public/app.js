@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.22'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.23'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7222,8 +7222,17 @@ async function confirmSignOut() {
 // One body-appended .auth-page for all three edit screens, the same pattern as #auth-page and
 // #reset-page so partialRender can never wipe it. Its back control always rebuilds the card, the
 // email-sent state included: the design's "back to email" would re-enter a form whose password field
-// is gone. Tasks 4-6 fill the three bodies; this scaffold owns the overlay, the view and the way back.
+// is gone. Task 4 filled the Name body; Tasks 5-6 fill the other two. This scaffold owns the overlay,
+// the view and the way back.
 let acctView = 'name';   // 'name' | 'email' | 'email-sent' | 'password'
+
+// The one error line every screen on this overlay writes to. It lives INSIDE each screen's markup, where
+// the design drew it (between the last field and the button), so there is never more than one #acct-err.
+const ACCT_ERR_HTML = '<div class="auth-err" id="acct-err" role="alert" hidden></div>';
+
+// The save failure every screen here can hit: the row the policy should have matched was not there. It
+// names the one thing the person can actually check, and the server's own words are logged, never shown.
+const ACCT_SAVE_FAIL = 'That did not save. Check you are signed in, then try again.';
 
 function closeAcctPage() {
   const el = document.getElementById('acct-page');
@@ -7254,21 +7263,85 @@ function renderAcctPageInner() {
   let inner;
   switch (acctView) {
     case 'email':
-      inner = '<h2 class="auth-title">Change email</h2>';
+      inner = '<h2 class="auth-title">Change email</h2>' + ACCT_ERR_HTML;
       break;
     case 'password':
-      inner = '<h2 class="auth-title">Change password</h2>';
+      inner = '<h2 class="auth-title">Change password</h2>' + ACCT_ERR_HTML;
       break;
     case 'name':
     default:
-      inner = '<h2 class="auth-title">Your name</h2>';
+      // The design's screen 10, verbatim, on the app's ids. Both fields carry the sign-up autocomplete
+      // tokens so a password manager fills the same two fields it filled at sign-up, and both are
+      // prefilled from the cached name: this screen edits a name, it never asks for one from scratch.
+      inner = `<form id="acct-form" novalidate autocomplete="on">
+        <h2 class="auth-title">Your name</h2>
+        <p class="auth-sub">This is what teammates and organizers see.</p>
+        <label class="auth-label" for="an-first">First name</label>
+        <input class="auth-input" id="an-first" type="text" required value="${escapeHTML(accountName && accountName.first)}" autocomplete="given-name" autocapitalize="words" spellcheck="false" />
+        <label class="auth-label" for="an-last">Last name</label>
+        <input class="auth-input" id="an-last" type="text" required value="${escapeHTML(accountName && accountName.last)}" autocomplete="family-name" autocapitalize="words" spellcheck="false" />
+        ${ACCT_ERR_HTML}
+        <button type="submit" class="auth-submit" id="acct-save">Save</button>
+      </form>`;
   }
   el.innerHTML = `
     <button type="button" class="auth-back" data-acct-back aria-label="Back to account">${AUTH_BACK_SVG}</button>
     <div class="auth-inner">
       ${inner}
-      <div class="auth-err" id="acct-err" role="alert" hidden></div>
     </div>`;
+  // Bound by id AFTER the swap, once per paint: innerHTML replaces the children, so this cannot stack the
+  // way an overlay-level bind would (the #auth-form pattern). Each screen owns its own submit.
+  const form = el.querySelector('#acct-form');
+  if (form && acctView === 'name') form.addEventListener('submit', onAcctNameSave);
+}
+
+// The Name screen's save (Account handoff 2026-08-25, spec §4). A plain profiles UPDATE for the caller's
+// own row under the self-update policy, with display_name kept in step by hand because only the INSERT
+// trigger writes it today, and a `.select('id')` READ-BACK: PostgREST answers a policy-filtered update
+// with zero rows and NO error, so without the read-back a rename that RLS refused would look like a save.
+// Never connect_profile_by_name: that RPC relinks roster rows to the new name and unlinks nothing, so a
+// rename there would drag other people's rows along with it.
+async function onAcctNameSave(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const firstEl = document.getElementById('an-first');
+  const lastEl = document.getElementById('an-last');
+  const errEl = document.getElementById('acct-err');
+  const btn = document.getElementById('acct-save');
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
+  if (errEl) errEl.hidden = true;
+  // The round's order: empties in the design's words first, then the name rule sign-up already uses, so
+  // one blank field never gets answered with a sentence about how long a name has to be.
+  if (!(firstEl && firstEl.value.trim()) || !(lastEl && lastEl.value.trim())) { showErr('Fill in every field.'); return; }
+  const nm = splitFullNameParts(firstEl.value, lastEl.value);
+  if (!nm.ok) { showErr(nm.message); return; }
+  if (!supabaseClient || !state.account) { showErr(ACCT_SAVE_FAIL); return; }
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  const failed = (msg) => {
+    showErr(msg);
+    if (btn) { btn.disabled = false; btn.textContent = orig; }
+  };
+  try {
+    const { data, error } = await supabaseClient
+      .from('profiles')
+      .update({ first_name: nm.first, last_name: nm.last, display_name: nm.first + ' ' + nm.last })
+      .eq('id', state.account.id)
+      .select('id');
+    if (error) console.error('profiles name update', error);   // the raw Postgres text is logged, never shown
+    if (error || !Array.isArray(data) || !data.length) { failed(ACCT_SAVE_FAIL); return; }
+    accountName = { first: nm.first, last: nm.last };
+    closeAcctPage();
+    // Only render() paints the header chip, and its letter comes from this cache, so a rename has to ask
+    // for one or the chip wears the old letter until the next nav tap (the promptNameFillIfNeeded fix).
+    if (state.loaded && bootPaintDone) { try { render(); } catch (_) {} }
+    openAccountMenu();
+    // The card behind the toast already shows the new name, so the toast only has to say the write landed.
+    // It is created and settled together: the in-flight state is the disabled "Saving…" button, not a toast.
+    settleSaveToast(makeSaveToast('Saving…'), true, 'Name saved');
+  } catch (err) {
+    console.error('profiles name update', err);
+    failed(ACCT_SAVE_FAIL);
+  }
 }
 
 // Mike pick X (task-#10, 2026-07-10): the in-app Check In tab is ANON-ONLY kiosk content — NO

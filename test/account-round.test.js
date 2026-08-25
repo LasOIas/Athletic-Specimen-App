@@ -37,6 +37,8 @@ const AUTH_CONTROL_IDS = [
   // Task 3: the account card's two footer buttons, #acct-page's error line, and the two buttons of the
   // REAL appConfirm - the sign-out confirm is driven through prod's own dialog, never a stub of it.
   'am-signout', 'am-close', 'acct-err', 'app-confirm-yes', 'app-confirm-no',
+  // Task 4: the Name screen's form, its two fields and its Save.
+  'acct-form', 'an-first', 'an-last', 'acct-save',
 ];
 
 function matches(node, sel) {
@@ -143,7 +145,15 @@ function loadApp() {
     },
     // maybeSingle is the profile read promptNameFillIfNeeded makes. Scriptable like the auth calls, so a
     // case can hand it a name (Task 3 review: the header chip has to repaint when that name lands).
-    from: () => ({ select: () => ({ eq: () => ({ limit: async () => ({ data: [], error: null }), maybeSingle: rec('profileRead') }) }) }),
+    // Task 4 adds the write half: update(...).eq(...).select(...) is recorded as ONE entry carrying every
+    // argument of the chain, so a case can assert the exact statement, and its answer is scriptable via
+    // supaNext('profileUpdate', value) - zero rows and a hard error are both drivable without a network.
+    from: (table) => ({
+      select: () => ({ eq: () => ({ limit: async () => ({ data: [], error: null }), maybeSingle: rec('profileRead') }) }),
+      update: (patch) => ({
+        eq: (col, val) => ({ select: (cols) => rec('profileUpdate')({ table, patch, col, val, cols }) }),
+      }),
+    }),
     channel: () => ({ on: () => ({ subscribe: noop }) }),
     removeChannel: noop, rpc: async () => ({ data: null, error: null }),
   };
@@ -977,5 +987,134 @@ describe('Account round Task 3 - the account card and the sign-out confirm', () 
     const html = bridge.registry['account-menu'].innerHTML;
     expect(html).toContain('class="acc-av">S<');
     expect(html).toContain('class="acc-rv">Add your name<');
+  });
+});
+
+// Account handoff round (2026-08-25), Task 4: the Name screen.
+// Guards the fourth push: the design's screen (the sentence, both fields prefilled from the cached name),
+// the two client rules in order (empties, then the shared splitFullNameParts rule), the write itself - a
+// plain profiles UPDATE for auth.uid() with display_name kept in step and a .select('id') READ-BACK, so a
+// policy that matched no row is a visible failure instead of a fake success - and the success path: the
+// cache, the repainted header chip, the card back on the new name and one toast.
+describe('Account round Task 4 - Your name', () => {
+  beforeEach(() => bridge.reset());
+
+  const synth = (sel, node) => ({ closest: (s) => (s === sel ? node : null) });
+  const fireClick = (node, ev) => (node.listeners.click || []).forEach((fn) => fn(ev));
+  const MORGAN = { id: 'u1', email: 'morgan@email.com' };
+  const CACHED = { first: 'Morgan', last: 'Blake' };
+  const FAIL_LINE = 'That did not save. Check you are signed in, then try again.';
+
+  // The real route in: the card row tears the card down and hands the view to #acct-page.
+  const openName = (name = CACHED) => {
+    bridge.setSignedIn(MORGAN, name);
+    bridge.openMenu();
+    fireClick(bridge.registry['account-menu'], { target: synth('[data-acct-view]', { getAttribute: () => 'name' }) });
+    return bridge.registry['acct-page'];
+  };
+  const type = (f, l) => { bridge.registry['an-first'].value = f; bridge.registry['an-last'].value = l; };
+  const submit = () => bridge.registry['acct-form'].listeners.submit[0]({ preventDefault() {} });
+  const toasts = () => bridge.doc.body.children.filter((n) => n.className === 'save-toast');
+
+  it('the screen is the design: the sentence, both fields prefilled, one error line, one Save', () => {
+    const html = openName().innerHTML;
+    expect(html).toContain('<h2 class="auth-title">Your name</h2>');
+    expect(html).toContain('This is what teammates and organizers see.');
+    expect(html).toContain('id="acct-form"');
+    expect(html).toContain('id="an-first"');
+    expect(html).toContain('id="an-last"');
+    expect(html).toContain('value="Morgan"');
+    expect(html).toContain('value="Blake"');
+    // The sign-up attributes, so a password manager fills the same two fields it filled at sign-up.
+    expect(html).toContain('autocomplete="given-name"');
+    expect(html).toContain('autocomplete="family-name"');
+    expect(count(html, 'required')).toBe(2);
+    expect(count(html, 'id="acct-err"')).toBe(1);
+    expect(html).toContain('id="acct-save"');
+    expect(html).toContain('>Save<');
+    expect(html).not.toMatch(/—|&mdash;|night/i);
+
+    // No name cached yet: empty fields, never the string "null" wearing a value attribute.
+    bridge.reset();
+    const empty = openName(null).innerHTML;
+    expect(empty).toContain('id="an-first" type="text" required value=""');
+    expect(empty).toContain('id="an-last" type="text" required value=""');
+  });
+
+  it('an empty field is refused before the name rule, and neither rule touches the network', async () => {
+    openName(null);
+    type('', '');
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('Fill in every field.');
+    expect(bridge.registry['acct-err'].hidden).toBe(false);
+    expect(bridge.supaCalls().length).toBe(0);
+
+    // A one-letter part gets the SHARED rule sign-up uses, in its own words, and still never writes.
+    type('M', 'Blake');
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('Enter your real first and last name.');
+    expect(bridge.supaCalls().length).toBe(0);
+    expect(bridge.registry['acct-page']).toBeTruthy();
+  });
+
+  it('a valid save is a plain profiles update with display_name in step and a read-back', async () => {
+    openName();
+    type('  Morgan ', 'Blake ');   // the cleaned parts are what gets written, never the raw field
+    bridge.supaNext('profileUpdate', { data: [{ id: 'u1' }], error: null });
+    await submit();
+    expect(bridge.supaCalls().at(-1)).toEqual(['profileUpdate', {
+      table: 'profiles',
+      patch: { first_name: 'Morgan', last_name: 'Blake', display_name: 'Morgan Blake' },
+      col: 'id', val: 'u1', cols: 'id',
+    }]);
+
+    // NEVER connect_profile_by_name: that RPC relinks roster rows to the new name and unlinks nothing,
+    // so a rename would drag other people's rows along with it.
+    const from = appSrc.indexOf('async function onAcctNameSave');
+    expect(from).toBeGreaterThan(-1);
+    expect(appSrc.slice(from, appSrc.indexOf('\n}', from))).not.toContain('connect_profile_by_name');
+  });
+
+  it('a write that matched no row, and a write that errored, both fail visibly and toast nothing', async () => {
+    openName();
+    type('Ada', 'Blake');
+    bridge.supaNext('profileUpdate', { data: [], error: null });
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe(FAIL_LINE);
+    expect(bridge.registry['acct-err'].hidden).toBe(false);
+    expect(toasts().length).toBe(0);
+    // Still on the screen, the card is not back, and the cache still holds the name that IS in the row.
+    expect(bridge.registry['acct-page']).toBeTruthy();
+    expect(bridge.registry['account-menu']).toBeFalsy();
+    expect(bridge.authInitial()).toBe('M');
+    expect(bridge.registry['acct-save'].disabled).toBe(false);
+
+    // A hard error reads the same: the Postgres text is logged, never shown.
+    bridge.supaNext('profileUpdate', { data: null, error: { message: 'permission denied for table profiles' } });
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe(FAIL_LINE);
+    expect(toasts().length).toBe(0);
+  });
+
+  it('a saved name updates the cache, repaints the chip, reopens the card and toasts once', async () => {
+    openName();
+    type('Ada', 'Blake');
+    bridge.setPainted(true);
+    const renders = bridge.renderCount();
+    bridge.supaNext('profileUpdate', { data: [{ id: 'u1' }], error: null });
+    await submit();
+
+    expect(bridge.registry['acct-page']).toBeFalsy();
+    const card = bridge.registry['account-menu'];
+    expect(card).toBeTruthy();
+    expect(card.innerHTML).toContain('class="acc-nm">Ada Blake<');
+    expect(card.innerHTML).toContain('class="acc-rv">Ada Blake<');
+    expect(bridge.authInitial()).toBe('A');
+    // Only render() paints the header chip, so a rename has to ask for one (the Task 3 precedent).
+    expect(bridge.renderCount()).toBe(renders + 1);
+
+    const t = toasts();
+    expect(t.length).toBe(1);
+    expect(t[0].textContent).toBe('Name saved');
   });
 });
