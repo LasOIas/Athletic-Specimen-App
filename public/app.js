@@ -9382,17 +9382,20 @@ function buildMgSettingsHTML() {
   const sp = (label, hint) =>
     `<span class="set-l">${escapeHTML(label)}<span class="set-h">${escapeHTML(hint)}</span></span>`;
   const val = (v) => escapeHTMLText(v == null ? '' : String(v));
-  const num = (id, v) =>
-    `<input class="set-in set-num" id="${id}" type="number" min="1" inputmode="numeric" value="${val(v)}" />`;
+  // `aria` is set ONLY on the paired scoring fields: their visible label is the two-letter .set-mini chip,
+  // so without it a screen reader announces "to", "cap", "to", "cap" and never says which game. The rows
+  // that own a single input already get their name from the <label for>, and a second one would fight it.
+  const num = (id, v, aria) =>
+    `<input class="set-in set-num" id="${id}" type="number" min="1" inputmode="numeric"${aria ? ` aria-label="${escapeHTML(aria)}"` : ''} value="${val(v)}" />`;
   const txt = (id, v, extra) =>
     `<input class="set-in set-wide" id="${id}" type="text" autocomplete="off" ${extra}value="${val(v)}" />`;
-  const pair = (id, mini, v) => `<span class="set-pair"><label class="set-mini" for="${id}">${mini}</label>${num(id, v)}</span>`;
+  const pair = (id, mini, v, aria) => `<span class="set-pair"><label class="set-mini" for="${id}">${mini}</label>${num(id, v, aria)}</span>`;
   // a free-text value gets the label above it and the full width below — an address has nowhere to go on one line
   const stack = (id, label, hint, input) => `<div class="set-row is-stack">${lb(id, label, hint)}${input}</div>`;
   const unit = (id, label, hint, v, u) =>
     `<div class="set-row">${lb(id, label, hint)}<span class="set-ctl">${num(id, v)}<span class="set-u">${u}</span></span></div>`;
-  const twin = (label, hint, aId, aV, bId, bV) =>
-    `<div class="set-row">${sp(label, hint)}<span class="set-ctl">${pair(aId, 'to', aV)}${pair(bId, 'cap', bV)}</span></div>`;
+  const twin = (label, hint, aria, aId, aV, bId, bV) =>
+    `<div class="set-row">${sp(label, hint)}<span class="set-ctl">${pair(aId, 'to', aV, aria + ' to')}${pair(bId, 'cap', bV, aria + ' cap')}</span></div>`;
   // The switch markup itself is UNCHANGED (2026-08-04: a switch is tap-to-apply, never behind Save — flipping
   // one is already the instruction). Only the row around it moved.
   const sw = (field, label, hint, on) =>
@@ -9400,25 +9403,28 @@ function buildMgSettingsHTML() {
     + `<button type="button" class="mg-sw${on ? ' on' : ''}" data-mges-toggle="${field}" role="switch" aria-checked="${on ? 'true' : 'false'}" aria-label="${escapeHTML(label)}"></button></div>`;
   const bracketTo = (t.bracket_target != null ? t.bracket_target : t.match_cap);
   const winBy2 = (t.win_by_2 == null || !!t.win_by_2); // default on (matches the create/modal contract)
+  const ruleSum = settingsRuleSummary(t);
   return header
     + `<p class="set-intro">These decide how the day runs. Scoring here sets the rule line on every score card.</p>`
     + `<div class="pl-sect">The basics</div><div class="set-card">`
-      + stack('mges-name', 'Name', 'What players see on the front page',
+      + stack('mges-name', 'Tournament name', 'What players see on the front page',
         txt('mges-name', t.name, 'autocapitalize="words" '))
       + unit('mges-teamsize', 'Team size', 'Players per side on the court', t.team_size, 'a side')
       + unit('mges-nets', 'Nets', 'Courts you have for the day', t.net_count, 'courts')
     + `</div>`
     + `<div class="pl-sect">Scoring</div><div class="set-card">`
-      + twin('Pool play', 'First to the target, capped so a close game ends',
+      + twin('Pool play', 'First to the target, capped so a close game ends', 'Pool',
         'mges-pooltarget', t.pool_target, 'mges-poolcap', t.pool_cap)
-      + twin('Bracket', 'Longer, because they decide the day',
+      + twin('Bracket', 'Longer, because they decide the day', 'Bracket',
         'mges-brackettarget', bracketTo, 'mges-bracketcap', t.bracket_cap)
       + sw('win_by_2', 'Win by 2', 'A game ends on a two-point lead', winBy2)
       + sw('grand_final_reset', 'Grand final reset', 'The losers-bracket team gets a second championship game', !!t.grand_final_reset)
     + `</div>`
     // The four knobs above, restated in the grammar the score card prints. Derived (settingsRuleSummary, in
-    // pure.js) rather than typed, so it cannot drift from the switch sitting directly above it.
-    + `<p class="set-sum">${escapeHTML(settingsRuleSummary(t))}</p>`
+    // pure.js) rather than typed, so it cannot drift from the switch sitting directly above it. It drops a
+    // clause whose target is unset, so on a row carrying none of them it comes back empty — and an empty
+    // <p> would leave a 8px gap under the card advertising a sentence that is not there.
+    + (ruleSum ? `<p class="set-sum">${escapeHTML(ruleSum)}</p>` : '')
     // COLUMN-GUARDED (migration 0058). The venue fields render only once the loaded rows carry both keys —
     // an input that cannot save is worse than an absent one (the 0057 rule). Home's Details card reads the
     // same two columns; until they exist it keeps its "Posted in GroupMe" row. The GROUP is inside the

@@ -1141,6 +1141,10 @@ describe('Task 6 Event settings', () => {
     expect(html).toContain('<button type="button" class="mg-sw on" data-mges-toggle="win_by_2" role="switch" aria-checked="true" aria-label="Win by 2"></button>');
     expect(html).toContain('<button type="button" class="mg-sw" data-mges-toggle="grand_final_reset" role="switch" aria-checked="false" aria-label="Grand final reset"></button>');
     expect(html).toContain('Grand final reset<'); // the design's own label, kept
+    expect(html).toContain('>Tournament name<'); // the design's label (mgts-settings.html:40) and production's
+    // the four paired scoring fields show only a two-letter chip, so each carries its own accessible name —
+    // without it a screen reader reads "to", "cap", "to", "cap" and never says which game they belong to
+    ['Pool to', 'Pool cap', 'Bracket to', 'Bracket cap'].forEach((n) => expect(count(html, `aria-label="${n}"`)).toBe(1));
     // the Save hook the edit engine resolves, once, inside the foot
     expect(count(html, 'data-mg-save="settings"')).toBe(1);
     expect(html).toContain('<div class="set-foot">');
@@ -1156,6 +1160,16 @@ describe('Task 6 Event settings', () => {
     expect(html).not.toContain('id="mges-venue"');
     expect(count(html, 'class="set-card"')).toBe(3);
     expect(html).toContain('class="set-sum">Pool to 15 · bracket to 21.<');
+  });
+
+  it('a tournament carrying no scoring targets prints no summary line at all', () => {
+    seedHub(bridge, { status: 'setup', name: 'A' });
+    const st = bridge.getState();
+    st.tournaments = [{ id: 'T', name: 'A', status: 'setup', win_by_2: false }];
+    // the helper returns '' — an empty <p class="set-sum"> would leave a gap advertising a sentence that
+    // is not there, so the element goes with it
+    expect(bridge.ruleSummary(st.tournaments[0])).toBe('');
+    expect(bridge.buildSettings()).not.toContain('set-sum');
   });
 
   it('the Event settings CSS ships, authored to beat prod input[type=...]', () => {

@@ -1913,17 +1913,29 @@ function rulesToHTML(text) {
 
 // The Event settings rule line (Manage handoff 2026-08-25, screen 39). The Scoring card's four knobs
 // restated as ONE sentence, in the grammar the score card already prints, so the organizer reads the
-// line players will read before he leaves the page. A cap that is not set drops its own clause rather
-// than printing "cap" with nothing after it, bracket_target falls back to match_cap (the NF-1 back-compat
-// pair buildMgSettingsHTML reads the same way), and win_by_2 unset counts as ON — the same default the
-// builder renders the switch with, so the summary can never contradict the switch above it.
+// line players will read before he leaves the page.
+//
+// A clause is built ONLY when its own target is set, and it takes its cap with it. Fix round 1: a cap
+// without a target used to print "Pool to , cap 20", and an empty tournament printed "Pool to  · bracket
+// to  · win by 2." — a missing target is exactly as absent as a missing cap, so it drops the whole
+// clause. bracket_target falls back to match_cap (the NF-1 back-compat pair buildMgSettingsHTML reads
+// the same way). win_by_2 unset counts as ON — the same default the builder renders the switch with, so
+// the summary can never contradict the switch above it. Every clause is authored lower-case and the
+// SURVIVING first one is capitalised, so the line still opens as a sentence when pool play drops out.
+// Nothing left to say (no targets, win by 2 off) returns '' rather than a bare full stop.
 function settingsRuleSummary(t) {
   const x = t || {};
-  const cap = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? ', cap ' + Number(v) : '';
-  const parts = ['Pool to ' + (x.pool_target != null ? x.pool_target : '') + cap(x.pool_cap),
-    'bracket to ' + (x.bracket_target != null ? x.bracket_target : (x.match_cap != null ? x.match_cap : '')) + cap(x.bracket_cap)];
+  const n = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
+  const cap = (v) => (n(v) != null ? ', cap ' + n(v) : '');
+  const poolTo = n(x.pool_target);
+  const bracketTo = n(x.bracket_target != null ? x.bracket_target : x.match_cap);
+  const parts = [];
+  if (poolTo != null) parts.push('pool to ' + poolTo + cap(x.pool_cap));
+  if (bracketTo != null) parts.push('bracket to ' + bracketTo + cap(x.bracket_cap));
   if (x.win_by_2 == null || !!x.win_by_2) parts.push('win by 2');
-  return parts.join(' · ') + '.';
+  if (!parts.length) return '';
+  const line = parts.join(' · ');
+  return line.charAt(0).toUpperCase() + line.slice(1) + '.';
 }
 
 if (typeof module !== "undefined" && module.exports) {

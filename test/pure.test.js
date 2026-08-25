@@ -1136,6 +1136,20 @@ describe('settingsRuleSummary (Manage handoff 2026-08-25 — the derived Event s
     // bracket_target wins when both are present
     expect(settingsRuleSummary({ pool_target: 15, bracket_target: 21, match_cap: 99 })).toBe('Pool to 15 · bracket to 21 · win by 2.');
   });
+  it('a clause whose TARGET is missing is dropped WHOLE — a cap on its own never prints', () => {
+    // fix round 1: this used to render 'Pool to , cap 20 · …' — a missing target is exactly as absent as a
+    // missing cap, and the surviving clause capitalises so the line still opens as a sentence.
+    expect(settingsRuleSummary({ pool_target: null, pool_cap: 20, bracket_target: 21, bracket_cap: 25, win_by_2: true }))
+      .toBe('Bracket to 21, cap 25 · win by 2.');
+    expect(settingsRuleSummary({ pool_target: 15, pool_cap: 20, bracket_target: null, match_cap: null, bracket_cap: 25, win_by_2: true }))
+      .toBe('Pool to 15, cap 20 · win by 2.');
+    expect(settingsRuleSummary({ pool_target: '', pool_cap: 20, bracket_target: 21, win_by_2: false })).toBe('Bracket to 21.');
+  });
+  it('with no targets at all it says only what is still true, or nothing', () => {
+    expect(settingsRuleSummary({})).toBe('Win by 2.');
+    expect(settingsRuleSummary({ pool_cap: 20, bracket_cap: 25 })).toBe('Win by 2.');
+    expect(settingsRuleSummary({ win_by_2: false })).toBe('');
+  });
   it('never throws on a missing tournament', () => {
     expect(typeof settingsRuleSummary(null)).toBe('string');
     expect(typeof settingsRuleSummary(undefined)).toBe('string');
