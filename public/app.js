@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.17'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.18'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6182,14 +6182,24 @@ function appPrompt({ title, message, value, confirmText, placeholder, danger } =
 // clean-centered), implemented as a .auth-page overlay appended to <body> so
 // partialRender never wipes it. On success onAuthStateChange sets state + re-renders.
 // ─────────────────────────────────────────────────────────────────────────────
-let authMode = 'signin';                 // 'signin' | 'signup' | 'signup-sent'
+let authMode = 'signin';                 // 'signin' | 'signup' | 'signup-sent' | 'forgot' | 'forgot-sent'
 const AUTH_PASSWORD_MIN = 8;             // Mike 2026-08-25: one number for sign-up, reset and change (the server minimum is 6)
 const AUTH_RESEND_MS = 60000;            // how long a Resend control waits before it can send again
+// The client's email shape gate, in one place: sign-in, create-account and forgot all refuse a malformed
+// address in the same words before the server ever sees it (Account round 2026-08-25).
+const AUTH_EMAIL_RE = /^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/;
 let authSentEmail = '';                  // the address a sent screen resends to (memory only; a reload loses it)
 let authResendUntil = 0;                 // cooldown deadline (ms) shared by every Resend control
 // The one back chevron every .auth-page overlay wears. Declared once so the wall and the auth page can
-// never drift apart (Account round 2026-08-25).
+// never drift apart (Account round 2026-08-25). Same reason for the brand block and the two marks: every
+// screen in this round reuses them verbatim.
 const AUTH_BACK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
+const AUTH_MAIL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/></svg>';
+const AUTH_OK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5l4.5 4.5L19.5 6.5"/></svg>';
+const AUTH_BRAND_HTML = `<div class="auth-brand">
+        <img class="auth-logo" src="logo-mark.png" alt="Athletic Specimen" />
+        <div class="auth-wm"><div class="auth-wm-1">ATHLETIC SPECIMEN</div><div class="auth-wm-2">COLORADO</div></div>
+      </div>`;
 let asCommunityId = null;                 // cached community uuid (read live, never hardcoded)
 
 async function fetchCommunityId() {
@@ -6224,7 +6234,7 @@ function closeAuthPage() {
 
 function openAuthPage(mode) {
   closeAuthPage();
-  authMode = mode === 'signup' ? 'signup' : 'signin';
+  authMode = (mode === 'signup' || mode === 'forgot') ? mode : 'signin';
   const el = document.createElement('div');
   el.id = 'auth-page';
   el.className = 'auth-page';
@@ -6232,6 +6242,14 @@ function openAuthPage(mode) {
   // Bound ONCE, on the overlay itself, never inside renderAuthPageInner: the mode toggle re-renders the
   // same element, so binding there would stack a second reveal handler and the two would cancel out.
   authBindOverlay(el);
+  // Same rule for the view switches inside the overlay ("Forgot your password?"): they change authMode
+  // and repaint THIS element, so the delegate lives with the element, not with the paint.
+  el.addEventListener('click', (ev) => {
+    const v = ev.target.closest('[data-auth-view]');
+    if (!v) return;
+    authMode = v.getAttribute('data-auth-view');
+    renderAuthPageInner();
+  });
   renderAuthPageInner();
 }
 
@@ -6279,31 +6297,48 @@ function renderAuthPageInner() {
   if (!el) return;
   const signup = authMode === 'signup';
   const sent = authMode === 'signup-sent';
+  const forgot = authMode === 'forgot';
+  const forgotSent = authMode === 'forgot-sent';
   // Task 13 (2026-07-11): the quiet "Admin sign-in" link + code panel are GONE — email+password IS
   // the admin sign-in (owner/organizer role sets isAdmin in onAuthStateChange). .auth-inner stays a
   // wrapper DIV so the brand block can sit outside the form.
   // Mike AD+AC hybrid (task-#11, 2026-07-10): the brand block (big logo + Barlow wordmark) moves OUT
   // of the form to the TOP; the form (hairline-underline fields + full-width blue CTA) sits below.
   // Every element id is unchanged — handlers bind by id, so the mechanics are untouched.
-  // Account handoff (2026-08-25): three states of ONE overlay. The two form states keep prod's brand
-  // block; the sent state is the design's confirmation screen (mark, title, address, Resend) and drops
+  // Account handoff (2026-08-25): five states of ONE overlay. The three form states keep prod's brand
+  // block; the sent states are the design's confirmation screens (mark, title, address, Resend) and drop
   // the brand the way the handoff drew it. .auth-back stays on the shell in every state so the overlay
   // always has an exit.
-  const brand = `<div class="auth-brand">
-        <img class="auth-logo" src="logo-mark.png" alt="Athletic Specimen" />
-        <div class="auth-wm"><div class="auth-wm-1">ATHLETIC SPECIMEN</div><div class="auth-wm-2">COLORADO</div></div>
-      </div>`;
   // The sent screen is the branch signUp takes when it comes back with no session, i.e. when the
   // project has Confirm email ON. It is dormant while that setting is OFF, and correct the moment Mike
   // flips it. The typed address lives in memory only, so a reload lands on sign-in, which is what the
   // copy tells them to do anyway.
-  const sentInner = `<div class="au-mark is-mail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/></svg></div>
+  const sentInner = `<div class="au-mark is-mail">${AUTH_MAIL_SVG}</div>
       <h2 class="auth-title">Check your email</h2>
       <p class="auth-sub">We sent a link to <span class="au-em">${escapeHTML(authSentEmail)}</span>. Tap it, then sign in.</p>
       <div class="auth-err" id="auth-err" role="alert" hidden></div>
       <button type="button" class="auth-alt" id="auth-resend">Didn't get it? Resend</button>
       <button type="button" class="au-alt2" id="auth-alt">Back to sign in</button>`;
-  const formInner = `${brand}
+  // The forgot pair. Supabase answers "success" to resetPasswordForEmail for an address it has never
+  // seen (on purpose, so nobody can probe for accounts), so the sent copy says the app ASKED for a
+  // link and never that one was delivered.
+  const forgotInner = `${AUTH_BRAND_HTML}
+      <form id="auth-form" novalidate autocomplete="on">
+        <h2 class="auth-title">Reset your password</h2>
+        <p class="auth-sub">Enter your email and we'll send a link to set a new one.</p>
+        <label class="auth-label" for="fg-email">Email</label>
+        <input class="auth-input" id="fg-email" type="email" required autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="you@email.com" />
+        <div class="auth-err" id="auth-err" role="alert" hidden></div>
+        <button type="submit" class="auth-submit" id="auth-submit">Send reset link</button>
+        <button type="button" class="auth-alt" id="auth-alt">Back to sign in</button>
+      </form>`;
+  const forgotSentInner = `<div class="au-mark is-mail">${AUTH_MAIL_SVG}</div>
+      <h2 class="auth-title">Check your email</h2>
+      <p class="auth-sub">If <span class="au-em">${escapeHTML(authSentEmail)}</span> has an account, a reset link is on its way.</p>
+      <div class="auth-err" id="auth-err" role="alert" hidden></div>
+      <button type="button" class="auth-alt" id="auth-resend">Didn't get it? Resend</button>
+      <button type="button" class="au-alt2" id="auth-alt">Back to sign in</button>`;
+  const formInner = `${AUTH_BRAND_HTML}
       <form id="auth-form" novalidate autocomplete="on">
         <h2 class="auth-title">${signup ? 'Create account' : 'Welcome'}</h2>
         <p class="auth-sub">${signup ? 'One account for every tournament you play.' : 'Sign in to claim your team and follow your games.'}</p>
@@ -6317,27 +6352,32 @@ function renderAuthPageInner() {
         ${authFieldHTML('auth-pass', `autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="${signup ? 'At least ' + AUTH_PASSWORD_MIN + ' characters' : 'Your password'}"${signup ? ' data-strength' : ''}`, signup)}
         <div class="auth-err" id="auth-err" role="alert" hidden></div>
         <button type="submit" class="auth-submit" id="auth-submit">${signup ? 'Create account' : 'Sign in'}</button>
+        ${signup ? '' : '<button type="button" class="au-alt2" data-auth-view="forgot">Forgot your password?</button>'}
         <button type="button" class="auth-alt" id="auth-alt">${signup ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>
       </form>`;
+  // The forgot screens are steps INSIDE this overlay, so their chevron walks one step back instead of
+  // closing it (the design's data-auth-view on each back control).
+  const backStep = forgot ? 'signin' : (forgotSent ? 'forgot' : '');
   el.innerHTML = `
-    <button type="button" class="auth-back" id="auth-back" aria-label="Close sign in">${AUTH_BACK_SVG}</button>
+    <button type="button" class="auth-back" id="auth-back" aria-label="${backStep ? 'Back' : 'Close sign in'}">${AUTH_BACK_SVG}</button>
     <div class="auth-inner">
-      ${sent ? sentInner : formInner}
+      ${sent ? sentInner : (forgot ? forgotInner : (forgotSent ? forgotSentInner : formInner))}
     </div>`;
   el.querySelector('#auth-back').addEventListener('click', () => {
+    if (backStep) { authMode = backStep; renderAuthPageInner(); return; }
     claimIntent = false; // dismissing sign-in abandons a pending claim intent (review: it leaked into a later sign-in)
     closeAuthPage();
   });
   const altBtn = el.querySelector('#auth-alt');
   if (altBtn) altBtn.addEventListener('click', () => {
-    authMode = (signup || sent) ? 'signin' : 'signup';
+    authMode = authMode === 'signin' ? 'signup' : 'signin';   // every other state's alt is "Back to sign in"
     renderAuthPageInner();
   });
   const resendBtn = el.querySelector('#auth-resend');
-  if (resendBtn) resendBtn.addEventListener('click', () => authResend('signup'));
+  if (resendBtn) resendBtn.addEventListener('click', () => (forgotSent ? authResend('reset', authSentEmail) : authResend('signup')));
   const form = el.querySelector('#auth-form');
   if (form) form.addEventListener('submit', onAuthSubmit);
-  if (!sent) setTimeout(() => { const f = document.getElementById('auth-email'); if (f) f.focus(); }, 50);
+  if (!sent && !forgotSent) setTimeout(() => { const f = document.getElementById(forgot ? 'fg-email' : 'auth-email'); if (f) f.focus(); }, 50);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6589,8 +6629,37 @@ function friendlyAuthError(error, signup) {
   return m || (signup ? 'Could not create your account.' : 'Could not sign you in.');
 }
 
+// The forgot screen submits through #auth-form, so it lands here first. It shares nothing with the two
+// account paths except the error line, so it gets its own body instead of five more ternaries below.
+async function onForgotSubmit() {
+  const emailEl = document.getElementById('fg-email');
+  const errEl = document.getElementById('auth-err');
+  const btn = document.getElementById('auth-submit');
+  const email = (emailEl && emailEl.value || '').trim();
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
+  if (errEl) errEl.hidden = true;
+  if (!email) { showErr('Fill in every field.'); return; }
+  if (!AUTH_EMAIL_RE.test(email)) { showErr("That email doesn't look right."); return; }
+  if (!supabaseClient) { showErr('Sending is unavailable right now.'); return; }
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    // The link comes back to the site root, where detectSessionInUrl turns the fragment into a
+    // PASSWORD_RECOVERY event and onAuthEvent opens #reset-page.
+    const res = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: location.origin });
+    if (res && res.error) { showErr(friendlyAuthError(res.error, false)); if (btn) { btn.disabled = false; btn.textContent = orig; } return; }
+    authSentEmail = email;
+    authMode = 'forgot-sent';
+    renderAuthPageInner();
+  } catch (_) {
+    showErr('Something went wrong. Try again.');
+    if (btn) { btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
 async function onAuthSubmit(e) {
   e.preventDefault();
+  if (authMode === 'forgot') { await onForgotSubmit(); return; }
   const signup = authMode === 'signup';
   const emailEl = document.getElementById('auth-email');
   const passEl = document.getElementById('auth-pass');
@@ -6606,7 +6675,7 @@ async function onAuthSubmit(e) {
   // first, then the email shape (before the server ever sees it), then the length gate (create-account
   // only), because sign-in must never guess at what an existing password is allowed to be.
   if (!email || !password || (signup && (!(firstEl && firstEl.value.trim()) || !(lastEl && lastEl.value.trim())))) { showErr('Fill in every field.'); return; }
-  if (!/^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/.test(email)) { showErr("That email doesn't look right."); return; }
+  if (!AUTH_EMAIL_RE.test(email)) { showErr("That email doesn't look right."); return; }
   if (signup && password.length < AUTH_PASSWORD_MIN) { showErr('Your password needs at least ' + AUTH_PASSWORD_MIN + ' characters.'); return; }
   // Identity (spec §2): create-account captures the person. Validate first+last BEFORE we disable the
   // button (same grammar as the password-length gate above); the cleaned parts ride the signUp metadata.
@@ -6680,6 +6749,85 @@ async function authResend(kind, emailOverride) {
   }
 }
 
+// ── The recovery screen (Account round 2026-08-25) ─────────────────────────────────────────────────
+// A reset link lands back on the site root; detectSessionInUrl turns the fragment into a recovery
+// session and onAuthEvent routes PASSWORD_RECOVERY here. #reset-page is the same body-appended overlay
+// as #auth-page, with NO back control: the design draws none, and a half-finished recovery has nowhere
+// sensible to go, so the only ways off it are a saved password or a reload.
+function closeResetPage() {
+  const el = document.getElementById('reset-page');
+  if (el) el.remove();
+}
+
+function openResetPage(session) {
+  closeResetPage(); // never stack
+  const email = (session && session.user && session.user.email) || (state.account && state.account.email) || '';
+  const el = document.createElement('div');
+  el.id = 'reset-page';
+  el.className = 'auth-page';
+  document.body.appendChild(el);
+  // Once per overlay, for the same reason as #auth-page: the done state repaints THIS element.
+  authBindOverlay(el);
+  el.innerHTML = `
+    <div class="auth-inner">
+      ${AUTH_BRAND_HTML}
+      <form id="reset-form" novalidate autocomplete="on">
+        <h2 class="auth-title">Set a new password</h2>
+        <p class="auth-sub">For <span class="au-em">${escapeHTML(email)}</span>.</p>
+        <label class="auth-label" for="rs-new">New password</label>
+        ${authFieldHTML('rs-new', `data-min="${AUTH_PASSWORD_MIN}" data-strength autocomplete="new-password" placeholder="At least ${AUTH_PASSWORD_MIN} characters"`, true)}
+        <label class="auth-label" for="rs-again">Type it again</label>
+        <input class="auth-input" id="rs-again" type="password" required data-match="rs-new" autocomplete="new-password" placeholder="Same password" />
+        <div class="auth-err" id="reset-err" role="alert" hidden></div>
+        <button type="submit" class="auth-submit" id="reset-save">Save password</button>
+      </form>
+    </div>`;
+  el.querySelector('#reset-form').addEventListener('submit', onResetSave);
+  setTimeout(() => { const f = document.getElementById('rs-new'); if (f) f.focus(); }, 50);
+}
+
+async function onResetSave(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const newEl = document.getElementById('rs-new');
+  const againEl = document.getElementById('rs-again');
+  const errEl = document.getElementById('reset-err');
+  const btn = document.getElementById('reset-save');
+  const password = (newEl && newEl.value) || '';   // NEVER trimmed: a space is a character someone chose
+  const again = (againEl && againEl.value) || '';
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
+  if (errEl) errEl.hidden = true;
+  // The design's order: empty, then length, then match.
+  if (!password || !again) { showErr('Fill in every field.'); return; }
+  if (password.length < AUTH_PASSWORD_MIN) { showErr('Your new password needs at least ' + AUTH_PASSWORD_MIN + ' characters.'); return; }
+  if (password !== again) { showErr("Those two passwords don't match."); return; }
+  if (!supabaseClient) { showErr('Saving is unavailable right now.'); return; }
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const res = await supabaseClient.auth.updateUser({ password });
+    if (res && res.error) { showErr(friendlyAuthError(res.error, false)); if (btn) { btn.disabled = false; btn.textContent = orig; } return; }
+    const el = document.getElementById('reset-page');
+    if (el) {
+      el.innerHTML = `
+    <div class="auth-inner">
+      <div class="au-mark is-ok">${AUTH_OK_SVG}</div>
+      <h2 class="auth-title">Password changed</h2>
+      <p class="auth-sub">You're signed in.</p>
+      <button type="button" class="auth-submit" id="reset-go">Go to the tournament</button>
+    </div>`;
+      const go = el.querySelector('#reset-go');
+      if (go) go.addEventListener('click', () => { closeResetPage(); activateMainTab('tournament'); });
+    }
+    // The router deliberately skipped the heavy path (a recovery is not a sign-in), so it runs HERE,
+    // once: an organizer who recovered on a device that was already signed in gets Manage back without
+    // a reload, and a fresh device gets its role, tournaments and claimed player.
+    void runPostSignInWork();
+  } catch (_) {
+    showErr('Something went wrong. Try again.');
+    if (btn) { btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
 // ── The wall (Account round 2026-08-25, Mike's pick: the design's overlay WITH an exit) ────────────
 // #gate-page is a body-appended .auth-page, exactly like #auth-page and #namefill-page, so partialRender
 // can never wipe it. The decision to raise or drop it runs at NAVIGATION time, never inside a render
@@ -6696,10 +6844,7 @@ function openGatePage() {
   el.className = 'auth-page';
   el.innerHTML = `<button type="button" class="auth-back" data-gate-back aria-label="Back to Home">${AUTH_BACK_SVG}</button>
     <div class="auth-inner">
-      <div class="auth-brand">
-        <img class="auth-logo" src="logo-mark.png" alt="Athletic Specimen" />
-        <div class="auth-wm"><div class="auth-wm-1">ATHLETIC SPECIMEN</div><div class="auth-wm-2">COLORADO</div></div>
-      </div>
+      ${AUTH_BRAND_HTML}
       <h2 class="auth-title">Sign in to see the tournament</h2>
       <p class="auth-sub">Your team, your games and your bracket run are for players. Takes a minute.</p>
       <button type="button" class="auth-submit" data-auth-view="signin">Sign in</button>
@@ -6815,6 +6960,123 @@ async function onNameFillSave(e) {
     console.error('connect_profile_by_name (name fill)', err);
     showErr("Couldn't save your name. Try again.");
     if (btn) { btn.disabled = false; btn.textContent = orig; }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The session listener (C21 + Identity 2026-07-08), lifted out of attachHandlers by the Account round
+// so both of its halves have a name: runPostSignInWork is the heavy path, and the recovery screen calls
+// it once a recovered password is saved (a PASSWORD_RECOVERY event deliberately skips it).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Everything a genuine sign-in needs beyond the session itself: the community role, the admin surface,
+// the personal layer, my claimed player and the one-time name fill. ALWAYS called from a deferred site
+// (setTimeout(0) or after an awaited updateUser), NEVER inside the auth callback: a supabase call there
+// deadlocks supabase-js's auth lock.
+async function runPostSignInWork() {
+  try {
+    for (let i = 0; i < 3; i++) {
+      await deriveRole();
+      if (state.role || !state.authSession) break;
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    // Auth Task 4 (2026-07-09) + Task 13 (2026-07-11): a signed-in owner/organizer gets the admin
+    // surface from their SERVER role (caller_role) — the ONLY admin source now that the code login
+    // is retired. A plain 'player' or null role never sets isAdmin here. Cleared on sign-out
+    // (the SIGNED_OUT branch already resets isAdmin/masterAdminAuthenticated).
+    if (state.role === 'owner' || state.role === 'organizer') {
+      state.isAdmin = true;
+      state.masterAdminAuthenticated = (state.role === 'owner');
+    }
+    // Slice 3c: load the personal layer (team_members) now instead of waiting for the next
+    // 15s poll — the Home hero/My Team tile should light up right after sign-in.
+    try { await tdbRefreshTournaments(); } catch (_) { /* the poll catches up */ }
+    // Round 2 §12.3: resolve MY claimed player for the check-in hero. Storm-safe: this whole function
+    // runs ONLY from the isNewSignIn-gated deferred site (a genuine sign-in transition or the initial
+    // restore of a persisted real session) and from the reset screen once a recovered password is
+    // saved. NEVER per auth event.
+    void loadMyClaimedPlayer();
+    // Identity (spec §2/§3): one-time name fill + auto-connect. Fire-and-forget here — same
+    // deferred site as deriveRole, so its supabase calls never run inside the auth callback.
+    void promptNameFillIfNeeded();
+    // bootPaintDone gate (2026-07-12): mid-boot the role/admin state just set above is carried
+    // by the single boot render(); painting here would swap the splash for half-loaded content.
+    if (state.loaded && bootPaintDone) { try { render(); } catch {} }
+  } catch (err) { console.error('Role derive error', err); }
+}
+
+async function onAuthEvent(event, session) {
+  const email = (session && session.user && session.user.email) || '';
+
+  // NOTE: supabase-js holds an internal lock during this callback — calling other supabase methods
+  // (auth/rpc/from) INLINE here races/deadlocks (role came back null even though caller_role is fine).
+  // So any supabase call below is deferred with setTimeout(0) per Supabase's own guidance.
+  if (session) {
+    if (event === 'PASSWORD_RECOVERY') {
+      // Account round 2026-08-25: a recovery link is NOT a sign-in. Keep the session (updateUser needs it),
+      // never run the heavy path yet, and open the reset screen out-of-band (a DOM write is safe here;
+      // no supabase call happens inside the callback). Above the isNewSignIn gate on purpose: the link
+      // usually opens in the browser that already holds this account's session, and that gate would
+      // swallow the event.
+      state.authSession = session;
+      state.account = { id: session.user.id, email };
+      setTimeout(() => { try { closeAuthPage(); closeGatePage(); openResetPage(session); } catch (_) {} }, 0);
+      return;
+    }
+    // STORM GUARD (2026-07-09, found live on prod v09.1): this branch fires on EVERY auth event —
+    // and the heavy work below (rpc + tournament reads) makes supabase-js re-validate/refresh the
+    // token, which EMITS MORE auth events → a self-sustaining ~14/sec request storm
+    // (ERR_INSUFFICIENT_RESOURCES). Only a GENUINE sign-in transition runs the heavy path; routine
+    // TOKEN_REFRESHED / repeat events just keep the session object fresh and stop.
+    const isNewSignIn = !state.authSession || !state.account || state.account.id !== session.user.id;
+    state.authSession = session;
+    state.account = { id: session.user.id, email };
+    if (!isNewSignIn) return;
+    closeAuthPage();
+    closeGatePage(); // Account round: signing in from the wall drops it; the tab behind is theirs now
+    // bootPaintDone gate (2026-07-12): during boot, INITIAL_SESSION restores can land while the
+    // splash is still up — state is set above, and the single boot render() paints it. Post-boot
+    // (a real sign-in from the auth page) this renders immediately, unchanged.
+    if (state.loaded && bootPaintDone) { try { render(); } catch {} }   // show signed-in immediately
+    // Slice 3b: a signed-out "claim your team" tap routed through sign-in — finish the journey.
+    // Deferred: openClaimPage does a .from() read, and supabase calls inline in this callback deadlock.
+    if (claimIntent) {
+      claimIntent = false;
+      setTimeout(() => { try { openClaimPage(); } catch (_) {} }, 0);
+    }
+    // Derive the community role out-of-band, then re-render (the account menu shows the role).
+    // Retry a few times: a fresh SIGNED_IN can race the JWT propagation to PostgREST, so the first
+    // caller_role may return null before the token attaches. Stop as soon as a role resolves or the
+    // session is gone. A genuine no-membership spectator just falls through to null (a few cheap calls).
+    setTimeout(() => { void runPostSignInWork(); }, 0);
+    return;
+  }
+
+  // No session -> signed out.
+  if (!session) {
+    const wasSignedIn = !!state.authSession;
+    state.authSession = null;
+    state.account = null;
+    state.role = null;
+    state.teamMembers = null; // the personal layer signs out with the account (anon can't read claims)
+    state.myClaimedPlayer = null; // Round 2 §12.3: clear the check-in hero on the SIGNED_OUT path too
+    claimIntent = false;
+    closeClaimPage(); // a claim page can't outlive its session (harmless no-op when not open)
+    if (state.isAdmin) {
+      state.isAdmin = false;
+      state.masterAdminAuthenticated = false;
+      state.activeGroup = 'All';
+      // Reliability fix (2026-06-20): a SILENT session loss (JWT expiry / failed refresh) must purge
+      // skill from memory + the localStorage cache the same way explicit logout does — re-fetch as anon
+      // (the fetch omits the skill column when !isAdmin) and overwrite the cache before re-rendering.
+      try {
+        const synced = await syncFromSupabase();
+        if (synced) saveLocal();
+      } catch (err) { console.error('Post-logout anon re-sync error', err); }
+      try { render(); } catch {}
+    } else if (wasSignedIn && state.loaded) {
+      try { render(); } catch {}
+    }
   }
 }
 
@@ -13520,102 +13782,13 @@ const logoutBtn = document.getElementById('btn-logout');
 
 // C21 + Identity (2026-07-08): follow the real session.
 //  - An email+password account is recorded in state + its community role derived (best-effort),
-//    and persists across reloads. Owner/organizer role sets isAdmin below — the ONLY admin source
-//    since Task 13 (2026-07-11) retired the `.local` code login.
+//    and persists across reloads. Owner/organizer role sets isAdmin in runPostSignInWork, the ONLY
+//    admin source since Task 13 (2026-07-11) retired the `.local` code login.
 //  - Session loss drops admin state (an explicit signOut / failed refresh) and purges skill.
+// The callback itself is onAuthEvent (lifted out by the Account round, 2026-08-25); this stays the
+// single place it is registered.
 if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthStateChange === 'function') {
-  supabaseClient.auth.onAuthStateChange(async (event, session) => {
-    const email = (session && session.user && session.user.email) || '';
-
-    // NOTE: supabase-js holds an internal lock during this callback — calling other supabase methods
-    // (auth/rpc/from) INLINE here races/deadlocks (role came back null even though caller_role is fine).
-    // So any supabase call below is deferred with setTimeout(0) per Supabase's own guidance.
-    if (session) {
-      // STORM GUARD (2026-07-09, found live on prod v09.1): this branch fires on EVERY auth event —
-      // and the heavy work below (rpc + tournament reads) makes supabase-js re-validate/refresh the
-      // token, which EMITS MORE auth events → a self-sustaining ~14/sec request storm
-      // (ERR_INSUFFICIENT_RESOURCES). Only a GENUINE sign-in transition runs the heavy path; routine
-      // TOKEN_REFRESHED / repeat events just keep the session object fresh and stop.
-      const isNewSignIn = !state.authSession || !state.account || state.account.id !== session.user.id;
-      state.authSession = session;
-      state.account = { id: session.user.id, email };
-      if (!isNewSignIn) return;
-      closeAuthPage();
-      closeGatePage(); // Account round: signing in from the wall drops it; the tab behind is theirs now
-      // bootPaintDone gate (2026-07-12): during boot, INITIAL_SESSION restores can land while the
-      // splash is still up — state is set above, and the single boot render() paints it. Post-boot
-      // (a real sign-in from the auth page) this renders immediately, unchanged.
-      if (state.loaded && bootPaintDone) { try { render(); } catch {} }   // show signed-in immediately
-      // Slice 3b: a signed-out "claim your team" tap routed through sign-in — finish the journey.
-      // Deferred: openClaimPage does a .from() read, and supabase calls inline in this callback deadlock.
-      if (claimIntent) {
-        claimIntent = false;
-        setTimeout(() => { try { openClaimPage(); } catch (_) {} }, 0);
-      }
-      // Derive the community role out-of-band, then re-render (the account menu shows the role).
-      // Retry a few times: a fresh SIGNED_IN can race the JWT propagation to PostgREST, so the first
-      // caller_role may return null before the token attaches. Stop as soon as a role resolves or the
-      // session is gone. A genuine no-membership spectator just falls through to null (a few cheap calls).
-      setTimeout(async () => {
-        try {
-          for (let i = 0; i < 3; i++) {
-            await deriveRole();
-            if (state.role || !state.authSession) break;
-            await new Promise((r) => setTimeout(r, 400));
-          }
-          // Auth Task 4 (2026-07-09) + Task 13 (2026-07-11): a signed-in owner/organizer gets the admin
-          // surface from their SERVER role (caller_role) — the ONLY admin source now that the code login
-          // is retired. A plain 'player' or null role never sets isAdmin here. Cleared on sign-out
-          // (the SIGNED_OUT branch already resets isAdmin/masterAdminAuthenticated).
-          if (state.role === 'owner' || state.role === 'organizer') {
-            state.isAdmin = true;
-            state.masterAdminAuthenticated = (state.role === 'owner');
-          }
-          // Slice 3c: load the personal layer (team_members) now instead of waiting for the next
-          // 15s poll — the Home hero/My Team tile should light up right after sign-in.
-          try { await tdbRefreshTournaments(); } catch (_) { /* the poll catches up */ }
-          // Round 2 §12.3: resolve MY claimed player for the check-in hero. Storm-safe — this runs
-          // ONLY inside the isNewSignIn-gated heavy block (genuine sign-in transition + initial
-          // restore of a persisted real session), NEVER per auth event.
-          void loadMyClaimedPlayer();
-          // Identity (spec §2/§3): one-time name fill + auto-connect. Fire-and-forget here — same
-          // deferred site as deriveRole, so its supabase calls never run inside the auth callback.
-          void promptNameFillIfNeeded();
-          // bootPaintDone gate (2026-07-12): mid-boot the role/admin state just set above is carried
-          // by the single boot render(); painting here would swap the splash for half-loaded content.
-          if (state.loaded && bootPaintDone) { try { render(); } catch {} }
-        } catch (err) { console.error('Role derive error', err); }
-      }, 0);
-      return;
-    }
-
-    // No session -> signed out.
-    if (!session) {
-      const wasSignedIn = !!state.authSession;
-      state.authSession = null;
-      state.account = null;
-      state.role = null;
-      state.teamMembers = null; // the personal layer signs out with the account (anon can't read claims)
-      state.myClaimedPlayer = null; // Round 2 §12.3: clear the check-in hero on the SIGNED_OUT path too
-      claimIntent = false;
-      closeClaimPage(); // a claim page can't outlive its session (harmless no-op when not open)
-      if (state.isAdmin) {
-        state.isAdmin = false;
-        state.masterAdminAuthenticated = false;
-        state.activeGroup = 'All';
-        // Reliability fix (2026-06-20): a SILENT session loss (JWT expiry / failed refresh) must purge
-        // skill from memory + the localStorage cache the same way explicit logout does — re-fetch as anon
-        // (the fetch omits the skill column when !isAdmin) and overwrite the cache before re-rendering.
-        try {
-          const synced = await syncFromSupabase();
-          if (synced) saveLocal();
-        } catch (err) { console.error('Post-logout anon re-sync error', err); }
-        try { render(); } catch {}
-      } else if (wasSignedIn && state.loaded) {
-        try { render(); } catch {}
-      }
-    }
-  });
+  supabaseClient.auth.onAuthStateChange(onAuthEvent);
 }
 
 // C47 cleanup: the manual "Save" button (#btn-save-supabase) was removed in C40 (the app auto-saves via

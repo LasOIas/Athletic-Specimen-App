@@ -32,6 +32,8 @@ const hooks = {};      // selector -> node, pre-registered per test via bridge.h
 const AUTH_CONTROL_IDS = [
   'auth-back', 'auth-alt', 'auth-form', 'auth-email', 'auth-pass',
   'auth-first', 'auth-last', 'auth-err', 'auth-submit', 'auth-resend',
+  // Task 2: the forgot screen's field and every control on #reset-page.
+  'fg-email', 'reset-form', 'rs-new', 'rs-again', 'reset-err', 'reset-save', 'reset-go',
 ];
 
 function matches(node, sel) {
@@ -161,8 +163,22 @@ function loadApp() {
     console, SUPABASE_URL: 'http://localhost', SUPABASE_KEY: 'anon',
   };
   sandbox.globalThis = sandbox; sandbox.self = sandbox;
+  // Task 2: the deferred sites (the recovery router, the focus nudges) are setTimeout(0) callbacks, so a
+  // noop stub would swallow the whole router. They QUEUE instead, and only flushTimers() runs them - the
+  // Task 1 cases never flush, so for them the queue behaves exactly like the noop it replaces.
+  const timers = [];
+  sandbox.setTimeout = (fn) => { if (typeof fn === 'function') timers.push(fn); return 0; };
   const epilogue = `
+    // Task 2 spy: the extracted post-sign-in work is the one thing the recovery router must NOT run and
+    // the reset-done path MUST run. The real function still runs - this only counts the calls.
+    ;let __postRuns = 0;
+    const __postWork = runPostSignInWork;
+    runPostSignInWork = async function () { __postRuns += 1; return __postWork(); };
     ;globalThis.__bridge = {
+      authEvent: (event, session) => onAuthEvent(event, session),
+      resetSave: () => onResetSave({ preventDefault() {} }),
+      postSignInRuns: () => __postRuns,
+      resetPostRuns: () => { __postRuns = 0; },
       meter: (v) => passwordMeterScore(v),
       getState: () => state,
       openAuthPage: (mode) => openAuthPage(mode),
@@ -189,7 +205,19 @@ function loadApp() {
   // The sandbox stubs setTimeout to a noop, so a cooldown callback never runs. A case that wants to see
   // the far side of the cooldown swaps in an immediate one and restores it with the returned undo.
   bridge.swapTimeout = (fn) => { const prev = sandbox.setTimeout; sandbox.setTimeout = fn; return () => { sandbox.setTimeout = prev; }; };
+  // Drains the queued setTimeout(0) work. Callbacks are CALLED, never awaited: the post-sign-in retry
+  // loop parks on a timer promise by design, and awaiting it would hang the suite. The cap is a guard
+  // against a callback that re-queues itself forever.
+  bridge.flushTimers = async () => {
+    for (let i = 0; timers.length && i < 50; i++) {
+      const fn = timers.shift();
+      try { fn(); } catch (_) { /* a deferred site swallows its own errors; so does this */ }
+      await Promise.resolve();
+    }
+  };
   bridge.reset = () => {
+    timers.length = 0;
+    bridge.resetPostRuns();
     for (const k of Object.keys(registry)) delete registry[k];
     for (const k of Object.keys(hooks)) delete hooks[k];
     for (const k of Object.keys(supaScript)) delete supaScript[k];
@@ -203,7 +231,13 @@ function loadApp() {
     for (const id of AUTH_CONTROL_IDS) { const n = mkNode('div'); n.id = id; registry[id] = n; }
   };
   bridge.setSignedOut = () => { bridge.getState().authSession = null; bridge.getState().account = null; };
-  bridge.setSignedIn = () => { bridge.getState().authSession = { user: { id: 'u1', email: 'a@b.co' } }; };
+  // A device that is ALREADY signed in: both halves of the state a real session leaves behind, so the
+  // listener's isNewSignIn gate reads false for the same account (Task 2's recovery case).
+  bridge.setSignedIn = (user) => {
+    const u = user || { id: 'u1', email: 'a@b.co' };
+    bridge.getState().authSession = { user: u };
+    bridge.getState().account = { id: u.id, email: u.email };
+  };
   bridge.openAuth = (mode) => { bridge.openAuthPage(mode); return registry['auth-page']; };
   return bridge;
 }
@@ -282,11 +316,13 @@ describe('Account round Task 1 - the auth page and the wall', () => {
     // out (Show -> Hide -> Show in one tap).
     bridge.openAuth('signin');
     const page = bridge.registry['auth-page'];
-    expect(page.listeners.click.length).toBe(1);
+    // Two click delegates, both bound by openAuthPage: the reveal (Task 1) and the view switch behind
+    // "Forgot your password?" (Task 2). What matters is that neither GROWS when the mode repaints.
+    expect(page.listeners.click.length).toBe(2);
     expect(page.listeners.input.length).toBe(1);
     bridge.registry['auth-alt'].listeners.click[0]();   // "New here? Create an account"
     expect(page.innerHTML).toContain('One account for every tournament you play.');
-    expect(page.listeners.click.length).toBe(1);
+    expect(page.listeners.click.length).toBe(2);
     expect(page.listeners.input.length).toBe(1);
   });
 
@@ -484,5 +520,149 @@ describe('Account round Task 1 - the auth page and the wall', () => {
     expect(css).toMatch(/\.au-reveal \{[^}]*font-size: 13px !important/);
     expect(css).toMatch(/\.au-alt2 \{[^}]*font-size: 13\.5px !important/);
     expect(css).toContain('ACCOUNT DESIGN ROUND - 2026-08-25');
+  });
+});
+
+// Account handoff round (2026-08-25), Task 2: forgot / reset and the recovery router.
+// Guards the second push: the forgot screen and its sent state, the PASSWORD_RECOVERY branch that sits
+// ABOVE the listener's isNewSignIn gate (so a recovery link works on a device that is already signed in),
+// the reset screen's validation order, and the post-sign-in work running once, after the save.
+describe('Account round Task 2 - forgot, reset and the recovery router', () => {
+  beforeEach(() => bridge.reset());
+
+  // Opens #reset-page the way a real recovery link does: the event, then the deferred callback.
+  async function recover(user = { id: 'u1', email: 'a@b.co' }) {
+    bridge.setSignedIn(user);
+    await bridge.authEvent('PASSWORD_RECOVERY', { user });
+    await bridge.flushTimers();
+    return bridge.registry['reset-page'];
+  }
+
+  it('sign in carries the forgot link; the forgot screen asks Supabase with the root redirectTo and renders the sent screen', async () => {
+    bridge.openAuth('forgot');   // Task 3 opens this mode straight from the account card
+    expect(bridge.registry['auth-page'].innerHTML).toContain('Send reset link');
+
+    bridge.openAuth('signin');
+    const page = bridge.registry['auth-page'];
+    expect(page.innerHTML).toContain('data-auth-view="forgot"');
+    expect(page.innerHTML).toContain('Forgot your password?');
+
+    // The link is a view switch INSIDE the overlay, so a real tap reaches every delegate bound on it.
+    const link = bridge.node('button');
+    link.setAttribute('data-auth-view', 'forgot');
+    bridge.hook('[data-auth-view]', link);
+    page.listeners.click.forEach((fn) => fn({ target: link }));
+    expect(page.innerHTML).toContain('Reset your password');
+    expect(page.innerHTML).toContain("Enter your email and we'll send a link to set a new one.");
+
+    bridge.registry['fg-email'].value = 'a@b.co';
+    bridge.supaNext('resetPasswordForEmail', { data: {}, error: null });
+    await bridge.authSubmit();
+    expect(bridge.supaCalls().at(-1)).toEqual(['resetPasswordForEmail', 'a@b.co', { redirectTo: 'http://localhost' }]);
+
+    const html = page.innerHTML;
+    expect(html).toContain('Check your email');
+    expect(html).toContain('a reset link is on its way');
+    expect(html).toContain('a@b.co');
+    expect(html).not.toContain('expires in an hour');
+    expect(html).not.toContain('Open the link from the email');
+    expect(html).not.toMatch(/—|&mdash;|night/i);
+  });
+
+  it('the forgot screen refuses an empty and a malformed address before the network', async () => {
+    bridge.openAuth('forgot');
+    const err = bridge.registry['auth-err'];
+
+    bridge.registry['fg-email'].value = '';
+    await bridge.authSubmit();
+    expect(err.textContent).toBe('Fill in every field.');
+
+    bridge.registry['fg-email'].value = 'nope';
+    await bridge.authSubmit();
+    expect(err.textContent).toBe("That email doesn't look right.");
+    expect(bridge.supaCalls().length).toBe(0);
+  });
+
+  it("the sent screen's Resend asks for another reset link, not a signup link", async () => {
+    bridge.openAuth('forgot');
+    bridge.registry['fg-email'].value = 'a@b.co';
+    bridge.supaNext('resetPasswordForEmail', { data: {}, error: null });
+    await bridge.authSubmit();
+
+    const btn = bridge.registry['auth-resend'];
+    expect(btn.listeners.click.length).toBe(1);
+    bridge.supaNext('resetPasswordForEmail', { data: {}, error: null });
+    await btn.listeners.click[0]();
+    expect(bridge.supaCalls().at(-1)).toEqual(['resetPasswordForEmail', 'a@b.co', { redirectTo: 'http://localhost' }]);
+    expect(bridge.supaCalls().some((c) => c[0] === 'resend')).toBe(false);
+  });
+
+  it('a PASSWORD_RECOVERY event opens #reset-page even for a device that was already signed in, without closing anything else', async () => {
+    const page = await recover();
+    expect(page).toBeTruthy();
+    expect(page.innerHTML).toContain('Set a new password');
+    expect(page.innerHTML).toContain('For <span class="au-em">a@b.co</span>');
+    expect(page.innerHTML).toContain('Save password');
+    // No back control: the only ways off this screen are a saved password or a reload.
+    expect(page.innerHTML).not.toContain('auth-back');
+    // The session is KEPT (updateUser needs it) and the heavy sign-in path is NOT run on a recovery.
+    expect(bridge.getState().authSession).toBeTruthy();
+    expect(bridge.getState().account.email).toBe('a@b.co');
+    expect(bridge.postSignInRuns()).toBe(0);
+    expect(bridge.supaCalls().length).toBe(0);
+    // The branch is worthless unless the extracted listener is the one actually registered.
+    expect(appSrc).toContain('onAuthStateChange(onAuthEvent)');
+  });
+
+  it('the reset screen refuses a mismatch and a short password before calling updateUser, then shows done and runs the post-sign-in work', async () => {
+    const page = await recover();
+    const err = bridge.registry['reset-err'];
+
+    await bridge.resetSave();
+    expect(err.textContent).toBe('Fill in every field.');
+
+    bridge.registry['rs-new'].value = 'short1';
+    bridge.registry['rs-again'].value = 'short1';
+    await bridge.resetSave();
+    expect(err.textContent).toBe('Your new password needs at least 8 characters.');
+
+    bridge.registry['rs-new'].value = 'Passw0rd!';
+    bridge.registry['rs-again'].value = 'Passw0rd?';
+    await bridge.resetSave();
+    expect(err.textContent).toBe("Those two passwords don't match.");
+    expect(bridge.supaCalls().length).toBe(0);
+
+    bridge.registry['rs-again'].value = 'Passw0rd!';
+    bridge.supaNext('updateUser', { data: {}, error: null });
+    await bridge.resetSave();
+    expect(bridge.supaCalls().at(-1)).toEqual(['updateUser', { password: 'Passw0rd!' }]);
+    expect(page.innerHTML).toContain('au-mark is-ok');
+    expect(page.innerHTML).toContain('Password changed');
+    expect(page.innerHTML).toContain("You're signed in.");
+    expect(page.innerHTML).toContain('Go to the tournament');
+    expect(page.innerHTML).not.toMatch(/—|&mdash;|night/i);
+    expect(bridge.postSignInRuns()).toBe(1);
+  });
+
+  it('a failed updateUser keeps the form and says why', async () => {
+    await recover();
+    bridge.registry['rs-new'].value = 'Passw0rd!';
+    bridge.registry['rs-again'].value = 'Passw0rd!';
+    bridge.supaNext('updateUser', { data: null, error: { message: 'Password should be at least 6 characters.' } });
+    await bridge.resetSave();
+    expect(bridge.registry['reset-err'].textContent).toBe('Your password needs at least 8 characters.');
+    expect(bridge.registry['reset-save'].disabled).toBe(false);
+    expect(bridge.registry['reset-page'].innerHTML).not.toContain('Password changed');
+    expect(bridge.postSignInRuns()).toBe(0);
+  });
+
+  it('the reset path never trims the password', async () => {
+    await recover();
+    const typed = '12345678 ';   // nine characters; the last one is a space somebody chose
+    bridge.registry['rs-new'].value = typed;
+    bridge.registry['rs-again'].value = typed;
+    bridge.supaNext('updateUser', { data: {}, error: null });
+    await bridge.resetSave();
+    expect(bridge.supaCalls().at(-1)).toEqual(['updateUser', { password: typed }]);
   });
 });
