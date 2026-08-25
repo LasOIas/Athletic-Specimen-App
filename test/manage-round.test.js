@@ -493,3 +493,70 @@ describe('Task 2 hub', () => {
     expect(rules).not.toContain('.mgh-undo');
   });
 });
+
+describe('Task 3 live strip', () => {
+  it('the live strip lists every net, names the game on it, and prints no minutes', () => {
+    seedHub(bridge, { status: 'pools', net_count: 2, name: 'A' }, { matches: [
+      { id: 'm1', phase: 'pool', pool_id: 'p1', net: 1, status: 'live', score_a: 3, score_b: 1, team_a_id: 't1', team_b_id: 't2', queue_order: 4 },
+      { id: 'm2', phase: 'pool', pool_id: 'p1', net: 2, status: 'scheduled', team_a_id: 't3', team_b_id: 't4', queue_order: 5 }],
+      pools: [{ id: 'p1', label: 'A' }], teams: [{ id: 't1', name: 'Net Gains' }, { id: 't2', name: 'Block Party' }, { id: 't3', name: 'X' }, { id: 't4', name: 'Y' }] });
+    const html = bridge.buildManage();
+    expect(html).toContain('>On the nets<');
+    expect(html).toContain('1 playing · 1 idle');
+    expect(html).toContain('Net Gains vs Block Party');
+    expect(html).toContain('Pool A · G4');
+    expect(html).toContain('G5 can start');
+    expect(html).not.toMatch(/\d+ min</);
+    expect(html).not.toContain('checked in');
+  });
+
+  it('a silent net says no score yet and nothing else claims a duration', () => {
+    seedHub(bridge, { status: 'pools', net_count: 1, name: 'A' }, { matches: [
+      { id: 'm1', phase: 'pool', pool_id: 'p1', net: 1, status: 'live', score_a: 0, score_b: 0, team_a_id: 't1', team_b_id: 't2', queue_order: 1 }],
+      pools: [{ id: 'p1', label: 'A' }], teams: [{ id: 't1', name: 'Net Gains' }, { id: 't2', name: 'Block Party' }] });
+    const html = bridge.buildManage();
+    expect(html).toContain('class="mgh-lnet is-late"');
+    expect(html).toContain('Pool A · G1 · no score yet');
+    expect(html).not.toMatch(/\d+ min</);
+  });
+
+  it('an idle net with nothing queued says so honestly, and a live net never shows Idle', () => {
+    seedHub(bridge, { status: 'pools', net_count: 1, name: 'A' }, { matches: [], pools: [{ id: 'p1', label: 'A' }], teams: [] });
+    const html = bridge.buildManage();
+    expect(html).toContain('class="mgh-lnet is-idle"');
+    expect(html).toContain('Nothing queued');
+    expect(html).toContain('0 playing · 1 idle');
+  });
+
+  it('a bracket game prints its side and the Championship label, not a pool letter', () => {
+    seedHub(bridge, { status: 'bracket', net_count: 1, name: 'A' }, { matches: [
+      { id: 'gf', phase: 'main', side: 'grand_final', round: 1, slot: 0, net: 1, status: 'live', score_a: 5, score_b: 4, team_a_id: 't1', team_b_id: 't2', queue_order: 9 }],
+      teams: [{ id: 't1', name: 'Net Gains' }, { id: 't2', name: 'Block Party' }] });
+    const html = bridge.buildManage();
+    expect(html).toContain('Championship · G1');
+  });
+
+  it('the strip is absent outside game day, without nets configured, and off a stale collection', () => {
+    const liveMatch = { id: 'm1', phase: 'pool', pool_id: 'p1', net: 1, status: 'live', score_a: 3, score_b: 1, team_a_id: 't1', team_b_id: 't2', queue_order: 4 };
+
+    seedHub(bridge, { status: 'setup', net_count: 2, name: 'A' }, { matches: [liveMatch] });
+    expect(bridge.buildManage()).not.toContain('On the nets');
+
+    seedHub(bridge, { status: 'pools', net_count: 0, name: 'A' }, { matches: [liveMatch] });
+    expect(bridge.buildManage()).not.toContain('On the nets');
+
+    seedHub(bridge, { status: 'pools', net_count: 2, name: 'A' }, { matches: [liveMatch] });
+    bridge.getState().activeTournamentId = 'somebody-else';
+    expect(bridge.buildManage()).not.toContain('On the nets');
+  });
+
+  it('the live-strip CSS ships, minus the minutes column', () => {
+    expect(css).toContain('.mgh-live {');
+    expect(css).toContain('.mgh-livehd {');
+    expect(css).toContain('.mgh-lnet {');
+    expect(css).toContain('.mgh-lnn {');
+    expect(css).toContain('.mgh-lnt {');
+    expect(css).toContain('.mgh-lns {');
+    expect(css.replace(/\/\*[\s\S]*?\*\//g, '')).not.toContain('.mgh-lnm');
+  });
+});

@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7347,6 +7347,59 @@ function mgHubActsHTML(t) {
     + `<p class="mgr-status" id="mgh-status" role="status" aria-live="polite"></p></div>`;
 }
 
+// Task 3 (2026-08-25 hub round): the game-day "On the nets" strip — the honest subset of the design's live
+// strip (mg-hub-live). Prints only what the DB can back: which net, the matchup, its context (pool letter or
+// bracket side + game number), and "no score yet" when a live game is genuinely scoreless. NO minutes column
+// and NO "checked in" wording ship — there is no start-time column and no arrival fact behind either, so the
+// design's duration/checked-in reads were dropped rather than faked. An idle net's "could start now" game
+// comes from pickPoolCurrentGames (pure.js) — its first caller (vault C77) — fed one games list per net
+// (index 0 = net 1), each sorted by queue_order and holding only two-team games, so a team already placed on
+// an earlier net is never offered a second game at once. Renders only on game day (pools/bracket) with nets
+// configured, and only from collections that belong to state.activeTournamentId: those collections are
+// loaded for the active tournament and NOTHING else (mgActiveTournament can fall back to
+// manageLeadTournament when the pick is stale), so showing another tournament's nets under this one's name
+// would be the exact borrowed-data failure the 2026-07-11 resolver note already guards against elsewhere.
+function mgHubLiveStripHTML(t) {
+  if (!t || (t.status !== 'pools' && t.status !== 'bracket')) return '';
+  const nets = Number(t.net_count) > 0 ? Number(t.net_count) : 0;
+  if (!nets) return '';
+  if (state.activeTournamentId !== t.id) return '';
+  const teams = state.tournamentTeams || [];
+  const pools = state.tournamentPools || [];
+  const matches = (state.tournamentMatches || []).filter((m) => m && m.team_a_id && m.team_b_id);
+  const main = matches.filter((m) => m.phase === 'main');
+  const gn = main.length ? bracketGameNumbers(main).byId : {};
+  const gameLabel = (m) => 'G' + (m.phase === 'main' ? (gn[m.id] || '') : (m.queue_order || ''));
+  const ctx = (m) => {
+    const where = m.phase === 'main'
+      ? (m.side === 'grand_final' ? 'Championship' : (m.side === 'losers' ? 'Losers' : 'Winners'))
+      : ('Pool ' + ((pools.find((p) => p.id === m.pool_id) || {}).label || ''));
+    return where + ' · ' + gameLabel(m);
+  };
+  const live = matches.filter((m) => m.status === 'live' && m.net != null);
+  const playing = new Set(live.map((m) => Number(m.net))).size;
+  const notFinal = matches.filter((m) => m.status !== 'final' && m.status !== 'live');
+  const byId = {};
+  notFinal.forEach((m) => { byId[m.id] = m; });
+  const netGames = [];
+  for (let n = 1; n <= nets; n++) {
+    netGames.push(notFinal.filter((m) => Number(m.net) === n).sort((a, b) => (a.queue_order || 0) - (b.queue_order || 0)));
+  }
+  const currentByNet = pickPoolCurrentGames(netGames);
+  const rows = [];
+  for (let n = 1; n <= nets; n++) {
+    const m = live.find((x) => Number(x.net) === n);
+    if (m) {
+      const silent = !(Number(m.score_a) > 0 || Number(m.score_b) > 0);
+      rows.push(`<div class="mgh-lnet${silent ? ' is-late' : ''}"><span class="mgh-lnn">${n}</span><span class="mgh-lnb"><span class="mgh-lnt">${escapeHTML(teamNameById(teams, m.team_a_id))} vs ${escapeHTML(teamNameById(teams, m.team_b_id))}</span><span class="mgh-lns">${escapeHTML(ctx(m))}${silent ? ' · no score yet' : ''}</span></span></div>`);
+    } else {
+      const next = currentByNet[n - 1] ? byId[currentByNet[n - 1]] : null;
+      rows.push(`<div class="mgh-lnet is-idle"><span class="mgh-lnn">${n}</span><span class="mgh-lnb"><span class="mgh-lnt">Idle</span><span class="mgh-lns">${next ? escapeHTML(gameLabel(next) + ' can start') : 'Nothing queued'}</span></span></div>`);
+    }
+  }
+  return `<div class="mgh-live"><div class="mgh-livehd"><span>On the nets</span><span class="mgh-liveq">${playing} playing · ${nets - playing} idle</span></div>${rows.join('')}</div>`;
+}
+
 // Needs you, with the fix in the row. Shared with the tournament page (headLabel differs). Titles emit RAW:
 // they are fixed copy plus counts, and the one value interpolated from a DB row is `matches.net`, a numeric
 // column ("Net 3 has no score"). Subs may embed team or tournament NAMES and are escaped. `.is-go` = a jump
@@ -7448,6 +7501,7 @@ function buildManagePageHTML() {
   return mgHubScopeHTML(t)
     + (t ? mgHubTrackHTML(t) : '')
     + mgHubActsHTML(t)
+    + mgHubLiveStripHTML(t)
     + mgNeedsRowsHTML(needs, setupHead ? 'Before you open' : 'Needs you')
     + rows;
 }

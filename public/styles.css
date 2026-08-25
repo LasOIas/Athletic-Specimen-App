@@ -5119,6 +5119,50 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
 .mgh-done.is-under { height: auto; padding: 11px 2px 1px; }
 .mgh-acts .mgh-done.is-under { height: auto; padding: 11px 2px 1px; }
 
+/* PORT NOTE: _rounds.css:1420-1460 (Task 3, "On the nets"), minus the duration column. The round's own
+   comment reads "which net, who is on it, HOW LONG, and which one is sitting empty" — .mgh-lnm (the
+   right-aligned minutes clock) is the "how long" member and is DROPPED: there is no game start-time column
+   behind it, and the spec's honest-subset rule (nothing prints that the DB cannot back) rules it out along
+   with every "checked in" read the same screen draws elsewhere. .mgh-lnet.is-late is kept, but re-pointed:
+   the round washes BOTH .mgh-lnm and .mgh-lns amber for a game running long; with no clock to be late
+   against, the app reuses the same class for a genuinely SCORELESS live game and washes only .mgh-lns (the
+   "no score yet" line) — the one fact this app can actually see. */
+.mgh-live { margin: 16px 0 2px; border: 1px solid var(--border); border-radius: 14px; background: #fff; }
+.mgh-livehd {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 11px 13px 9px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.mgh-liveq { margin-left: auto; letter-spacing: 0; text-transform: none; font-size: 12px; font-weight: 500; color: var(--muted); }
+.mgh-lnet { display: flex; align-items: center; gap: 11px; padding: 9px 13px; }
+.mgh-lnet + .mgh-lnet { border-top: 1px solid var(--border); }
+.mgh-lnn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.mgh-lnb { display: grid; gap: 1px; min-width: 0; }
+.mgh-lnt { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.mgh-lns { font-size: 11.5px; color: var(--muted); }
+/* a scoreless live game is the one thing on this strip that wants a look */
+.mgh-lnet.is-late .mgh-lns { color: oklch(0.50 0.11 70); }
+.mgh-lnet.is-idle .mgh-lnn { background: #fff; border: 1px dashed var(--border); color: var(--muted); }
+.mgh-lnet.is-idle .mgh-lnt { color: var(--muted); }
 
 /* PORT NOTE: _rounds.css:1461-1473 rewritten onto production's chip class. The round names the hub's
    right-hand chip .mgh-state; prod already ships .mgv-rmeta (styles.css ~3472) for exactly the same
