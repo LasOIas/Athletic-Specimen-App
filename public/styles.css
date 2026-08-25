@@ -5912,11 +5912,13 @@ input.set-money {
       space-between }`. Production keeps the stepper and the live save, so the row's right edge is already
       spoken for - the pill is absolutely positioned inside the winner button instead, which puts it in the
       prototype's place (right of the name, left of the stepper) and costs no layout when it appears.
-   2. the 16px name and the 62px row are scoped to :has(.mgv-scsub), so the POOL card - the same component -
-      keeps the 15px name and the shorter row it ships today. */
+   2. the 16px name, the 62px row and the round's 12px gap are ALL scoped to :has(.mgv-scsub), so the POOL
+      card - the same component - keeps the 15px name, the shorter row and the 11px dot-to-name gap it
+      ships today, byte for byte. Only `position: relative` (the pill's anchor, inert without a pill) is
+      unscoped. */
 #mgss-sheet .mgv-scrow { position: relative; }
-#mgss-sheet .mgv-scwin { position: relative; gap: 12px; }
-#mgss-sheet .mgv-scwin:has(.mgv-scsub) { min-height: 62px; }
+#mgss-sheet .mgv-scwin { position: relative; }
+#mgss-sheet .mgv-scwin:has(.mgv-scsub) { min-height: 62px; gap: 12px; }
 #mgss-sheet .mgv-scwin:has(.mgv-scwpill) { padding-right: 66px; }
 #mgss-sheet .mgv-scnb { flex: 1; display: grid; gap: 3px; min-width: 0; }
 #mgss-sheet .mgv-scwin:has(.mgv-scsub) .mgv-scname { font-size: 16px; letter-spacing: -.01em; }

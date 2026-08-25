@@ -7044,6 +7044,11 @@ let mgTournamentPinned = false; // true = the organizer picked this tournament e
 //                     registration switch is its own undo.
 let mgHubPickerOpen = false;
 let mgHubDoneText = '';
+// Fix round 1 (2026-08-25): attachHandlers' Manage block is guarded by appContent.dataset.navTabBound, but
+// renderPublicShell() REBUILDS #app-content on every full render() (42 call sites) — the dataset guard dies
+// with the old node, so the block's body runs again, and anything it binds on DOCUMENT stacks up one copy
+// per render. This module flag outlives the node, so it is what guards the document-level key listeners.
+let mgDocKeysBound = false;
 // Task 7 (Pools & schedule admin, pick R9): the active pool tab in the post-draw schedule
 // ('A'|'B'|…|'seeding'; null → the first pool) + whether the Pool-controls section is expanded. Both
 // survive the container-swap repaint (a background score sync must not reset the tab or collapse the panel).
@@ -10822,9 +10827,29 @@ function mgScoreNextHTML(match) {
     const side = d.side === 'grand_final' ? 'Championship' : (d.side === 'losers' ? 'losers bracket' : 'winners bracket');
     return `${side} · G${gn[d.id]}`;
   };
-  // The championship is the one game with no wiring out of it, so its two ends ARE the outcome. With a
-  // reset game pending, winner_next_match_id points at the reset and reads "Championship · G15" honestly.
   const isChamp = match.side === 'grand_final';
+  // The championship of a RESET-ENABLED bracket wires BOTH of its ends into the reset game (pure.js ~522,
+  // and grand_final_reset defaults to true), so the Winner/Loser form would read "Championship · G15"
+  // twice — where, twice; what, never. The reset is only played when the LOSERS-side team wins
+  // (0039: wb_won_gf ends the tournament on the spot), so the honest line names the two TEAMS instead of
+  // the two ends: slot a is the winners-side team, slot b the one that came up through the losers bracket.
+  // A no-reset championship, and the reset game itself, keep the Winner/Loser form below.
+  const reset = (isChamp && Number(match.round) === 1)
+    ? main.find((x) => x.side === 'grand_final' && Number(x.round) === 2) : null;
+  if (reset) {
+    const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];
+    const nameOf = (id) => { const tm = teams.find((x) => x && x.id === id); return (tm && tm.name) ? tm.name : ''; };
+    const aName = nameOf(match.team_a_id);
+    const bName = nameOf(match.team_b_id);
+    // Both slots have to be filled for the team form to say anything; an unresolved championship falls
+    // through to the generic form rather than naming a team that is not there yet.
+    if (aName && bName) {
+      return `<div class="mgv-scstake">`
+        + `<span class="mgv-scstk"><b>${escapeHTML(aName)}</b> wins → champion</span>`
+        + `<span class="mgv-scstk"><b>${escapeHTML(bName)}</b> wins → Championship · G${gn[reset.id]}</span>`
+        + `</div>`;
+    }
+  }
   const win = (match.winner_next_match_id && byId[match.winner_next_match_id]) ? dest(match.winner_next_match_id) : (isChamp ? 'champion' : '');
   const lose = (match.loser_next_match_id && byId[match.loser_next_match_id]) ? dest(match.loser_next_match_id)
     : (isChamp ? 'runner-up' : (match.side === 'losers' && (match.round || 0) >= maxRounds.losers ? 'third place' : 'eliminated'));
@@ -11000,6 +11025,15 @@ function openMgScoreSheet(matchId) {
   scrim.innerHTML = `<div class="popup-card card mgv-sccard" role="dialog" aria-modal="true" aria-labelledby="mgv-sctitle"`
     + ` aria-label="${escapeHTMLText(isFinal ? 'Edit result' : 'Enter score')}">${buildMgScoreSheetHTML(match, pick)}</div>`;
   document.body.appendChild(scrim);
+  // Fix round 1 (2026-08-25): opened from the keyboard, the bracket row that fired this still holds focus
+  // BEHIND a role="dialog" aria-modal card — a second Enter/Space would tear the card down and rebuild it,
+  // losing the pick. Move focus into the card, onto the close button: the one control every card has, in
+  // every state (a pool card's primary starts disabled). Deferred a tick, like the team sheet's field
+  // focus, so the node is mounted before it is asked to take focus.
+  setTimeout(() => {
+    const x = scrim.querySelector('[data-mgss="close"]');
+    if (x && x.focus) { try { x.focus({ preventScroll: true }); } catch (_) { try { x.focus(); } catch (_e) {} } }
+  }, 0);
   const errEl = () => document.getElementById('mgss-err');
   const fail = (msg) => { const e = errEl(); if (e) { e.textContent = msg; e.hidden = false; } };
   const sync = () => {
@@ -13138,23 +13172,28 @@ function attachHandlers() {
       const navBtn = e.target.closest('[data-nav-tab]');
       if (navBtn) activateMainTab(navBtn.dataset.navTab);
     });
-    // Escape closes the hub's inline picker, like every other dismissible surface in the app. Bound on
-    // DOCUMENT (the QR modal's convention) rather than on the panel: the panel is rebuilt on every repaint,
-    // and a keypress with focus back on <body> would never reach a container-scoped listener. A no-op
-    // whenever the picker is already shut, so it costs one boolean per keystroke.
-    document.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape' || !mgHubPickerOpen) return;
-      mgHubPickerOpen = false;
-      repaintManage();
-    });
-    // Escape closes the shared score card too (round 2026-08-25), the same as its × or a tap on the scrim.
-    // The card is body-level and rebuilt on every open, so the listener is bound ONCE here and asks the DOM
-    // whether a card is up — a no-op keystroke otherwise. Bound outside the sheet so nothing leaks when the
-    // sheet is removed, and it reaches the card from the public pages that open it as well as from Manage.
-    document.addEventListener('keydown', (e) => {
-      if (!e || e.key !== 'Escape') return;
-      if (document.getElementById('mgss-sheet')) closeMgScoreSheet();
-    });
+    // The two DOCUMENT-level key listeners, bound once for the life of the page. They are on document (the
+    // QR modal's convention) rather than the panel because both surfaces are rebuilt on every repaint and a
+    // keypress with focus back on <body> would never reach a container-scoped listener — and because they
+    // are on document, the surrounding dataset guard is not enough to keep them from stacking (see
+    // mgDocKeysBound). Both are a no-op keystroke whenever their surface is shut.
+    if (!mgDocKeysBound) {
+      mgDocKeysBound = true;
+      // Escape closes the hub's inline picker, like every other dismissible surface in the app.
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape' || !mgHubPickerOpen) return;
+        mgHubPickerOpen = false;
+        repaintManage();
+      });
+      // Escape closes the shared score card too (round 2026-08-25), the same as its × or a tap on the
+      // scrim. The card is body-level and rebuilt on every open, so the listener asks the DOM whether one
+      // is up rather than holding a reference — and it reaches the card from the public pages that open it
+      // as well as from Manage.
+      document.addEventListener('keydown', (e) => {
+        if (!e || e.key !== 'Escape') return;
+        if (document.getElementById('mgss-sheet')) closeMgScoreSheet();
+      });
+    }
   }
   // C46 cleanup: the admin "Menu" dropdown (#admin-quick-open) was removed in C40 (Add = the + button,
 // Show QR = the Dashboard tile, Check-in = the roster search + tap toggle — all duplicated). Its change

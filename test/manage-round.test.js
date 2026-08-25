@@ -215,6 +215,12 @@ function loadApp() {
         openMgScoreSheet = (id) => { calls.push(id); };
         return { calls, restore: () => { openMgScoreSheet = was; } };
       },
+      // Fix round 1: the REAL opener, so the focus move after the mount is provable. And the bound-once
+      // flag, which outlives #app-content on purpose — a test that wants to watch the document listeners
+      // being bound has to clear it first, and the bound-once case leaves it set between its two calls.
+      openScore: (id) => openMgScoreSheet(id),
+      resetDocKeys: () => { mgDocKeysBound = false; },
+      docKeysBound: () => mgDocKeysBound,
       mockTeamAdd: (o) => {
         o = o || {};
         const calls = [];
@@ -1923,26 +1929,38 @@ describe('Task 8 pool controls', () => {
 // The REAL keydown listeners, captured the way withDelegate captures the click one. The bracket's
 // Enter/Space reach is bound on #app-content and the score card's Escape on document, so both lists are
 // collected and driven with a synthetic event: a grep of app.js proves neither is actually wired.
-function withKeys(fn) {
+function withKeys(fn, times) {
   const doc = bridge.doc;
   const realGet = doc.getElementById;
   const realAdd = doc.addEventListener;
   const noop = () => {};
   const onEl = [];
   const onDoc = [];
-  const appContent = {
+  // A FRESH #app-content per attachHandlers call, because that is what production does: renderPublicShell()
+  // rebuilds the node on every full render(), which is exactly why its dataset guard cannot keep a
+  // document-level listener from stacking.
+  const makeAppContent = () => ({
     dataset: {}, style: {},
     classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
     addEventListener: (type, cb) => { if (type === 'keydown') onEl.push(cb); },
     removeEventListener: noop,
     querySelector: () => null, querySelectorAll: () => ({ forEach: noop, length: 0 }),
-  };
+  });
+  let appContent = makeAppContent();
   doc.getElementById = (id) => (id === 'app-content' ? appContent : null);
   doc.addEventListener = (type, cb) => { if (type === 'keydown') onDoc.push(cb); };
-  // the later bindings in attachHandlers want DOM this harness has not got; the two keydown listeners are
-  // bound before any of them complain
-  try { bridge.attachHandlers(); } catch (_) { /* nothing after the keydown bindings matters here */ }
-  finally { doc.getElementById = realGet; doc.addEventListener = realAdd; }
+  // The document listeners are bound once for the life of the page and this suite shares one vm context,
+  // so the flag is cleared first or a later case would capture nothing. `times` > 1 is how the bound-once
+  // guard itself is proven: the flag is NOT cleared between the repeats, only the node is replaced.
+  bridge.resetDocKeys();
+  try {
+    for (let i = 0; i < (times || 1); i += 1) {
+      appContent = makeAppContent();
+      // the later bindings in attachHandlers want DOM this harness has not got; both keydown blocks are
+      // bound before any of them complain
+      try { bridge.attachHandlers(); } catch (_) { /* nothing after the keydown bindings matters here */ }
+    }
+  } finally { doc.getElementById = realGet; doc.addEventListener = realAdd; }
   // One synthetic key press. `hooks` is every attribute the focused node sits under, so a row can be
   // reproduced exactly; `list` picks which set of listeners hears it (the element's, or document's).
   const press = (key, hooks, value, list) => {
@@ -2006,6 +2024,15 @@ describe('Task 9 the progress strip', () => {
     const html = bridge.buildBracket();
     expect(html).toContain('No game is playable, the next round needs results first.');
     expect(html).not.toMatch(/—|&mdash;/);
+  });
+
+  it('an unplayed reset game is not in the total, so the count can actually reach the end', () => {
+    setMainBracketFixture();
+    bridge.getState().tournamentMatches.push({ id: 'gf2', tournament_id: 'T', phase: 'main', side: 'grand_final',
+      round: 2, slot: 0, round_label: 'Grand Final Reset', net: 1, queue_order: 11, status: 'scheduled',
+      team_a_id: null, team_b_id: null, source_a: 'Winner of Grand Final', source_b: 'Loser of Grand Final',
+      winner_next_match_id: null, loser_next_match_id: null, version: 0 });
+    expect(bridge.buildBracket()).toContain('class="bkr-count">4 of 11 games in<');
   });
 
   it('rides between the controls and the board, and brings nothing from the data round with it', () => {
@@ -2091,6 +2118,34 @@ describe('Task 9 the bracket score card', () => {
     expect(html).toContain('<b>Loser</b> → runner-up');
   });
 
+  // Fix round 1: grand_final_reset defaults TRUE, and pure.js wires BOTH ends of the championship into the
+  // reset game — so the Winner/Loser form said "Championship · G12" twice and named no outcome at all. The
+  // reset is only played when the LOSERS-side team wins (0039 ends the tournament the moment the
+  // winners-side team does), so the card names the two teams instead of the two ends.
+  it('a reset championship names the two teams, because both of its ends feed the same game', () => {
+    setMainBracketFixture();
+    const st = bridge.getState();
+    const gf = match('gf');
+    gf.team_a_id = 't1'; gf.team_b_id = 't2';               // slot a = winners side, slot b = losers side
+    gf.winner_next_match_id = 'gf2'; gf.loser_next_match_id = 'gf2';
+    st.tournamentMatches.push({ id: 'gf2', tournament_id: 'T', phase: 'main', side: 'grand_final', round: 2,
+      slot: 0, round_label: 'Grand Final Reset', net: 1, queue_order: 11, status: 'scheduled',
+      team_a_id: null, team_b_id: null, source_a: 'Winner of Grand Final', source_b: 'Loser of Grand Final',
+      winner_next_match_id: null, loser_next_match_id: null, version: 0 });
+    const html = bridge.buildScoreSheet(gf);
+    expect(html).toContain('<b>Dink Responsibly</b> wins → champion');
+    expect(html).toContain('<b>Sets and Reps</b> wins → Championship · G12');
+    expect(html).not.toContain('<b>Winner</b> →');
+    expect(html).not.toContain('<b>Loser</b> →');
+    expect(html).not.toMatch(/—|&mdash;/);
+    // and the reset game ITSELF is the decider, so it keeps the Winner / Loser form
+    const reset = match('gf2');
+    reset.team_a_id = 't2'; reset.team_b_id = 't1';
+    const resetHtml = bridge.buildScoreSheet(reset);
+    expect(resetHtml).toContain('<b>Winner</b> → champion');
+    expect(resetHtml).toContain('<b>Loser</b> → runner-up');
+  });
+
   it('the last losers round sends its loser to third place', () => {
     setMainBracketFixture();
     const l2 = match('l2a');
@@ -2136,6 +2191,58 @@ describe('Task 9 keyboard reach', () => {
     } finally { mock.restore(); }
   });
 
+  // Fix round 1: renderPublicShell() rebuilds #app-content on every full render(), so its dataset guard
+  // dies with the old node and attachHandlers runs the Manage block again. Anything it binds on DOCUMENT
+  // would stack one copy per render; the module flag is what stops it.
+  it('the document key listeners bind once, however many times #app-content is rebuilt', () => {
+    const once = withKeys(({ onDoc }) => onDoc.length);
+    let twiceDoc = null;
+    const twice = withKeys(({ onDoc, onEl }) => {
+      twiceDoc = onDoc;
+      expect(onEl.length).toBe(4);   // the ELEMENT listeners do re-bind: they ride on the new node
+      expect(bridge.docKeysBound()).toBe(true);
+      return onDoc.length;
+    }, 2);
+    // The Manage block's document PAIR (the hub picker's Escape + the score card's) binds once for the
+    // life of the page, so a second render adds exactly ONE listener, not three. That one is the
+    // copilot's Enter handler, which has re-bound with #app-content since long before this round and is
+    // not this task's to change — it is ledgered, not silently absorbed into this assertion.
+    expect(twice - once).toBe(1);
+    // and functionally: one Escape still closes the card exactly once, never twice over
+    const doc = bridge.doc;
+    const realGet = doc.getElementById;
+    let removed = 0;
+    doc.getElementById = (id) => (id === 'mgss-sheet' ? { remove: () => { removed += 1; } } : null);
+    try {
+      twiceDoc.forEach((cb) => cb({ key: 'Escape', target: { closest: () => null }, preventDefault: () => {}, stopPropagation: () => {} }));
+      expect(removed).toBe(1);
+    } finally { doc.getElementById = realGet; }
+  });
+
+  // Fix round 1: opened from the keyboard, the row that fired still holds focus behind an aria-modal card,
+  // so a second Enter would tear the card down and rebuild it — losing the pick.
+  it('opening the card moves focus into it', () => {
+    setMainBracketFixture();
+    const doc = bridge.doc;
+    const realCreate = doc.createElement;
+    let focused = 0;
+    const closeBtn = { focus: () => { focused += 1; } };
+    const scrim = {
+      id: '', className: '', style: {}, innerHTML: '',
+      addEventListener: () => {},
+      querySelector: (sel) => (sel === '[data-mgss="close"]' ? closeBtn : null),
+      querySelectorAll: () => ({ forEach: () => {} }),
+    };
+    doc.createElement = () => scrim;
+    const realTimeout = bridge.swapTimeout((cb) => { cb(); return 0; });
+    try {
+      bridge.openScore('w2a');
+      expect(scrim.id).toBe('mgss-sheet');
+      expect(scrim.innerHTML).toContain('data-mgss="close"');
+      expect(focused).toBe(1);
+    } finally { doc.createElement = realCreate; bridge.swapTimeout(realTimeout); }
+  });
+
   it('Escape closes the score card', () => {
     withKeys(({ press, onDoc }) => {
       const doc = bridge.doc;
@@ -2178,6 +2285,10 @@ describe('Task 9 the ported CSS', () => {
     expect(body).toContain('.mgv-scnb');
     expect(body).not.toContain('[aria-label="Pick the winner"]');
     expect(body).toMatch(/#mgss-sheet \.mgv-scrow \{[^}]*position: relative/);
+    // Fix round 1: the round's 12px gap is scoped to the bracket card, so the POOL card keeps prod's 11px
+    expect(body).toContain('#mgss-sheet .mgv-scwin { position: relative; }');
+    expect(body).toContain('#mgss-sheet .mgv-scwin:has(.mgv-scsub) { min-height: 62px; gap: 12px; }');
+    expect(body).not.toContain('.mgv-scwin { position: relative; gap: 12px; }');
   });
 
   it('the old .mgv-bknext block went with its markup', () => {
