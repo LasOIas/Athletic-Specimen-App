@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.31'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.32'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6195,6 +6195,10 @@ function appPrompt({ title, message, value, confirmText, placeholder, danger } =
 let authMode = 'signin';                 // 'signin' | 'signup' | 'signup-sent' | 'forgot' | 'forgot-sent'
 const AUTH_PASSWORD_MIN = 8;             // Mike 2026-08-25: one number for sign-up, reset and change (the server minimum is 6)
 const AUTH_RESEND_MS = 60000;            // how long a Resend control waits before it can send again
+// Mike 2026-08-25: email only for now. Continue with Google stays built and tested but OFF until Athletic
+// Specimen has its own Google Cloud project (consent screen in its name, the Supabase callback as the
+// client's redirect URI); flip this to true the day that exists. Off = no button, no OR row, inert handler.
+let AUTH_GOOGLE_ENABLED = false;
 // The empties line, in one place: sign-in, create-account, forgot, the reset save and the name save all
 // refuse a blank field in the same words, so the copy can only ever be changed for all of them at once.
 const AUTH_FILL_ALL = 'Fill in every field.';
@@ -6316,6 +6320,7 @@ function authFieldHTML(id, attrs, withMeter) {
 // round adds no fifth !important counter. The divider's text is lowercase in the markup and uppercased by
 // .au-or, exactly the way .auth-label already uppercases "Email" and "Password".
 function authGoogleButtonHTML() {
+  if (!AUTH_GOOGLE_ENABLED) return '';
   return `<div class="au-or">or</div>
         <button type="button" class="au-google" id="auth-google">${AUTH_GOOGLE_SVG}<span>${AUTH_GOOGLE_LABEL}</span></button>`;
 }
@@ -6795,7 +6800,7 @@ async function onGoogleSignIn() {
   // first act is to remove the local session, and that removal notifies nobody, so a signed-in person who
   // taps and then backs out at Google looks signed in until their next reload. The guard is here rather
   // than only at the paint so every future caller inherits it.
-  if (state.authSession) return;
+  if (!AUTH_GOOGLE_ENABLED || state.authSession) return;
   const btn = document.getElementById('auth-google');
   // Belt and suspenders: a disabled <button> emits no click in a real browser, but the test fires the
   // bound closure directly, and a double tap must never send two authorize requests.

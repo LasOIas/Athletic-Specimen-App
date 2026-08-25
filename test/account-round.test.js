@@ -20,7 +20,7 @@
 // grows exactly three things: created nodes capture innerHTML, an id registry answers getElementById and
 // querySelector('#id'), and a small hooks map answers the attribute selectors a delegate uses. Listeners
 // are recorded so a test can fire one with a synthetic event. Later tasks in this round reuse it.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
@@ -287,6 +287,9 @@ function loadApp() {
         authMode = 'signin'; authSentEmail = ''; authResendUntil = 0;
         acctPendingEmail = ''; acctView = 'name';
       },
+      // Mike 2026-08-25: Google ships OFF; the Task 8 cases flip it on to prove the built path.
+      setGoogle: (v) => { AUTH_GOOGLE_ENABLED = !!v; },
+      googleSignIn: () => onGoogleSignIn(),
       // Task 3: the account card reads the cached name for its initial, its title and its Name row.
       openMenu: () => openAccountMenu(),
       // Final review: reset() has to be able to drop the claim page's own module vars (claimCandidates
@@ -2047,7 +2050,25 @@ describe('Account round Task 6 - Change password', () => {
 });
 
 describe('Account round Task 8 - Continue with Google', () => {
-  beforeEach(() => bridge.reset());
+  // The flag is describe-scoped, not reset-scoped: cases call bridge.reset() mid-flow and must keep it.
+  beforeEach(() => { bridge.reset(); bridge.setGoogle(true); });
+  afterAll(() => bridge.setGoogle(false));
+
+  it('ships OFF: with the flag down neither form carries the button or the OR row, and the handler is inert', async () => {
+    bridge.setGoogle(false);
+    expect(appSrc).toContain('let AUTH_GOOGLE_ENABLED = false;');
+    for (const mode of ['signin', 'signup']) {
+      bridge.openAuth(mode);
+      const html = bridge.registry['auth-page'].innerHTML;
+      expect(html).not.toContain('id="auth-google"');
+      expect(html).not.toContain('class="au-or"');
+      expect(html).toContain('id="auth-submit"');
+    }
+    bridge.setSignedOut();
+    await bridge.googleSignIn();
+    expect(bridge.supaCalls().filter((c) => c[0] === 'signInWithOAuth')).toEqual([]);
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+  });
 
   it('splitFullName splits on the LAST space and refuses a single word', () => {
     const s = bridge.splitName;
@@ -2434,7 +2455,7 @@ describe('Account round Task 8 - Continue with Google', () => {
     expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
     expect(bridge.assigns()).toEqual([]);
     // In the FUNCTION, not only in the markup, so every future caller inherits it.
-    expect(appSrc).toContain('if (state.authSession) return;');
+    expect(appSrc).toContain('if (!AUTH_GOOGLE_ENABLED || state.authSession) return;');
   });
 
   it('signed out, both forgot exits still walk back to sign in and the button is where it belongs', async () => {
