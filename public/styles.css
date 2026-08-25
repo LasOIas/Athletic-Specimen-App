@@ -5522,6 +5522,11 @@ input.set-money {
 }
 .set-foot { display: grid; gap: 8px; margin-top: 22px; }
 .set-foot .mgr-status { margin: 0; text-align: center; }
+/* PORT NOTE (final-review wave, v2026.08.25.15): #mgh-status is rendered on both Manage pages so a refused write is
+   never silent; while it holds no text the base .mgr-status reserves 1em + 6px, which drew a blank band between the
+   tournament page's Needs-you block and its first section head. Zero the box while empty; the live region stays in the
+   tree so a later message is still announced. */
+#mgh-status:empty { min-height: 0; margin: 0; }
 
 /* PORT NOTE: _shared.css:300-384 (the round's own banner comment kept) — Manage › Tournament › Rules
    sheet. Placed HERE, inside the 2026-08-25 Manage block and ABOVE the 2026-08-23 button restyle below,

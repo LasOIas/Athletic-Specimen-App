@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.14'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.15'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -8742,7 +8742,9 @@ function buildManageTournamentHTML() {
   const paid = nTeams - unpaid;
   const cap = (tournamentHasTeamCap() && Number(t.team_cap) > 0) ? Number(t.team_cap) : 0;
   const gamesDone = finalCt(matches);
-  const gamesTotal = matches.length;
+  // Final-review wave v.15: the denominator uses the strip's rule (mgBracketCountable) so an unplayed reset game is
+  // not promised on the tile either. gamesDone is unchanged: the excluded row is never final.
+  const gamesTotal = poolMatches.length + mgBracketCountable(mainMatches).length;
   const tile = (n, label, cls) => `<div class="tv-stat${cls || ''}"><span class="tv-sn">${n}</span><span class="tv-sl">${label}</span></div>`;
   const stats = `<div class="tv-stats">`
     + tile(`${nTeams}${cap ? `<small>/${cap}</small>` : ''}`, 'Teams in')

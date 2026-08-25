@@ -948,12 +948,16 @@ describe('Task 4 the tournament page', () => {
     });
     expect(bridge.buildTournament()).toContain('3 of 3 games done');
     expect(bridge.buildBracket()).toContain('3 of 3 games in');
+    // v2026.08.25.15: the Games tile uses the same rule (it read 3/4 with the phantom reset counted).
+    expect(bridge.buildTournament()).toContain('<span class="tv-sn">3<small>/3</small></span><span class="tv-sl">Games</span>');
   });
 
   it('the page CSS ships', () => {
     ['.tv-when {', '.tv-stats {', '.tv-stat {', '.tv-sn {', '.tv-sl {', '.tv-note {',
       '.tv-stat.is-attn .tv-sn', '.tv-stat.is-live .tv-sn'].forEach((sel) => expect(css).toContain(sel));
     expect(css.replace(/\/\*[\s\S]*?\*\//g, '')).not.toContain('.mgt-stage');
+    // v2026.08.25.15: the shared status target takes no room while it is empty (the blank band on the tournament page).
+    expect(css).toContain('#mgh-status:empty { min-height: 0; margin: 0; }');
   });
 });
 
@@ -2078,7 +2082,10 @@ describe('Task 8 pool controls', () => {
   });
 
   it('the version bumped with the change', () => {
-    expect(appSrc).toContain("const APP_VERSION = '2026.08.25.14'");
+    // A literal would break on every later same-day bump (it did at v.15); the contract is the format and a floor.
+    const m = /const APP_VERSION = '(\d{4})\.(\d{2})\.(\d{2})\.(\d+)'/.exec(appSrc);
+    expect(m).not.toBeNull();
+    expect(Number(m[1] + m[2] + m[3]) * 1000 + Number(m[4])).toBeGreaterThanOrEqual(20260825 * 1000 + 14);
   });
 });
 
