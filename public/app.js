@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.16'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.17'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6245,7 +6245,11 @@ function authFieldHTML(id, attrs, withMeter) {
 }
 
 function authMeterUpdate(input) {
-  const box = input && input.form ? input.form.querySelector('[data-sbox]') : null;
+  if (!input) return;
+  // The reset and change-password screens put the field OUTSIDE a <form>, so input.form is null there.
+  // Fall back to the overlay wrapper, then the document (review, fix round 1).
+  const scope = input.form || (input.closest && input.closest('.auth-inner')) || document;
+  const box = scope && scope.querySelector('[data-sbox]');
   if (!box) return;
   const m = passwordMeterScore(input.value);   // pure.js: the value is read, never stored or logged
   box.classList.remove('is-1', 'is-2', 'is-3');
@@ -6577,9 +6581,10 @@ function friendlyAuthError(error, signup) {
   const m = (error && error.message) || '';
   if (/invalid login credentials/i.test(m)) return "That email or password isn't right.";
   if (/already registered|user already/i.test(m)) return 'That email already has an account. Sign in instead.';
-  // The server's own minimum is 6 and it says so; the client's gate is stricter, so the message people
-  // read is always AUTH_PASSWORD_MIN (Account round 2026-08-25).
-  if (/password/i.test(m) && /(characters|short|\d)/i.test(m)) return 'Your password needs at least ' + AUTH_PASSWORD_MIN + ' characters.';
+  // The server names its own minimum (6) and always says "characters"; the client gate is stricter, so
+  // the message people read is always AUTH_PASSWORD_MIN. Deliberately NOT matching a bare digit: the
+  // character-class complaint lists "0123456789" and is not about length at all (review, fix round 1).
+  if (/password/i.test(m) && /(characters|short)/i.test(m)) return 'Your password needs at least ' + AUTH_PASSWORD_MIN + ' characters.';
   if (/email/i.test(m) && /valid/i.test(m)) return 'Enter a valid email address.';
   return m || (signup ? 'Could not create your account.' : 'Could not sign you in.');
 }
@@ -6644,7 +6649,8 @@ async function authResend(kind, emailOverride) {
   const note = (m) => { if (err) { err.textContent = m; err.hidden = !m; } };
   if (Date.now() < authResendUntil) { note('Give it a minute, then try again.'); return; }
   const email = emailOverride || authSentEmail;
-  if (!email || !supabaseClient) return;
+  // A lost address (a reload dropped it) or a dead client must not read as a tap that did nothing.
+  if (!email || !supabaseClient) { note('Something went wrong. Try again.'); return; }
   if (btn) btn.disabled = true;
   try {
     const res = kind === 'reset'
@@ -6666,7 +6672,8 @@ async function authResend(kind, emailOverride) {
     note('');
     authResendUntil = Date.now() + AUTH_RESEND_MS;
     if (btn) btn.textContent = 'Sent again';
-    setTimeout(() => { if (btn) btn.disabled = false; }, AUTH_RESEND_MS);
+    // The cooldown hands back BOTH the button and its own label, else it reads "Sent again" forever.
+    setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = "Didn't get it? Resend"; } }, AUTH_RESEND_MS);
   } catch (_) {
     note('That did not send. Check the connection and try again.');
     if (btn) btn.disabled = false;

@@ -8,7 +8,10 @@
 //   5. the sent screen a no-session signUp renders, and a Resend that AWAITS the API and shows its failure,
 //   6. every link back to the site root (emailRedirectTo = location.origin),
 //   7. the wall as a body-appended overlay with an exit, opened at navigation time,
-//   8. the ported CSS block: one copy of each selector, the documented iOS counters, no banner family.
+//   8. the ported CSS block: one copy of each selector, the documented iOS counters, no banner family,
+//   9. (fix round 1) the auth error map's narrow length rule, the meter's fallback scope, a Resend that
+//      never fails silently, the cooldown handing back its own label, and the one-delegate-per-overlay
+//      binding that a per-render bind would have cancelled out.
 //
 // Harness copied from manage-round.test.js (app.js is a browser classic script, so it runs in a Node vm
 // with browser stubs; pure.js loads first into the same context). THE DIFFERENCE: manage-round drives
@@ -43,28 +46,54 @@ function resolve(sel) {
 
 function mkNode(tag) {
   const listeners = {};
+  const classes = new Set();
   const node = {
     tagName: String(tag || 'div').toUpperCase(), id: '', className: '', hidden: false, disabled: false,
     value: '', type: '', textContent: '', dataset: {}, style: {}, attrs: {}, children: [], parent: null,
-    _html: '', listeners,
-    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    _html: '', listeners, classes,
+    // Set-backed, so a class the app adds is actually OBSERVABLE - authMeterUpdate's is-N step is the
+    // whole behaviour of the meter and a noop classList would have made it untestable.
+    classList: {
+      add(...c) { c.forEach((x) => classes.add(x)); },
+      remove(...c) { c.forEach((x) => classes.delete(x)); },
+      toggle(c, force) { const on = force === undefined ? !classes.has(c) : !!force; if (on) classes.add(c); else classes.delete(c); return on; },
+      contains: (c) => classes.has(c),
+    },
     setAttribute(k, v) { this.attrs[k] = String(v); if (k === 'id') this.id = String(v); },
     getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
     hasAttribute(k) { return k in this.attrs; },
     removeAttribute(k) { delete this.attrs[k]; },
     addEventListener(t, fn) { (listeners[t] = listeners[t] || []).push(fn); },
     removeEventListener() {}, focus() { this.focused = true; }, blur() {},
+    _clearListeners() { for (const k of Object.keys(listeners)) delete listeners[k]; },
     appendChild(c) { this.children.push(c); c.parent = this; if (c.id) registry[c.id] = c; return c; },
     remove() {
       if (this.parent) this.parent.children = this.parent.children.filter((x) => x !== this);
       if (this.id) delete registry[this.id];
     },
-    querySelector(sel) { return resolve(sel); },
-    querySelectorAll(sel) { const r = resolve(sel); return r ? [r] : []; },
+    // The real DOM finds an id only INSIDE the element being queried. Modelling that is what stops a
+    // render that did NOT declare a control from binding a handler to it anyway (the form state was
+    // silently binding #auth-resend, so the sent screen's test fired the form state's stale closure).
+    _owns(sel) {
+      if (!sel.startsWith('#')) return true;
+      if (!this._html) return true;   // a bare fixture node that never had markup set
+      return this._html.includes('id="' + sel.slice(1) + '"');
+    },
+    querySelector(sel) { return this._owns(sel) ? resolve(sel) : null; },
+    querySelectorAll(sel) { const r = this.querySelector(sel); return r ? [r] : []; },
     closest(sel) { return matches(this, sel) ? this : (this.parent ? this.parent.closest(sel) : null); },
     contains() { return false; },
     get innerHTML() { return this._html; },
-    set innerHTML(v) { this._html = String(v); this.children = []; },
+    set innerHTML(v) {
+      this._html = String(v);
+      this.children = [];
+      // An innerHTML swap REPLACES the subtree: every control the new markup declares is a brand new
+      // element, so whatever a previous render bound to it is gone. Without this the same registry node
+      // collects one handler per render and a test ends up firing a stale binding.
+      for (const id of Object.keys(registry)) {
+        if (id !== this.id && this._html.includes('id="' + id + '"')) registry[id]._clearListeners();
+      }
+    },
   };
   return node;
 }
@@ -139,6 +168,8 @@ function loadApp() {
       openAuthPage: (mode) => openAuthPage(mode),
       openGate: () => openGatePage(),
       authSubmit: () => onAuthSubmit({ preventDefault() {} }),
+      resend: (kind, email) => authResend(kind, email),
+      friendlyError: (err, signup) => friendlyAuthError(err, signup),
       tab: (t) => activateMainTab(t),
       setView: (v) => { pdTournamentView = v; },
       // The module vars the overlays keep between renders. reset() clears them so a cooldown or a typed
@@ -155,6 +186,9 @@ function loadApp() {
   bridge.hook = (sel, node) => { hooks[sel] = node; };
   bridge.supaCalls = () => supaCalls;
   bridge.supaNext = (name, value) => { supaScript[name] = value; };
+  // The sandbox stubs setTimeout to a noop, so a cooldown callback never runs. A case that wants to see
+  // the far side of the cooldown swaps in an immediate one and restores it with the returned undo.
+  bridge.swapTimeout = (fn) => { const prev = sandbox.setTimeout; sandbox.setTimeout = fn; return () => { sandbox.setTimeout = prev; }; };
   bridge.reset = () => {
     for (const k of Object.keys(registry)) delete registry[k];
     for (const k of Object.keys(hooks)) delete hooks[k];
@@ -164,6 +198,8 @@ function loadApp() {
     bridge.resetAuthVars();
     bridge.getState().authSession = null;
     bridge.getState().account = null;
+    // FRESH nodes, not cleared ones: a control carries listeners, classes and a value, and every one of
+    // those has to start empty or a case inherits the previous case's bindings.
     for (const id of AUTH_CONTROL_IDS) { const n = mkNode('div'); n.id = id; registry[id] = n; }
   };
   bridge.setSignedOut = () => { bridge.getState().authSession = null; bridge.getState().account = null; };
@@ -240,6 +276,67 @@ describe('Account round Task 1 - the auth page and the wall', () => {
     expect(rev.getAttribute('aria-pressed')).toBe('false');
   });
 
+  it('the overlay delegate is bound once per overlay, not once per render', () => {
+    // The regression guard for the fix that moved authBindOverlay out of renderAuthPageInner: a mode
+    // toggle re-renders the SAME element, and a second identical reveal handler would cancel the first
+    // out (Show -> Hide -> Show in one tap).
+    bridge.openAuth('signin');
+    const page = bridge.registry['auth-page'];
+    expect(page.listeners.click.length).toBe(1);
+    expect(page.listeners.input.length).toBe(1);
+    bridge.registry['auth-alt'].listeners.click[0]();   // "New here? Create an account"
+    expect(page.innerHTML).toContain('One account for every tournament you play.');
+    expect(page.listeners.click.length).toBe(1);
+    expect(page.listeners.input.length).toBe(1);
+  });
+
+  it('the meter delegate scores the typed value and paints its step, with no form in scope', () => {
+    // The reset and change-password screens put the password OUTSIDE a <form>, so input.form is null and
+    // the meter has to fall back to the overlay wrapper.
+    bridge.openAuth('signup');
+    const page = bridge.registry['auth-page'];
+    const inner = bridge.node('div');
+    const box = bridge.node('div');
+    const lab = bridge.node('span');
+    bridge.hook('.auth-inner', inner);
+    bridge.hook('[data-sbox]', box);
+    bridge.hook('.au-slab', lab);
+    const inp = bridge.node('input');
+    inp.setAttribute('data-strength', '');
+    inp.form = null;
+    inp.parent = inner;
+    const type = (v) => { inp.value = v; page.listeners.input[0]({ target: inp }); };
+
+    type('abc');
+    expect(lab.textContent).toBe('Too short');
+    expect(box.classList.contains('is-1')).toBe(true);
+
+    type('password');
+    expect(lab.textContent).toBe('OK');
+    expect(box.classList.contains('is-1')).toBe(false);
+    expect(box.classList.contains('is-2')).toBe(true);
+
+    type('Passw0rd!');
+    expect(lab.textContent).toBe('Good');
+    expect(box.classList.contains('is-2')).toBe(false);
+    expect(box.classList.contains('is-3')).toBe(true);
+
+    type('');
+    expect(lab.textContent).toBe('');
+    for (const c of ['is-1', 'is-2', 'is-3']) expect(box.classList.contains(c)).toBe(false);
+  });
+
+  it('the auth error map catches a length complaint and leaves the character-class one alone', () => {
+    const f = bridge.friendlyError;
+    expect(f({ message: 'Password should be at least 6 characters.' }))
+      .toBe('Your password needs at least 8 characters.');
+    // Supabase's character-class refusal LISTS the digits. Matching a bare digit mapped it to the length
+    // copy and told people the wrong thing to fix (review, fix round 1).
+    const charClass = { message: 'Password should contain at least one character of each: abcdefghijklmnopqrstuvwxyz, 0123456789.' };
+    expect(f(charClass)).toBe(charClass.message);
+    expect(appSrc).not.toContain('/(characters|short|\d)/i');
+  });
+
   it('AUTH_PASSWORD_MIN is the only place 8 lives', () => {
     expect(appSrc).toContain('const AUTH_PASSWORD_MIN = 8');
     expect(appSrc).not.toContain('password.length < 6');
@@ -289,11 +386,37 @@ describe('Account round Task 1 - the auth page and the wall', () => {
     expect(html).toContain('Back to sign in');
     expect(html).not.toMatch(/—|&mdash;|night/i);
 
+    // The sent render is the ONLY thing that declares #auth-resend, so it owns the one handler on it.
+    const btn = bridge.registry['auth-resend'];
+    expect(btn.listeners.click.length).toBe(1);
+
     bridge.supaNext('resend', { data: null, error: { message: 'email rate limit exceeded' } });
-    await bridge.registry['auth-resend'].listeners.click[0]();
+    await btn.listeners.click[0]();
     expect(bridge.registry['auth-err'].textContent).toContain('try again');
     expect(bridge.registry['auth-err'].hidden).toBe(false);
-    expect(bridge.registry['auth-resend'].disabled).toBe(true);
+    expect(btn.disabled).toBe(true);
+  });
+
+  it('a Resend with no address in memory says so instead of doing nothing', async () => {
+    // The shape a reload leaves behind: the sent screen is gone and authSentEmail is empty.
+    bridge.openAuth('signup');
+    await bridge.resend('signup');
+    expect(bridge.registry['auth-err'].textContent).toBe('Something went wrong. Try again.');
+    expect(bridge.registry['auth-err'].hidden).toBe(false);
+    expect(bridge.supaCalls().length).toBe(0);
+  });
+
+  it('the cooldown hands back both the button and its own label', async () => {
+    bridge.openAuth('signup');
+    fillSignup();
+    bridge.supaNext('signUp', { data: { user: {}, session: null }, error: null });
+    await bridge.authSubmit();
+    const btn = bridge.registry['auth-resend'];
+    bridge.supaNext('resend', { data: {}, error: null });
+    const undo = bridge.swapTimeout((fn) => fn());   // run the cooldown callback the moment it is set
+    try { await btn.listeners.click[0](); } finally { undo(); }
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toBe("Didn't get it? Resend");
   });
 
   it('signUp and resend carry emailRedirectTo = the origin', async () => {
