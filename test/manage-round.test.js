@@ -115,6 +115,10 @@ function loadApp() {
       rulesSections: (t) => rulesToSections(t),
       openEditor: (kind, opts) => openManageEditor(kind, opts),
       rulesDirty: () => manageRulesDirty(),
+      attachHandlers: () => attachHandlers(),
+      // openManageEditor puts the caret in a 60ms timeout; the sandbox stubs setTimeout to a noop, so a
+      // test that wants the caret swaps in an immediate one for the length of the call.
+      swapTimeout: (fn) => { const prev = globalThis.setTimeout; globalThis.setTimeout = fn; return prev; },
       buildCloseout: (opts) => {
         opts = opts || {};
         manageView = 'tournament'; mgtView = 'closeout';
@@ -1267,8 +1271,12 @@ describe('Task 7 rules cards', () => {
   it('the rules-card CSS ships, with the iOS font-size guard countered on every pill', () => {
     ['.rlv-intro {\n', '.rlv-card {\n', '.rlv-hd {\n', '\n.rlv-lines {', '.rlv-add {\n', '.rlv-plus {', '.rlv-foot {']
       .forEach((sel) => expect(count(css, sel)).toBe(1));
-    expect(css).toContain('.rlv-card.is-note .rlv-lines');
-    expect(css).toContain('.rlv-hd .rl-h::after { content: none;');   // the card divider replaces the rule
+    // fix round 1 — the two rules that looked right in the mockup and did nothing against production:
+    // prod's .rl-h keeps a padding-bottom the round never reset, and prod's .rl-p/.rl-li set their own
+    // colour, so a container-level colour can never reach them
+    expect(count(css, '.rlv-hd .rl-h { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; }')).toBe(1);
+    expect(count(css, '.rlv-card.is-note .rlv-lines .rl-p,\n.rlv-card.is-note .rlv-lines .rl-li { color: var(--muted); }')).toBe(1);
+    expect(css).not.toContain('.rl-h::after');   // production has no ::after to cancel
     expect(css).toContain('.rlv-card.is-note .rlv-hd { justify-content: flex-end; }'); // a headless card
     // prod ships button { font-size: 16px !important } as an iOS zoom guard, so each pill says its size back
     expect(css).toContain('.rlv-add { min-height: 46px; height: 46px; font-size: 13.5px !important; }');
@@ -1291,8 +1299,13 @@ function withEditorDOM(fn) {
   const doc = bridge.doc;
   const realCreate = doc.createElement;
   const noop = () => {};
-  const ta = { value: '', scrollTop: 0, clientHeight: 0, focus: noop, blur: noop, setSelectionRange: noop };
-  const unesc = (s) => String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  // `carets` records every setSelectionRange the editor performs, so a test can prove WHERE it opened.
+  const ta = {
+    value: '', scrollTop: 0, clientHeight: 0, carets: [],
+    focus: noop, blur: noop,
+    setSelectionRange: (a) => { ta.carets.push(a); },
+  };
+  const unesc = (v) => String(v).replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
   const el = {
     id: '', className: '', style: {}, dataset: {},
@@ -1306,7 +1319,46 @@ function withEditorDOM(fn) {
     querySelector: (sel) => (sel === '#mged-ta' ? ta : { addEventListener: noop }),
   };
   doc.createElement = () => el;
-  try { return fn(ta); } finally { doc.createElement = realCreate; }
+  // run the 60ms focus timeout inline, so the caret path is DRIVEN rather than skipped
+  const realTimeout = bridge.swapTimeout((cb) => { cb(); return 0; });
+  try { return fn(ta); } finally { doc.createElement = realCreate; bridge.swapTimeout(realTimeout); }
+}
+
+// The REAL click delegate, captured off the #app-content element attachHandlers binds it to. Driving it
+// with a synthetic event is what proves a tap reaches the editor with the right caret and that the hooks
+// are checked in the right order — a grep of app.js proves neither.
+function withRulesDelegate(fn) {
+  const doc = bridge.doc;
+  const realGet = doc.getElementById;
+  const noop = () => {};
+  let handler = null;
+  const appContent = {
+    dataset: {}, style: {},
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+    addEventListener: (type, cb) => { if (type === 'click') handler = cb; },
+    removeEventListener: noop,
+    querySelector: () => null, querySelectorAll: () => ({ forEach: noop, length: 0 }),
+  };
+  doc.getElementById = (id) => (id === 'app-content' ? appContent : null);
+  // the later bindings in attachHandlers want DOM this harness does not have; the click delegate is bound
+  // first, so it is already captured by the time any of them complain
+  try { bridge.attachHandlers(); } catch (_) { /* nothing after the delegate matters here */ }
+  finally { doc.getElementById = realGet; }
+  if (!handler) throw new Error('the #app-content click delegate was never bound');
+  // One synthetic tap. `attrs` is every hook the tapped node sits under, so a control nested inside
+  // another hook's block (the empty state's Write pill) can be reproduced exactly.
+  const tap = (attrs, value) => {
+    const list = Array.isArray(attrs) ? attrs : [attrs];
+    const target = {
+      tagName: 'BUTTON', dataset: {},
+      classList: { contains: () => false },
+      closest: (sel) => (list.some((a) => sel === '[' + a + ']')
+        ? { getAttribute: (name) => (list.includes(name) ? (value == null ? '' : value) : null), dataset: {} }
+        : null),
+    };
+    return handler({ target, preventDefault: noop, stopPropagation: noop });
+  };
+  return fn(tap);
 }
 
 describe('Task 7 the one editor, opened at a section', () => {
@@ -1348,12 +1400,62 @@ describe('Task 7 the one editor, opened at a section', () => {
     });
   });
 
-  it('the delegates route the pills to the one editor: caret from the offset, scaffold from Add', () => {
-    // the wiring itself lives in the click delegate, which needs a real event target; assert the shape the
-    // delegate hands over so a rename of either hook cannot pass silently
-    expect(appSrc).toContain("openManageEditor('rules', { caret:");
-    expect(appSrc).toContain("openManageEditor('rules', { append: '\\n\\n## New section\\n- ' })");
-    expect(appSrc).toContain("e.target.closest('[data-rlv-edit]')");
-    expect(appSrc).toContain("e.target.closest('[data-rlv-add]')");
+  // fix round 1: this used to grep app.js for the delegate's source. A substring proves nothing about what
+  // a tap DOES, so every case below drives the captured delegate instead.
+  it('a section Edit pill opens the editor at ITS offset', () => {
+    const rules = '## Format\n- 4s\n\n## Between games\n1. Winners stay';
+    seedHub(bridge, { status: 'setup', name: 'A', rules });
+    bridge.setMgtView('rules');
+    const off = rules.indexOf('## Between games');
+    const seen = withRulesDelegate((tap) => withEditorDOM((ta) => {
+      tap('data-rlv-edit', String(off));
+      return { value: ta.value, carets: ta.carets.slice() };
+    }));
+    expect(seen.value).toBe(rules);       // a caret is not an edit
+    expect(seen.carets).toEqual([off]);
+  });
+
+  it('a non-numeric offset falls back to the top of the document rather than NaN', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', rules: '## Format\n- 4s' });
+    bridge.setMgtView('rules');
+    const carets = withRulesDelegate((tap) => withEditorDOM((ta) => {
+      tap('data-rlv-edit', 'nonsense');
+      return ta.carets.slice();
+    }));
+    expect(carets).toEqual([0]);
+  });
+
+  it('an Add-a-section tap appends the scaffold through the delegate', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', rules: '## Format\n- 4s\n' });
+    bridge.setMgtView('rules');
+    const seen = withRulesDelegate((tap) => withEditorDOM((ta) => {
+      tap('data-rlv-add');
+      return { value: ta.value, carets: ta.carets.slice() };
+    }));
+    expect(seen.value).toBe('## Format\n- 4s\n\n## New section\n- ');
+    expect(seen.carets).toEqual([seen.value.length]);   // caret waiting after the new bullet
+  });
+
+  it('the check order holds: the empty state Write pill seeds a section, it does not open blank', () => {
+    // the Write pill sits INSIDE the .mgru-empty block, so a real tap matches both hooks at once. If
+    // [data-mgru-edit] were checked first, the pill would silently become a second plain Edit.
+    seedHub(bridge, { status: 'setup', name: 'A', rules: '' });
+    bridge.setMgtView('rules');
+    const value = withRulesDelegate((tap) => withEditorDOM((ta) => {
+      tap(['data-rlv-add', 'data-mgru-edit']);
+      return ta.value;
+    }));
+    expect(value).toBe('## New section\n- ');
+  });
+
+  it('the header Edit all still opens the whole document with the caret at the end', () => {
+    seedHub(bridge, { status: 'setup', name: 'A', rules: '## Format\n- 4s' });
+    bridge.setMgtView('rules');
+    const seen = withRulesDelegate((tap) => withEditorDOM((ta) => {
+      tap('data-mgru-edit');
+      return { value: ta.value, carets: ta.carets.slice() };
+    }));
+    expect(seen.value).toBe('## Format\n- 4s');
+    expect(seen.carets).toEqual([seen.value.length]);   // no options at all: the 2026-07-12 behaviour
   });
 });

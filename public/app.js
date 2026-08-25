@@ -9459,10 +9459,11 @@ const MG_PENCIL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor
 //
 // The pill does NOT open an inline field. Spec decision 2: the card LOOK, the SAME one editor. Tapping a
 // section's Edit opens the existing full-screen editor with the caret already on that section (the offset
-// comes from rulesToSections, counted in the stored text). "Edit all" opens it at the top; "+ Add a section"
-// opens it with a "## New section" scaffold appended. The design's inline editing is deliberately NOT
-// ported: it never saved anything, and its own serializer rewrote numbered lists as bullets — one editor
-// and one serializer is the whole point.
+// comes from rulesToSections, counted in the stored text). "Edit all" passes no options, so it opens the
+// whole document with the caret at the END, exactly as the header Edit has since 2026-07-12;
+// "+ Add a section" opens it with a "## New section" scaffold appended. The design's inline editing is
+// deliberately NOT ported: it never saved anything, and its own serializer rewrote numbered lists as
+// bullets — one editor and one serializer is the whole point.
 //
 // Empty rules → the honest admin prompt (never the public "coming soon" stub), now inside a single card so
 // the page still reads as the same object it will become.
@@ -12691,8 +12692,9 @@ function attachHandlers() {
         // Rules sheet (§38 pick C, 2026-07-12; cards 2026-08-25 Task 7): every control here opens the SAME
         // full-screen editor, only at a different place in the one document — a section's Edit pill at that
         // section's offset, "+ Add a section" (and the empty state's Write pill) with a "## " scaffold on the
-        // end, the header's "Edit all" at the top. The two rlv-* hooks are checked FIRST because the empty
-        // state's Write pill sits inside a block that also carries data-mgru-edit. Before the generic hub
+        // end, the header's "Edit all" with no options at all — the whole document, caret at the end, the
+        // behaviour it has always had. The two rlv-* hooks are checked FIRST because the empty state's
+        // Write pill sits inside a block that also carries data-mgru-edit. Before the generic hub
         // rows, so no tap falls through to a sub-view.
         if (mgtView === 'rules') {
           const rlvEdit = e.target.closest('[data-rlv-edit]');

@@ -5595,10 +5595,12 @@ input.set-money {
   border-bottom: 1px solid var(--border);
   background: oklch(0.985 0.003 75);
 }
-.rlv-hd .rl-h { flex: 1; min-width: 0; margin: 0; border: 0; }
-/* production draws a rule after the section head; the card's own divider does
-   that job here */
-.rlv-hd .rl-h::after { content: none; display: none; }
+/* PORT NOTE: production's .rl-h carries padding-bottom: 7px AND draws the head's rule with its own
+   border-bottom (styles.css ~2850). Both are reset here: the card's .rlv-hd divider draws that line
+   now, and the leftover padding would sit the head ~3.5px above the pill's centre in this flex row.
+   (The round reset the border and an ::after that production does not have; the padding is the one
+   that actually bites.) */
+.rlv-hd .rl-h { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; }
 /* PORT NOTE: not in the round — its "note" card still carried a head ("The details" is fixture text, and
    spec 2026-08-25 forbids inventing one). A section the organizer wrote with no "## " line has nothing to
    fill the header row, so the pill keeps its own edge instead of drifting left. */
@@ -5606,7 +5608,11 @@ input.set-money {
 .rlv-lines { display: grid; gap: 9px; padding: 13px 14px 14px; }
 .rlv-lines .rl-li { margin: 0; }
 .rlv-lines .rl-p { margin: 0; }
-.rlv-card.is-note .rlv-lines { color: var(--muted); }
+/* PORT NOTE: the round set the note's quiet grey on the CONTAINER, which does nothing against
+   production — its .rl-p and .rl-li declare color: var(--ink) on themselves, and a direct
+   declaration beats an inherited one. The elements have to be named. */
+.rlv-card.is-note .rlv-lines .rl-p,
+.rlv-card.is-note .rlv-lines .rl-li { color: var(--muted); }
 
 .rlv-add {
   display: flex;
