@@ -372,7 +372,7 @@ function loadApp() {
     documentStub.body.children = [];
     bridge.resetAuthVars();
     // Final review: three more module vars that outlived a case. closeClaimPage nulls claimCandidates
-    // and claimFetchFailed (a loaded roster leaking into the next case reads as "already loaded"), the
+    // (claimFetchFailed is reset by fetchClaimCandidates on every open, so it cannot leak), the
     // tournament sub-view is put back on the hub through the app's own setter, and the derived role is
     // dropped so a case that never signs in cannot inherit an admin from the one before it.
     bridge.closeClaim();
@@ -2384,7 +2384,8 @@ describe('Account round Task 8 - Continue with Google', () => {
     // the WHOLE account block may reach for a colour of our own beyond the app's tokens.
     // Final review: the sweep used to stop at the Google button and to look for hex only, so the two raw
     // oklch() values further up (the meter track and the done mark's ring) were invisible to it. Google's
-    // four Light-theme values are the only exemption, and #fff normalises into their #FFFFFF: plain white
+    // four Light-theme values are the only exemption; the block's own #fff (.acc-close, white on a coloured
+    // field, the stylesheet's convention) normalises into the same #FFFFFF and rides that entry: plain white
     // on a coloured field is how this stylesheet has always written it, in ninety-odd other places.
     const GOOGLE = ['#FFFFFF', '#747775', '#1F1F1F', '#F2F2F2'];
     const norm = (h) => {
