@@ -1796,9 +1796,11 @@ body.copilot-open #cop-chat {
 .bt-link { fill: none; stroke: var(--faint); stroke-width: 1.5; opacity: .5; }
 .bt-link.on { stroke: var(--accent); stroke-width: 2.5; opacity: 1; }
 .bt-cols { position: relative; display: flex; gap: 46px; align-items: stretch; padding: 16px; }
-.bt-col { display: flex; flex-direction: column; justify-content: space-around; gap: 14px; }
-.bt-rlabel { font-family: 'Sora','Inter',sans-serif; font-size: 12px; color: var(--muted);
-  text-align: center; margin-bottom: 2px; white-space: nowrap; }
+/* 2026-08-25 (design round 2026-08-24): the round label lifts OUT of the column flow (absolute over a
+   34px top pad) so it cannot skew the node spacing layoutBracketTree centres against. */
+.bt-col { position: relative; display: flex; flex-direction: column; justify-content: space-around; gap: 14px; padding-top: 34px; }
+.bt-rlabel { position: absolute; top: 0; left: 0; right: 0; font-family: 'Sora','Inter',sans-serif; font-size: 12px; color: var(--muted);
+  text-align: center; line-height: 1.25; white-space: nowrap; }
 
 .bt-node { position: relative; width: 176px; background: var(--card); border: 1px solid var(--border);
   border-radius: 10px; box-shadow: var(--shadow-sm); overflow: hidden; }
@@ -1813,10 +1815,12 @@ body.copilot-open #cop-chat {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bt-row.win .bt-name { font-weight: 700; color: var(--ink); }
 .bt-name.bt-tbd { color: var(--faint); font-style: italic; }
-.bt-sc { flex: 0 0 auto; font-family: 'Sora','Inter',sans-serif; font-size: 15px; color: var(--faint); }
-.bt-row.win .bt-sc { color: var(--live); font-weight: 700; }
+/* 2026-08-25 (design round 2026-08-24): scores are 12.5px tabular Inter, right-aligned off the name; the
+   winner's score in ink, a running score in live-ink (the gold override for the champ game still wins). */
+.bt-sc { flex: 0 0 auto; margin-left: auto; padding-left: 8px; font: 700 12.5px 'Inter', sans-serif; font-variant-numeric: tabular-nums; color: var(--muted); }
+.bt-row.win .bt-sc { color: var(--ink); }
 /* C72: live-scored bracket match — running score + LIVE pill (mirrors the pool board's .ppg-live*). */
-.bt-sc.bt-livesc { color: var(--live); font-weight: 800; }
+.bt-sc.bt-livesc, .bt-node.pd-bk-live .bt-sc { color: var(--live-ink); }
 .bt-livetag { font-size: 9px; font-weight: 800; letter-spacing: .05em; color: #fff; background: var(--live); border-radius: 999px; padding: 2px 7px; }
 /* A scorable match card is a tap target that opens the result pop-up. */
 .bt-node.tappable { cursor: pointer; }
@@ -2945,7 +2949,9 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   body.pd-public-active #tab-tournament > .container:has(> .rf-page) > * { max-width: 600px; margin-left: auto; margin-right: auto; }
   /* Rules page: long-form text — same centered 600px column as the register page (line measure). */
   body.pd-public-active #tab-tournament > .container:has(> .rl-body) > * { max-width: 600px; margin-left: auto; margin-right: auto; }
-  /* (Bracket keeps its full-width tree + champions strip from the widened container; pan stays available.) */
+  /* (Bracket keeps its full-width tree + champions strip from the widened container; pan stays available.)
+     2026-08-25: only the bracket page's PROSE takes a line measure — the tree stays full width. */
+  body.pd-public-active #tab-tournament :is(.pd-bk-pres, .pd-bk-preh, .bk-pv, .bk-pv-ss) { max-width: 640px; }
 
   /* ---- atom-up Home (2026-07-10 spec §3): rail + board at >=1024, CSS-only ----
      Mobile (<1024) is byte-identical — the flatten rules live in @media (max-width:1023px)
@@ -4555,7 +4561,8 @@ body.m-enter #app-content > .tab-panel.active {
 }
 /* ---------- 2. lists and stacks land in sequence ---------- */
 body.m-enter #app-content > .tab-panel.active > .container > *,
-body.m-enter #app-content > .tab-panel.active > .container > .hm > * {
+body.m-enter #app-content > .tab-panel.active > .container > .hm > *,
+body.m-enter #app-content > .tab-panel.active > .container .bt-col > .bt-node {
   animation: m-rise calc(var(--m-elem) * var(--m-scale)) var(--e-settle) backwards;
   animation-delay: calc(var(--m-i, 0) * 42ms * var(--m-scale));
 }
@@ -4702,4 +4709,22 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
   letter-spacing: .1em;
   text-transform: uppercase;
   color: var(--brand-dark); /* AA at 10px on the accent-soft ground */
+}
+
+/* Round 2026-08-24 — "everywhere this needs to say Championship, no more final": the third side tab is a
+   12-character word in a third of a phone's width, so the tabs hold one line and step down on narrow
+   screens. PORT NOTE: prod's global button { font-size: 16px !important } (iOS zoom guard) beats the kit's
+   14px, so the size must be !important here — the tabs were already rendering at 16px. */
+.bt-sides button { font-size: 14px !important; white-space: nowrap; }
+@media (max-width: 430px) {
+  .bt-sides button { font-size: 13.5px !important; padding-left: 6px; padding-right: 6px; }
+}
+/* "the brackets games need to be labeled … semi finals is the last game before the champ" — the round name
+   over its G range on a second line. */
+.bk-gid {
+  display: block;
+  margin-top: 2px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: .06em;
 }

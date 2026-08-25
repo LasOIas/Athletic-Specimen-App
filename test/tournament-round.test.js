@@ -180,6 +180,38 @@ describe('pools rows (design round 2026-08-22)', () => {
   });
 });
 
+describe('bracket geometry + view (design round 2026-08-24, Mike 2026-08-25: 1:1 open, no re-fit on a side switch)', () => {
+  const layout = appSrcText.slice(appSrcText.indexOf('function layoutBracketTree()'), appSrcText.indexOf('let btView = null;'));
+  it('centres a fed game on its feeders from LAYOUT measurement and draws stub + shared riser + horizontal', () => {
+    expect(layout).toContain('const offsetIn = (node)');
+    expect(layout).toContain("n.style.top = dy + 'px'");
+    expect(layout).toMatch(/d="M\$\{mx\} \$\{lo\} V\$\{hi\}"/);   // the one shared riser
+    expect(layout).toMatch(/d="M\$\{f\.x \+ f\.w\} \$\{ys\[i\]\} H\$\{mx\}"/); // a stub per feeder (keeps .on per feeder)
+    expect(layout).not.toContain('offsetLeft, y: n.offsetTop'); // the raw reads are gone
+  });
+  it('opens at 1:1 anchored to the first column; the pane hugs the tree', () => {
+    expect(layout).toContain('if (btScale == null) { btScale = 1; btX = 0; btY = 0; }');
+    expect(layout).toContain('const vh = Math.min(Math.max(240, H), vhCap);');
+  });
+  it('a side-tab switch never re-fits', () => {
+    const i = appSrcText.indexOf("if (role === 'tv2-bracket-side')");
+    const h = appSrcText.slice(i, i + 500);
+    expect(h).not.toContain('btResetView()');
+    expect(h).toContain('btX = 0; btY = 0;');
+  });
+  it('Semifinals / Championship column labels over a .bk-gid game range', () => {
+    const b = appSrcText.slice(appSrcText.indexOf('function buildBracketHTML('), appSrcText.indexOf('function layoutBracketTree()'));
+    expect(b).toContain("'Semifinals'");
+    expect(b).toContain("'Championship'");
+    expect(b).toContain('<span class="bk-gid">');
+  });
+  it('the tabs hold "Championship" on one line, the label lifts out of the column flow', () => {
+    expect(cssText).toContain('.bt-sides button { font-size: 14px !important; white-space: nowrap; }');
+    expect(cssText).toMatch(/\.bt-rlabel \{ position: absolute; top: 0; left: 0; right: 0;/);
+    expect(cssText).toMatch(/\.bt-col \{ position: relative;[^}]*padding-top: 34px; \}/);
+  });
+});
+
 describe('port guards (things the recon said must NOT ship)', () => {
   it('the prototype bracket shim and the retired grammar are absent from styles.css', () => {
     expect(cssText).not.toMatch(/\.bt-pan\s*>\s*\.bt-canvas\s*\{[^}]*position:\s*relative/);

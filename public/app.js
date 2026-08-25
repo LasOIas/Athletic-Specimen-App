@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3220,10 +3220,20 @@ function buildBracketHTML(tournament, matches, teams, opts = {}) {
     if (!gs.length) return 'G?';
     return gs.length === 1 ? ('G' + gs[0]) : ('G' + gs[0] + '–G' + gs[gs.length - 1]);
   };
+  // Design round 2026-08-24 (Mike: "the brackets games need to be labeled … only semi finals … the last game
+  // before the champ"): the round that feeds the championship reads Semifinals (last winners round, last
+  // losers round) and the championship column reads Championship, each over its G range on a .bk-gid line.
+  const maxRound = sideMatches.reduce((mx, m) => Math.max(mx, Number(m.round) || 0), 0);
+  const roundLabelHTML = (r) => {
+    const range = roundLabelFor(r);
+    const name = side === 'grand_final' ? (Number(r) === 1 ? 'Championship' : '')
+      : ((Number(r) === maxRound && sideDefs.length > 1) ? 'Semifinals' : '');
+    return name ? `${name}<span class="bk-gid">${escapeHTML(range)}</span>` : escapeHTML(range);
+  };
   const cols = rounds.map((r) => {
     const rm = sideMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
     return `<div class="bt-col">
-      <div class="bt-rlabel">${escapeHTML(roundLabelFor(r))}</div>
+      <div class="bt-rlabel">${roundLabelHTML(r)}</div>
       ${rm.map((m) => buildBracketNodeHTML(m, main, teams, !ro, pathIds, seedByTeam, gn, { readOnly: ro, champMatchId: opts.champMatchId })).join('')}
     </div>`;
   }).join('');
@@ -3251,44 +3261,68 @@ function layoutBracketTree() {
   const svg = pan.querySelector('[data-role="bt-links"]');
   if (!canvas || !svg) return;
 
-  // Reset any prior fit-scale so we measure the tree's natural geometry.
+  // Reset any prior fit-scale so we measure the tree's natural geometry (W/H are read after the centring pass).
   canvas.style.transform = 'none';
+
+  // Design round 2026-08-24 (Mike: "the lines that connect the games to be even and in the middle", "the game
+  // cards are moving, they shouldnt", "when the brackets first show up no lines are showing"): measure LAYOUT
+  // (the offset chain — animation cannot touch it), centre every fed game on the midpoint of its feeders by
+  // writing `top` (never a transform), then draw a stub off each feeder, ONE shared riser, one line into the
+  // destination. Feeders come from the RENDERED nodes (data-mid -> data-next, i.e. winner_next_match_id) —
+  // prod's real pairing, which is right for the losers bracket where the design's column-index pairing is not.
+  const offsetIn = (node) => { let x = 0, y = 0, el = node; while (el && el !== canvas) { x += el.offsetLeft; y += el.offsetTop; el = el.offsetParent; } return { x, y }; };
+  const nodes = [...canvas.querySelectorAll('.bt-node')];
+  nodes.forEach((n) => { n.style.top = ''; });
+  const pos = {};
+  nodes.forEach((n) => {
+    const o = offsetIn(n);
+    pos[n.getAttribute('data-mid')] = { x: o.x, y: o.y, w: n.offsetWidth, h: n.offsetHeight, path: n.classList.contains('path'), feeders: [] };
+  });
+  nodes.forEach((n) => {
+    const to = pos[n.getAttribute('data-next')];
+    const from = pos[n.getAttribute('data-mid')];
+    if (to && from) to.feeders.push(from); // a winner advancing to another side (not in this view) feeds nothing here
+  });
+  // columns left to right, so a game's feeders are already in their final place when it is centred on them
+  [...canvas.querySelectorAll('.bt-col')].forEach((col) => {
+    col.querySelectorAll('.bt-node').forEach((n) => {
+      const p = pos[n.getAttribute('data-mid')];
+      if (!p || !p.feeders.length) return;
+      const mid = p.feeders.reduce((s, f) => s + f.y + f.h / 2, 0) / p.feeders.length;
+      const dy = Math.round(mid - (p.y + p.h / 2));
+      if (dy) { n.style.top = dy + 'px'; p.y += dy; }
+    });
+  });
+  // a shifted node can extend the canvas — measure the tree AFTER the centring pass
   const W = canvas.offsetWidth, H = canvas.offsetHeight;
   svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-
-  const pos = {};
-  canvas.querySelectorAll('.bt-node').forEach((n) => {
-    pos[n.getAttribute('data-mid')] = { x: n.offsetLeft, y: n.offsetTop, w: n.offsetWidth, h: n.offsetHeight, path: n.classList.contains('path') };
-  });
-  // Draw connectors from the RENDERED nodes (data-mid -> data-next) rather than state.tournamentMatches —
-  // this works for the live bracket AND the teamless format preview (whose rows aren't in state).
   let paths = '';
-  canvas.querySelectorAll('.bt-node').forEach((n) => {
-    const fromId = n.getAttribute('data-mid');
-    const nextId = n.getAttribute('data-next');
-    if (!nextId) return;
-    const from = pos[fromId];
-    const to = pos[nextId];
-    if (!from || !to) return; // winner advances to another side (not in this view) -> no line here
-    const x1 = from.x + from.w, y1 = from.y + from.h / 2, x2 = to.x, y2 = to.y + to.h / 2;
-    const mx = x1 + Math.max(12, (x2 - x1) / 2);
-    const onPath = from.path && to.path;
-    // Styled via CSS (.bt-link/.bt-link.on) — var() is unreliable inside an SVG stroke attribute.
-    paths += `<path class="bt-link${onPath ? ' on' : ''}" d="M${x1} ${y1} H${mx} V${y2} H${x2}" />`;
+  Object.values(pos).forEach((to) => {
+    if (!to.feeders.length) return;
+    const x2 = to.x, y2 = to.y + to.h / 2;
+    const rightMost = Math.max(...to.feeders.map((f) => f.x + f.w));
+    const mx = rightMost + Math.max(12, (x2 - rightMost) / 2);
+    const ys = to.feeders.map((f) => f.y + f.h / 2);
+    // Styled via CSS (.bt-link/.bt-link.on) — var() is unreliable inside an SVG stroke attribute. The stubs
+    // stay per-feeder (Manage's champion-path tint needs a path that belongs to one feeder); the riser is shared.
+    to.feeders.forEach((f, i) => { paths += `<path class="bt-link${f.path && to.path ? ' on' : ''}" d="M${f.x + f.w} ${ys[i]} H${mx}" />`; });
+    const lo = Math.min(...ys, y2), hi = Math.max(...ys, y2);
+    if (hi - lo > 1) paths += `<path class="bt-link${to.path && to.feeders.some((f) => f.path) ? ' on' : ''}" d="M${mx} ${lo} V${hi}" />`;
+    paths += `<path class="bt-link${to.path && to.feeders.some((f) => f.path) ? ' on' : ''}" d="M${mx} ${y2} H${x2}" />`;
   });
   svg.innerHTML = paths;
 
-  // C57: map-style view — fixed on-screen viewport; default = the WHOLE bracket fit to width AND height
-  // (no scroll), centered; pinch / wheel zoom in, drag pans any direction.
+  // View (design round 2026-08-24, Mike's pick 2026-08-25): the bracket opens at 1:1 anchored to the first
+  // column — cards at full size, drag to pan, pinch to zoom OUT as far as the whole-tree fit. The pane hugs
+  // the tree's own height, capped at ~64vh; a side-tab switch never re-fits (see the tv2-bracket-side handler).
   const avail = pan.clientWidth;
-  const vh = Math.max(320, Math.round((window.innerHeight || 800) * 0.64));
+  const vhCap = Math.max(320, Math.round((window.innerHeight || 800) * 0.64));
+  const vh = Math.min(Math.max(240, H), vhCap);
   const fit = (avail > 0 && W > 0 && H > 0) ? Math.min(1, avail / W, vh / H) : 1;
   pan.style.height = vh + 'px';
-  // Max zoom: enough to read/reach ANY single game card. The old `fit*4` PENALISED big brackets (small fit →
-  // low ceiling, exactly when you need to zoom IN more), so a 18-team bracket capped at 1.8×. Raise the floor
-  // to 2.8× (a 176px card → ~490px, fills a phone) and the multiplier so small brackets can still zoom far.
+  // Max zoom: enough to read/reach ANY single game card (a 176px card → ~490px fills a phone).
   btView = { W, H, vw: avail, vh, fit, max: Math.max(fit * 6, 2.8) };
-  if (btScale == null) { btScale = fit; btX = (avail - W * fit) / 2; btY = (vh - H * fit) / 2; }
+  if (btScale == null) { btScale = 1; btX = 0; btY = 0; }
   btClampApply(canvas);
   wireBracketGestures(pan, canvas);
 }
@@ -11352,7 +11386,9 @@ function bindTournamentTabV2() {
       if (role === 'tv2-bracket-side') { // the one surviving tv2 role: the PUBLIC bracket side tabs
         state.bracketSide = el.getAttribute('data-side');
         state.bracketRound = null;
-        btResetView(); // C57: show the newly-selected side fit to screen
+        // Design round 2026-08-24 ("switching tabs must never move a card"): keep the zoom, land the new side
+        // on its first column. (Was a full re-fit on every switch — C57.)
+        btX = 0; btY = 0;
         partialRenderTournament();
       }
     } catch (err) {
