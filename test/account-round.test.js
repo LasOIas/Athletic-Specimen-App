@@ -136,7 +136,15 @@ function loadApp() {
   const supaScript = {};
   const rec = (name, dflt) => async (...a) => {
     supaCalls.push([name, ...a]);
-    if (name in supaScript) { const v = supaScript[name]; delete supaScript[name]; return v; }
+    if (name in supaScript) {
+      const v = supaScript[name];
+      delete supaScript[name];
+      // Task 5 review: a scripted Error THROWS instead of resolving. A dead network is not an { error }
+      // answer, it is a rejected promise, and the catch path is the only one that logs - so it needs a
+      // way to be driven (the password-never-logged case runs through it).
+      if (v instanceof Error) throw v;
+      return v;
+    }
     return dflt || { data: {}, error: null };
   };
   const supaStub = {
@@ -230,7 +238,12 @@ function loadApp() {
       setView: (v) => { pdTournamentView = v; },
       // The module vars the overlays keep between renders. reset() clears them so a cooldown or a typed
       // address can never leak from one case into the next (this suite shares one vm context).
-      resetAuthVars: () => { authMode = 'signin'; authSentEmail = ''; authResendUntil = 0; },
+      // Task 5 adds the account overlay's own two: a pending address or a left-over view would otherwise
+      // leak from one case into the next (this suite shares one vm context).
+      resetAuthVars: () => {
+        authMode = 'signin'; authSentEmail = ''; authResendUntil = 0;
+        acctPendingEmail = ''; acctView = 'name';
+      },
       // Task 3: the account card reads the cached name for its initial, its title and its Name row.
       openMenu: () => openAccountMenu(),
       setAccountName: (n) => { accountName = n; },
@@ -311,6 +324,10 @@ const count = (hay, needle) => hay.split(needle).length - 1;
 
 const css = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const appSrc = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+// The words a control ships with, read out of the markup that declared it. The document stub keeps
+// innerHTML as a STRING and never parses it, so a control's textContent is only ever what code assigned;
+// a case that needs the label a real paint would have given it seeds it from here (Task 5 review).
+const labelOf = (html, id) => (new RegExp('id="' + id + '"[^>]*>([^<]*)<').exec(html) || [])[1];
 
 // Fill the four create-account inputs with something that passes every client rule.
 function fillSignup(email = 'morgan@email.com', password = 'Passw0rd!') {
@@ -512,6 +529,11 @@ describe('Account round Task 1 - the auth page and the wall', () => {
     bridge.supaNext('signUp', { data: { user: {}, session: null }, error: null });
     await bridge.authSubmit();
     const btn = bridge.registry['auth-resend'];
+    // Task 5 review: the cooldown restores the label it READ off this control, so the label has to be on
+    // it first. The stub captures innerHTML as a string and never parses it, so the words the real paint
+    // would have given the button are lifted out of the markup that was just shipped.
+    btn.textContent = labelOf(bridge.registry['auth-page'].innerHTML, 'auth-resend');
+    expect(btn.textContent).toBe("Didn't get it? Resend");
     bridge.supaNext('resend', { data: {}, error: null });
     const undo = bridge.swapTimeout((fn) => fn());   // run the cooldown callback the moment it is set
     try { await btn.listeners.click[0](); } finally { undo(); }
@@ -1340,13 +1362,36 @@ describe('Account round Task 5 - Change email and the pending screen', () => {
   });
 
   it('the cooldown hands this control back ITS own label, not the sign-up screens', async () => {
-    await sent();
+    const page = await sent();
     const btn = bridge.registry['acct-resend'];
+    // The label the cooldown restores is the one it read off this control, so it comes out of the markup
+    // this screen shipped, never a literal in the function (which is how the sent screens' words would
+    // end up renaming this button).
+    btn.textContent = labelOf(page.innerHTML, 'acct-resend');
+    expect(btn.textContent).toBe('Resend the link');
     bridge.supaNext('resend', { data: {}, error: null });
     const undo = bridge.swapTimeout((fn) => fn());   // run the cooldown callback the moment it is set
     try { await btn.listeners.click[0]({}); } finally { undo(); }
     expect(btn.disabled).toBe(false);
     expect(btn.textContent).toBe('Resend the link');
+    // Each screen's words live in the MARKUP that ships them and nowhere else. A per-kind literal back
+    // in the shared function is what renames the NEXT screen to reuse it (Task 6's is already coming).
+    expect(count(appSrc, "Didn't get it? Resend")).toBe(1);
+    expect(count(appSrc, 'Resend the link')).toBe(1);
+  });
+
+  it('a Resend that lands after Done logs the failure instead of writing to a screen that is gone', async () => {
+    await sent();
+    const btn = bridge.registry['acct-resend'];
+    bridge.supaNext('resend', { data: null, error: { message: 'email rate limit exceeded' } });
+    const inFlight = btn.listeners.click[0]({});          // the send is parked on its await
+    fireClick(bridge.registry['acct-done'], {});          // and Done tears the screen down under it
+    // Removing the overlay takes its subtree with it, which the registry models per case, not per node.
+    delete bridge.registry['acct-err'];
+    delete bridge.registry['acct-resend'];
+    await inFlight;                                       // nothing thrown
+    expect(bridge.registry['acct-page']).toBeFalsy();
+    expect(bridge.errors()).toEqual([['authResend', 'email_change', 'Too many emails just now. Wait a minute, then try again.']]);
   });
 
   it('the pending screen binds its two controls once per paint and leaves no form bound', async () => {
@@ -1398,6 +1443,47 @@ describe('Account round Task 5 - Change email and the pending screen', () => {
     expect(JSON.stringify(bridge.errors())).not.toContain('spaces');
     // Not in the markup either: the field is re-rendered away, never re-rendered with a value.
     expect(bridge.registry['acct-page'].innerHTML).not.toContain('spaces');
+
+    // The catch path is the ONLY one that logs, so it is the only one that could ever log a password.
+    // A dead network gets it running (a rejected promise, not an { error } answer).
+    bridge.reset();
+    openEmail();
+    type(NEW, RAW);
+    bridge.supaNext('signInWithPassword', new Error('Failed to fetch'));
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('Something went wrong. Try again.');
+    expect(bridge.errors().length).toBe(1);
+    expect(bridge.errors()[0][0]).toBe('email change');
+    expect(JSON.stringify(bridge.errors())).not.toContain('spaces');
+    expect(String(bridge.errors())).not.toContain('spaces');
+    expect(bridge.registry['acct-save'].disabled).toBe(false);
+  });
+
+  it('a rate limit reads as the app sentence on every call that sends an email', async () => {
+    // The email change. Supabase caps sends per hour, and its own words read like a bug report.
+    openEmail();
+    type(NEW, SECRET);
+    bridge.supaNext('signInWithPassword', { data: {}, error: null });
+    bridge.supaNext('updateUser', { data: null, error: { message: 'email rate limit exceeded' } });
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('Too many emails just now. Wait a minute, then try again.');
+    expect(bridge.registry['acct-err'].textContent).not.toContain('rate limit exceeded');
+    expect(bridge.getState().account.pendingEmail).toBe(null);
+
+    // And create-account, which reaches the same cap through the same map.
+    bridge.reset();
+    bridge.openAuth('signup');
+    bridge.registry['auth-first'].value = 'Morgan';
+    bridge.registry['auth-last'].value = 'Blake';
+    bridge.registry['auth-email'].value = 'morgan@email.com';
+    bridge.registry['auth-pass'].value = 'longenough1';
+    bridge.supaNext('signUp', { data: null, error: { message: 'over_email_send_rate_limit' } });
+    await bridge.authSubmit();
+    expect(bridge.registry['auth-err'].textContent).toBe('Too many emails just now. Wait a minute, then try again.');
+
+    // One copy of the sentence: the Resend controls and the error map read the same const.
+    expect(count(appSrc, "'Too many emails just now. Wait a minute, then try again.'")).toBe(1);
+    expect(count(appSrc, 'AUTH_RATE_LIMIT')).toBe(3);   // the declaration, friendlyAuthError, authResend
   });
 
   it('the SIGNED_IN the password check emits for the same account runs nothing', async () => {
@@ -1408,14 +1494,17 @@ describe('Account round Task 5 - Change email and the pending screen', () => {
     bridge.resetPostRuns();
     await submit();
     // The real client answers a successful signInWithPassword with a SIGNED_IN for the SAME user, which
-    // isNewSignIn reads as a repeat: no heavy path, no overlay torn down under the person.
-    await bridge.authEvent('SIGNED_IN', { user: MORGAN });
+    // isNewSignIn reads as a repeat: no heavy path, no overlay torn down under the person. gotrue awaits
+    // that notification inside signInWithPassword, so it lands BEFORE updateUser; by the time an event
+    // carries this account again it carries new_email too, which is the shape fired here.
+    await bridge.authEvent('SIGNED_IN', { user: { ...MORGAN, new_email: NEW } });
     await bridge.flushTimers();
     expect(bridge.postSignInRuns()).toBe(0);
     expect(bridge.registry['acct-page']).toBeTruthy();
     expect(bridge.registry['acct-page'].innerHTML).toContain('Confirm your new email');
-    // The screen names the address from its own module var, so an auth event re-deriving state.account
-    // cannot blank the sentence the person is reading.
+    // Re-deriving state.account off that session KEEPS the pending address (the tag on the card survives
+    // the round trip), and the screen names it from its own module var either way.
+    expect(bridge.getState().account.pendingEmail).toBe(NEW);
     expect(bridge.acctPending()).toBe(NEW);
   });
 });

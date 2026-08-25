@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.25'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.26'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6200,6 +6200,11 @@ const AUTH_FILL_ALL = 'Fill in every field.';
 // The client's email shape gate, in one place: sign-in, create-account and forgot all refuse a malformed
 // address in the same words before the server ever sees it (Account round 2026-08-25).
 const AUTH_EMAIL_RE = /^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/;
+// The one sentence every email-sending call answers a rate limit with (Task 5 review). Supabase caps
+// sends per hour and answers with "email rate limit exceeded" / over_email_send_rate_limit, which reads
+// like a bug report. Both roads to that cap read the same: the Resend controls below, and
+// friendlyAuthError, which is where a signUp, a reset and an email change land.
+const AUTH_RATE_LIMIT = 'Too many emails just now. Wait a minute, then try again.';
 let authSentEmail = '';                  // the address a sent screen resends to (memory only; a reload loses it)
 let authResendUntil = 0;                 // cooldown deadline (ms) shared by every Resend control
 // The one back chevron every .auth-page overlay wears. Declared once so the wall and the auth page can
@@ -6629,6 +6634,11 @@ function renderClaimSuccess(c) {
 
 function friendlyAuthError(error, signup) {
   const m = (error && error.message) || '';
+  // First, because a rate limit is about the server's patience and not about anything that was typed:
+  // every input-shaped rule below would answer it with advice that cannot help. Every call that can send
+  // an email reaches this map (signUp, the reset request, the email change), so they all get the sentence
+  // the Resend controls already use (Task 5 review).
+  if (/rate|limit/i.test(m)) return AUTH_RATE_LIMIT;
   if (/invalid login credentials/i.test(m)) return "That email or password isn't right.";
   if (/already registered|user already/i.test(m)) return 'That email already has an account. Sign in instead.';
   // The server names its own minimum (6) and always says "characters"; the client gate is stricter, so
@@ -6724,13 +6734,28 @@ async function onAuthSubmit(e) {
 // its sent screens, so one is rendered there and written here. "Sent again" appears only after the API
 // actually answered without an error, never optimistically.
 async function authResend(kind, emailOverride) {
-  const btn = document.getElementById(kind === 'email_change' ? 'acct-resend' : 'auth-resend');
-  const err = document.getElementById(kind === 'email_change' ? 'acct-err' : 'auth-err');
-  const note = (m) => { if (err) { err.textContent = m; err.hidden = !m; } };
+  const btnId = kind === 'email_change' ? 'acct-resend' : 'auth-resend';
+  const errId = kind === 'email_change' ? 'acct-err' : 'auth-err';
+  // Task 5 review: every write below RE-RESOLVES its node by id instead of holding the one this call
+  // started with. A send is in flight for as long as the network takes, and Done (or a back chevron) can
+  // tear the screen down under it; writing to a detached node is a failure nobody ever sees. When the
+  // screen is gone the failure goes to the log instead of nowhere.
+  const button = () => document.getElementById(btnId);
+  const note = (m) => {
+    const el = document.getElementById(errId);
+    if (el) { el.textContent = m; el.hidden = !m; return; }
+    if (m) console.error('authResend', kind, m);
+  };
+  const enable = () => { const b = button(); if (b) b.disabled = false; };
   if (Date.now() < authResendUntil) { note('Give it a minute, then try again.'); return; }
   const email = emailOverride || authSentEmail;
   // A lost address (a reload dropped it) or a dead client must not read as a tap that did nothing.
   if (!email || !supabaseClient) { note('Something went wrong. Try again.'); return; }
+  const btn = button();
+  // The label the cooldown hands back is read off THIS control before it is overwritten, never a literal
+  // here: the sent screens and the pending email screen word their Resend differently, and the next
+  // screen to reuse this function gets its own words for free instead of a branch nobody remembers.
+  const label = btn ? btn.textContent : '';
   if (btn) btn.disabled = true;
   try {
     const res = kind === 'reset'
@@ -6740,26 +6765,24 @@ async function authResend(kind, emailOverride) {
       // A rate limit is the server saying "wait", so the control waits with it (disabled + the cooldown).
       // Anything else is worth an immediate retry, so that branch hands the button straight back.
       if (/rate|limit/i.test(res.error.message || '')) {
-        note('Too many emails just now. Wait a minute, then try again.');
+        note(AUTH_RATE_LIMIT);
         authResendUntil = Date.now() + AUTH_RESEND_MS;
-        setTimeout(() => { if (btn) btn.disabled = false; }, AUTH_RESEND_MS);
+        setTimeout(enable, AUTH_RESEND_MS);
       } else {
         note('That did not send. Check the connection and try again.');
-        if (btn) btn.disabled = false;
+        enable();
       }
       return;
     }
     note('');
     authResendUntil = Date.now() + AUTH_RESEND_MS;
-    if (btn) btn.textContent = 'Sent again';
+    const sent = button();
+    if (sent) sent.textContent = 'Sent again';
     // The cooldown hands back BOTH the button and its own label, else it reads "Sent again" forever.
-    // Task 5: "its own" is per screen. The pending email screen's control says "Resend the link", and
-    // handing it the sent screens' words would rename a button someone is looking at.
-    const label = kind === 'email_change' ? 'Resend the link' : "Didn't get it? Resend";
-    setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = label; } }, AUTH_RESEND_MS);
+    setTimeout(() => { const b = button(); if (b) { b.disabled = false; b.textContent = label; } }, AUTH_RESEND_MS);
   } catch (_) {
     note('That did not send. Check the connection and try again.');
-    if (btn) btn.disabled = false;
+    enable();
   }
 }
 
