@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.29'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.30'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6362,8 +6362,12 @@ function renderAuthPageInner() {
   // back to 'signin' would paint a sign-in form over a signed-in app with the account card already torn
   // down, and submitting it could switch accounts. While a session is open, both exits from the forgot
   // pair return to the account card instead. Signed out, every one of them behaves exactly as before.
+  // Task 8 review: that was only half true. The CHEVRON went to the card, but #auth-alt on the plain
+  // forgot screen still flipped authMode to 'signin' and repainted formInner, which since Task 8 carries
+  // Continue with Google. So a signed-in person had a reachable path to a control that removes their
+  // session silently. Both members of the pair now take the same exit, and both say so.
   const signedIn = !!state.authSession;
-  const altLabel = (forgotSent && signedIn) ? 'Back to account' : 'Back to sign in';
+  const altLabel = ((forgot || forgotSent) && signedIn) ? 'Back to account' : 'Back to sign in';
   const sentScreenHTML = (subHTML) => `<div class="au-mark is-mail">${AUTH_MAIL_SVG}</div>
       <h2 class="auth-title">Check your email</h2>
       <p class="auth-sub">${subHTML}</p>
@@ -6385,7 +6389,7 @@ function renderAuthPageInner() {
         <input class="auth-input" id="fg-email" type="email" required autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="you@email.com" />
         <div class="auth-err" id="auth-err" role="alert" hidden></div>
         <button type="submit" class="auth-submit" id="auth-submit">Send reset link</button>
-        <button type="button" class="auth-alt" id="auth-alt">Back to sign in</button>
+        <button type="button" class="auth-alt" id="auth-alt">${altLabel}</button>
       </form>`;
   const formInner = `${AUTH_BRAND_HTML}
       <form id="auth-form" novalidate autocomplete="on">
@@ -6426,9 +6430,11 @@ function renderAuthPageInner() {
   });
   const altBtn = el.querySelector('#auth-alt');
   if (altBtn) altBtn.addEventListener('click', () => {
-    // Same rule as the chevron: the sent screen's alt reads "Back to account" for a signed-in person and
-    // takes them there, instead of dropping them on a sign-in form they do not need.
-    if (forgotSent && signedIn) { closeAuthPage(); openAccountMenu(); return; }
+    // Same rule as the chevron: on BOTH forgot screens the alt reads "Back to account" for a signed-in
+    // person and takes them there, instead of dropping them on a sign-in form they do not need. The plain
+    // forgot screen is in that rule as of the Task 8 review: the form it used to repaint carries Continue
+    // with Google, and that control is never allowed in front of a session.
+    if ((forgot || forgotSent) && signedIn) { closeAuthPage(); openAccountMenu(); return; }
     authMode = authMode === 'signin' ? 'signup' : 'signin';   // every other state's alt is "Back to sign in"
     renderAuthPageInner();
   });
@@ -6770,6 +6776,12 @@ async function onForgotSubmit() {
 // tokens come back in the URL FRAGMENT, and detectSessionInUrl already consumes them. Switching to pkce
 // would put a ?code= in the query that this build never exchanges.
 async function onGoogleSignIn() {
+  // Task 8 review, Mike's call 1: never on a signed-in surface, and never FIRED from one either. The
+  // markup rule alone was one repaint away from being wrong, and the cost is silent: signInWithOAuth's
+  // first act is to remove the local session, and that removal notifies nobody, so a signed-in person who
+  // taps and then backs out at Google looks signed in until their next reload. The guard is here rather
+  // than only at the paint so every future caller inherits it.
+  if (state.authSession) return;
   const btn = document.getElementById('auth-google');
   // Belt and suspenders: a disabled <button> emits no click in a real browser, but the test fires the
   // bound closure directly, and a double tap must never send two authorize requests.
@@ -6797,7 +6809,7 @@ async function onGoogleSignIn() {
       options: { redirectTo: location.origin },   // the round's law, and the only value the allow-list
                                                   // accepts beside the Site URL
     });
-    if (res && res.error) fail();
+    if (!res || res.error) fail();   // a missing answer is a failure, not a silent success
   } catch (_) { fail(); }
   // The button is deliberately left DISABLED on the success path: the page is leaving.
 }

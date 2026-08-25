@@ -687,9 +687,11 @@ function splitFullNameParts(first, last) {
 // never given_name / family_name, so first and last have to be guessed by splitting it. Last space, not
 // first: "Mary Jo Van Der Berg" is a person, and putting the whole run in `first` is the guess a human
 // can correct in one field instead of two. Returns null rather than a half-answer for one word or
-// nothing, so the caller asks instead of guessing.
+// nothing, so the caller asks instead of guessing. Task 8 review: a non-STRING is treated as empty and
+// answers null too. String({}) is "[object Object]", which has a space in it, so the old coercion turned
+// a junk metadata value into a confident wrong split instead of an honest refusal.
 function splitFullName(full) {
-  const whole = String(full == null ? '' : full).trim().replace(/\s+/g, ' ');
+  const whole = (typeof full === 'string' ? full : '').trim().replace(/\s+/g, ' ');
   const cut = whole.lastIndexOf(' ');
   if (cut < 1) return null;
   return { first: whole.slice(0, cut), last: whole.slice(cut + 1) };

@@ -1974,6 +1974,17 @@ describe('Account round Task 8 - Continue with Google', () => {
       bridge.openAcct(view);
       expect(bridge.registry['acct-page'].innerHTML).not.toContain('auth-google');
     }
+    // The REACHABLE path, not just the enumerated surfaces (Task 8 review, Critical). #ap-forgot opens
+    // the forgot screen for a signed-in person, and its alt used to flip authMode to 'signin' and
+    // repaint formInner, which carries the button. The exit goes to the account card instead, so the
+    // markup this overlay ever held never contained the control.
+    bridge.reset();
+    bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, { first: 'Morgan', last: 'Blake' });
+    bridge.openAuth('forgot');
+    const held = bridge.registry['auth-page'];
+    bridge.registry['auth-alt'].listeners.click[0]();
+    expect(bridge.registry['auth-page']).toBeFalsy();
+    expect(held.innerHTML).not.toContain('id="auth-google"');
     // One emission site in the whole file: the helper called from formInner, and nothing else.
     expect(count(appSrc, 'id="auth-google"')).toBe(1);
   });
@@ -2203,5 +2214,70 @@ describe('Account round Task 8 - Continue with Google', () => {
     const blk = css.slice(css.indexOf('.au-google {'), css.indexOf('.au-or::before'));
     const ours = (blk.match(/#[0-9A-Fa-f]{3,8}\b/g) || []).filter((h) => !['#FFFFFF', '#747775', '#1F1F1F', '#F2F2F2'].includes(h));
     expect(ours).toEqual([]);
+  });
+
+  // ── Fix round 1 ──────────────────────────────────────────────────────────────────
+  it('a signed-in person leaving the forgot screen lands on the account, never on a form with Google on it', () => {
+    bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, { first: 'Morgan', last: 'Blake' });
+    bridge.openAuth('forgot');   // where #ap-forgot on the Password screen sends them
+    const auth = bridge.registry['auth-page'];
+    expect(auth.innerHTML).toContain('Reset your password');
+    expect(labelOf(auth.innerHTML, 'auth-alt')).toBe('Back to account');
+
+    bridge.registry['auth-alt'].listeners.click[0]();
+    expect(bridge.registry['auth-page']).toBeFalsy();
+    expect(bridge.registry['account-menu']).toBeTruthy();
+    expect(bridge.registry['account-menu'].innerHTML).toContain('morgan@email.com');
+    // The overlay was never repainted into formInner on the way out, so the button never existed here.
+    expect(auth.innerHTML).toContain('Reset your password');
+    expect(auth.innerHTML).not.toContain('id="auth-google"');
+    expect(auth.innerHTML).not.toContain('New here? Create an account');
+    expect(bridge.authModeNow()).toBe('forgot');
+  });
+
+  it('a signed-in person who reaches the button anyway cannot fire it', async () => {
+    bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, { first: 'Morgan', last: 'Blake' });
+    bridge.setClaimIntent(true);
+    bridge.openAuth('signin');   // the paint a stale repaint over a live session would have produced
+    const btn = bridge.registry['auth-google'];
+    expect(bridge.registry['auth-page'].innerHTML).toContain('id="auth-google"');
+    await btn.listeners.click[0]();
+    // signInWithOAuth removes the local session before it builds a URL and that removal notifies
+    // nobody, so the call may never happen while a session is open. Nothing else moved either.
+    expect(bridge.supaCalls().filter((c) => c[0] === 'signInWithOAuth')).toEqual([]);
+    expect(btn.disabled).toBe(false);
+    expect(bridge.session.get('athletic_specimen_claim_intent')).toBe(null);
+    expect(bridge.assigns()).toEqual([]);
+    // In the FUNCTION, not only in the markup, so every future caller inherits it.
+    expect(appSrc).toContain('if (state.authSession) return;');
+  });
+
+  it('signed out, both forgot exits still walk back to sign in and the button is where it belongs', async () => {
+    bridge.openAuth('forgot');
+    expect(labelOf(bridge.registry['auth-page'].innerHTML, 'auth-alt')).toBe('Back to sign in');
+    bridge.registry['auth-alt'].listeners.click[0]();
+    expect(bridge.authModeNow()).toBe('signin');
+    expect(bridge.registry['auth-page'].innerHTML).toContain('id="auth-google"');
+
+    bridge.reset();
+    bridge.openAuth('forgot');
+    bridge.registry['fg-email'].value = 'a@b.co';
+    bridge.supaNext('resetPasswordForEmail', { data: {}, error: null });
+    await bridge.authSubmit();
+    expect(labelOf(bridge.registry['auth-page'].innerHTML, 'auth-alt')).toBe('Back to sign in');
+    bridge.registry['auth-alt'].listeners.click[0]();
+    expect(bridge.authModeNow()).toBe('signin');
+    expect(bridge.registry['account-menu']).toBeFalsy();   // no session, so no card to go back to
+  });
+
+  it('splitFullName treats a non-string as empty', () => {
+    const s = bridge.splitName;
+    // String({}) is "[object Object]", which has a space in it: the old coercion answered
+    // { first: '[object', last: 'Object]' } with total confidence.
+    expect(s({})).toBe(null);
+    expect(s({ full_name: 'Morgan Reyes' })).toBe(null);
+    expect(s(42)).toBe(null);
+    expect(s(['Morgan', 'Reyes'])).toBe(null);
+    expect(s(true)).toBe(null);
   });
 });
