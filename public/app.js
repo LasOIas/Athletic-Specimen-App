@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.24'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.25'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -6753,7 +6753,10 @@ async function authResend(kind, emailOverride) {
     authResendUntil = Date.now() + AUTH_RESEND_MS;
     if (btn) btn.textContent = 'Sent again';
     // The cooldown hands back BOTH the button and its own label, else it reads "Sent again" forever.
-    setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = "Didn't get it? Resend"; } }, AUTH_RESEND_MS);
+    // Task 5: "its own" is per screen. The pending email screen's control says "Resend the link", and
+    // handing it the sent screens' words would rename a button someone is looking at.
+    const label = kind === 'email_change' ? 'Resend the link' : "Didn't get it? Resend";
+    setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = label; } }, AUTH_RESEND_MS);
   } catch (_) {
     note('That did not send. Check the connection and try again.');
     if (btn) btn.disabled = false;
@@ -7228,9 +7231,14 @@ async function confirmSignOut() {
 // One body-appended .auth-page for all three edit screens, the same pattern as #auth-page and
 // #reset-page so partialRender can never wipe it. Its back control always rebuilds the card, the
 // email-sent state included: the design's "back to email" would re-enter a form whose password field
-// is gone. Task 4 filled the Name body; Tasks 5-6 fill the other two. This scaffold owns the overlay,
-// the view and the way back.
+// is gone. Task 4 filled the Name body, Task 5 the email pair; Task 6 fills the password one. This
+// scaffold owns the overlay, the view and the way back.
 let acctView = 'name';   // 'name' | 'email' | 'email-sent' | 'password'
+// The address the pending screen names and resends to. Memory only, like authSentEmail: a reload lands
+// back on the card, where the Pending tag (read from the session) still says a change is half-finished.
+// Kept apart from state.account so an auth event re-deriving the account cannot blank the sentence
+// someone is reading.
+let acctPendingEmail = '';
 
 // The one error line every screen on this overlay writes to. It lives INSIDE each screen's markup, where
 // the design drew it (between the last field and the button), so there is never more than one #acct-err.
@@ -7269,7 +7277,35 @@ function renderAcctPageInner() {
   let inner;
   switch (acctView) {
     case 'email':
-      inner = '<h2 class="auth-title">Change email</h2>' + ACCT_ERR_HTML;
+      // The design's screen 11. The sub-line names the address that works TODAY, so nobody has to
+      // remember which one they are replacing, and the password field is a CURRENT one: it carries the
+      // reveal every password field in this round carries, and no meter (the meter is advice for a
+      // password being chosen, and grading one being recalled would be noise).
+      inner = `<form id="acct-form" novalidate autocomplete="on">
+        <h2 class="auth-title">Change email</h2>
+        <p class="auth-sub">Right now it's <span class="au-em">${escapeHTML(state.account && state.account.email)}</span>.</p>
+        <label class="auth-label" for="ae-new">New email</label>
+        <input class="auth-input" id="ae-new" type="email" required autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="you@email.com" />
+        <label class="auth-label" for="ae-pass">Your password</label>
+        ${authFieldHTML('ae-pass', 'data-current autocomplete="current-password" placeholder="Current password"', false)}
+        <p class="au-note">We ask for your password to be sure it's you. The new address has to be confirmed before it takes over.</p>
+        ${ACCT_ERR_HTML}
+        <button type="submit" class="auth-submit" id="acct-save">Send confirmation</button>
+      </form>`;
+      break;
+    case 'email-sent':
+      // The design's screen 12, minus its "Cancel this change": GoTrue has no cancel, so the sentence
+      // that replaces it says the only thing that IS true (a link nobody taps changes nothing). No
+      // expiry line either, that number is a dashboard value this client cannot read. NO FORM here on
+      // purpose: a form with no submit listener navigates the page on Enter, so a screen with nothing to
+      // submit ships none, and its two buttons are bound by id below.
+      inner = `<div class="au-mark is-mail">${AUTH_MAIL_SVG}</div>
+        <h2 class="auth-title">Confirm your new email</h2>
+        <p class="auth-sub">We sent a link to <span class="au-em">${escapeHTML(acctPendingEmail)}</span>. Until you tap it, sign in with your old address.</p>
+        <p class="auth-sub">To keep your old address, just don't tap the link.</p>
+        ${ACCT_ERR_HTML}
+        <button type="button" class="auth-submit" id="acct-done">Done</button>
+        <button type="button" class="auth-alt" id="acct-resend">Resend the link</button>`;
       break;
     case 'password':
       inner = '<h2 class="auth-title">Change password</h2>' + ACCT_ERR_HTML;
@@ -7298,7 +7334,18 @@ function renderAcctPageInner() {
   // Bound by id AFTER the swap, once per paint: innerHTML replaces the children, so this cannot stack the
   // way an overlay-level bind would (the #auth-form pattern). Each screen owns its own submit.
   const form = el.querySelector('#acct-form');
-  if (form && acctView === 'name') form.addEventListener('submit', onAcctNameSave);
+  if (form) {
+    if (acctView === 'email') form.addEventListener('submit', onAcctEmailSave);
+    else if (acctView === 'name') form.addEventListener('submit', onAcctNameSave);
+  }
+  // The pending screen has no form, so its two controls are bound the same way: by id, after the swap,
+  // once per paint. Resend RETURNS its promise so the caller (and a test) can await the real send.
+  if (acctView === 'email-sent') {
+    const done = el.querySelector('#acct-done');
+    if (done) done.addEventListener('click', () => { closeAcctPage(); openAccountMenu(); });
+    const resend = el.querySelector('#acct-resend');
+    if (resend) resend.addEventListener('click', () => authResend('email_change', acctPendingEmail));
+  }
 }
 
 // The Name screen's save (Account handoff 2026-08-25, spec §4). A plain profiles UPDATE for the caller's
@@ -7348,6 +7395,63 @@ async function onAcctNameSave(e) {
   } catch (err) {
     console.error('profiles name update', err);
     failed(ACCT_SAVE_FAIL);
+  }
+}
+
+// The Email screen's save (Account handoff 2026-08-25, spec §5). Two calls, in this order and no other:
+// the current password is PROVEN with a second signInWithPassword against the account that is already
+// signed in (GoTrue has no "verify my password" endpoint, and Secure email change is OFF so updateUser
+// would otherwise take an address change on nothing but an open session). That success emits a SIGNED_IN
+// for the SAME user, which the listener's isNewSignIn gate reads as a repeat, so nothing re-runs. Then
+// updateUser sends the confirmation link to the NEW address, back to the site root like every other link
+// in this round. The old address keeps working until the link is tapped, which is what the screen says.
+async function onAcctEmailSave(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  const newEl = document.getElementById('ae-new');
+  const passEl = document.getElementById('ae-pass');
+  const errEl = document.getElementById('acct-err');
+  const btn = document.getElementById('acct-save');
+  const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
+  if (errEl) errEl.hidden = true;
+  const newEmail = ((newEl && newEl.value) || '').trim();
+  const password = (passEl && passEl.value) || '';   // NEVER trimmed: a space is a character someone chose
+  // The round's order: empties in the shared words, then the email shape before the server sees it, then
+  // the one refusal only this screen can make. Asking GoTrue to send a confirmation link to the address
+  // someone is already using would "succeed" and confuse them, so it never leaves the client.
+  if (!newEmail || !password) { showErr(AUTH_FILL_ALL); return; }
+  if (!AUTH_EMAIL_RE.test(newEmail)) { showErr("That email doesn't look right."); return; }
+  const current = (state.account && state.account.email) || '';
+  if (newEmail.toLowerCase() === current.toLowerCase()) { showErr("That's already your email."); return; }
+  if (!supabaseClient || !state.account) { showErr(ACCT_SAVE_FAIL); return; }
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  const failed = (msg) => {
+    showErr(msg);
+    if (btn) { btn.disabled = false; btn.textContent = orig; }
+  };
+  try {
+    const chk = await supabaseClient.auth.signInWithPassword({ email: current, password });
+    // Every reason this can fail reads the same to the person holding the phone: the password they typed
+    // is not the one on the account. The server's own words stay out of it (they name the email too).
+    if (chk && chk.error) { failed('That password is wrong.'); return; }
+    const res = await supabaseClient.auth.updateUser({ email: newEmail }, { emailRedirectTo: location.origin });
+    if (res && res.error) {
+      failed(/already/i.test(res.error.message || '')
+        ? 'That email already has an account.'
+        : friendlyAuthError(res.error));
+      return;
+    }
+    // The card's Pending tag reads state; the pending screen reads its own var. Both are set here so the
+    // half-finished change is visible whichever surface they land on next.
+    state.account.pendingEmail = newEmail;
+    acctPendingEmail = newEmail;
+    authSentEmail = newEmail;
+    // No toast: this screen IS the confirmation, and a toast under it would say less than it does.
+    acctView = 'email-sent';
+    renderAcctPageInner();
+  } catch (err) {
+    console.error('email change', err);   // the failure only; the typed password never reaches a log
+    failed('Something went wrong. Try again.');
   }
 }
 

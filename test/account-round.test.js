@@ -39,6 +39,8 @@ const AUTH_CONTROL_IDS = [
   'am-signout', 'am-close', 'acct-err', 'app-confirm-yes', 'app-confirm-no',
   // Task 4: the Name screen's form, its two fields and its Save.
   'acct-form', 'an-first', 'an-last', 'acct-save',
+  // Task 5: the Email screen's two fields, and the pending screen's Done and Resend.
+  'ae-new', 'ae-pass', 'acct-done', 'acct-resend',
 ];
 
 function matches(node, sel) {
@@ -92,13 +94,19 @@ function mkNode(tag) {
     contains() { return false; },
     get innerHTML() { return this._html; },
     set innerHTML(v) {
+      const prev = this._html;
       this._html = String(v);
       this.children = [];
       // An innerHTML swap REPLACES the subtree: every control the new markup declares is a brand new
       // element, so whatever a previous render bound to it is gone. Without this the same registry node
       // collects one handler per render and a test ends up firing a stale binding.
+      // Task 5: the controls the swap DROPS are gone from the document too, so their listeners go with
+      // them. Modelling only the survivors let a handler outlive the element it was bound to (the
+      // account overlay's email form, still "bound" on a pending screen that ships no form at all).
       for (const id of Object.keys(registry)) {
-        if (id !== this.id && this._html.includes('id="' + id + '"')) registry[id]._clearListeners();
+        if (id === this.id) continue;
+        const tag = 'id="' + id + '"';
+        if (this._html.includes(tag) || prev.includes(tag)) registry[id]._clearListeners();
       }
     },
   };
@@ -229,6 +237,10 @@ function loadApp() {
       authInitial: () => authInitial(),
       nameFill: () => promptNameFillIfNeeded(),
       renderCount: () => __renders,
+      // Task 5: the account overlay's own repaint, and the module var the pending screen names and
+      // resends to. Repainting the same view is how a case proves a bind cannot stack.
+      renderAcct: () => renderAcctPageInner(),
+      acctPending: () => acctPendingEmail,
       // The two gates every post-boot repaint sits behind.
       setPainted: (v) => { state.loaded = !!v; bootPaintDone = !!v; },
     };`;
@@ -1068,9 +1080,10 @@ describe('Account round Task 4 - Your name', () => {
     expect(bridge.supaCalls().length).toBe(0);
     expect(bridge.registry['acct-page']).toBeTruthy();
     expect(bridge.errors()).toEqual([]);
-    // One copy of the copy: the four submits that can meet a blank field all read the same const.
+    // One copy of the copy: every submit that can meet a blank field reads the same const (Task 5 made
+    // it five - the email change is the newest of them).
     expect(count(appSrc, "'Fill in every field.'")).toBe(1);
-    expect(count(appSrc, 'showErr(AUTH_FILL_ALL)')).toBe(4);
+    expect(count(appSrc, 'showErr(AUTH_FILL_ALL)')).toBe(5);
   });
 
   it('a valid save is a plain profiles update with display_name in step and a read-back', async () => {
@@ -1143,5 +1156,266 @@ describe('Account round Task 4 - Your name', () => {
     expect(css).toMatch(/\.popup-overlay \{[^}]*z-index: 12000/);
     expect(css).toMatch(/\.live-overlay \{[^}]*z-index: 13000/);
     expect(bridge.errors()).toEqual([]);
+  });
+});
+
+// Task 5 (2026-08-25): Change email + the pending screen (the design's screens 11 and 12). Guards the
+// current address in the sub-line, the two fields, the note, the three client rules that never touch the
+// network, the current-password check that runs BEFORE updateUser, the root redirect, the pending screen
+// with a real Resend and no cancel the API cannot honour, and the three password promises: never trimmed,
+// never on state or in an argument that does not need it, never logged.
+describe('Account round Task 5 - Change email and the pending screen', () => {
+  beforeEach(() => bridge.reset());
+
+  const synth = (sel, node) => ({ closest: (s) => (s === sel ? node : null) });
+  const fireClick = (node, ev) => (node.listeners.click || []).forEach((fn) => fn(ev));
+  const MORGAN = { id: 'u1', email: 'morgan@email.com' };
+  const NEW = 'm@work.com';
+  const SECRET = 'correct horse 42';
+
+  // The real route in: the card's Email row tears the card down and hands the view to #acct-page.
+  const openEmail = () => {
+    bridge.setSignedIn(MORGAN, { first: 'Morgan', last: 'Blake' });
+    bridge.openMenu();
+    fireClick(bridge.registry['account-menu'], { target: synth('[data-acct-view]', { getAttribute: () => 'email' }) });
+    return bridge.registry['acct-page'];
+  };
+  const type = (email, pass) => { bridge.registry['ae-new'].value = email; bridge.registry['ae-pass'].value = pass; };
+  const submit = () => bridge.registry['acct-form'].listeners.submit[0]({ preventDefault() {} });
+  // A change that went all the way through, so a case can start on the pending screen.
+  const sent = async () => {
+    const page = openEmail();
+    type(NEW, SECRET);
+    bridge.supaNext('signInWithPassword', { data: { user: MORGAN }, error: null });
+    bridge.supaNext('updateUser', { data: { user: MORGAN }, error: null });
+    await submit();
+    return page;
+  };
+
+  it('the screen is the design: the current address, both fields, the reveal, the note, one error line', () => {
+    const html = openEmail().innerHTML;
+    expect(html).toContain('<h2 class="auth-title">Change email</h2>');
+    expect(html).toContain('Right now it\'s <span class="au-em">morgan@email.com</span>.');
+    expect(html).toContain('id="ae-new"');
+    expect(html).toContain('type="email"');
+    expect(html).toContain('id="ae-pass"');
+    expect(html).toContain('data-reveal="ae-pass"');
+    expect(html).toContain('autocomplete="current-password"');
+    expect(html).toContain('placeholder="Current password"');
+    expect(html).toContain("We ask for your password to be sure it's you. The new address has to be confirmed before it takes over.");
+    expect(count(html, 'id="acct-err"')).toBe(1);
+    expect(html).toContain('id="acct-save"');
+    expect(html).toContain('>Send confirmation<');
+    expect(count(html, 'required')).toBe(2);
+    // The meter is advice for a password being CHOSEN. A current password is being recalled, so the
+    // screen never grades it.
+    expect(html).not.toContain('data-sbox');
+    expect(html).not.toContain('data-strength');
+    expect(html).not.toMatch(/—|&mdash;|night/i);
+    expect(bridge.errors()).toEqual([]);
+  });
+
+  it('empties, a malformed address and the address it already is are refused with no network call', async () => {
+    openEmail();
+    type('', '');
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('Fill in every field.');
+    expect(bridge.registry['acct-err'].hidden).toBe(false);
+    expect(bridge.supaCalls().length).toBe(0);
+
+    type('nope', SECRET);
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe("That email doesn't look right.");
+    expect(bridge.supaCalls().length).toBe(0);
+
+    // A password with no new address is still an empty field, never a send.
+    type(NEW, '');
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('Fill in every field.');
+    expect(bridge.supaCalls().length).toBe(0);
+
+    // The address it already is: refused in its own words, and the password check never runs. GoTrue
+    // would answer that one with a link to the address they are already using.
+    type('MORGAN@email.com', SECRET);
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe("That's already your email.");
+    expect(bridge.supaCalls().length).toBe(0);
+    expect(bridge.registry['acct-page']).toBeTruthy();
+    expect(bridge.errors()).toEqual([]);
+  });
+
+  it('a wrong current password stops before updateUser and says which one was wrong', async () => {
+    openEmail();
+    type(NEW, 'not it');
+    bridge.supaNext('signInWithPassword', { data: {}, error: { message: 'Invalid login credentials' } });
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('That password is wrong.');
+    expect(bridge.registry['acct-err'].hidden).toBe(false);
+    // The check ran, and NOTHING else did.
+    expect(bridge.supaCalls().map((c) => c[0])).toEqual(['signInWithPassword']);
+    expect(bridge.registry['acct-save'].disabled).toBe(false);
+    expect(bridge.registry['acct-page'].innerHTML).toContain('id="ae-new"');
+    expect(bridge.getState().account.pendingEmail).toBe(null);
+    expect(bridge.errors()).toEqual([]);
+  });
+
+  it('a right password sends updateUser to the root redirect and paints the pending screen', async () => {
+    const page = openEmail();
+    type('  m@work.com  ', SECRET);   // the address is trimmed; the password never is
+    bridge.supaNext('signInWithPassword', { data: { user: MORGAN }, error: null });
+    bridge.supaNext('updateUser', { data: { user: MORGAN }, error: null });
+    await submit();
+
+    // The order is the whole point: the password is proven BEFORE the address is changed.
+    expect(bridge.supaCalls()).toEqual([
+      ['signInWithPassword', { email: 'morgan@email.com', password: SECRET }],
+      ['updateUser', { email: NEW }, { emailRedirectTo: 'http://localhost' }],
+    ]);
+
+    const html = page.innerHTML;
+    expect(html).toContain('class="au-mark is-mail"');
+    expect(html).toContain('<h2 class="auth-title">Confirm your new email</h2>');
+    expect(html).toContain('We sent a link to <span class="au-em">m@work.com</span>. Until you tap it, sign in with your old address.');
+    expect(html).toContain("To keep your old address, just don't tap the link.");
+    expect(count(html, 'id="acct-err"')).toBe(1);
+    expect(html).toContain('id="acct-done"');
+    expect(html).toContain('>Done<');
+    expect(html).toContain('id="acct-resend"');
+    expect(html).toContain('>Resend the link<');
+    // GoTrue has no cancel, and the expiry is a dashboard value this client cannot read.
+    expect(html).not.toContain('Cancel this change');
+    expect(html).not.toMatch(/expire/i);
+    // A confirmation is not a form: a form with no submit listener navigates the page on Enter, so this
+    // screen ships none at all.
+    expect(html).not.toContain('<form');
+    expect(html).not.toContain('id="acct-form"');
+    expect(html).not.toMatch(/—|&mdash;|night/i);
+
+    expect(bridge.getState().account.pendingEmail).toBe(NEW);
+    expect(bridge.acctPending()).toBe(NEW);
+    expect(bridge.errors()).toEqual([]);
+  });
+
+  it('Done lands on the card, which now carries the Pending tag beside the address that still works', async () => {
+    await sent();
+    fireClick(bridge.registry['acct-done'], {});
+    expect(bridge.registry['acct-page']).toBeFalsy();
+    const card = bridge.registry['account-menu'];
+    expect(card).toBeTruthy();
+    expect(card.innerHTML).toContain('class="acc-tag">Pending<');
+    // The old address is still the account's until the link is tapped, so the row still reads it.
+    expect(card.innerHTML).toContain('class="acc-rv">morgan@email.com<');
+
+    // The chevron on the pending screen goes to the card too. Never back into the form: its password
+    // field is gone, and re-asking for a password nobody needs again is the wrong step back.
+    bridge.reset();
+    const page = await sent();
+    fireClick(page, { target: synth('[data-acct-back]', {}) });
+    expect(bridge.registry['acct-page']).toBeFalsy();
+    expect(bridge.registry['account-menu']).toBeTruthy();
+    expect(bridge.registry['account-menu'].innerHTML).toContain('class="acc-tag">Pending<');
+  });
+
+  it('Resend asks for another email_change link at the NEW address, on this screens error line', async () => {
+    await sent();
+    const btn = bridge.registry['acct-resend'];
+    expect(btn.listeners.click.length).toBe(1);
+    bridge.supaNext('resend', { data: {}, error: null });
+    await btn.listeners.click[0]({});
+    expect(bridge.supaCalls().at(-1)).toEqual(['resend', {
+      type: 'email_change', email: NEW, options: { emailRedirectTo: 'http://localhost' },
+    }]);
+    expect(btn.textContent).toBe('Sent again');
+    expect(bridge.registry['acct-err'].hidden).toBe(true);
+
+    // A refusal writes THIS screen's error line, never the auth page's, and hands nothing back silently.
+    bridge.reset();
+    await sent();
+    const btn2 = bridge.registry['acct-resend'];
+    bridge.supaNext('resend', { data: null, error: { message: 'email rate limit exceeded' } });
+    await btn2.listeners.click[0]({});
+    expect(bridge.registry['acct-err'].textContent).toContain('try again');
+    expect(bridge.registry['acct-err'].hidden).toBe(false);
+    expect(btn2.disabled).toBe(true);
+  });
+
+  it('the cooldown hands this control back ITS own label, not the sign-up screens', async () => {
+    await sent();
+    const btn = bridge.registry['acct-resend'];
+    bridge.supaNext('resend', { data: {}, error: null });
+    const undo = bridge.swapTimeout((fn) => fn());   // run the cooldown callback the moment it is set
+    try { await btn.listeners.click[0]({}); } finally { undo(); }
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toBe('Resend the link');
+  });
+
+  it('the pending screen binds its two controls once per paint and leaves no form bound', async () => {
+    await sent();
+    expect(bridge.registry['acct-done'].listeners.click.length).toBe(1);
+    expect(bridge.registry['acct-resend'].listeners.click.length).toBe(1);
+    // The form of the screen before it is gone from the markup, so nothing is bound to it: an unbound
+    // form is the one that navigates the page on Enter.
+    expect((bridge.registry['acct-form'].listeners.submit || []).length).toBe(0);
+    // A repaint of the same view replaces the controls, so it can never stack a second handler.
+    bridge.renderAcct();
+    expect(bridge.registry['acct-done'].listeners.click.length).toBe(1);
+    expect(bridge.registry['acct-resend'].listeners.click.length).toBe(1);
+  });
+
+  it('a taken address and any other refusal read differently, and neither loses the form', async () => {
+    openEmail();
+    type(NEW, SECRET);
+    bridge.supaNext('signInWithPassword', { data: {}, error: null });
+    bridge.supaNext('updateUser', { data: null, error: { message: 'A user with this email address has already been registered' } });
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('That email already has an account.');
+    expect(bridge.registry['acct-page'].innerHTML).toContain('id="ae-new"');
+    expect(bridge.registry['acct-save'].disabled).toBe(false);
+    expect(bridge.getState().account.pendingEmail).toBe(null);
+
+    // Anything else falls through to the shared map, and the raw server string is never shown.
+    bridge.supaNext('signInWithPassword', { data: {}, error: null });
+    bridge.supaNext('updateUser', { data: null, error: { message: 'Unable to validate email address: invalid format' } });
+    await submit();
+    expect(bridge.registry['acct-err'].textContent).toBe('Enter a valid email address.');
+    expect(bridge.registry['acct-err'].textContent).not.toContain('Unable to validate');
+    expect(bridge.errors()).toEqual([]);
+  });
+
+  it('the password is never trimmed, never sent to updateUser, never on state and never logged', async () => {
+    openEmail();
+    const RAW = '  spaces  matter  ';
+    type(NEW, RAW);
+    bridge.supaNext('signInWithPassword', { data: { user: MORGAN }, error: null });
+    bridge.supaNext('updateUser', { data: { user: MORGAN }, error: null });
+    await submit();
+
+    const check = bridge.supaCalls().find((c) => c[0] === 'signInWithPassword');
+    expect(check[1].password).toBe(RAW);   // exactly as typed: a space is a character someone chose
+    const upd = bridge.supaCalls().find((c) => c[0] === 'updateUser');
+    expect(JSON.stringify(upd)).not.toContain('spaces');
+    expect(JSON.stringify(bridge.getState())).not.toContain('spaces');
+    expect(JSON.stringify(bridge.errors())).not.toContain('spaces');
+    // Not in the markup either: the field is re-rendered away, never re-rendered with a value.
+    expect(bridge.registry['acct-page'].innerHTML).not.toContain('spaces');
+  });
+
+  it('the SIGNED_IN the password check emits for the same account runs nothing', async () => {
+    openEmail();
+    type(NEW, SECRET);
+    bridge.supaNext('signInWithPassword', { data: { user: MORGAN }, error: null });
+    bridge.supaNext('updateUser', { data: { user: MORGAN }, error: null });
+    bridge.resetPostRuns();
+    await submit();
+    // The real client answers a successful signInWithPassword with a SIGNED_IN for the SAME user, which
+    // isNewSignIn reads as a repeat: no heavy path, no overlay torn down under the person.
+    await bridge.authEvent('SIGNED_IN', { user: MORGAN });
+    await bridge.flushTimers();
+    expect(bridge.postSignInRuns()).toBe(0);
+    expect(bridge.registry['acct-page']).toBeTruthy();
+    expect(bridge.registry['acct-page'].innerHTML).toContain('Confirm your new email');
+    // The screen names the address from its own module var, so an auth event re-deriving state.account
+    // cannot blank the sentence the person is reading.
+    expect(bridge.acctPending()).toBe(NEW);
   });
 });
