@@ -132,15 +132,22 @@ describe('buildMyTeamPageHTML — signed-in + claimed (single scroll)', () => {
     expect(html).not.toContain('class="mt-pip'); // the dots are gone
   });
 
-  // README §4: the next-game block reads as a sentence. The NET tile repeated the net and was
-  // removed; the countdown line was dropped.
-  it('reads the next game as a sentence, with no NET tile and no countdown', () => {
+  // Design round 2026-08-22/23 (the Tournament handoff, ported 2026-08-25): the next-game card is a NET tile
+  // (reinstated on purpose — the numeral appears exactly once now that the matchup line no longer names the
+  // net), a "vs Opponent" headline, the queue position as a fact, a stage footer and the Report score action.
+  it('renders the next-game card: net tile, vs headline, stage footer, no countdown', () => {
     expect(html).toContain('class="mt-next"');
     expect(html).toContain('class="mt-nl"');
     expect(html).toContain('>Your next game<');
-    expect(html).toContain('vs <b>Dinks</b>');
-    expect(html).not.toContain('class="mt-nettile"');
+    expect(html).toContain('class="mtv-ntile"');
+    expect(html).toContain('class="mtv-ntn">1<');
+    expect(html).toContain('class="mtv-nvs">vs<');
+    expect(html).toContain('<b>Dinks</b>');
+    expect(html).toContain('class="mtv-nstage">Pool play<');
+    expect(html).toContain('data-mt-report="gA3"'); // the live next game -> Finish game
+    expect(html).toContain('>Finish game<');
     expect(html).not.toContain('HAPPENING NOW');
+    expect(html).not.toContain('min');
   });
 
   it('stacks BOTH Games and the roster in one render — no toggle', () => {

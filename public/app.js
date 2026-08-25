@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3158,8 +3158,12 @@ function buildBracketNodeHTML(m, matches, teams, canSubmit, pathIds, seedByTeam,
   // data-next = the match this winner advances to — layoutBracketTree reads it off the DOM to draw the
   // connector line, so it works for BOTH the live bracket and the teamless format preview.
   const nextAttr = m.winner_next_match_id ? ` data-next="${escapeHTML(String(m.winner_next_match_id))}"` : '';
-  const roCls = (isChamp ? ' pd-bk-champ' : '') + (isLiveNode ? ' pd-bk-live' : '');
-  return `<div class="bt-node${pathIds.has(m.id) ? ' path' : ''}${roCls}" data-mid="${escapeHTML(m.id)}"${nextAttr}>${meta}${body}</div>`;
+  // Public scoring (2026-08-25): on the read-only tree a two-team, not-yet-final game is a tap target for a
+  // signed-in player (the delegate opens the shared sheet); a feeder-pending or finished node carries no hook.
+  const scorable = ro && canScoreMatch(m);
+  const hook = scorable ? ` data-pg-score="${escapeHTML(String(m.id))}" role="button" tabindex="0"` : '';
+  const roCls = (isChamp ? ' pd-bk-champ' : '') + (isLiveNode ? ' pd-bk-live' : '') + (scorable ? ' tappable' : '');
+  return `<div class="bt-node${pathIds.has(m.id) ? ' path' : ''}${roCls}" data-mid="${escapeHTML(m.id)}"${nextAttr}${hook}>${meta}${body}</div>`;
 }
 
 // Shared modal-title label for a match: bracket -> "G{n}" (continuous game number, Mike 2026-06-27),
@@ -3208,7 +3212,8 @@ function buildBracketHTML(tournament, matches, teams, opts = {}) {
 
   // C57: map-style bracket — pinch to zoom, drag any direction to pan (gestures handle it, no zoom buttons).
   // Mike removed the [- Fit +] control; keep a one-line hint so scoring stays discoverable.
-  const zoomToggle = `<div class="bt-bar"><span class="bt-hint">${ro ? 'Tap a team for its record · pinch or drag to zoom' : (opts.preview ? 'Bracket format · teams seed in once pools finish' : 'tap a match to enter its score')}</span></div>`;
+  const roHint = (state.account || state.isAdmin) ? 'Tap a game to enter its score · tap a team for its record · pinch or drag to zoom' : 'Tap a team for its record · pinch or drag to zoom';
+  const zoomToggle = `<div class="bt-bar"><span class="bt-hint">${ro ? roHint : (opts.preview ? 'Bracket format · teams seed in once pools finish' : 'tap a match to enter its score')}</span></div>`;
 
   // Columns left-to-right = rounds; connector lines between them are drawn post-render.
   const sideMatches = main.filter((m) => m.side === side);
@@ -4327,20 +4332,25 @@ function buildPoolsSchedulePageHTML() {
           // order kept so the score pair still reads winner–loser (§27 TRUE). The tag reads DONE, never FINAL.
           return `<div class="pl-g"><span class="rd">G${escapeHTML(String(order))}</span><span class="gt"><span class="win">${w}</span> <span class="vs">vs</span> <span class="lose">${l}</span></span><span class="sc">${escapeHTML(String(ws))}${EN}${escapeHTML(String(ls))}</span><span class="ftag">DONE</span></div>`;
         }
+        // Public scoring (2026-08-25): a not-yet-final game a signed-in player can see is a game they can score —
+        // the row carries the match id; the delegate opens the shared score sheet. A finished game carries no hook.
+        const hook = canScoreMatch(g) ? ` data-pg-score="${escapeHTML(String(g.id))}"` : '';
         if (g.status === 'live') {
           const sa = Number(g.score_a) || 0, sb = Number(g.score_b) || 0;
-          return `<div class="pl-g live"><span class="rd">G${escapeHTML(String(order))}</span><span class="gt">${aTap} <span class="vs">vs</span> ${bTap}</span><span class="sc">${sa}${EN}${sb}</span><span class="pill">LIVE</span></div>`;
+          return `<div class="pl-g live"${hook}><span class="rd">G${escapeHTML(String(order))}</span><span class="gt">${aTap} <span class="vs">vs</span> ${bTap}</span><span class="sc">${sa}${EN}${sb}</span><span class="pill">LIVE</span></div>`;
         }
-        return `<div class="pl-g"><span class="rd">G${escapeHTML(String(order))}</span><span class="gt up">${aTap} <span class="vs">vs</span> ${bTap}</span><span class="ftag">UP NEXT</span></div>`;
+        return `<div class="pl-g"${hook}><span class="rd">G${escapeHTML(String(order))}</span><span class="gt up">${aTap} <span class="vs">vs</span> ${bTap}</span><span class="ftag">UP NEXT</span></div>`;
       }).join('');
       return `<div class="pl-net">NET ${escapeHTML(String(net))}</div>${rows}`;
     }).join('');
     // Design round: a caption under the games header states the emphasis rule. Rendered ONLY when a real team
     // is resolved AND that team actually plays in THIS pool — a spectator with no claim, or one looking at a
     // pool their team isn't in, never sees a dangling or untrue "is your team".
-    const mineHere = myTeamId && poolMatches.some((m) => m.team_a_id === myTeamId || m.team_b_id === myTeamId);
-    const legend = mineHere && myTeam.teamName
-      ? `<div class="pl-sect pl-legend"><b>${escapeHTML(myTeam.teamName)}</b> is your team</div>`
+    // Design round 2026-08-24: the caption under the Games head is the tap hint (the your-team legend went —
+    // the blue chip + the You tag carry it). "enter", never "fix": a finished score is organizer-only (0039).
+    // Rides .pl-sect so it inherits the ≥1024 column; rendered only for someone who can actually score.
+    const legend = (state.account || state.isAdmin)
+      ? '<p class="pl-sect pl-tip">Tap any game to enter its score.</p>'
       : '';
     body = `<div class="pl-sect">Pool ${escapeHTML(pool.label || '')} standings</div>${colh('Seeding in pool ' + (pool.label || ''))}${standRows}<div class="pl-sect">Games${netsLabel ? ' · ' + escapeHTML(netsLabel) : ''}</div>${legend}${gsections}`;
   }
@@ -6739,10 +6749,24 @@ function buildMyTeamPageHTML() {
   // Design round: the next-game block reads as one sentence — "Your next game / at Net 3 vs Sand Sharks".
   // The NET tile went (it repeated the net the sentence already names) and so did the countdown tail
   // (~12 min / N games ahead), which was a guess dressed as a fact. Net is only spoken when we know it.
-  const nextStrip = tl.next ? `<div class="mt-next">
-      <div><div class="mt-nl">Your next game</div>
-        <div class="mt-nv">${tl.next.net ? `at <b>Net ${escapeHTML(String(tl.next.net))}</b> ` : ''}vs <b>${escapeHTML(tl.next.oppName || 'TBD')}</b></div>
+  // Design round 2026-08-22/23 (Mike: "separate the details here, each gets its own row", "it's just very
+  // bland", "can it say where we are in the tournament"): the net is a white TILE with the numeral (shown
+  // only when a net is assigned — the numeral appears exactly once), the matchup is the headline, the queue
+  // position "after G4" is a FACT off my net's queue (never an ETA — the 2026-08-03 objection), and a hairline
+  // footer carries the stage word + the Report score action (public scoring, 2026-08-25). .is-elim marks the
+  // losers side, where a loss ends the run.
+  const nx = tl.next;
+  const stageWord = !nx ? '' : (nx.phase === 'main'
+    ? ('Bracket · ' + (nx.side === 'grand_final' ? 'Championship' : nx.side === 'losers' ? 'Losers' : 'Winners'))
+    : 'Pool play');
+  const nextStrip = nx ? `<div class="mt-next">
+      ${nx.net ? `<div class="mtv-ntile"><span class="mtv-ntl">Net</span><b class="mtv-ntn">${escapeHTML(String(nx.net))}</b></div>` : ''}
+      <div class="mtv-nbody">
+        <div class="mtv-nhead"><span class="mt-nl">Your next game</span></div>
+        <div class="mtv-nopp"><span class="mtv-nvs">vs</span><b>${escapeHTML(nx.oppName || 'TBD')}</b></div>
+        ${nx.afterGame ? `<div class="mtv-nwhen">after G${escapeHTML(String(nx.afterGame))}</div>` : ''}
       </div>
+      <div class="mtv-nfoot"><span class="mtv-nstage${nx.side === 'losers' ? ' is-elim' : ''}">${escapeHTML(stageWord)}</span>${(state.account && nx.id) ? `<button type="button" class="mtv-obtn" data-mt-report="${escapeHTML(String(nx.id))}">${nx.live ? 'Finish game' : 'Report score'}</button>` : ''}</div>
     </div>` : '';
 
   // GAMES rows (stacked, no toggle): zip rec.results with the same finals list to recover each game's net
@@ -9938,8 +9962,10 @@ function mgScoreNextHTML(match) {
 
 // The primary action's label. The LEADER is what it names, so the button can never claim a winner the score
 // contradicts (tapping a team swaps the numbers to match — see openMgScoreSheet).
-function mgScoreFinalLabel(aName, bName, a, b, isFinal) {
+function mgScoreFinalLabel(aName, bName, a, b, isFinal, pick) {
   const leader = a > b ? aName : (b > a ? bName : null);
+  // A bracket winner with no score kept (2026-08-24 round): the tap alone is the result.
+  if (!leader && pick && a === 0 && b === 0 && !isFinal) return 'Save winner · ' + (pick === 'a' ? aName : bName);
   if (!leader) return isFinal ? 'Enter a winning score' : 'Final · set the score to pick a winner';
   return (isFinal ? 'Save · ' : 'Final · ') + leader + ' wins ' + Math.max(a, b) + '–' + Math.min(a, b);
 }
@@ -9949,6 +9975,26 @@ function mgScoreFinalLabel(aName, bName, a, b, isFinal) {
 // tdbSubmitResult, bracket final → tdbSubmitBracketResult, edit-final → tdbEditMatchScore, live →
 // tdbSetLiveScore. Round 2026-08-03: a CENTRED popup on the shared dialog kit, one framed box, a row per
 // team doing both jobs (winner radio + pill stepper), the consequence line, then one primary action.
+// Who may open the score sheet on THIS device for THIS match (design round 2026-08-24; Mike 2026-08-25:
+// public scoring is back for signed-in players — it was read-only since 2026-07-11). Admins: any game with
+// two teams (Manage fixes finals). Signed-in players: a two-team game that is not final — the DB refuses a
+// player's overwrite anyway (0039), so the card never offers it. Anon: nothing. The RPCs behind the card
+// (submit_match_score / set_live_score) are SECURITY DEFINER and validate everything server-side.
+function canScoreMatch(match) {
+  if (!match || !match.team_a_id || !match.team_b_id) return false;
+  if (state.isAdmin) return true;
+  if (!state.account) return false;
+  return match.status !== 'final';
+}
+// The rule line in plain words from the TOURNAMENT'S OWN settings (Mike 2026-08-25: "always just say what the
+// tournament settings have") — never a literal. scoringRulesFor drops the cap on the championship.
+function mgScoreHint(match, rules) {
+  const who = match.phase === 'main'
+    ? ((match.side === 'grand_final' && Number(match.round) === 1) ? 'The championship goes' : 'Bracket games go')
+    : 'Pool games go';
+  return who + ' to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ', cap ' + rules.cap + '.' : ', no cap.');
+}
+
 function buildMgScoreSheetHTML(match, winner) {
   if (!match) return '';
   const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];
@@ -9969,8 +10015,7 @@ function buildMgScoreSheetHTML(match, winner) {
     if (match.queue_order) bits.push('Game ' + match.queue_order); // Rn → Gn (round 2026-08-03)
   }
   if (match.net) bits.push('Net ' + match.net);
-  bits.push(mgRuleLine(rules));
-  const meta = bits.filter(Boolean).join(' · ');
+  const meta = bits.filter(Boolean).join(' · '); // the rule moved off the eyebrow into the hint (2026-08-25)
   // Which side is marked the winner. Explicit pick when the caller has one, else the score leader.
   const pick = winner || (a > b ? 'a' : (b > a ? 'b' : null));
 
@@ -10002,27 +10047,33 @@ function buildMgScoreSheetHTML(match, winner) {
   // sentence true needs a scoreless-final path in the DB (an RPC that accepts a winner with no
   // score); until then the tap still does real work - it picks the winner, and swaps the
   // numbers when a score is already in so the pick and the scoreboard can never disagree.
-  const hint = isFinal
+  // Design round 2026-08-24: the rule sentence leads (derived, per tournament), then the instruction. A
+  // bracket winner can be saved WITHOUT a score (the RPC allows it for phase 'main'); a pool game cannot.
+  const hint = mgScoreHint(match, rules) + ' ' + (isFinal
     ? 'Fixing the score. Same winner only. To change who won, clear the result first.'
-    : 'Tap a team to mark them the winner, then enter the score.';
+    : (match.phase === 'main' ? 'Tap the team that won. Add the score if you kept one.' : 'Tap a team to mark them the winner, then enter the score.'));
+  // The primary is live when the save would be accepted: a bracket game needs a pick (score optional, a tied
+  // non-zero score is still a tie); a pool game needs a decided score.
+  const canFinal = match.phase === 'main' ? (!!pick && !(a === b && a > 0)) : a !== b;
   const body = `<div class="mgv-scbody">`
     + `<div class="mgv-scbox">${row('a', aName, a)}${row('b', bName, b)}</div>`
     + `<div class="mgv-schint">${escapeHTML(hint)}</div>`
     + `<div class="mgss-err" id="mgss-err" hidden></div>`
     + mgScoreNextHTML(match)
     + `</div>`;
-  const primary = `<button type="button" class="mgv-scfinal" data-mgss="${isFinal ? 'edit' : 'final'}"${a === b ? ' disabled' : ''}>`
-    + `${escapeHTML(mgScoreFinalLabel(aName, bName, a, b, isFinal))}</button>`;
-  const quiet = isFinal ? '' : `<button type="button" class="mgv-sclive" data-mgss="live">Update the live score without ending the game</button>`;
+  const primary = `<button type="button" class="mgv-scfinal" data-mgss="${isFinal ? 'edit' : 'final'}"${canFinal ? '' : ' disabled'}>`
+    + `${escapeHTML(mgScoreFinalLabel(aName, bName, a, b, isFinal, pick))}</button>`;
+  // "add to the score card a way for live scoring that can be saved" (2026-08-24): the secondary saves the
+  // running score and keeps the game in progress.
+  const quiet = isFinal ? '' : `<button type="button" class="mgv-sclive" data-mgss="live">${match.status === 'live' ? 'Update live score' : 'Save live score'}</button>`;
   return head + body + `<div class="mgv-scfoot">${primary}${quiet}</div>`;
 }
 
 function closeMgScoreSheet() { const el = document.getElementById('mgss-sheet'); if (el) el.remove(); }
 
 function openMgScoreSheet(matchId) {
-  if (!state.isAdmin) return;
   const match = (Array.isArray(state.tournamentMatches) ? state.tournamentMatches : []).find((m) => m.id === matchId);
-  if (!match || !match.team_a_id || !match.team_b_id) return;
+  if (!canScoreMatch(match)) return; // admins, or a signed-in player on a not-yet-final game (2026-08-25)
   closeMgScoreSheet();
   const aName = teamNameById(state.tournamentTeams, match.team_a_id) || 'Team A';
   const bName = teamNameById(state.tournamentTeams, match.team_b_id) || 'Team B';
@@ -10062,32 +10113,42 @@ function openMgScoreSheet(matchId) {
     });
     const btn = scrim.querySelector('.mgv-scfinal');
     if (btn) {
-      if (a !== b) btn.removeAttribute('disabled'); else btn.setAttribute('disabled', 'true');
-      btn.textContent = mgScoreFinalLabel(aName, bName, a, b, isFinal);
+      const canFinal = match.phase === 'main' ? (!!pick && !(a === b && a > 0)) : a !== b;
+      if (canFinal) btn.removeAttribute('disabled'); else btn.setAttribute('disabled', 'true');
+      btn.textContent = mgScoreFinalLabel(aName, bName, a, b, isFinal, pick);
     }
   };
+  // After a write: Manage repaints its own board; the public Tournament tab rebuilds its container (standings
+  // are derived from matches, so a public save re-sorts and renumbers with no client arithmetic).
+  const afterSave = () => { if (activeMainTab === 'manage') repaintManage(); else partialRenderTournament(); };
   const doFinal = async () => {
     if (submitting) return;
-    if (a === b) { fail('A game can\'t end in a tie.'); return; }
+    const scoreless = match.phase === 'main' && !isFinal && a === 0 && b === 0 && !!pick;
+    if (!scoreless && a === b) { fail('A game can\'t end in a tie.'); return; }
     submitting = true;
     try {
-      if (!(await confirmBigMargin(String(a), String(b)))) { submitting = false; return; }
-      if (isFinal) await tdbEditMatchScore(match, String(a), String(b));
-      else if (match.phase === 'main') await tdbSubmitBracketResult(match, a > b ? 'a' : 'b', String(a), String(b));
-      else await tdbSubmitResult(match, String(a), String(b));
+      if (scoreless) {
+        await tdbSubmitBracketResult(match, pick, '', ''); // the tap alone is the result (submit_match_score p_winner_side)
+      } else {
+        if (!(await confirmBigMargin(String(a), String(b)))) { submitting = false; return; }
+        if (isFinal) await tdbEditMatchScore(match, String(a), String(b));
+        else if (match.phase === 'main') await tdbSubmitBracketResult(match, a > b ? 'a' : 'b', String(a), String(b));
+        else await tdbSubmitResult(match, String(a), String(b));
+      }
       await tdbRefreshTournaments();
       closeMgScoreSheet();
-      repaintManage();
+      afterSave();
     } catch (e) { fail((e && e.message) || 'Could not save the result.'); submitting = false; }
   };
   const doLive = async () => {
     if (submitting) return;
+    if (a === 0 && b === 0) { fail('Add a point to at least one team first.'); return; } // never flip a scheduled game live at 0-0
     submitting = true;
     try {
       await tdbSetLiveScore(match, a, b);
       await tdbRefreshTournaments();
       closeMgScoreSheet();
-      repaintManage();
+      afterSave();
     } catch (e) { fail((e && e.message) || 'Could not update the live score.'); submitting = false; }
   };
   scrim.addEventListener('click', (ev) => {
@@ -11563,6 +11624,12 @@ function attachHandlers() {
       // falls through to navigation. (The peek's own X is bound in openTeamPeek — it lives on document.body.)
       const peekBtn = e.target.closest('[data-team-peek]');
       if (peekBtn) { openTeamPeek(peekBtn.getAttribute('data-team-peek'), peekBtn); return; }
+      // Public scoring (2026-08-25): a pool row / bracket node / My Team "Report score" opens the shared score
+      // sheet. Checked AFTER the team-peek branch so a tap on a team NAME still peeks (the design's rule).
+      const pgScore = e.target.closest('[data-pg-score]');
+      if (pgScore) { openMgScoreSheet(pgScore.getAttribute('data-pg-score')); return; }
+      const mtReport = e.target.closest('[data-mt-report]');
+      if (mtReport) { openMgScoreSheet(mtReport.getAttribute('data-mt-report')); return; }
       // Pools & schedule tab strip (Mike H): POOL + SEEDING tabs — client-side, pdPoolFilter survives
       // partialRender. Container-swap partial repaint only (never a full render() from a tab tap).
       const plTab = e.target.closest('[data-pl-tab]');

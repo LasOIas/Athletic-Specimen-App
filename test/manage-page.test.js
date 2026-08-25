@@ -1158,14 +1158,14 @@ describe('buildMgScoreSheetHTML — the shared score sheet (T7 defines, T8 reuse
     expect(html).toContain('Sets &amp; Reps');
     expect(html).toContain('Pool A');
     expect(html).toContain('Net 1');
-    expect(html).toContain('First to 15'); // targets from the tournament fields
+    expect(html).toContain('Pool games go to 15, win by 2, cap 20.'); // targets from the tournament fields, now the hint sentence (2026-08-25)
     expect(html).toContain('data-mgss-step="a"');
     expect(html).toContain('data-mgss-step="b"');
     expect(html).toContain('id="mgss-a"');
     expect(html).toContain('id="mgss-b"');
     expect(html).toContain('Dink Responsibly wins 12' + EN + '9'); // leader-first final label
     expect(html).toContain('data-mgss="final"');
-    expect(html).toContain('Update the live score without ending the game');
+    expect(html).toContain('>Update live score<'); // the live game's secondary (design round 2026-08-24 copy)
     expect(html).toContain('data-mgss="live"');
   });
 
@@ -1208,7 +1208,7 @@ describe('buildMgScoreSheetHTML — the shared score sheet (T7 defines, T8 reuse
     const html = bridge.buildScoreSheet(bm);
     expect(html).toContain('Dink Responsibly');
     expect(html).toContain('Net 3');
-    expect(html).toContain('First to 21'); // bracket_target from the fixture → proves phase-generic
+    expect(html).toContain('Bracket games go to 21'); // bracket_target from the fixture → proves phase-generic (hint sentence, 2026-08-25)
     expect(html).toContain('data-mgss="final"');
   });
 });

@@ -2952,6 +2952,10 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   /* (Bracket keeps its full-width tree + champions strip from the widened container; pan stays available.)
      2026-08-25: only the bracket page's PROSE takes a line measure — the tree stays full width. */
   body.pd-public-active #tab-tournament :is(.pd-bk-pres, .pd-bk-preh, .bk-pv, .bk-pv-ss) { max-width: 640px; }
+  /* My Team next-game card at ≥1024: the footer's forced wrap existed "so both fit at 390px" — in the 720px
+     column the stage word and the button ride the main row instead of sitting 500px apart on an empty rule. */
+  body.pd-public-active .mt-next { flex-wrap: nowrap; }
+  body.pd-public-active .mtv-nfoot { flex: none; margin: 0 0 0 auto; padding-top: 0; border-top: 0; }
 
   /* ---- atom-up Home (2026-07-10 spec §3): rail + board at >=1024, CSS-only ----
      Mobile (<1024) is byte-identical — the flatten rules live in @media (max-width:1023px)
@@ -4728,3 +4732,128 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
   color: var(--muted);
   letter-spacing: .06em;
 }
+
+/* Round 2026-08-24 — the caption under the Games head is a plain tap hint (rides .pl-sect for the column,
+   with the head's type and rule turned back off). */
+.pl-tip {
+  margin: 4px 0 10px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.pl-tip::after { content: none; display: none; }
+
+/* Round 2026-08-22 — My Team · "Your next game": the net is a white TILE, the matchup is the headline. */
+.mt-next { align-items: stretch; gap: 12px; padding: 11px 12px; flex-wrap: wrap; }
+.mtv-ntile {
+  flex: none;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 1px;
+  width: 60px;
+  padding: 7px 0 8px;
+  border: 1px solid var(--accent-bd);
+  border-radius: 10px;
+  background: #fff;
+}
+.mtv-ntl {
+  font: 700 9px var(--font-display);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--brand-dark);
+}
+.mtv-ntn {
+  font: 800 30px var(--font-display);
+  line-height: .92;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.mtv-nbody { flex: 1; min-width: 0; display: grid; gap: 4px; align-content: center; }
+.mtv-nhead { display: flex; align-items: baseline; gap: 10px; }
+.mtv-nopp { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.mtv-nvs {
+  flex: none;
+  font: 700 10.5px var(--font-display);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mtv-nopp b {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mtv-nwhen { margin-top: 2px; font-size: 12px; color: var(--brand-dark); }
+/* the card's footer row — stage left, the score action right — so both fit at 390px */
+.mtv-nfoot {
+  flex: 1 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--accent-bd);
+}
+.mtv-nfoot .mtv-nstage { margin-left: 0; }
+.mtv-nfoot .mtv-obtn { margin-left: auto; }
+.mtv-nstage {
+  flex: none;
+  font: 700 10px var(--font-display);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.mtv-nstage.is-elim { color: oklch(0.52 0.17 25); }
+.mtv-obtn {
+  flex: none;
+  height: 36px;
+  min-height: 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px !important; /* PORT NOTE: counters prod's button { font-size: 16px !important } iOS guard */
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color .15s ease, transform .08s ease;
+}
+.mtv-obtn:hover { background: var(--brand-dark); }
+.mtv-obtn:active { transform: scale(.97); }
+
+/* Round 2026-08-22/24 — "just a basic scoring system is good": the score sheet's geometry — one component
+   for Manage AND the public pages (the .mgv-sc* markup and every data hook stay; only the look moves).
+   380px card, 40px stepper pills, 26px numerals, a stacked footer with the live save as a quiet white
+   secondary. PORT NOTE: the !important sizes counter prod's global button font-size guard. */
+#mgss-sheet .mgv-sccard { width: min(380px, calc(100vw - 1.25rem)); }
+#mgss-sheet .mgv-scb { width: 40px; height: 40px; min-width: 40px; min-height: 40px; border: 1px solid var(--border); border-radius: 10px; font-size: 18px !important; font-weight: 700; }
+#mgss-sheet .mgv-scb:hover { border-color: var(--accent-bd); background: var(--accent-soft); color: var(--accent); }
+#mgss-sheet .mgv-scval { min-width: 46px; font: 800 26px var(--font-display); font-variant-numeric: tabular-nums; }
+#mgss-sheet .mgv-scfoot { display: flex; flex-direction: column; gap: 8px; }
+#mgss-sheet .mgv-scfinal { height: 46px; border-radius: 12px; font-size: 15px !important; font-weight: 600; }
+#mgss-sheet .mgv-sclive {
+  width: 100%;
+  height: 42px;
+  min-height: 0;
+  border: 0;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(20, 20, 22, .05), 0 0 0 1px var(--border);
+  font-family: 'Inter', sans-serif;
+  font-size: 14px !important;
+  font-weight: 650;
+  color: var(--ink);
+  cursor: pointer;
+  transition: box-shadow .15s var(--e-settle, ease), transform .12s var(--e-settle, ease);
+}
+#mgss-sheet .mgv-sclive:hover { transform: translateY(-1px); box-shadow: 0 2px 5px rgba(20, 20, 22, .08), 0 0 0 1px oklch(0.86 0.006 75); }
+#mgss-sheet .mgv-sclive:active { transform: none; }

@@ -69,6 +69,10 @@ function loadApp() {
     ;globalThis.__bridge = {
       hub: () => buildTournamentHubHTML(),
       pools: () => buildPoolsSchedulePageHTML(),
+      myteam: () => buildMyTeamPageHTML(),
+      bracketNode: (m, opts) => buildBracketNodeHTML(m, [m], state.tournamentTeams, false, new Set(), {}, { byId: {}, byRoundLabel: {} }, opts || { readOnly: true }),
+      sheet: (m, pick) => buildMgScoreSheetHTML(m, pick),
+      canScore: (m) => canScoreMatch(m),
       getState: () => state,
       setPoolFilter: (v) => { pdPoolFilter = v; },
       setTournamentView: (v) => { pdTournamentView = v; },
@@ -209,6 +213,91 @@ describe('bracket geometry + view (design round 2026-08-24, Mike 2026-08-25: 1:1
     expect(cssText).toContain('.bt-sides button { font-size: 14px !important; white-space: nowrap; }');
     expect(cssText).toMatch(/\.bt-rlabel \{ position: absolute; top: 0; left: 0; right: 0;/);
     expect(cssText).toMatch(/\.bt-col \{ position: relative;[^}]*padding-top: 34px; \}/);
+  });
+});
+
+describe('public scoring for signed-in players (Mike 2026-08-25, reversing the 2026-07-11 read-only call)', () => {
+  it('canScoreMatch: admin any two-team game; a player only a not-final one; anon nothing', () => {
+    setState();
+    expect(bridge.canScore(MATCHES[1])).toBe(true);   // scheduled, two teams
+    expect(bridge.canScore(MATCHES[0])).toBe(false);  // final -> organizer-only (0039)
+    expect(bridge.canScore({ id: 'x', team_a_id: 't1', team_b_id: null, status: 'scheduled' })).toBe(false);
+    setState({ isAdmin: true });
+    expect(bridge.canScore(MATCHES[0])).toBe(true);
+    setState({ account: null, teamMembers: [] });
+    expect(bridge.canScore(MATCHES[1])).toBe(false);
+  });
+  it('pool rows: the not-final games carry the hook, the finished one does not; the tip replaces the legend', () => {
+    setState(); bridge.setTournamentView('pools'); bridge.setPoolFilter('A');
+    const html = bridge.pools();
+    expect(html).toContain('data-pg-score="gA2"');
+    expect(html).not.toContain('data-pg-score="gA1"');
+    expect(html).toContain('<p class="pl-sect pl-tip">Tap any game to enter its score.</p>');
+    expect(html).not.toContain('pl-legend');
+    setState({ account: null, teamMembers: [] });
+    const anon = bridge.pools();
+    expect(anon).not.toContain('data-pg-score');
+    expect(anon).not.toContain('pl-tip');
+  });
+  it('bracket nodes: a two-team not-final node is tappable for a signed-in player; TBD and final are not', () => {
+    setState();
+    const open = { id: 'b1', phase: 'main', side: 'winners', round: 1, slot: 0, status: 'scheduled', team_a_id: 't1', team_b_id: 't2' };
+    const html = bridge.bracketNode(open);
+    expect(html).toContain('data-pg-score="b1"');
+    expect(html).toContain(' tappable');
+    expect(bridge.bracketNode({ ...open, id: 'b2', team_b_id: null, source_b: 'Winner of WB R1 M1' })).not.toContain('data-pg-score');
+    expect(bridge.bracketNode({ ...open, id: 'b3', status: 'final', winner_team_id: 't1', score_a: 21, score_b: 15 })).not.toContain('data-pg-score');
+    setState({ account: null, teamMembers: [] });
+    expect(bridge.bracketNode(open)).not.toContain('data-pg-score');
+  });
+  it('the score sheet: rule sentence from the tournament settings, a scoreless bracket winner can be saved, a pool game cannot', () => {
+    setState({ tournaments: [{ id: 'T', name: 'August 2026 Tournament', status: 'bracket', pool_target: 15, pool_cap: 20, bracket_target: 21, bracket_cap: 25, win_by_2: true }] });
+    const poolGame = { ...MATCHES[1], tournament_id: 'T' };
+    const pool = bridge.sheet(poolGame, null);
+    expect(pool).toContain('Pool games go to 15, win by 2, cap 20.');
+    expect(pool).toContain('data-mgss="final" disabled');
+    expect(pool).not.toContain('&mdash;');
+    const br = { id: 'b1', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', score_a: 0, score_b: 0 };
+    const bracket = bridge.sheet(br, 'a');
+    expect(bracket).toContain('Bracket games go to 21, win by 2, cap 25.');
+    expect(bracket).toContain('>Save winner · Ballin<');
+    expect(bracket).not.toContain('data-mgss="final" disabled');
+    expect(bracket).toContain('>Save live score<');
+    const champ = bridge.sheet({ ...br, id: 'gf', side: 'grand_final', round: 1 }, null);
+    expect(champ).toContain('The championship goes to 21, win by 2, no cap.');
+    expect(champ).toContain('data-mgss="final" disabled'); // no pick yet
+  });
+  it('the sheet is gated by canScoreMatch, not by isAdmin; the live save refuses 0-0; a public save repaints the tab', () => {
+    const fn = appSrcText.slice(appSrcText.indexOf('function openMgScoreSheet('), appSrcText.indexOf('function openMgScoreSheet(') + 5200);
+    expect(fn).not.toContain('if (!state.isAdmin) return;');
+    expect(fn).toContain('if (!canScoreMatch(match)) return;');
+    expect(fn).toContain("fail('Add a point to at least one team first.')");
+    expect(fn).toContain("if (activeMainTab === 'manage') repaintManage(); else partialRenderTournament();");
+    expect(fn).toContain("tdbSubmitBracketResult(match, pick, '', '')");
+    expect(appSrcText).toContain("e.target.closest('[data-pg-score]')");
+    expect(appSrcText).toContain("e.target.closest('[data-mt-report]')");
+  });
+  it('My Team: tile only when a net is known, "after Gn" from the queue, Report score on the next game', () => {
+    setState();
+    const html = bridge.myteam();
+    expect(html).toContain('class="mtv-ntile"');
+    expect(html).toContain('class="mtv-ntn">2<');
+    expect(html).toContain('class="mtv-nvs">vs<');
+    expect(html).toContain('<b>Dinks</b>');
+    expect(html).toContain('class="mtv-nstage">Pool play<');
+    expect(html).toContain('data-mt-report="gA2"');
+    expect(html).toContain('>Report score<');
+    expect(html).not.toContain('mtv-nwhen'); // nothing ahead of gA2 on net 2
+    const t = pure.computeTeamRunTimeline('t1', MATCHES, TEAMS);
+    expect(t.next).toMatchObject({ id: 'gA2', phase: 'pool', side: null, afterGame: null, net: 2 });
+    const queued = pure.computeTeamRunTimeline('t1', [
+      ...MATCHES.filter((m) => m.id !== 'gA2'),
+      { id: 'x1', pool_id: 'p1', phase: 'pool', net: 2, queue_order: 2, status: 'scheduled', team_a_id: 't3', team_b_id: 't4' },
+      { id: 'gA2', pool_id: 'p1', phase: 'pool', net: 2, queue_order: 4, status: 'scheduled', team_a_id: 't2', team_b_id: 't1' },
+    ], TEAMS);
+    expect(queued.next.afterGame).toBe(2);
+    const bracketNext = pure.computeTeamRunTimeline('t1', [{ id: 'b1', phase: 'main', side: 'losers', round: 1, net: null, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 1 }], TEAMS);
+    expect(bracketNext.next).toMatchObject({ id: 'b1', phase: 'main', side: 'losers', afterGame: null, net: null });
   });
 });
 

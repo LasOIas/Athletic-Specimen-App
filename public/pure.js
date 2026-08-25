@@ -1231,9 +1231,16 @@ function computeTeamRunTimeline(teamId, matches, teams) {
       const median = gaps.length ? gaps[Math.floor(gaps.length / 2) - (gaps.length % 2 === 0 ? 1 : 0)] : null;
       const etaMin = (gaps.length >= 2 && aheadCount >= 1 && median != null) ? Math.round(median * aheadCount) : null;
       const isNow = aheadCount === 0 || n.status === 'live';
-      next = { net: n.net || null, oppName: o.oppName, gamesAhead: aheadCount, etaMin, isNow, label: isNow ? 'Playing now' : 'Up next' };
+      // Design round 2026-08-22 ("after G4"): the queue POSITION on my net — the highest game number still ahead
+      // of mine — is a fact on the board (unlike the ETA, which was a guess). null when nothing is ahead.
+      const ahead = list.filter((m) =>
+        m.phase === 'pool' && m.status !== 'final' && m.net === n.net &&
+        (Number(m.queue_order) || 0) < (Number(n.queue_order) || 0)).map((m) => Number(m.queue_order) || 0);
+      const afterGame = ahead.length ? Math.max(...ahead) : null;
+      // `live` = the game itself is being scored (status 'live'); `isNow` also covers "nothing ahead of you".
+      next = { id: n.id, phase: 'pool', side: null, afterGame, live: n.status === 'live', net: n.net || null, oppName: o.oppName, gamesAhead: aheadCount, etaMin, isNow, label: isNow ? 'Playing now' : 'Up next' };
     } else {
-      next = { net: n.net || null, oppName: o.oppName, gamesAhead: null, etaMin: null, isNow: n.status === 'live', label: n.status === 'live' ? 'Playing now' : 'Up next' };
+      next = { id: n.id, phase: 'main', side: n.side || null, afterGame: null, live: n.status === 'live', net: n.net || null, oppName: o.oppName, gamesAhead: null, etaMin: null, isNow: n.status === 'live', label: n.status === 'live' ? 'Playing now' : 'Up next' };
     }
   }
 
