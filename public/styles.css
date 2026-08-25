@@ -15,7 +15,7 @@
   --accent-soft: oklch(0.96 0.015 240);    /* accent tint (avatar bg, pills, icon tiles) */
   --live:        oklch(0.55 0.09 150);     /* muted green — live/positive/checked-in */
   --live-soft:   oklch(0.96 0.03 150);     /* muted-green tint — live status pill bg */
-  --warn:        oklch(0.58 0.10 70);      /* amber — admin cautions only */
+  --warn:        oklch(0.58 0.10 70);      /* amber — admin cautions and the password meter's middle step */
   /* dashboard remake (Slice 1, 2026-07-08) — used by the pd-* component kit */
   --accent-bd:   oklch(0.86 0.03 240);     /* accent border — pills, You-highlight, claim card */
   --live-ink:    oklch(0.40 0.09 150);     /* live text on live-soft */
@@ -2825,14 +2825,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 .tn-row.is-now { border-left: 3px solid var(--accent); padding-left: 10px; margin-left: -13px; }
 .tn-row.is-now .tn-sub { color: var(--live-ink); font-weight: 600; }
 .tn-row.is-locked { opacity: .45; }
-/* Signed-out gate */
-.tn-gate { text-align: center; padding-top: 78px; }
-.tn-glogo { height: 110px; width: auto; margin: 0 auto 18px; display: block; }
-.tn-gate-h { font-family: var(--font-display); font-size: 26px; font-weight: 700; color: var(--ink); margin: 0; }
-.tn-gate-p { font-size: 14px; color: var(--muted); margin-top: 8px; line-height: 1.5; padding: 0 18px; }
-.tn-gate-cta { width: 100%; margin-top: 22px; padding: 14px 0; min-height: 0; background: var(--accent); color: #fff; border: none; border-radius: 11px; font: 600 16px 'Inter', sans-serif; }
-@media (hover: hover) and (pointer: fine) { .tn-gate-cta:hover { background: var(--brand-dark); } }
-.tn-gate-alt { margin-top: 14px; font: 600 13.5px 'Inter', sans-serif; color: var(--brand-dark); cursor: pointer; }
+/* PORT NOTE (Account round 2026-08-25): the in-tab .tn-gate block is retired with its markup; the signed-out wall is the #gate-page overlay now. */
 /* Rules stub (shown only while tournaments.rules is unset) */
 .tn-rules-stub { text-align: center; padding: 48px 20px; }
 .tn-rules-ic { width: 56px; height: 56px; margin: 0 auto 14px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; }
@@ -2917,10 +2910,10 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   /* ---- Tournament hub: header card full width, tiles 4-across ---- */
   body.pd-public-active .pd-tiles { grid-template-columns: repeat(4, 1fr); }
 
-  /* ---- Tournament page atom-up (spec §4): the hub + gate stay a comfortable CENTERED column on desktop
+  /* ---- Tournament page atom-up (spec §4): the hub stays a comfortable CENTERED column on desktop
      (the .container widens to 1140px; the flat rows don't want to stretch that wide). ---- */
-  body.pd-public-active .tn-hub,
-  body.pd-public-active .tn-gate { max-width: 560px; margin-left: auto; margin-right: auto; }
+  body.pd-public-active .tn-hub { max-width: 560px; margin-left: auto; margin-right: auto; }
+  /* PORT NOTE (Account round 2026-08-25): the gate half of this clamp went with .tn-gate; the hub keeps its centred column. */
   body.pd-public-active .tn-title { font-size: 30px; }
 
   /* ---- Pools & schedule (Mike H): the tabbed page is a comfortable CENTERED reading column on desktop
@@ -6043,3 +6036,63 @@ input.pc-nin:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--accent),
 .mgh-prow.is-on {
   box-shadow: inset 0 0 0 1.5px var(--accent), 0 4px 12px -6px oklch(0.55 0.07 240 / .45);
 }
+
+/* ===== ACCOUNT DESIGN ROUND - 2026-08-25 (Mike's Claude Design handoff, "Account") ===== */
+/* Ported from the handoff's _rounds.css:2314-2348 (the ACCOUNT + AUTH FLOW block). It sits ON TOP of
+   production's .auth-* kit (auth-page / auth-inner / auth-title / auth-input / auth-submit / auth-alt)
+   and adds only what that kit has no piece for: the in-field reveal, the password meter, the
+   end-of-flow marks and the third-level link.
+   NOT ported: au-center (dead on arrival - every title it decorated is already centred by the kit),
+   and the whole vb-* confirm-your-email banner family (no banner ships this round). */
+.au-em { font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
+
+/* reveal - sits in the field's own right edge, so it never costs a row */
+.au-field { position: relative; }
+.au-field .auth-input { padding-right: 58px; }
+/* PORT NOTE: two raises off the design. (1) the 13px !important below counters production's iOS guard
+   on every button (font-size: 16px !important), which the shorthand alone could never have beaten, and
+   13px is the handoff's own type floor. (2) the 44px tap box is bought with PADDING, not height, so
+   bottom moves 7px -> -4px and the label's baseline stays exactly where the design drew it. */
+.au-reveal {
+  position: absolute; right: 0; bottom: -4px;
+  min-height: 44px; padding: 12px 2px; background: none; border: 0;
+  color: var(--accent); font: 700 12.5px 'Inter', sans-serif; letter-spacing: .02em;
+  font-size: 13px !important;   /* wins over the shorthand above regardless of order */
+}
+@media (hover: hover) and (pointer: fine) { .au-reveal:hover { background: none; color: var(--brand-dark); } }
+.au-reveal:active { transform: none; opacity: .6; }
+
+.au-note { font-size: 12.5px; color: var(--muted); margin: 7px 0 0; line-height: 1.45; }
+
+/* password meter - three states, no score theatre */
+.au-strength { display: flex; align-items: center; gap: 10px; margin: 9px 0 2px; }
+.au-sbar { flex: 1; height: 4px; border-radius: 999px; background: oklch(0.90 0.005 75); overflow: hidden; }
+/* PORT NOTE: the design's .18s ease is not one of the five shipped durations, so the fill moves on the
+   app's own --m-state / --e-settle pair, scaled by --m-scale so reduced motion is honoured. */
+.au-sfill {
+  display: block; height: 100%; width: 0; border-radius: 999px; background: var(--danger);
+  transition: width calc(var(--m-state) * var(--m-scale)) var(--e-settle),
+              background-color calc(var(--m-state) * var(--m-scale)) var(--e-settle);
+}
+.au-slab { flex: none; min-width: 46px; text-align: right; font: 700 10.5px 'Inter', sans-serif; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.au-strength.is-1 .au-sfill { width: 34%; background: var(--danger); }
+.au-strength.is-2 .au-sfill { width: 67%; background: var(--warn); }
+.au-strength.is-3 .au-sfill { width: 100%; background: var(--live); }
+
+/* the two end-of-flow marks */
+.au-mark { width: 62px; height: 62px; margin: 0 auto 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.au-mark svg { width: 28px; height: 28px; }
+.au-mark.is-mail { background: var(--accent-soft); color: var(--accent); }
+.au-mark.is-ok { background: var(--live-soft); color: var(--live-ink); box-shadow: 0 0 0 6px oklch(0.62 0.16 152 / .10); }
+
+/* third-level link under the two production buttons */
+/* PORT NOTE: the same iOS counter as .au-reveal - the 16px !important on every button would
+   otherwise win. The design shorthand is kept verbatim above it; !important beats it either way. */
+.au-alt2 {
+  display: block; width: 100%; margin-top: 4px; min-height: 40px; background: none; border: 0;
+  color: var(--muted); font: 600 13.5px 'Inter', sans-serif;
+  font-size: 13.5px !important;   /* wins over the shorthand above regardless of order */
+}
+@media (hover: hover) and (pointer: fine) { .au-alt2:hover { background: none; color: var(--ink); } }
+.au-alt2.is-danger { color: var(--danger); }
+@media (hover: hover) and (pointer: fine) { .au-alt2.is-danger:hover { background: none; color: var(--danger-dark); } }

@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.15'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.16'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3505,19 +3505,12 @@ let regSubmittedTeam = null;
 let regAutoAttached = false;
 let pdPoolFilter = 'all'; // Pools & schedule tab: 'seeding' | a pool label | 'all'/stale -> resolves to first pool — survives partialRender
 
-// Atom-up redesign (spec 2026-07-10 §1): the signed-out gate. The Tournament page is PERSONAL, so a
-// signed-out user gets ONLY this — a centered logo, "This page is yours", the personal-page line, a
-// full-width Sign in CTA, and a "Create an account" link. Both auth affordances carry data-role="tn-signin"
-// → the #app-content handler opens the existing openAuthPage() (its create toggle covers the new account).
-// FLAT on the stone (no card — the tamed watermark shows through, spec §1). Transcribed from tn5-gate.html.
+// The signed-out gate. Account round (2026-08-25): Mike picked the design's full-screen wall over the
+// old in-tab "This page is yours" block, so the panel behind it renders EMPTY and #gate-page (opened by
+// syncGatePage at navigation time) carries the copy and the two auth affordances. The slot stays so the
+// tab has a stable, non-collapsing body under the overlay.
 function buildTournamentGateHTML() {
-  return `<div class="tn-gate">
-      <img class="tn-glogo" src="/logo-mark.png" alt="" aria-hidden="true" />
-      <h1 class="tn-gate-h">This page is yours</h1>
-      <p class="tn-gate-p">The tournament page is personal. Your team, your games, your bracket run. Sign in to see it.</p>
-      <button type="button" class="tn-gate-cta" data-role="tn-signin">Sign in</button>
-      <div class="tn-gate-alt" data-role="tn-signin">New here? Create an account</div>
-    </div>`;
+  return '<div class="tn-gate-slot" aria-hidden="true"></div>';
 }
 
 // Rules slice (2026-07-10): the Rules page renders tournaments.rules (markdown-lite text Mike edits in
@@ -4240,6 +4233,7 @@ function openJoinSheet() {
       pdTournamentView = 'hub';
       const c = document.querySelector('#tab-tournament .container');
       if (c) c.innerHTML = buildPublicTournamentRootHTML();
+      syncGatePage(); // Account round: leaving register for the hub is a signed-out viewer's wall moment
       closeJoinSheet();
       return;
     }
@@ -6188,7 +6182,14 @@ function appPrompt({ title, message, value, confirmText, placeholder, danger } =
 // clean-centered), implemented as a .auth-page overlay appended to <body> so
 // partialRender never wipes it. On success onAuthStateChange sets state + re-renders.
 // ─────────────────────────────────────────────────────────────────────────────
-let authMode = 'signin';                 // 'signin' | 'signup'
+let authMode = 'signin';                 // 'signin' | 'signup' | 'signup-sent'
+const AUTH_PASSWORD_MIN = 8;             // Mike 2026-08-25: one number for sign-up, reset and change (the server minimum is 6)
+const AUTH_RESEND_MS = 60000;            // how long a Resend control waits before it can send again
+let authSentEmail = '';                  // the address a sent screen resends to (memory only; a reload loses it)
+let authResendUntil = 0;                 // cooldown deadline (ms) shared by every Resend control
+// The one back chevron every .auth-page overlay wears. Declared once so the wall and the auth page can
+// never drift apart (Account round 2026-08-25).
+const AUTH_BACK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>';
 let asCommunityId = null;                 // cached community uuid (read live, never hardcoded)
 
 async function fetchCommunityId() {
@@ -6221,61 +6222,118 @@ function closeAuthPage() {
   if (el) el.remove();
 }
 
-function openAuthPage() {
+function openAuthPage(mode) {
   closeAuthPage();
-  authMode = 'signin';
+  authMode = mode === 'signup' ? 'signup' : 'signin';
   const el = document.createElement('div');
   el.id = 'auth-page';
   el.className = 'auth-page';
   document.body.appendChild(el);
+  // Bound ONCE, on the overlay itself, never inside renderAuthPageInner: the mode toggle re-renders the
+  // same element, so binding there would stack a second reveal handler and the two would cancel out.
+  authBindOverlay(el);
   renderAuthPageInner();
+}
+
+// ── Account handoff (2026-08-25): the three pieces prod's .auth-* kit has no part for ──────────────
+// The in-field Show/Hide reveal, the advisory strength meter, and the one delegate that drives both.
+// They sit above renderAuthPageInner because every later screen in this round reuses them verbatim.
+function authFieldHTML(id, attrs, withMeter) {
+  return `<div class="au-field"><input class="auth-input" id="${id}" type="password" required ${attrs} />`
+    + `<button type="button" class="au-reveal" data-reveal="${id}" aria-pressed="false">Show</button></div>`
+    + (withMeter ? `<div class="au-strength" data-sbox><span class="au-sbar"><span class="au-sfill"></span></span><span class="au-slab"></span></div>` : '');
+}
+
+function authMeterUpdate(input) {
+  const box = input && input.form ? input.form.querySelector('[data-sbox]') : null;
+  if (!box) return;
+  const m = passwordMeterScore(input.value);   // pure.js: the value is read, never stored or logged
+  box.classList.remove('is-1', 'is-2', 'is-3');
+  if (m.score) box.classList.add('is-' + m.score);
+  const lab = box.querySelector('.au-slab');
+  if (lab) lab.textContent = m.label;
+}
+
+function authBindOverlay(el) {
+  el.addEventListener('click', (ev) => {
+    const r = ev.target.closest('[data-reveal]');
+    if (!r) return;
+    const inp = el.querySelector('#' + r.getAttribute('data-reveal'));
+    if (!inp) return;
+    const hidden = inp.type === 'password';
+    inp.type = hidden ? 'text' : 'password';   // the ONLY place a typed password is ever echoed
+    r.textContent = hidden ? 'Hide' : 'Show';
+    r.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+  });
+  el.addEventListener('input', (ev) => {
+    if (ev.target && ev.target.hasAttribute && ev.target.hasAttribute('data-strength')) authMeterUpdate(ev.target);
+  });
 }
 
 function renderAuthPageInner() {
   const el = document.getElementById('auth-page');
   if (!el) return;
   const signup = authMode === 'signup';
+  const sent = authMode === 'signup-sent';
   // Task 13 (2026-07-11): the quiet "Admin sign-in" link + code panel are GONE — email+password IS
   // the admin sign-in (owner/organizer role sets isAdmin in onAuthStateChange). .auth-inner stays a
   // wrapper DIV so the brand block can sit outside the form.
   // Mike AD+AC hybrid (task-#11, 2026-07-10): the brand block (big logo + Barlow wordmark) moves OUT
   // of the form to the TOP; the form (hairline-underline fields + full-width blue CTA) sits below.
   // Every element id is unchanged — handlers bind by id, so the mechanics are untouched.
-  el.innerHTML = `
-    <button type="button" class="auth-back" id="auth-back" aria-label="Close sign in">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>
-    </button>
-    <div class="auth-inner">
-      <div class="auth-brand">
+  // Account handoff (2026-08-25): three states of ONE overlay. The two form states keep prod's brand
+  // block; the sent state is the design's confirmation screen (mark, title, address, Resend) and drops
+  // the brand the way the handoff drew it. .auth-back stays on the shell in every state so the overlay
+  // always has an exit.
+  const brand = `<div class="auth-brand">
         <img class="auth-logo" src="logo-mark.png" alt="Athletic Specimen" />
         <div class="auth-wm"><div class="auth-wm-1">ATHLETIC SPECIMEN</div><div class="auth-wm-2">COLORADO</div></div>
-      </div>
+      </div>`;
+  // The sent screen is the branch signUp takes when it comes back with no session, i.e. when the
+  // project has Confirm email ON. It is dormant while that setting is OFF, and correct the moment Mike
+  // flips it. The typed address lives in memory only, so a reload lands on sign-in, which is what the
+  // copy tells them to do anyway.
+  const sentInner = `<div class="au-mark is-mail"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 7.5 8.5 6 8.5-6"/></svg></div>
+      <h2 class="auth-title">Check your email</h2>
+      <p class="auth-sub">We sent a link to <span class="au-em">${escapeHTML(authSentEmail)}</span>. Tap it, then sign in.</p>
+      <div class="auth-err" id="auth-err" role="alert" hidden></div>
+      <button type="button" class="auth-alt" id="auth-resend">Didn't get it? Resend</button>
+      <button type="button" class="au-alt2" id="auth-alt">Back to sign in</button>`;
+  const formInner = `${brand}
       <form id="auth-form" novalidate autocomplete="on">
         <h2 class="auth-title">${signup ? 'Create account' : 'Welcome'}</h2>
-        <p class="auth-sub">Sign in to claim your team and follow your games.</p>
+        <p class="auth-sub">${signup ? 'One account for every tournament you play.' : 'Sign in to claim your team and follow your games.'}</p>
         ${signup ? `<label class="auth-label" for="auth-first">First name</label>
-        <input class="auth-input" id="auth-first" type="text" autocomplete="given-name" autocapitalize="words" spellcheck="false" placeholder="First" />
+        <input class="auth-input" id="auth-first" type="text" required autocomplete="given-name" autocapitalize="words" spellcheck="false" placeholder="First" />
         <label class="auth-label" for="auth-last">Last name</label>
-        <input class="auth-input" id="auth-last" type="text" autocomplete="family-name" autocapitalize="words" spellcheck="false" placeholder="Last" />
+        <input class="auth-input" id="auth-last" type="text" required autocomplete="family-name" autocapitalize="words" spellcheck="false" placeholder="Last" />
         ` : ''}<label class="auth-label" for="auth-email">Email</label>
-        <input class="auth-input" id="auth-email" type="email" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="you@email.com" />
+        <input class="auth-input" id="auth-email" type="email" required autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="you@email.com" />
         <label class="auth-label" for="auth-pass">Password</label>
-        <input class="auth-input" id="auth-pass" type="password" autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="${signup ? 'At least 6 characters' : 'Your password'}" />
+        ${authFieldHTML('auth-pass', `autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="${signup ? 'At least ' + AUTH_PASSWORD_MIN + ' characters' : 'Your password'}"${signup ? ' data-strength' : ''}`, signup)}
         <div class="auth-err" id="auth-err" role="alert" hidden></div>
         <button type="submit" class="auth-submit" id="auth-submit">${signup ? 'Create account' : 'Sign in'}</button>
         <button type="button" class="auth-alt" id="auth-alt">${signup ? 'Already have an account? Sign in' : 'New here? Create an account'}</button>
-      </form>
+      </form>`;
+  el.innerHTML = `
+    <button type="button" class="auth-back" id="auth-back" aria-label="Close sign in">${AUTH_BACK_SVG}</button>
+    <div class="auth-inner">
+      ${sent ? sentInner : formInner}
     </div>`;
   el.querySelector('#auth-back').addEventListener('click', () => {
     claimIntent = false; // dismissing sign-in abandons a pending claim intent (review: it leaked into a later sign-in)
     closeAuthPage();
   });
-  el.querySelector('#auth-alt').addEventListener('click', () => {
-    authMode = signup ? 'signin' : 'signup';
+  const altBtn = el.querySelector('#auth-alt');
+  if (altBtn) altBtn.addEventListener('click', () => {
+    authMode = (signup || sent) ? 'signin' : 'signup';
     renderAuthPageInner();
   });
-  el.querySelector('#auth-form').addEventListener('submit', onAuthSubmit);
-  setTimeout(() => { const f = document.getElementById('auth-email'); if (f) f.focus(); }, 50);
+  const resendBtn = el.querySelector('#auth-resend');
+  if (resendBtn) resendBtn.addEventListener('click', () => authResend('signup'));
+  const form = el.querySelector('#auth-form');
+  if (form) form.addEventListener('submit', onAuthSubmit);
+  if (!sent) setTimeout(() => { const f = document.getElementById('auth-email'); if (f) f.focus(); }, 50);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -6519,30 +6577,36 @@ function friendlyAuthError(error, signup) {
   const m = (error && error.message) || '';
   if (/invalid login credentials/i.test(m)) return "That email or password isn't right.";
   if (/already registered|user already/i.test(m)) return 'That email already has an account. Sign in instead.';
-  if (/password/i.test(m) && /(6|characters|short)/i.test(m)) return 'Password must be at least 6 characters.';
+  // The server's own minimum is 6 and it says so; the client's gate is stricter, so the message people
+  // read is always AUTH_PASSWORD_MIN (Account round 2026-08-25).
+  if (/password/i.test(m) && /(characters|short|\d)/i.test(m)) return 'Your password needs at least ' + AUTH_PASSWORD_MIN + ' characters.';
   if (/email/i.test(m) && /valid/i.test(m)) return 'Enter a valid email address.';
   return m || (signup ? 'Could not create your account.' : 'Could not sign you in.');
 }
 
 async function onAuthSubmit(e) {
   e.preventDefault();
+  const signup = authMode === 'signup';
   const emailEl = document.getElementById('auth-email');
   const passEl = document.getElementById('auth-pass');
+  const firstEl = document.getElementById('auth-first');
+  const lastEl = document.getElementById('auth-last');
   const errEl = document.getElementById('auth-err');
   const btn = document.getElementById('auth-submit');
   const email = (emailEl && emailEl.value || '').trim();
-  const password = (passEl && passEl.value) || '';
+  const password = (passEl && passEl.value) || '';   // NEVER trimmed: a space is a character someone chose
   const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.hidden = false; } };
   if (errEl) errEl.hidden = true;
-  if (!email || !password) { showErr('Enter your email and password.'); return; }
-  const signup = authMode === 'signup';
-  if (signup && password.length < 6) { showErr('Password must be at least 6 characters.'); return; }
+  // Account round (2026-08-25): the design's three client rules, in its words and its order. Empties
+  // first, then the email shape (before the server ever sees it), then the length gate (create-account
+  // only), because sign-in must never guess at what an existing password is allowed to be.
+  if (!email || !password || (signup && (!(firstEl && firstEl.value.trim()) || !(lastEl && lastEl.value.trim())))) { showErr('Fill in every field.'); return; }
+  if (!/^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/.test(email)) { showErr("That email doesn't look right."); return; }
+  if (signup && password.length < AUTH_PASSWORD_MIN) { showErr('Your password needs at least ' + AUTH_PASSWORD_MIN + ' characters.'); return; }
   // Identity (spec §2): create-account captures the person. Validate first+last BEFORE we disable the
   // button (same grammar as the password-length gate above); the cleaned parts ride the signUp metadata.
   let nm = null;
   if (signup) {
-    const firstEl = document.getElementById('auth-first');
-    const lastEl = document.getElementById('auth-last');
     nm = splitFullNameParts(firstEl && firstEl.value, lastEl && lastEl.value);
     if (!nm.ok) { showErr(nm.message); return; }
   }
@@ -6552,14 +6616,15 @@ async function onAuthSubmit(e) {
   try {
     const res = signup
       ? await supabaseClient.auth.signUp({ email, password,
-          options: { data: { first_name: nm.first, last_name: nm.last, full_name: nm.first + ' ' + nm.last } } })
+          options: { emailRedirectTo: location.origin, data: { first_name: nm.first, last_name: nm.last, full_name: nm.first + ' ' + nm.last } } })
       : await supabaseClient.auth.signInWithPassword({ email, password });
     if (res.error) { showErr(friendlyAuthError(res.error, signup)); if (btn) { btn.disabled = false; btn.textContent = orig; } return; }
     if (signup && !(res.data && res.data.session)) {
-      // Email confirmation is ON at the project level -> no instant session. (We aim to disable it.)
-      showErr('Account created. Check your email to confirm, then sign in.');
-      authMode = 'signin';
-      if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+      // Email confirmation is ON at the project level -> no instant session. The design's sent screen
+      // owns the rest of the journey (Account round 2026-08-25).
+      authSentEmail = email;
+      authMode = 'signup-sent';
+      renderAuthPageInner();
       return;
     }
     closeAuthPage(); // success -> onAuthStateChange sets state + re-renders the header
@@ -6567,6 +6632,87 @@ async function onAuthSubmit(e) {
     showErr('Something went wrong. Try again.');
     if (btn) { btn.disabled = false; btn.textContent = orig; }
   }
+}
+
+// Every Resend control in the round (signup-sent now; forgot-sent and email-sent later) runs through
+// here. Account round rule: the send is AWAITED and can fail VISIBLY. The design drew no error line on
+// its sent screens, so one is rendered there and written here. "Sent again" appears only after the API
+// actually answered without an error, never optimistically.
+async function authResend(kind, emailOverride) {
+  const btn = document.getElementById(kind === 'email_change' ? 'acct-resend' : 'auth-resend');
+  const err = document.getElementById(kind === 'email_change' ? 'acct-err' : 'auth-err');
+  const note = (m) => { if (err) { err.textContent = m; err.hidden = !m; } };
+  if (Date.now() < authResendUntil) { note('Give it a minute, then try again.'); return; }
+  const email = emailOverride || authSentEmail;
+  if (!email || !supabaseClient) return;
+  if (btn) btn.disabled = true;
+  try {
+    const res = kind === 'reset'
+      ? await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: location.origin })
+      : await supabaseClient.auth.resend({ type: kind, email, options: { emailRedirectTo: location.origin } });
+    if (res && res.error) {
+      // A rate limit is the server saying "wait", so the control waits with it (disabled + the cooldown).
+      // Anything else is worth an immediate retry, so that branch hands the button straight back.
+      if (/rate|limit/i.test(res.error.message || '')) {
+        note('Too many emails just now. Wait a minute, then try again.');
+        authResendUntil = Date.now() + AUTH_RESEND_MS;
+        setTimeout(() => { if (btn) btn.disabled = false; }, AUTH_RESEND_MS);
+      } else {
+        note('That did not send. Check the connection and try again.');
+        if (btn) btn.disabled = false;
+      }
+      return;
+    }
+    note('');
+    authResendUntil = Date.now() + AUTH_RESEND_MS;
+    if (btn) btn.textContent = 'Sent again';
+    setTimeout(() => { if (btn) btn.disabled = false; }, AUTH_RESEND_MS);
+  } catch (_) {
+    note('That did not send. Check the connection and try again.');
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ── The wall (Account round 2026-08-25, Mike's pick: the design's overlay WITH an exit) ────────────
+// #gate-page is a body-appended .auth-page, exactly like #auth-page and #namefill-page, so partialRender
+// can never wipe it. The decision to raise or drop it runs at NAVIGATION time, never inside a render
+// builder, which repaints on every 15s poll.
+function closeGatePage() {
+  const el = document.getElementById('gate-page');
+  if (el) el.remove();
+}
+
+function openGatePage() {
+  if (state.authSession || document.getElementById('gate-page')) return;
+  const el = document.createElement('div');
+  el.id = 'gate-page';
+  el.className = 'auth-page';
+  el.innerHTML = `<button type="button" class="auth-back" data-gate-back aria-label="Back to Home">${AUTH_BACK_SVG}</button>
+    <div class="auth-inner">
+      <div class="auth-brand">
+        <img class="auth-logo" src="logo-mark.png" alt="Athletic Specimen" />
+        <div class="auth-wm"><div class="auth-wm-1">ATHLETIC SPECIMEN</div><div class="auth-wm-2">COLORADO</div></div>
+      </div>
+      <h2 class="auth-title">Sign in to see the tournament</h2>
+      <p class="auth-sub">Your team, your games and your bracket run are for players. Takes a minute.</p>
+      <button type="button" class="auth-submit" data-auth-view="signin">Sign in</button>
+      <button type="button" class="auth-alt" data-auth-view="signup">New here? Create an account</button>
+    </div>`;
+  document.body.appendChild(el);
+  el.addEventListener('click', (ev) => {
+    if (ev.target.closest('[data-gate-back]')) { closeGatePage(); activateMainTab('home'); return; }
+    const v = ev.target.closest('[data-auth-view]');
+    if (v) openAuthPage(v.getAttribute('data-auth-view'));
+  });
+}
+
+// The single decision, so the three navigation sites that can land on a Tournament sub-page cannot drift:
+// the tab switch itself, the data-tn-view push (which never leaves the tab), and the join sheet's
+// "back to hub". Register and rules stay in front of the wall; both are anonymous by design.
+function syncGatePage() {
+  const personal = activeMainTab === 'tournament' && !state.authSession
+    && pdTournamentView !== 'register' && pdTournamentView !== 'rules';
+  if (personal) openGatePage(); else closeGatePage();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -12662,6 +12808,7 @@ function activateMainTab(tab) {
   window.dispatchEvent(new Event('as-tab-changed')); // C25 item 5: refresh back-to-top visibility for the new panel
   // C32 #9: fit the bracket tree when switching into the tab that shows one — the public/admin Tournament tab.
   if (tab === 'tournament') layoutBracketTree();
+  syncGatePage(); // Account round: raise or drop the signed-out wall. This is also the BOOT paint (render() ends here).
 }
 
 
@@ -12791,8 +12938,9 @@ function attachHandlers() {
         else { claimIntent = true; openAuthPage(); }
         return;
       }
-      // Tournament atom-up (spec 2026-07-10 §1): the signed-out gate's "Sign in" CTA + "Create an account"
-      // link both open the existing auth page (its create toggle handles the new-account path).
+      // The in-tab gate's affordances are retired with it (Account round 2026-08-25: the wall is
+      // #gate-page now), but the hook stays: any older surface still emitting data-role="tn-signin"
+      // reaches sign-in rather than nothing.
       if (e.target.closest('[data-role="tn-signin"]')) { openAuthPage(); return; }
       // Slice 1 (spec §13.2): tap-a-team peek — open on any tapped team name. Read-only, account-free;
       // opens on the Pools page AND the Home live board. Checked before nav so a tap on a team name never
@@ -12840,6 +12988,7 @@ function attachHandlers() {
         if (activeMainTab !== 'tournament') activateMainTab('tournament');
         const c = document.querySelector('#tab-tournament .container');
         if (c) c.innerHTML = buildPublicTournamentRootHTML();
+        syncGatePage(); // Account round: a sub-page push never leaves the tab, so the wall is decided here too
         mEnter(); // motion (2026-08-24): a sub-page push is a real navigation
         if (pdTournamentView === 'bracket') layoutBracketTree(); // the Bracket page shows the real bt-* tree
         const panel = document.getElementById('tab-tournament');
@@ -13385,6 +13534,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
       state.account = { id: session.user.id, email };
       if (!isNewSignIn) return;
       closeAuthPage();
+      closeGatePage(); // Account round: signing in from the wall drops it; the tab behind is theirs now
       // bootPaintDone gate (2026-07-12): during boot, INITIAL_SESSION restores can land while the
       // splash is still up — state is set above, and the single boot render() paints it. Post-boot
       // (a real sign-in from the auth page) this renders immediately, unchanged.

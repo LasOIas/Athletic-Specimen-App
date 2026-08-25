@@ -2002,6 +2002,23 @@ function settingsRuleSummary(t) {
   return line.charAt(0).toUpperCase() + line.slice(1) + '.';
 }
 
+// Password meter (Account handoff 2026-08-24, honest labels): what is MEASURED is length and character
+// variety, so the labels say that and never "Strong". 0 empty · 1 under the minimum · 2 at the minimum
+// with fewer than three kinds · 3 three kinds, or twelve+ characters with two. Advisory only - the hard
+// gate is AUTH_PASSWORD_MIN in app.js.
+function passwordMeterScore(v) {
+  const s = String(v == null ? '' : v);
+  if (!s.length) return { score: 0, label: '' };
+  if (s.length < 8) return { score: 1, label: 'Too short' };
+  let kinds = 0;
+  if (/[a-z]/.test(s)) kinds++;
+  if (/[A-Z]/.test(s)) kinds++;
+  if (/[0-9]/.test(s)) kinds++;
+  if (/[^A-Za-z0-9]/.test(s)) kinds++;
+  if (kinds >= 3 || (s.length >= 12 && kinds >= 2)) return { score: 3, label: 'Good' };
+  return { score: 2, label: 'OK' };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
@@ -2029,6 +2046,7 @@ if (typeof module !== "undefined" && module.exports) {
     manageNeedsYouModel, manageHubPhaseIndex, MANAGE_HUB_STEPS,
     publicHomeState, homeNetBlocksModel, homeComingUpModel, homeTopStandingsModel,
     tournamentStageModel, rulesToHTML, rulesToSections,
-    settingsRuleSummary
+    settingsRuleSummary,
+    passwordMeterScore
   };
 }
