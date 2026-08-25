@@ -550,6 +550,41 @@ describe('Task 3 live strip', () => {
     expect(bridge.buildManage()).not.toContain('On the nets');
   });
 
+  it('an idle net never offers a game whose team is currently live on another net', () => {
+    const liveWX = { id: 'live1', phase: 'pool', pool_id: 'p1', net: 1, status: 'live', score_a: 5, score_b: 3, team_a_id: 'w', team_b_id: 'x', queue_order: 1 };
+
+    // W and X are live on net 1. Net 2's only queued game reuses X, so net 2 must read Idle and
+    // must NOT offer that game as startable while X is still mid-match on net 1 (fix round 1,
+    // 2026-08-25: pickPoolCurrentGames needs the live match in its input to know X is busy).
+    seedHub(bridge, { status: 'pools', net_count: 2, name: 'A' }, { matches: [liveWX,
+      { id: 'q2', phase: 'pool', pool_id: 'p1', net: 2, status: 'scheduled', team_a_id: 'x', team_b_id: 'z', queue_order: 2 }],
+      pools: [{ id: 'p1', label: 'A' }],
+      teams: [{ id: 'w', name: 'W' }, { id: 'x', name: 'X' }, { id: 'z', name: 'Z' }] });
+    let html = bridge.buildManage();
+    expect(html).toContain('>Idle<');
+    expect(html).not.toContain('can start');
+    expect(html).toContain('Nothing queued');
+
+    // Control: same live game on net 1, but net 2's queued game is between two teams that are
+    // both free — it DOES read as startable.
+    seedHub(bridge, { status: 'pools', net_count: 2, name: 'A' }, { matches: [liveWX,
+      { id: 'q2', phase: 'pool', pool_id: 'p1', net: 2, status: 'scheduled', team_a_id: 'y', team_b_id: 'z', queue_order: 2 }],
+      pools: [{ id: 'p1', label: 'A' }],
+      teams: [{ id: 'w', name: 'W' }, { id: 'x', name: 'X' }, { id: 'y', name: 'Y' }, { id: 'z', name: 'Z' }] });
+    html = bridge.buildManage();
+    expect(html).toContain('G2 can start');
+  });
+
+  it('the header playing count is clamped to net_count, not to whatever net value a row carries', () => {
+    seedHub(bridge, { status: 'pools', net_count: 2, name: 'A' }, { matches: [
+      { id: 'stray', phase: 'pool', pool_id: 'p1', net: 5, status: 'live', score_a: 4, score_b: 2, team_a_id: 't1', team_b_id: 't2', queue_order: 1 }],
+      pools: [{ id: 'p1', label: 'A' }], teams: [{ id: 't1', name: 'W' }, { id: 't2', name: 'X' }] });
+    const html = bridge.buildManage();
+    expect(html).toContain('0 playing · 2 idle');
+    expect(html).not.toContain('5</span>');
+    expect((html.match(/class="mgh-lnet/g) || []).length).toBe(2);
+  });
+
   it('the live-strip CSS ships, minus the minutes column', () => {
     expect(css).toContain('.mgh-live {');
     expect(css).toContain('.mgh-livehd {');

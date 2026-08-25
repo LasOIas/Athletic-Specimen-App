@@ -7377,8 +7377,15 @@ function mgHubLiveStripHTML(t) {
     return where + ' · ' + gameLabel(m);
   };
   const live = matches.filter((m) => m.status === 'live' && m.net != null);
-  const playing = new Set(live.map((m) => Number(m.net))).size;
-  const notFinal = matches.filter((m) => m.status !== 'final' && m.status !== 'live');
+  // Clamped to 1..nets: a stray net value outside the configured count (or 0/null) must never
+  // throw the header out of step with the rows, which only ever render 1..nets.
+  const playing = new Set(live.filter((m) => Number(m.net) >= 1 && Number(m.net) <= nets).map((m) => Number(m.net))).size;
+  // A live game stays IN this list (only 'final' drops out). It is never READ for its own net —
+  // the live.find branch above wins there — but pickPoolCurrentGames still needs to see it so its
+  // teams land in the picker's `used` set; otherwise a team playing live on net 1 is invisible to
+  // the picker and its NEXT queued game on net 2 gets offered as startable while the team is still
+  // mid-match (fix round 1, 2026-08-25: reviewer-caught cross-net double-booking).
+  const notFinal = matches.filter((m) => m.status !== 'final');
   const byId = {};
   notFinal.forEach((m) => { byId[m.id] = m; });
   const netGames = [];
