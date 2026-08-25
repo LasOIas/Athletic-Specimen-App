@@ -10100,32 +10100,45 @@ function mgTeamAddTogglePaid(btn) {
 }
 
 // True when the Add a team form holds work the background poll must not throw away: a focused field in
-// #tab-manage, or any team-name / player value typed but not yet submitted. Same shape as manageRegDirty /
-// manageSettingsDirty, minus their saved-value comparison — nothing here has been written yet, so ANY
-// typed character is unsaved work.
+// #tab-manage, any team-name / player value typed but not yet submitted, or the Marked-paid switch left
+// ON. Same shape as manageRegDirty / manageSettingsDirty, minus their saved-value comparison — nothing
+// here has been written yet, so ANY typed character is unsaved work. Fix round 1: the SWITCH counts too.
+// It is the one control on this screen that holds a decision without holding text, and a repaint rebuilds
+// it at aria-checked="false", so flipping it on and then pausing for the 15s poll silently un-marked the
+// team as paid with nothing on screen to say so.
 function manageTeamAddDirty() {
   if (mgtView !== 'teamadd') return false;
   const panel = document.getElementById('tab-manage');
   if (!panel) return false;
   const ae = document.activeElement;
   if (ae && panel.contains && panel.contains(ae) && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return true;
+  if (panel.querySelector && panel.querySelector('[data-mgta-paid][aria-checked="true"]')) return true;
   const fields = panel.querySelectorAll ? panel.querySelectorAll('.rf-tinput, .rf-pinput') : null;
   let dirty = false;
   if (fields && fields.forEach) fields.forEach((el) => { if (String((el && el.value) || '').trim() !== '') dirty = true; });
   return dirty;
 }
 
+// Fix round 1: the double-tap guard this screen shipped without. tdbAddTeam's duplicate-name check is a
+// SELECT and then an INSERT, not one atomic statement, so two overlapping submits both read "no team by
+// that name" and both insert — a double-tap on a slow connection creates the team twice. Same shape as
+// mgSaveScreenFields: a module flag turns the re-entry into a no-op, the CTA greys for the duration, and
+// the finally restores both however the path ends (success, a thrown write, or an early return).
+let mgTeamAddInFlight = false;
+
 // Add the team. THREE writes, in the order a failure can be reported honestly: the insert first (nothing
 // exists until it lands), then the roster, then the paid flag. Once the insert has succeeded the team IS
 // in, so a later failure never says "could not add" — it says what did not follow and where to finish it,
 // leaves the form filled, and refreshes the collections so the new team is already visible under Teams &
 // payment. tdbAddTeam throws its own player-readable line on a duplicate name (its data-layer guard), and
-// that line is surfaced verbatim; only a message-less throw falls back to the house copy.
+// that line is surfaced verbatim; only a message-less throw falls back to the house copy. Every early
+// return writes a status line — a button that does nothing and says nothing reads as broken.
 async function mgTeamAddSubmit() {
-  if (!state.isAdmin) return;
-  const t = mgActiveTournament();
-  if (!t) return;
+  if (mgTeamAddInFlight) return;
   const note = (msg, bad) => mgNoteStatus('mgta-status', msg, bad);
+  if (!state.isAdmin) { note('Sign in as an admin to add a team.', true); return; }
+  const t = mgActiveTournament();
+  if (!t) { note('No tournament is selected.', true); return; }
   const nameEl = document.getElementById('mgta-name');
   const name = String((nameEl && nameEl.value) || '').trim();
   if (!name) { note('Give the team a name first.', true); return; }
@@ -10133,38 +10146,48 @@ async function mgTeamAddSubmit() {
     .map((i) => String((i && i.value) || '').trim()).filter(Boolean);
   const paidBtn = document.querySelector('[data-mgta-paid]');
   const paid = !!(paidBtn && paidBtn.getAttribute && paidBtn.getAttribute('aria-checked') === 'true');
+  // Held by reference, not re-queried in the finally: a successful submit repaints the container onto the
+  // Teams list, so a second lookup would find nothing (or, worse, another screen's control).
+  const btn = document.querySelector('[data-mgta-save]');
+  mgTeamAddInFlight = true;
+  if (btn) btn.disabled = true;
   note('Adding…');
-  let team;
   try {
-    team = await tdbAddTeam(t.id, name);
-  } catch (err) {
-    note((err && err.message) ? String(err.message) : ('Could not add the team. ' + MG_SAVE_FAILED), true);
-    return;
-  }
-  // A write that comes back with no row is the silent-refusal shape this project has been burned by
-  // (RLS filters rather than raises), so it is never reported as a success.
-  if (!team || !team.id) { note(MG_SAVE_FAILED, true); return; }
-  if (roster.length) {
+    let team;
     try {
-      await tdbSetTeamRoster(team.id, roster);
+      team = await tdbAddTeam(t.id, name);
     } catch (err) {
-      note('The team is in, but its roster did not save. Open it under Teams & payment to add the names.', true);
-      await tdbRefreshTournaments();
+      note((err && err.message) ? String(err.message) : ('Could not add the team. ' + MG_SAVE_FAILED), true);
       return;
     }
-  }
-  if (paid) {
-    try {
-      await tdbSetTeamPaid(team.id, true);
-    } catch (err) {
-      note('The team is in, but it could not be marked paid. Open it under Teams & payment.', true);
-      await tdbRefreshTournaments();
-      return;
+    // A write that comes back with no row is the silent-refusal shape this project has been burned by
+    // (RLS filters rather than raises), so it is never reported as a success.
+    if (!team || !team.id) { note(MG_SAVE_FAILED, true); return; }
+    if (roster.length) {
+      try {
+        await tdbSetTeamRoster(team.id, roster);
+      } catch (err) {
+        note('The team is in, but its roster did not save. Open it under Teams & payment to add the names.', true);
+        await tdbRefreshTournaments();
+        return;
+      }
     }
+    if (paid) {
+      try {
+        await tdbSetTeamPaid(team.id, true);
+      } catch (err) {
+        note('The team is in, but it could not be marked paid. Open it under Teams & payment.', true);
+        await tdbRefreshTournaments();
+        return;
+      }
+    }
+    await tdbRefreshTournaments();
+    mgtView = 'teams';
+    repaintManage();
+  } finally {
+    mgTeamAddInFlight = false;
+    if (btn) btn.disabled = false;
   }
-  await tdbRefreshTournaments();
-  mgtView = 'teams';
-  repaintManage();
 }
 
 // ── The body-level team sheet ────────────────────────────────────────────────────────────────────────

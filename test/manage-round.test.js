@@ -141,6 +141,14 @@ function loadApp() {
       teamAddMenu: (q) => mgTeamAddMenuHTML(mgTeamAddMatches(q)),
       setMgtView: (v) => { manageView = 'tournament'; mgtView = (v === undefined ? null : v); },
       mgtViewNow: () => mgtView,
+      togglePaid: (btn) => mgTeamAddTogglePaid(btn),
+      // Fix round 1: the poll guard is proven by DRIVING partialRender, not by grepping app.js for its
+      // call site. bootPaintDone gates partialRender and activeMainTab picks its branch, so both are set
+      // and restored by the test that uses them.
+      poll: () => partialRender(),
+      setTab: (v) => { activeMainTab = v; },
+      tabNow: () => activeMainTab,
+      setBoot: (v) => { bootPaintDone = !!v; },
       mockTeamAdd: (o) => {
         o = o || {};
         const calls = [];
@@ -735,12 +743,17 @@ describe('Task 4 the tournament page', () => {
 
 // A minimal element the submit path can read and write: a value, attributes, a status line's text.
 function mkEl(extra) {
+  const classes = new Set();
   return Object.assign({
-    tagName: 'INPUT', value: '', textContent: '',
+    tagName: 'INPUT', value: '', textContent: '', innerHTML: '', disabled: false,
     attrs: {},
+    classes,   // fix round 1: a REAL class set, so a toggle can be asserted rather than grepped
     getAttribute(k) { return (k in this.attrs) ? this.attrs[k] : null; },
     setAttribute(k, v) { this.attrs[k] = String(v); },
-    classList: { add() {}, remove() {}, contains: () => false, toggle() {} },
+    classList: {
+      add: (c) => classes.add(c), remove: (c) => classes.delete(c),
+      contains: (c) => classes.has(c), toggle: (c) => (classes.has(c) ? classes.delete(c) : classes.add(c)),
+    },
   }, extra || {});
 }
 const docOrig = { getElementById: bridge.doc.getElementById, querySelector: bridge.doc.querySelector, querySelectorAll: bridge.doc.querySelectorAll };
@@ -752,20 +765,29 @@ function installTeamAddForm(opts) {
   const name = mkEl({ value: o.name == null ? '' : o.name });
   const status = mkEl({ tagName: 'P' });
   const paid = mkEl({ tagName: 'BUTTON', attrs: { 'aria-checked': o.paid ? 'true' : 'false' } });
+  const save = mkEl({ tagName: 'BUTTON' });
   const rows = (o.roster || []).map((v) => mkEl({ value: v }));
   bridge.doc.getElementById = (id) => (id === 'mgta-name' ? name : (id === 'mgta-status' ? status : null));
   bridge.doc.querySelectorAll = (sel) => (sel === '#tab-manage .rf-pinput' ? rows.slice() : []);
-  bridge.doc.querySelector = (sel) => (sel === '[data-mgta-paid]' ? paid : null);
-  return { name, status, paid, rows };
+  bridge.doc.querySelector = (sel) => (sel === '[data-mgta-paid]' ? paid : (sel === '[data-mgta-save]' ? save : null));
+  return { name, status, paid, save, rows };
 }
 
-// Install #tab-manage carrying N text fields, optionally with the caret in the first one.
-function installTeamAddPanel(values, focused) {
+// Install #tab-manage carrying N text fields plus the Marked-paid switch, optionally with the caret in
+// the first field and optionally with the switch already flipped on.
+function installTeamAddPanel(values, focused, paidOn) {
   const fields = (values || []).map((v) => mkEl({ value: v }));
-  const panel = { contains: (n) => fields.indexOf(n) >= 0, querySelectorAll: () => fields.slice() };
+  const sw = mkEl({ tagName: 'BUTTON', attrs: { 'aria-checked': paidOn ? 'true' : 'false' } });
+  const panel = {
+    scrollTop: 0,
+    contains: (n) => fields.indexOf(n) >= 0,
+    querySelectorAll: () => fields.slice(),
+    querySelector: (sel) => (sel === '[data-mgta-paid][aria-checked="true"]'
+      ? (sw.getAttribute('aria-checked') === 'true' ? sw : null) : null),
+  };
   bridge.doc.getElementById = (id) => (id === 'tab-manage' ? panel : null);
   bridge.doc.activeElement = focused ? fields[0] : null;
-  return fields;
+  return { fields, sw, panel };
 }
 
 describe('Task 5 add a team', () => {
@@ -846,19 +868,66 @@ describe('Task 5 add a team', () => {
     expect(appSrc).not.toContain('mgTeamAddPrompt');
   });
 
-  // The 15s poll repaints the Manage container. A half-typed roster sitting in it must survive.
-  it('the poll never clobbers a half-typed form', () => {
+  // The 15s poll repaints the Manage container. Anything unsaved sitting in it must survive — and on this
+  // screen that includes the Marked-paid SWITCH, the one control that holds a decision without holding
+  // text. A repaint rebuilds it at aria-checked="false", so before fix round 1 flipping it on and pausing
+  // silently un-marked the team as paid with nothing on screen to say so.
+  it('the poll guard: typed text, the caret, or the paid switch all count as unsaved work', () => {
     bridge.setMgtView('teams');
-    installTeamAddPanel(['Dig Deep', 'Harper Ellis'], false);
+    installTeamAddPanel(['Dig Deep', 'Harper Ellis'], false, false);
     expect(bridge.teamAddDirty()).toBe(false);        // wrong view: nothing to protect
     bridge.setMgtView('teamadd');
-    installTeamAddPanel(['', '', '', ''], false);
+    installTeamAddPanel(['', '', '', ''], false, false);
     expect(bridge.teamAddDirty()).toBe(false);        // untouched form: the poll may repaint
-    installTeamAddPanel(['', 'Harper Ellis', '', ''], false);
+    installTeamAddPanel(['', 'Harper Ellis', '', ''], false, false);
     expect(bridge.teamAddDirty()).toBe(true);         // typed but unfocused still blocks it
-    installTeamAddPanel(['', '', '', ''], true);
+    installTeamAddPanel(['', '', '', ''], true, false);
     expect(bridge.teamAddDirty()).toBe(true);         // the caret alone blocks it
-    expect(appSrc).toContain("mgtView === 'teamadd' && manageTeamAddDirty()");
+    installTeamAddPanel(['', '', '', ''], false, true);
+    expect(bridge.teamAddDirty()).toBe(true);         // Marked paid ON with nothing typed: still unsaved
+  });
+
+  // The WIRING, driven rather than grepped: partialRender rebuilds the Manage container on a clean form
+  // and bails (sync notice only) on a dirty one.
+  it('the background poll repaints a clean Add a team screen and bails on a dirty one', () => {
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    const prevTab = bridge.tabNow();
+    const container = mkEl({ tagName: 'DIV', innerHTML: 'STALE' });
+    const notice = mkEl({ tagName: 'DIV' });
+    const rootEl = mkEl({ tagName: 'DIV', hasChildNodes: () => true });
+    let fields = [];
+    const sw = mkEl({ tagName: 'BUTTON', attrs: { 'aria-checked': 'false' } });
+    const panel = {
+      scrollTop: 0,
+      contains: (n) => fields.indexOf(n) >= 0,
+      querySelectorAll: () => fields.slice(),
+      querySelector: (sel) => (sel === '.container' ? container
+        : (sel === '[data-mgta-paid][aria-checked="true"]'
+          ? (sw.getAttribute('aria-checked') === 'true' ? sw : null) : null)),
+    };
+    bridge.doc.getElementById = (id) => (id === 'root' ? rootEl
+      : (id === 'js-sync-notice' ? notice : (id === 'tab-manage' ? panel : null)));
+    bridge.doc.querySelector = () => null;   // no .players — partialRender takes the Manage branch
+    bridge.doc.activeElement = null;
+    bridge.setBoot(true);
+    bridge.setTab('manage');
+    try {
+      fields = [mkEl({ value: '' }), mkEl({ value: '' })];
+      bridge.poll();
+      expect(container.innerHTML).toContain('class="pd-htitle">Add a team<');   // clean: repainted
+      container.innerHTML = 'STALE';
+      fields = [mkEl({ value: 'Dig Deep' }), mkEl({ value: '' })];
+      bridge.poll();
+      expect(container.innerHTML).toBe('STALE');                                 // typed: bailed
+      fields = [mkEl({ value: '' }), mkEl({ value: '' })];
+      sw.setAttribute('aria-checked', 'true');
+      bridge.poll();
+      expect(container.innerHTML).toBe('STALE');                                 // the switch alone bails
+    } finally {
+      bridge.setBoot(false);
+      bridge.setTab(prevTab);
+    }
   });
 
   it('submit: the team, then its roster, then the paid flag, then back to Teams and payment', async () => {
@@ -948,13 +1017,71 @@ describe('Task 5 add a team', () => {
     expect(bridge.mgtViewNow()).toBe('teams');
   });
 
-  // The switch is LOCAL until submit — no team exists yet, so there is nothing to write to.
+  // The switch is LOCAL until submit — no team exists yet, so there is nothing to write to. Driven through
+  // a real element: aria-checked flips both ways, .on follows it, and no tdb* write is issued.
   it('the paid switch flips in place and never writes on tap', () => {
-    expect(appSrc).toContain('function mgTeamAddTogglePaid');
-    expect(appSrc).toMatch(/function mgTeamAddTogglePaid\(btn\)[\s\S]{0,420}aria-checked/);
-    expect(appSrc).not.toMatch(/function mgTeamAddTogglePaid\(btn\)[\s\S]{0,420}tdbSetTeamPaid/);
-    expect(appSrc).toContain("if (taPaid) { mgTeamAddTogglePaid(taPaid); return; }");
-    expect(appSrc).toContain("data-mgta-save]')) { void mgTeamAddSubmit(); return; }");
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    const calls = bridge.mockTeamAdd({});
+    const sw = mkEl({ tagName: 'BUTTON', attrs: { 'aria-checked': 'false' } });
+    bridge.togglePaid(sw);
+    expect(sw.getAttribute('aria-checked')).toBe('true');
+    expect(sw.classes.has('on')).toBe(true);
+    bridge.togglePaid(sw);
+    expect(sw.getAttribute('aria-checked')).toBe('false');
+    expect(sw.classes.has('on')).toBe(false);
+    expect(calls.length).toBe(0);                     // a tap writes NOTHING: no team exists yet
+    expect(() => bridge.togglePaid(null)).not.toThrow();
+  });
+
+
+  // Fix round 1, IMPORTANT 1: tdbAddTeam's duplicate-name check is a SELECT and then an INSERT, not one
+  // atomic statement, so two overlapping submits both read "no team by that name" and both insert. A
+  // double tap on a slow connection created the team twice. The insert is gated now, and the CTA greys.
+  it('submit: a double tap on Add team inserts the team once', async () => {
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    let release;
+    const gate = new Promise((r) => { release = r; });          // hold the insert open across both taps
+    const calls = bridge.mockTeamAdd({ add: () => gate.then(() => ({ id: 'newteam', name: 'Dig Deep' })) });
+    const form = installTeamAddForm({ name: 'Dig Deep', roster: [], paid: false });
+    const first = bridge.teamAddSubmit();
+    expect(form.save.disabled).toBe(true);            // the CTA greys the moment the insert goes out
+    const second = bridge.teamAddSubmit();            // the double tap
+    release();
+    await Promise.all([first, second]);
+    expect(Array.from(calls, (c) => c[0])).toEqual(['add', 'refresh', 'repaint']);   // exactly ONE add
+    expect(form.save.disabled).toBe(false);           // and comes back however the path ended
+    expect(bridge.mgtViewNow()).toBe('teams');
+  });
+
+  // A failed insert must leave the button usable — the organizer's next act is to retype and try again.
+  it('submit: the CTA comes back after a failed insert', async () => {
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    bridge.mockTeamAdd({ add: () => { throw new Error('A team named "Dig Deep" is already in this tournament.'); } });
+    const form = installTeamAddForm({ name: 'Dig Deep', roster: [], paid: false });
+    await bridge.teamAddSubmit();
+    expect(form.save.disabled).toBe(false);
+    expect(form.status.textContent).toBe('A team named "Dig Deep" is already in this tournament.');
+  });
+
+  // Fix round 1, SMALL: both guard branches used to return in silence, which reads as a dead button.
+  it('submit: the guard branches say why instead of doing nothing', async () => {
+    seedHub(bridge, { id: 'T', status: 'setup', registration_open: false, name: 'A', team_size: 4 });
+    bridge.setMgtView('teamadd');
+    const calls = bridge.mockTeamAdd({});
+    const st = bridge.getState();
+    st.isAdmin = false;
+    let form = installTeamAddForm({ name: 'Dig Deep', roster: [], paid: false });
+    await bridge.teamAddSubmit();
+    expect(form.status.textContent).toBe('Sign in as an admin to add a team.');
+    st.isAdmin = true;
+    st.tournaments = []; st.activeTournamentId = null;
+    form = installTeamAddForm({ name: 'Dig Deep', roster: [], paid: false });
+    await bridge.teamAddSubmit();
+    expect(form.status.textContent).toBe('No tournament is selected.');
+    expect(calls.length).toBe(0);
   });
 
   it('the Add a team CSS ships', () => {
