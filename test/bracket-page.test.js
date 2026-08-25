@@ -245,15 +245,21 @@ describe('buildBracketPageHTML — pre state, registration (setup + open)', () =
   let html;
   beforeEach(() => { bkSetState({ id: 'T', name: 'Summer Slam', status: 'setup', registration_open: true }, []); html = bridge.build(); });
 
-  it('is flat (pd-bk-pre) with NO card and NO pill', () => {
-    expect(html).toContain('class="pd-bk-pre"');
+  // Design round 2026-08-24 (ported 2026-08-25): the pre-state IS the sample bracket drawn from the
+  // registered team count — no card, no pill, no "battling through pools" in registration.
+  it('is the sample bracket (bk-pv) with NO card and NO pill', () => {
+    expect(html).toContain('class="bk-pv"');
+    expect(html).toContain('>Sample bracket<');
+    expect(html).toContain('bk-pv-pan" data-role="bt-pan"');
+    expect(html).toContain('bt-tbd');
     expect(html).not.toContain('pd-card');
     expect(html).not.toContain('pd-bk-pill');
   });
 
   it('shows the honest registration copy (never "battling through pools")', () => {
-    expect(html).toContain('The bracket comes after pool play');
+    expect(html).toContain('registered so far');
     expect(html).not.toContain('battling through pools');
+    expect(html).not.toContain('&mdash;');
   });
 
   it('omits the seeding chip during registration (no seeds exist yet)', () => {
@@ -265,8 +271,9 @@ describe('buildBracketPageHTML — pre state, pools running', () => {
   let html;
   beforeEach(() => { bkSetState({ id: 'T', name: 'Summer Slam', status: 'pools' }, BK_POOL); html = bridge.build(); });
 
-  it('is flat (pd-bk-pre) with NO card', () => {
-    expect(html).toContain('class="pd-bk-pre"');
+  it('is the sample bracket (bk-pv) with the in-the-tournament copy and NO card', () => {
+    expect(html).toContain('class="bk-pv"');
+    expect(html).toContain('in the tournament');
     expect(html).not.toContain('pd-card');
   });
 

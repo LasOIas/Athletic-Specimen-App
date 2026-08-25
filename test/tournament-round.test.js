@@ -73,6 +73,8 @@ function loadApp() {
       bracketNode: (m, opts) => buildBracketNodeHTML(m, [m], state.tournamentTeams, false, new Set(), {}, { byId: {}, byRoundLabel: {} }, opts || { readOnly: true }),
       sheet: (m, pick) => buildMgScoreSheetHTML(m, pick),
       canScore: (m) => canScoreMatch(m),
+      bracketPage: () => buildBracketPageHTML(),
+      setSide: (s) => { state.bracketSide = s; },
       getState: () => state,
       setPoolFilter: (v) => { pdPoolFilter = v; },
       setTournamentView: (v) => { pdTournamentView = v; },
@@ -298,6 +300,59 @@ describe('public scoring for signed-in players (Mike 2026-08-25, reversing the 2
     expect(queued.next.afterGame).toBe(2);
     const bracketNext = pure.computeTeamRunTimeline('t1', [{ id: 'b1', phase: 'main', side: 'losers', round: 1, net: null, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 1 }], TEAMS);
     expect(bracketNext.next).toMatchObject({ id: 'b1', phase: 'main', side: 'losers', afterGame: null, net: null });
+  });
+});
+
+describe('the sample bracket before seeding (design round 2026-08-24, Mike 2026-08-25: build it, keep the seeding chip)', () => {
+  it('registration: a sample built from the registered count, three sides, placeholders only, no chip', () => {
+    setState({ tournaments: [{ id: 'T', name: 'August 2026 Tournament', status: 'setup', registration_open: true, grand_final_reset: true }], tournamentMatches: [] });
+    bridge.setTournamentView('bracket'); bridge.setSide(null);
+    const html = bridge.bracketPage();
+    expect(html).toContain('class="bk-pv"');
+    expect(html).toContain('>Sample bracket<');
+    expect(html).toContain('<b>4 teams</b> registered so far');
+    expect(html).toContain('Seeds fill in when the last pool game is played. The shape stays the same.');
+    expect(html).not.toContain('&mdash;');
+    expect(html).toContain('class="bt-sides"');
+    expect(html).toContain('>Championship<');
+    expect(html).toContain('class="bt-pan pd-bk-ro bk-pv-pan" data-role="bt-pan"');
+    expect(html).toContain('class="bt-name bt-tbd">Seed 1<');
+    expect(html).toContain('class="bt-name bt-tbd">Seed 4<');
+    expect(html).toContain('>Winner of G1<');
+    expect(html).toContain('data-mid="W1-0" data-next="W2-0"');
+    expect(html).not.toContain('pd-bk-pre"');
+    expect(html).not.toContain('data-pools-tab="seeding"');
+    expect(html).not.toContain('bt-livetag');
+    // Winners side: G1–G2 then the Semifinals column (G3, feeds the championship)
+    expect(html).toContain('Semifinals<span class="bk-gid">');
+  });
+  it('the side tabs swap panes through state.bracketSide; the championship column reads Championship + the if-necessary game', () => {
+    setState({ tournaments: [{ id: 'T', name: 'August 2026 Tournament', status: 'setup', grand_final_reset: true }], tournamentMatches: [] });
+    bridge.setTournamentView('bracket'); bridge.setSide('grand_final');
+    const html = bridge.bracketPage();
+    expect(html).toContain('data-side="grand_final" class="on"');
+    expect(html).toContain('Championship<span class="bk-gid">');
+    expect(html).toContain('· if necessary</div>');
+    expect(html).toContain('The winners side champion meets the losers side champion.');
+    bridge.setSide('losers');
+    expect(bridge.bracketPage()).toContain('>Loser of G1<');
+    bridge.setSide(null);
+  });
+  it('pools: same sample with "in the tournament" copy, the progress bar and the seeding chip kept', () => {
+    setState();
+    bridge.setTournamentView('bracket'); bridge.setSide(null);
+    const html = bridge.bracketPage();
+    expect(html).toContain('<b>4 teams</b> in the tournament');
+    expect(html).toContain('2 of 3 games done');
+    expect(html).toContain('data-tn-view="pools" data-pools-tab="seeding"');
+    expect(html).not.toContain('battling through pools');
+  });
+  it('the hub Bracket row is never dead and says how many games the draw will have', () => {
+    setState();
+    const html = bridge.hub();
+    expect(html).not.toContain('is-locked');
+    expect(html).toContain('Double elimination · all 6 games'); // 4 teams: W1-0, W1-1, W2-0, L1-0, L2-0, GF (the reset is not promised)
+    expect(pure.generateDoubleElim(4, true).realMatches.filter((m) => !m.isReset).length).toBe(6);
   });
 });
 

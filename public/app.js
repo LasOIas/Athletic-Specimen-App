@@ -25,7 +25,7 @@
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.4'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -3627,8 +3627,11 @@ function buildTournamentHubHTML() {
     rows.push(row('data-tn-view="bracket"', '', ICON.trophy, 'Bracket',
       oc ? 'Champion crowned' : 'Bracket complete', oc ? escapeHTML(oc.championName || '') : CHEV));
   } else {
-    const sub = show.status === 'pools' ? 'Unlocks when pools finish' : 'After pool play';
-    rows.push(row('data-tn-view="bracket"', 'is-locked', ICON.trophy, 'Bracket', sub, CHEV));
+    // Design round 2026-08-24 ("i want to be able to click this and a sample bracket shows"): the row is never
+    // dead — it opens the sample bracket, and says how many games the drawn one will have.
+    const games = bracketPreviewGameCount(show, teams);
+    const sub = games ? ('Double elimination · all ' + games + ' games') : (show.status === 'pools' ? 'Unlocks when pools finish' : 'After pool play');
+    rows.push(row('data-tn-view="bracket"', games ? '' : 'is-locked', ICON.trophy, 'Bracket', sub, CHEV));
   }
 
   // Rules — tournaments.rules rendered on the Rules page (stub when unset); Past tournaments → History.
@@ -3679,6 +3682,53 @@ function buildPublicTournamentRootHTML() {
 // HARD RULES (Mike): bracket match-node cards stay SOLID var(--card) (never frosted — the page keeps the
 // watermark); gold appears ONLY on the decided championship game + the champions strip
 // (nothing gold before a winner exists, no gold path tint). Read-only spectator copy — never "submit results".
+// The SAMPLE bracket (design round 2026-08-24; Mike: "i want to be able to click this and a sample bracket
+// shows based off the number of registered teams" — built 2026-08-25 on his call, seeding chip kept). Built
+// from generateDoubleElim(N, reset) — the same generator tdbGenerateBracket uses — and rendered on the real
+// .bt-* furniture with data-mid / data-next so layoutBracketTree centres, connects and pans it exactly like
+// the live tree. ONE side at a time (state.bracketSide, the same tabs + handler as the drawn bracket). Every
+// slot is a placeholder ("Seed 3", "Winner of G4"); no scores, no live tag, no team names — it cannot be
+// mistaken for a result.
+function buildBracketPreviewHTML(show, teams) {
+  const N = (teams || []).length;
+  const gen = generateDoubleElim(N, !!(show && show.grand_final_reset));
+  const real = gen.realMatches || [];
+  if (!real.length) return '';
+  const synth = real.map((m) => ({ id: m.key, side: m.side, round: m.round, slot: m.slot, round_label: m.key }));
+  const gn = bracketGameNumbers(synth.slice());
+  const gOf = (key) => (gn.byId[key] ? 'G' + gn.byId[key] : key);
+  const src = (s) => (!s ? 'TBD' : s.seed ? ('Seed ' + s.seed) : ((s.type === 'winner' ? 'Winner of ' : 'Loser of ') + gOf(s.of)));
+  const sideDefs = [['winners', 'Winners'], ['losers', 'Losers'], ['grand_final', 'Championship']].filter(([s]) => real.some((m) => m.side === s));
+  let side = state.bracketSide || 'winners';
+  if (!sideDefs.some(([s]) => s === side)) side = sideDefs[0][0];
+  const sideMatches = real.filter((m) => m.side === side);
+  const rounds = [...new Set(sideMatches.map((m) => m.round))].sort((a, b) => a - b);
+  const maxRound = sideMatches.reduce((mx, m) => Math.max(mx, m.round || 0), 0);
+  const cols = rounds.map((r) => {
+    const rm = sideMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
+    const range = rm.length === 1 ? gOf(rm[0].key) : (gOf(rm[0].key) + '–' + gOf(rm[rm.length - 1].key));
+    const name = side === 'grand_final' ? (r === 1 ? 'Championship' : '') : ((r === maxRound && sideDefs.length > 1) ? 'Semifinals' : '');
+    const label = name ? `${name}<span class="bk-gid">${escapeHTML(range)}</span>` : escapeHTML(range);
+    return `<div class="bt-col"><div class="bt-rlabel">${label}</div>${rm.map((m) => {
+      const next = (m.winnerNext && m.winnerNext.key) ? ` data-next="${escapeHTML(m.winnerNext.key)}"` : '';
+      return `<div class="bt-node" data-mid="${escapeHTML(m.key)}"${next}><div class="bt-meta">${escapeHTML(gOf(m.key))}${m.isReset ? ' · if necessary' : ''}</div>
+        <div class="bt-row"><span class="bt-name bt-tbd">${escapeHTML(src(m.aSource))}</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">${escapeHTML(src(m.bSource))}</span></div></div>`;
+    }).join('')}</div>`;
+  }).join('');
+  const tabs = `<div class="bt-sides">${sideDefs.map(([s, lbl]) => `<button type="button" data-role="tv2-bracket-side" data-side="${s}" class="${s === side ? 'on' : ''}">${lbl}</button>`).join('')}</div>`;
+  const ss = { winners: 'Lose once and you drop to the losers side.', losers: 'Lose here and you are out.', grand_final: 'The winners side champion meets the losers side champion.' }[side] || '';
+  return `${tabs}<div class="bt-bar"><span class="bt-hint">Sample shape · pinch or drag to zoom</span></div>
+    <div class="bk-pv-pane"><div class="bk-pv-ss">${ss}</div>
+    <div class="bt-pan pd-bk-ro bk-pv-pan" data-role="bt-pan"><div class="bt-canvas" data-role="bt-canvas"><svg class="bt-links" data-role="bt-links" xmlns="http://www.w3.org/2000/svg"></svg><div class="bt-cols" data-role="bt-cols">${cols}</div></div></div></div>`;
+}
+// How many games the drawn bracket will have for N teams (the hub row's "all N games"; the if-necessary reset
+// game is not promised). 0 when there are not enough teams for a bracket.
+function bracketPreviewGameCount(show, teams) {
+  const N = (teams || []).length;
+  if (N < 2) return 0;
+  return generateDoubleElim(N, !!(show && show.grand_final_reset)).realMatches.filter((m) => !m.isReset).length;
+}
+
 function buildBracketPageHTML() {
   const list = state.tournaments || [];
   const active = state.activeTournamentId ? list.find((x) => x.id === state.activeTournamentId) : null;
@@ -3715,15 +3765,28 @@ function buildBracketPageHTML() {
     // (never "battling through pools"); pools → the existing in-play copy + the seeding chip (deep-links to
     // the Pools Seeding tab — Mike K; seeding only exists once pool games are played, so it's omitted during
     // registration).
+    const seedChip = isReg ? '' : `<button type="button" class="pd-bk-chip" data-tn-view="pools" data-pools-tab="seeding">Current seeding
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
+          <span class="pd-bk-chip-2">Seeding</span></button>`;
+    // Design round 2026-08-24 (Mike 2026-08-25): the pre-state IS the sample bracket — the shape the registered
+    // teams will draw, honest copy per status (registration vs pools), the progress bar during pools, and the
+    // seeding chip kept underneath (the only route from an undrawn bracket to where seeds are decided).
+    const preview = buildBracketPreviewHTML(show, teams);
+    if (preview) {
+      const n = teams.length;
+      const teamsWord = `<b>${n} ${n === 1 ? 'team' : 'teams'}</b> ${isReg ? 'registered so far' : 'in the tournament'}`;
+      return `${header}<div class="bk-pv">
+        <div class="bk-pv-h">Sample bracket</div>
+        <div class="bk-pv-s">Built from the ${teamsWord}. Double elimination, so there are two sides: win and you stay on the winners side, lose and you get a second life on the losers side. Seeds fill in when the last pool game is played. The shape stays the same.</div>
+      </div>${preview}${progress}${seedChip}`;
+    }
+    // Fewer than two teams: nothing to draw yet — the honest paragraph (never "battling through pools" in setup).
     const preH = isReg ? 'The bracket comes after pool play' : 'The bracket generates when pool play finishes';
     const preS = isReg
       ? (regOpen
         ? 'Registration is open. The bracket comes after pool play. Once teams are in and pools wrap, it appears right here.'
         : 'The bracket comes after pool play. Once pools wrap, it appears right here.')
       : 'Teams are still battling through pools. The moment the last pool game goes final, seeds lock in and the bracket appears right here.';
-    const seedChip = isReg ? '' : `<button type="button" class="pd-bk-chip" data-tn-view="pools" data-pools-tab="seeding">Current seeding
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
-          <span class="pd-bk-chip-2">Seeding</span></button>`;
     return `${header}<div class="pd-bk-pre">
         <div class="pd-bk-preic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v4a2 2 0 0 0 2 2h4"/><path d="M6 21v-4a2 2 0 0 1 2-2h4"/><path d="M12 12h6"/><path d="M18 8v8"/></svg></div>
         <div class="pd-bk-preh">${escapeHTML(preH)}</div>

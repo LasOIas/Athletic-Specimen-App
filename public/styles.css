@@ -4857,3 +4857,26 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
 }
 #mgss-sheet .mgv-sclive:hover { transform: translateY(-1px); box-shadow: 0 2px 5px rgba(20, 20, 22, .08), 0 0 0 1px oklch(0.86 0.006 75); }
 #mgss-sheet .mgv-sclive:active { transform: none; }
+
+/* Round 2026-08-24 — the SAMPLE bracket before seeding ("a sample bracket based off the number of registered
+   teams"). Reads as a diagram, not a scoreboard: nodes on the page tint, dashed. PORT NOTE: _rounds.css'
+   `.bk-pv-pan { height:auto; overflow-x:auto }` + `.bt-canvas { position:relative }` were the prototype's
+   no-JS crutch and are NOT ported — layoutBracketTree sizes, centres and pans the preview like the live tree. */
+.bk-pv { margin: 14px 0 4px; }
+.bk-pv-h {
+  font: 800 13px var(--font-display);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.bk-pv-s { margin-top: 5px; font-size: 13px; line-height: 1.5; color: var(--muted); text-wrap: pretty; }
+.bk-pv-s b { font-weight: 600; color: var(--ink); }
+.bk-pv-pan .bt-node { background: var(--surface-2, oklch(0.975 0.003 75)); border-style: dashed; }
+.bk-pv-pan .bt-meta { color: var(--muted); }
+.bk-pv-pane .bk-pv-ss { margin: 0 0 8px; }
+.bk-pv-ss {
+  font: 400 12px 'Inter', sans-serif;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+.bk-pv-pane + .pd-bk-prog { margin-top: 14px; }
