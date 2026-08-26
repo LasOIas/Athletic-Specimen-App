@@ -138,16 +138,21 @@ function pickMostDifferentTeams(candidates, previousTeams) {
   return tier[Math.floor(Math.random() * tier.length)];
 }
 
-// Mike (2026-08-25): the app never creates an ODD number of teams. evenCount rounds a wanted count DOWN to
-// the nearest even number and never below 2; evenTeamCount is the generator's count for a head count at a
-// team size (floor(players / size), then even). Remainders ride along per the balancer, as before.
+// Mike (2026-08-25): the app never creates an ODD number of teams, and a generated team never has MORE
+// players than the chosen size. evenCount rounds a wanted count DOWN to the nearest even number, never
+// below 2 (the copilot and the old group-count input). evenTeamCount is the generator's count for a head
+// count at a team size: the SMALLEST even count that keeps every team at or under the size (ceil(players /
+// size), rounded UP to even), so 30 players at 4 make eight teams of 4,4,4,4,4,4,3,3 and never a 5; the
+// balancer then spreads the players as evenly as it can.
 function evenCount(n) {
   const k = Math.max(0, Math.floor(Number(n) || 0));
   return Math.max(2, k - (k % 2));
 }
 function evenTeamCount(playerCount, teamSize) {
   const size = Number(teamSize) || 4;
-  return evenCount(Math.floor((Number(playerCount) || 0) / size));
+  const n = Math.max(0, Math.floor(Number(playerCount) || 0));
+  const need = Math.ceil(n / size);
+  return Math.max(2, need + (need % 2));
 }
 
 function generateBalancedGroups(players, checkedInKeys, groupCount, previousTeams) {

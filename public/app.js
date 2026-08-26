@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.36'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.37'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -9546,12 +9546,12 @@ function buildManageTeamsHTML() {
 }
 
 // Generate balanced teams from the checked-in players at the selected size (reuses generateBalancedGroups +
-// the groupCount/lastTeamSize chip state). Team count = floor(checked-in / size) rounded DOWN to even, min 2; remainders ride
+// the groupCount/lastTeamSize chip state). Team count = the smallest EVEN count that keeps every team at or under the size (Mike 2026-08-25); the balancer spreads the players as evenly as it can, so remainders ride
 // along per the balancer. Persists via saveLocal (→ queueLiveStateSave, teams only) + a partial repaint.
 function mgtGenerateTeams() {
   const size = Number(mgtSize) || 4;
   const inNow = (state.checkedIn || []).length;
-  const numTeams = evenTeamCount(inNow, size); // Mike (2026-08-25): always an even number of teams, never below 2
+  const numTeams = evenTeamCount(inNow, size); // Mike (2026-08-25): an even number of teams, none over the chosen size, never below 2
   const gen = generateBalancedGroups(state.players, state.checkedIn, numTeams, state.generatedTeams);
   state.generatedTeams = gen.teams;
   state.generatedTeamsSummary = gen.summary;

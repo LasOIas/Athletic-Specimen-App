@@ -1285,17 +1285,40 @@ describe('manageNeedsYouModel — the silent-game item', () => {
   });
 });
 
-describe('evenCount / evenTeamCount (Mike 2026-08-25: every generated team total is even)', () => {
-  it('rounds a count down to the nearest even number, never below 2', () => {
-    const { evenCount, evenTeamCount } = pure;
+
+describe('evenCount / evenTeamCount (Mike 2026-08-25: an even number of teams, every team at or under the chosen size, sizes as equal as possible)', () => {
+  it('evenCount rounds a wanted count down to even, never below 2', () => {
+    const { evenCount } = pure;
     expect(evenCount(7)).toBe(6); expect(evenCount(6)).toBe(6); expect(evenCount(3)).toBe(2); expect(evenCount(1)).toBe(2); expect(evenCount(0)).toBe(2);
-    expect(evenTeamCount(8, 4)).toBe(2);
-    expect(evenTeamCount(16, 4)).toBe(4);
-    expect(evenTeamCount(30, 4)).toBe(6);   // floor(30 / 4) = 7, rounded down to 6
-    expect(evenTeamCount(12, 4)).toBe(2);   // 3 -> 2
-    expect(evenTeamCount(7, 4)).toBe(2);    // 1 -> the floor of 2
+  });
+  it('evenTeamCount is the smallest even count that keeps every team at or under the size', () => {
+    const { evenTeamCount } = pure;
+    expect(evenTeamCount(8, 4)).toBe(2);     // 4, 4
+    expect(evenTeamCount(16, 4)).toBe(4);    // 4 x 4
+    expect(evenTeamCount(30, 4)).toBe(8);    // ceil(7.5) = 8: six teams of 4 and two of 3, never a 5
+    expect(evenTeamCount(12, 4)).toBe(4);    // ceil(3) = 3 -> 4: four teams of 3
+    expect(evenTeamCount(20, 4)).toBe(6);    // 5 -> 6: 4, 4, 3, 3, 3, 3
+    expect(evenTeamCount(7, 4)).toBe(2);     // 4 and 3
     expect(evenTeamCount(0, 4)).toBe(2);
-    expect(evenTeamCount(20, 0)).toBe(4);   // a bad size falls back to 4 like the generator does
-    for (let n = 0; n < 60; n += 1) expect(evenTeamCount(n, 4) % 2).toBe(0);
+    expect(evenTeamCount(20, 0)).toBe(6);    // a bad size falls back to 4 like the generator does
+    for (let n = 0; n < 80; n += 1) for (const size of [2, 3, 4, 6]) {
+      const k = evenTeamCount(n, size);
+      expect(k % 2).toBe(0);
+      expect(k).toBeGreaterThanOrEqual(2);
+      if (n >= 2) expect(Math.ceil(n / k)).toBeLessThanOrEqual(size);   // no team over the size
+    }
+  });
+  it('the real balancer at that count keeps every team within the size and within one player of each other', () => {
+    const { evenTeamCount } = pure;
+    for (const [n, size] of [[30, 4], [26, 4], [12, 4], [20, 4], [7, 4], [17, 3], [23, 6], [9, 2]]) {
+      const players = Array.from({ length: n }, (_, i) => ({ id: String(i + 1), skill: 1 + (i % 9) }));
+      const keys = players.map(playerIdentityKey);
+      const out = generateBalancedGroups(players, keys, evenTeamCount(n, size));
+      const counts = out.teams.map((tm) => tm.length);
+      expect(counts.length % 2).toBe(0);
+      expect(Math.max(...counts)).toBeLessThanOrEqual(size);
+      expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1);
+      expect(counts.reduce((a, b) => a + b, 0)).toBe(n);
+    }
   });
 });
