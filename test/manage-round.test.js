@@ -388,7 +388,10 @@ function seedPools(bridge, o) {
     { teams, pools, matches: o.matches || [] });
 }
 
-// Pool play with nothing final anywhere, so every pool is still movable.
+// C101 Task 0 (2026-08-25): Move is offered only BEFORE the schedule is drawn. UNDRAWN is the movable
+// fixture (pools exist, no games yet); UNPLAYED (drawn, nothing final) is LOCKED with its own line.
+const UNDRAWN = [];
+// Pool play drawn with nothing final anywhere: nets show, Move does not.
 const UNPLAYED = [
   { id: 'a1', phase: 'pool', pool_id: 'p1', net: 1, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 1 },
   { id: 'a2', phase: 'pool', pool_id: 'p1', net: 2, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 2 },
@@ -1693,16 +1696,18 @@ describe('Task 8 pool controls', () => {
     expect(count(html, 'class="pc-card"')).toBe(2);
     expect(count(html, 'data-pc-editnets=')).toBe(2);
     expect(html).toContain('>Nets 1<');
-    expect(html).toMatch(/pc-card"[\s\S]*Pool B[\s\S]*data-pc-move=/);
-    expect(html.split('Pool B')[0]).not.toContain('data-pc-move=');   // pool A has a final game: no Move
+    // C101 Task 0: pool B is drawn (a scheduled game), so it is locked too; only an UNDRAWN pool moves
+    expect(html).not.toContain('data-pc-move=');
     // the sharp version of the line above: the pools tab strip also says "Pool B", so slice the CARDS
     const cardA = html.slice(html.indexOf('data-pc-card="p1"'), html.indexOf('data-pc-card="p2"'));
     const cardB = html.slice(html.indexOf('data-pc-card="p2"'));
     expect(cardA).toContain('data-mgps-team="t1"');   // the row is still there, and still opens the sheet
     expect(cardA).not.toContain('data-pc-move=');     // it just cannot be moved any more
     expect(cardA).not.toContain('>Move<');
-    expect(count(cardB, 'data-pc-move=')).toBe(2);    // pool B has not played: both its teams can move
-    expect(html).toContain('before play starts');
+    expect(count(cardB, 'data-pc-move=')).toBe(0);    // pool B is drawn: teams stay put until the draw is redone
+    expect(cardB).toContain('The schedule is drawn, teams stay put.');
+    expect(html).toContain('before Start pool play');
+    expect(html).not.toContain('before play starts');
     expect(html).not.toContain('Scores follow the team');
     expect(html).toContain('class="mgv-danger"');
     expect(html).toContain('draws new pools from the registered teams at random');
@@ -1722,11 +1727,21 @@ describe('Task 8 pool controls', () => {
     const cardA = html.slice(html.indexOf('data-pc-card="p1"'), html.indexOf('data-pc-card="p2"'));
     const cardB = html.slice(html.indexOf('data-pc-card="p2"'));
     expect(cardA).toContain('<span class="pc-lock">Play has started, teams stay put.</span>');
-    expect(cardB).not.toContain('pc-lock');
-    expect(count(html, 'class="pc-lock"')).toBe(1);
-    // nothing final anywhere: neither card claims play has started
+    expect(cardB).toContain('<span class="pc-lock">The schedule is drawn, teams stay put.</span>');
+    expect(count(html, 'class="pc-lock"')).toBe(2);
+    // drawn but nothing final anywhere: every card says the schedule is drawn, none claims play started
     seedPools(bridge, { matches: UNPLAYED });
-    expect(bridge.buildMgPools({ controls: true })).not.toContain('pc-lock');
+    const drawn = bridge.buildMgPools({ controls: true });
+    expect(drawn).toContain('The schedule is drawn, teams stay put.');
+    expect(drawn).not.toContain('Play has started');
+    expect(drawn).not.toContain('data-pc-move=');
+    // undrawn: the page is the pre-start setup block (Pools drawn + Start pool play), which carries no
+    // controls panel, no lock line and, until C101 item 7 gives Move a safe home there, no Move either
+    seedPools(bridge, { matches: UNDRAWN });
+    const open = bridge.buildMgPools({ controls: true });
+    expect(open).toContain('Start pool play');
+    expect(open).not.toContain('pc-lock');
+    expect(open).not.toContain('data-pc-move=');
   });
 
   // Fix round 1: tdbDrawPoolsAtomic clamps to at least one pool, so a 2-3 team event is ONE pool. Move used
@@ -1743,7 +1758,7 @@ describe('Task 8 pool controls', () => {
     expect(count(html, 'class="pc-card"')).toBe(1);
     expect(html).toContain('data-mgps-team="t1"');   // the rows are all still there
     expect(html).not.toContain('data-pc-move=');     // there is simply nowhere to move to
-    expect(html).not.toContain('pc-lock');           // and nothing has been played, so no lock line either
+    expect(html).not.toContain('Play has started');  // nothing has been played, so that line never appears
     // and the dead-end state cannot be reached even if the module var somehow named a team
     const forced = bridge.buildMgPools({ controls: true, moveTeam: 't1' });
     expect(forced).not.toContain('class="pc-pick"');
@@ -1781,21 +1796,19 @@ describe('Task 8 pool controls', () => {
   });
 
   it('the move picker offers the other pools, never its own, and names the team it is moving', () => {
+    // C101 Task 0: a drawn pool never opens the picker, even when the module var names a team in it
     seedPools(bridge, { matches: UNPLAYED });
-    const open = bridge.buildMgPools({ controls: true, moveTeam: 't1' });
-    expect(open).toContain('class="pc-pick"');
-    expect(open).toContain('Move <b>Dink Responsibly</b> to');
-    expect(open).toContain('data-pc-pick="t1:p2"');
-    expect(open).not.toContain('data-pc-pick="t1:p1"');
-    expect(open).toContain('data-pc-cancel');
-    expect(count(open, 'class="pc-pick"')).toBe(1);           // one picker at a time
+    const drawnOpen = bridge.buildMgPools({ controls: true, moveTeam: 't1' });
+    expect(drawnOpen).not.toContain('class="pc-pick"');
+    expect(drawnOpen).not.toContain('data-pc-pick=');
+    expect(drawnOpen).toContain('The schedule is drawn, teams stay put.');
     // a team in a pool that HAS played can never have one, even if the module var somehow named it
     seedPools(bridge, { matches: [{ id: 'f1', phase: 'pool', pool_id: 'p1', net: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', score_a: 15, score_b: 9, winner_team_id: 't1', queue_order: 1 }] });
     expect(bridge.buildMgPools({ controls: true, moveTeam: 't1' })).not.toContain('class="pc-pick"');
   });
 
   it('the delegate: Move opens the picker BEFORE the team sheet, and a pick writes, refreshes, repaints', async () => {
-    seedPools(bridge, { matches: UNPLAYED });
+    seedPools(bridge, { matches: UNDRAWN });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true });
     const { calls, restore } = bridge.mockPoolWrites({});
@@ -1817,7 +1830,7 @@ describe('Task 8 pool controls', () => {
   });
 
   it('the delegate: the team row itself still opens the team sheet, and Cancel closes the picker', () => {
-    seedPools(bridge, { matches: UNPLAYED });
+    seedPools(bridge, { matches: UNDRAWN });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true, moveTeam: 't1' });
     const { calls, restore } = bridge.mockPoolWrites({});
@@ -1834,7 +1847,7 @@ describe('Task 8 pool controls', () => {
   // Fix round 1: opening a picker is not a reason to throw away a net list typed into another card — that
   // is the same unsaved-work defect the poll guard exists to prevent, reached through a different door.
   it('opening a move picker keeps an open nets field, and Done clears both', () => {
-    seedPools(bridge, { matches: UNPLAYED });
+    seedPools(bridge, { matches: UNDRAWN });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true, netsEdit: 'p1' });
     const { calls, restore } = bridge.mockPoolWrites({});
@@ -1850,7 +1863,7 @@ describe('Task 8 pool controls', () => {
   });
 
   it('a refused move says why and leaves the picker open, rather than reporting a move that never happened', async () => {
-    seedPools(bridge, { matches: UNPLAYED });
+    seedPools(bridge, { matches: UNDRAWN });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true, moveTeam: 't1' });
     const { calls, restore } = bridge.mockPoolWrites({ move: () => { throw new Error('The move did not save. Check you are signed in as an admin.'); } });
@@ -1868,7 +1881,7 @@ describe('Task 8 pool controls', () => {
   // Fix round 1: the write and the redraw fail for different reasons. A refresh that fails AFTER the move
   // landed must not be reported as a failed move — that notice invites a second tap on a write that worked.
   it('a landed move whose refresh fails is never reported as a failed move', async () => {
-    seedPools(bridge, { matches: UNPLAYED });
+    seedPools(bridge, { matches: UNDRAWN });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true, moveTeam: 't1' });
     const { calls, restore } = bridge.mockPoolWrites({ refresh: () => { throw new Error('Failed to fetch'); } });
@@ -1884,7 +1897,7 @@ describe('Task 8 pool controls', () => {
   });
 
   it('the delegate: Edit nets opens the field and Save nets writes what was TYPED in it', async () => {
-    seedPools(bridge, { matches: UNPLAYED });
+    seedPools(bridge, { matches: UNDRAWN });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true });
     const { calls, restore } = bridge.mockPoolWrites({});
@@ -1906,7 +1919,7 @@ describe('Task 8 pool controls', () => {
   // Fix round 1: the field the repaint just drew is a new element, so the caret has to be put in it one
   // tick later. The sandbox stubs setTimeout to a noop, so the test swaps in an immediate one.
   it('the delegate: Edit nets puts the caret in the field it just opened', () => {
-    seedPools(bridge, { matches: UNPLAYED });
+    seedPools(bridge, { matches: UNDRAWN });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true });
     const { calls, restore } = bridge.mockPoolWrites({});
@@ -1923,7 +1936,7 @@ describe('Task 8 pool controls', () => {
   });
 
   it('a refused nets write says why and brings the field back so the list can be fixed', async () => {
-    seedPools(bridge, { matches: UNPLAYED });
+    seedPools(bridge, { matches: UNDRAWN });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true, netsEdit: 'p1' });
     const { calls, restore } = bridge.mockPoolWrites({ nets: () => { throw new Error('A pool needs at least one net.'); } });
@@ -1966,7 +1979,7 @@ describe('Task 8 pool controls', () => {
   });
 
   it('the poll guard: a typed nets field or an open picker is unsaved work', () => {
-    seedPools(bridge, { matches: UNPLAYED });
+    seedPools(bridge, { matches: UNDRAWN });
     bridge.buildMgPools({ controls: true });
     expect(bridge.netsDirty()).toBe(false);
     bridge.buildMgPools({ controls: true, netsEdit: 'p1' });
@@ -2018,7 +2031,7 @@ describe('Task 8 pool controls', () => {
   // twice, so the per-row CAS in tdbSetPoolNets threw "Another device just updated a game" over a write
   // that had already landed, and the field reopened on a pool whose nets were correct.
   it('a double-tap on Save nets writes once, and the button greys while it is in flight', async () => {
-    seedPools(bridge, { matches: UNPLAYED });
+    seedPools(bridge, { matches: UNDRAWN });
     bridge.setMgtView('pools');
     bridge.buildMgPools({ controls: true, netsEdit: 'p1' });
     let release;
@@ -2048,7 +2061,7 @@ describe('Task 8 pool controls', () => {
   // A refused move left the tapped pill looking selected with nothing said, which is the exact silent-
   // refusal shape the rest of this round has been closing.
   it('a refused team-sheet write says so instead of dying in a console.warn', async () => {
-    seedPools(bridge, { matches: UNPLAYED });
+    seedPools(bridge, { matches: UNDRAWN });
     const { calls, restore } = bridge.mockPoolWrites({});
     try {
       await bridge.teamSheetWrite(() => { throw new Error('Another device just updated this team.'); });

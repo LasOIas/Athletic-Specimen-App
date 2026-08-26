@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.34'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.35'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -11833,10 +11833,11 @@ function mgPoolGameRowHTML(g, order, teams) {
 // how they are, fix them"). The head states the pool's nets and carries its own Edit-nets control; tapping
 // it swaps the label for a field prefilled with the PARSED net list ("1, 2, 3") — never the rendered
 // "Nets 1-3" label, because parseInt('1-3') is 1 and the pool would silently collapse to a single net.
-// MOVE, spec decision 3 (Mike, 2026-08-25): a pool moves ONLY BEFORE PLAY STARTS. tdbMoveTeamToPool writes
-// teams.pool_id and nothing else, so a team that has already played would leave its finished games behind
-// and drop out of the new pool's standings. The moment any game in the pool is final the Move label goes;
-// the panel note above the cards is what says why.
+// MOVE, spec decision 3 (Mike, 2026-08-25): a pool moves ONLY BEFORE THE SCHEDULE EXISTS. tdbMoveTeamToPool
+// writes teams.pool_id and nothing else, so once Start pool play has drawn the fixtures a moved team would
+// keep its games against the old pool and have none in the new one (C101 Task 0, 2026-08-25: the gate used
+// to wait for a FINAL game, which left that corruption path open between the draw and the first score).
+// The moment any game exists for the pool the Move label goes; the card's lock line says why.
 function mgPoolCardHTML(pool, teams, pools, matches) {
   const pid = String(pool.id);
   const label = pool.label || '';
@@ -11854,7 +11855,8 @@ function mgPoolCardHTML(pool, teams, pools, matches) {
   // background sync on a live-scoring page until the panel was closed.
   const others = pools.filter((p) => String(p.id) !== pid);
   const played = matches.some((m) => String(m.pool_id) === pid && m.status === 'final');
-  const movable = others.length > 0 && !played;
+  const drawn = matches.some((m) => String(m.pool_id) === pid);
+  const movable = others.length > 0 && !drawn;
   const rows = mine.length
     ? mine.map((tm) => {
       const tid = String(tm.id);
@@ -11877,7 +11879,8 @@ function mgPoolCardHTML(pool, teams, pools, matches) {
   // leaving the panel note above two cards as the only explanation. Gated on `played`, NOT on `!movable` —
   // a one-pool event also has no Move, and telling that organizer "play has started" when nothing has been
   // scored would be copy the app cannot honour.
-  const lock = played ? `<span class="pc-lock">Play has started, teams stay put.</span>` : '';
+  const lock = played ? `<span class="pc-lock">Play has started, teams stay put.</span>`
+    : (drawn ? `<span class="pc-lock">The schedule is drawn, teams stay put.</span>` : '');
   return `<div class="pc-card" data-pc-card="${escapeHTMLText(pid)}">`
     + `<div class="pc-hd"><span class="pc-name">Pool ${escapeHTML(label)}</span>${head}${lock}</div>`
     + rows + `</div>`;
@@ -11898,7 +11901,7 @@ function mgPoolsControlsHTML(t, teams, pools, matches) {
   }
   return `<div class="pl-sect">Pool controls</div>`
     + `<div class="pc-top">`
-      + `<p class="pc-note">Move a team to another pool before play starts, change the nets a pool plays on, or start the draw over.</p>`
+      + `<p class="pc-note">Move a team to another pool before Start pool play, change the nets a pool plays on, or start the draw over.</p>`
       + `<button type="button" class="pc-done" data-mgps-controls>Done</button></div>`
     + pools.map((p) => mgPoolCardHTML(p, teams, pools, matches)).join('')
     + `<div class="pl-sect mgv-dsect" aria-hidden="true"></div>`
