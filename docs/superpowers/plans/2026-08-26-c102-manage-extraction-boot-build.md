@@ -16,7 +16,7 @@
 - `node --check public/app.js` after every edit of it; from Task 5 on, ALSO `node --check public/manage.js` AND `node --check` on the concatenation (`cat public/manage.js public/app.js > "$SCRATCH/concat.js"; node --check "$SCRATCH/concat.js"`).
 - The suite: `cd test && npx vitest run` must be 39 files (42 from Task 6 on, see the task) green with NO test deleted, skipped or weakened. Baseline 1233 tests.
 - `partialRender()` for every background sync, never `render()`.
-- Copy law: no em dashes anywhere (code comments, tests, commit messages included); never the word "night"; no `!important` outside the documented iOS counters.
+- Copy law: no em dashes anywhere (code comments, tests, commit messages included); never the copy law's banned word for the dark hours; no `!important` outside the documented iOS counters.
 - Line endings: `public/app.js` and the new `public/manage.js` are LF; `public/styles.css` and `public/pure.js` are CRLF. `git config core.autocrlf` is true and there is no `.gitattributes`: NEVER `git stash` a `public/` file. Write files with the same endings they have.
 - No behaviour change. No rendered string, class name, style value, RPC call or event binding changes. If a task cannot be completed without one, STOP and report `DONE_WITH_CONCERNS` naming the string.
 - Subagents commit; the controller pushes (§21). Commit messages follow the repo style: `type(scope): plain sentence - vYYYY.MM.DD.N`, no em dashes.
