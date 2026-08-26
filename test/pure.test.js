@@ -17,6 +17,7 @@ const {
   scoringRulesFor, gameScoreStatus,
   splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
   bracketGameNumbers, bracketSourceLabel,
+  bracketClearPlan,
   shouldAutoPromptBracket, assignBracketNets,
   shapeClaimCandidates, filterClaimCandidates,
   resolveMyTeam, computeTeamRecord, computeTeamRunTimeline,
@@ -1320,5 +1321,60 @@ describe('evenCount / evenTeamCount (Mike 2026-08-25: an even number of teams, e
       expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1);
       expect(counts.reduce((a, b) => a + b, 0)).toBe(n);
     }
+  });
+});
+
+describe('bracketClearPlan (C101 Task 5 - the client mirror of clear_bracket_atomic)', () => {
+  // Build a fully PLAYED double-elimination bracket for N teams as match ROWS, seed 1 winning every game.
+  function playedBracket(N) {
+    const { realMatches } = generateDoubleElim(N, false);
+    const idOf = (k) => 'm-' + k;
+    return realMatches.map((m) => ({
+      id: idOf(m.key), phase: 'main', side: m.side, round: m.round, status: 'final',
+      winner_next_match_id: m.winnerNext ? idOf(m.winnerNext.key) : null,
+      winner_next_slot: m.winnerNext ? (m.winnerNext.slot === 'b' ? 1 : 2) : null,
+      loser_next_match_id: m.loserNext ? idOf(m.loserNext.key) : null,
+      loser_next_slot: m.loserNext ? (m.loserNext.slot === 'b' ? 1 : 2) : null,
+    }));
+  }
+
+  // THE PROPERTY, stated honestly: this is an END-STATE invariant of the FULL sweep. Clearing every game
+  // in reverse play order leaves the bracket identical to its generated state. It says NOTHING about any
+  // single intermediate clear, and no intermediate assertion should be read into it.
+  for (let N = 2; N <= 24; N++) {
+    it('N=' + N + ': clearing every game in reverse play order returns the bracket to its generated state', () => {
+      const rows = playedBracket(N);
+      if (!rows.length) return;
+      const byId = new Map(rows.map((r) => [r.id, { ...r }]));
+      for (let i = rows.length - 1; i >= 0; i--) {
+        const target = byId.get(rows[i].id);
+        if (target.status !== 'final') continue;
+        const plan = bracketClearPlan(target.id, [...byId.values()]);
+        expect(plan.reset[0]).toBe(target.id);
+        plan.reset.forEach((id) => { byId.get(id).status = 'scheduled'; });
+      }
+      // end state: every row scheduled, and the feeder graph untouched by the sweep
+      [...byId.values()].forEach((r) => expect(r.status).toBe('scheduled'));
+      rows.forEach((r) => {
+        const after = byId.get(r.id);
+        expect(after.winner_next_match_id).toBe(r.winner_next_match_id);
+        expect(after.loser_next_match_id).toBe(r.loser_next_match_id);
+      });
+    });
+  }
+
+  it('a scheduled downstream match is BLANKED but never collected for reset', () => {
+    const rows = [
+      { id: 'a', status: 'final', winner_next_match_id: 'c', winner_next_slot: 2, loser_next_match_id: 'b', loser_next_slot: 1 },
+      { id: 'b', status: 'scheduled', winner_next_match_id: null, loser_next_match_id: null },
+      { id: 'c', status: 'scheduled', winner_next_match_id: null, loser_next_match_id: null },
+    ];
+    const plan = bracketClearPlan('a', rows);
+    expect(plan.reset).toEqual(['a']);
+    expect(plan.blank).toEqual([{ match: 'c', slot: 'a' }, { match: 'b', slot: 'b' }]);
+  });
+
+  it('an unknown id plans nothing', () => {
+    expect(bracketClearPlan('nope', [{ id: 'a', status: 'final' }])).toEqual({ reset: [], blank: [] });
   });
 });

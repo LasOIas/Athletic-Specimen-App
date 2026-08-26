@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.40'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.41'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2604,6 +2604,19 @@ async function tdbApplyNetCountChange(tournamentId, newNetCount, assignments) {
   });
   if (error) throw error;
   return data;
+}
+
+// C101 Task 5 / migration 0062: clear ONE bracket result and everything it sent through. The RPC RETURNS
+// the number of matches it reset, which is what turns `returns void` (which gave the client nothing against
+// the read-back law) into a verifiable call. It NEVER falls back to a direct matches write: that would be
+// non-atomic and would leave no action_log row, so a failure here has to be reported as a failure.
+async function tdbClearBracketResult(match) {
+  if (!supabaseClient || !match || !match.id) throw new Error('No game.');
+  const { data, error } = await supabaseClient.rpc('clear_bracket_atomic', { p_match: match.id });
+  if (error) { console.error('tdbClearBracketResult', error); throw error; }
+  const n = Number(Array.isArray(data) ? data[0] : data);
+  if (!Number.isFinite(n) || n < 1) throw new Error('Nothing was cleared. Refresh and try again.');
+  return n;
 }
 
 // Seed from pool standings + generate + persist a double-elimination bracket.
@@ -12160,7 +12173,17 @@ function buildMgScoreSheetHTML(match, winner) {
   // "add to the score card a way for live scoring that can be saved" (2026-08-24): the secondary saves the
   // running score and keeps the game in progress.
   const quiet = isFinal ? '' : `<button type="button" class="mgv-sclive" data-mgss="live">${match.status === 'live' ? 'Update live score' : 'Save live score'}</button>`;
-  return head + body + `<div class="mgv-scfoot">${primary}${quiet}</div>`;
+  // C101 Task 5 / migration 0062: "Clear this result", never "Undo". Mike removed the Undo strip, the
+  // bracket page bans the literal, the clear lives in the score CARD and not on the page, and the edit
+  // hint above already says "clear the result first", which this makes true.
+  // Admin only: a signed-in player may SCORE a not-yet-final game (canScoreMatch) and must never clear one.
+  // It carries .mgv-sclive too, deliberately: the two never render together (one is the not-final
+  // secondary, the other the final-only one), and borrowing that class's geometry keeps the foot on one
+  // rhythm AND inherits the font-size that already counters prod's button { font-size: 16px !important }
+  // iOS guard, so this round adds no !important of its own. .mgv-scclear only repaints it.
+  const clear = (isFinal && state.isAdmin)
+    ? `<button type="button" class="mgv-sclive mgv-scclear" data-mgss="clear">Clear this result</button>` : '';
+  return head + body + `<div class="mgv-scfoot">${primary}${quiet}${clear}</div>`;
 }
 
 function closeMgScoreSheet() { const el = document.getElementById('mgss-sheet'); if (el) el.remove(); }
@@ -12216,7 +12239,12 @@ function openMgScoreSheet(matchId) {
     });
     const btn = scrim.querySelector('.mgv-scfinal');
     if (btn) {
-      const canFinal = match.phase === 'main' ? (!!pick && !(a === b && a > 0)) : a !== b;
+      // C101 Task 5: brought into line with the build-time expression at buildMgScoreSheetHTML. A FINISHED
+      // bracket game with no score on it cannot be re-submitted (edit_match_score derives the winner from
+      // the scores and refuses 0-0), so the primary must stay dead until a point goes in.
+      const canFinal = match.phase === 'main'
+        ? (!!pick && !(a === b && a > 0) && !(isFinal && a === 0 && b === 0))
+        : a !== b;
       if (canFinal) btn.removeAttribute('disabled'); else btn.setAttribute('disabled', 'true');
       btn.textContent = mgScoreFinalLabel(aName, bName, a, b, isFinal, pick);
     }
@@ -12254,6 +12282,25 @@ function openMgScoreSheet(matchId) {
       afterSave();
     } catch (e) { fail((e && e.message) || 'Could not update the live score.'); submitting = false; }
   };
+  const doClear = async () => {
+    if (submitting) return;
+    // The confirm's second sentence is true ONLY because guard (e) in 0062 refuses a live downstream game.
+    // If that guard is ever loosened, this copy has to warn that a game in progress is wiped.
+    const ok = await appConfirm({
+      title: 'Clear this result',
+      message: 'The score goes and the teams it sent through come back. This cannot be undone.',
+      confirmText: 'Clear it',
+      danger: true,
+    });
+    if (!ok) return;
+    submitting = true;
+    try {
+      await tdbClearBracketResult(match);
+      await tdbRefreshTournaments();
+      closeMgScoreSheet();
+      afterSave();
+    } catch (e) { fail((e && e.message) || 'Could not clear the result.'); submitting = false; }
+  };
   scrim.addEventListener('click', (ev) => {
     if (ev.target === scrim) { closeMgScoreSheet(); return; }
     // Tap a team to mark them the winner. If a score is already on the board and it contradicts the pick, the
@@ -12284,6 +12331,7 @@ function openMgScoreSheet(matchId) {
     if (role === 'close') { closeMgScoreSheet(); return; }
     if (role === 'final' || role === 'edit') { void doFinal(); return; }
     if (role === 'live') { void doLive(); return; }
+    if (role === 'clear') { void doClear(); return; }   // C101 Task 5
   });
 }
 

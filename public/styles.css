@@ -4748,6 +4748,23 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
 #mgss-sheet .mgv-sclive:hover { transform: translateY(-1px); box-shadow: 0 2px 5px rgba(20, 20, 22, .08), 0 0 0 1px oklch(0.86 0.006 75); }
 #mgss-sheet .mgv-sclive:active { transform: none; }
 
+/* PORT NOTE, C101 Task 5 (2026-08-25): "Clear this result" is the quiet destructive action INSIDE the
+   score card. It sits under the primary, not beside it, so a thumb going for Save cannot find it. The
+   markup carries .mgv-sclive as well, so the geometry and the font-size that counters prod's global
+   button { font-size: 16px !important } iOS guard are inherited rather than restated: this block adds no
+   !important of its own and only repaints the control. The two controls never render together, because
+   .mgv-sclive is the not-final secondary and this one is final-only. */
+#mgss-sheet .mgv-scclear {
+  border: 1px solid oklch(0.55 0.16 25 / .24);
+  border-radius: 11px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--danger);
+  font-weight: 600;
+}
+#mgss-sheet .mgv-scclear:hover { box-shadow: 0 0 0 1px oklch(0.55 0.16 25 / .38); }
+
+
 /* Round 2026-08-24 — the SAMPLE bracket before seeding ("a sample bracket based off the number of registered
    teams"). Reads as a diagram, not a scoreboard: nodes on the page tint, dashed. PORT NOTE: _rounds.css'
    `.bk-pv-pan { height:auto; overflow-x:auto }` + `.bt-canvas { position:relative }` were the prototype's

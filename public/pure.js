@@ -1071,6 +1071,42 @@ function bracketGameNumbers(mainMatches) {
   return { byId, byRoundLabel };
 }
 
+// C101 Task 5: the client's mirror of clear_bracket_atomic's COLLECTION step, so the sweep is testable
+// without a database and the card can say how many results a clear will take. `reset` is the target plus
+// every downstream match reachable through winner_next_match_id / loser_next_match_id that is NOT
+// 'scheduled' (the RPC's `with recursive chain`); `blank` is one {match, slot} per fed slot those matches
+// point at, using the 0039 mapping where slot 1 means team_b_id and anything else means team_a_id.
+// Breadth-first from the target, so the order is stable and readable.
+function bracketClearPlan(matchId, matches) {
+  const byId = new Map();
+  (matches || []).forEach((m) => { if (m && m.id != null) byId.set(String(m.id), m); });
+  if (!byId.has(String(matchId))) return { reset: [], blank: [] };
+  const reset = [];
+  const seen = new Set();
+  const queue = [String(matchId)];
+  while (queue.length) {
+    const id = queue.shift();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    reset.push(id);
+    const m = byId.get(id);
+    if (!m) continue;
+    [m.winner_next_match_id, m.loser_next_match_id].forEach((nx) => {
+      if (nx == null) return;
+      const n = byId.get(String(nx));
+      if (n && n.status !== 'scheduled' && !seen.has(String(nx))) queue.push(String(nx));
+    });
+  }
+  const blank = [];
+  reset.forEach((id) => {
+    const m = byId.get(id);
+    if (!m) return;
+    if (m.winner_next_match_id != null) blank.push({ match: String(m.winner_next_match_id), slot: Number(m.winner_next_slot) === 1 ? 'b' : 'a' });
+    if (m.loser_next_match_id != null) blank.push({ match: String(m.loser_next_match_id), slot: Number(m.loser_next_slot) === 1 ? 'b' : 'a' });
+  });
+  return { reset, blank };
+}
+
 // Rewrite a stored source label ("Winner of WB R1 M1" / "Loser of LB R2 M1") to the continuous game number
 // ("Winner of G3" / "Loser of G7") so a TBD slot reads "extremely clear where you are" (Mike). Returns the
 // original text unchanged if it doesn't match the pattern or the referenced match isn't in the map.
@@ -2067,6 +2103,7 @@ if (typeof module !== "undefined" && module.exports) {
     splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
     layoutRoundsOnNets, assignPoolGameSlots, relayoutPoolGamesOnNets, poolNetRange, teamNetRange,
     bracketGameNumbers, bracketSourceLabel,
+    bracketClearPlan,
     shouldAutoPromptBracket, assignBracketNets,
     shapeStandingsByPool, computeAllTimeLeaderboard,
     shapeClaimCandidates, filterClaimCandidates,

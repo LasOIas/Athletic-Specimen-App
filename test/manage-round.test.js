@@ -275,6 +275,33 @@ function loadApp() {
       teamSheetWrite: (fn) => mgtsWrite(fn),
       // Fix wave: the double-tap guard on Save nets. Driven through the real delegate by its own test.
       saveNets: (poolId) => mgPoolsSaveNets(poolId),
+      // C101 Task 5: the mirror of swapSupaFrom for the RPC door. supabaseClient is a const, but its rpc is
+      // a plain property, so it can be swapped for the length of one case. Returns its own undo.
+      swapSupaRpc: (fn) => { const was = supabaseClient.rpc; supabaseClient.rpc = async (...a) => fn(...a); return () => { supabaseClient.rpc = was; }; },
+      clearResult: (m) => tdbClearBracketResult(m),
+      // C101 Task 5: the score card's clear path, every collaborator swapped for a recorder. Install it
+      // AFTER the card is open: openMgScoreSheet calls closeMgScoreSheet on its way in, and a swapped one
+      // would record a 'close' nobody tapped. These live in the SHARED vm context, so every caller runs
+      // the returned restore in a finally.
+      mockScoreCard: (o) => {
+        o = o || {};
+        const calls = [];
+        const was = { appConfirm, tdbClearBracketResult, tdbRefreshTournaments, closeMgScoreSheet, repaintManage, partialRenderTournament };
+        appConfirm = async (opts) => { calls.push(['confirm', opts && opts.title]); return !!o.confirm; };
+        tdbClearBracketResult = async (m) => { calls.push(['clear', m && m.id]); return o.clear ? o.clear(m) : 1; };
+        tdbRefreshTournaments = async () => { calls.push(['refresh']); };
+        closeMgScoreSheet = () => { calls.push(['close']); };
+        repaintManage = () => { calls.push(['after']); };
+        partialRenderTournament = () => { calls.push(['after']); };
+        return { calls, restore: () => {
+          appConfirm = was.appConfirm;
+          tdbClearBracketResult = was.tdbClearBracketResult;
+          tdbRefreshTournaments = was.tdbRefreshTournaments;
+          closeMgScoreSheet = was.closeMgScoreSheet;
+          repaintManage = was.repaintManage;
+          partialRenderTournament = was.partialRenderTournament;
+        } };
+      },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -2197,6 +2224,133 @@ describe('C101 Task 1 Move in the Pools drawn block', () => {
     expect(count(css, '.mgps-pteam .pc-move {')).toBe(1);
     expect(count(css, '.mgps-pteam[data-pc-open="1"] {')).toBe(1);
     const block = css.slice(css.indexOf('.mgps-pteam .pc-move {'), css.indexOf('.mgps-pteam .pc-move {') + 400);
+    expect(block).not.toContain('!important');
+  });
+});
+
+// C101 Task 5 / migration 0062: "Clear this result" in the score CARD. The RPC returns a count, so the
+// client never guesses; there is no direct-matches fallback, because a fallback would be non-atomic and
+// would leave no audit row.
+describe('C101 Task 5 Clear this result', () => {
+  // The championship, finished. Written into the fixture's own gf row, so openMgScoreSheet can find it.
+  const FINISH_GF = () => {
+    setMainBracketFixture();
+    const gf = bridge.getState().tournamentMatches.find((m) => m.id === 'gf');
+    Object.assign(gf, { status: 'final', team_a_id: 't1', team_b_id: 't2', score_a: 21, score_b: 18, winner_team_id: 't1', version: 3 });
+    return gf;
+  };
+
+  // The REAL card, mounted the way the shipped opener mounts it, with its click handler captured off the
+  // scrim it binds to. A grep of app.js proves nothing about what a tap does (the 2026-08-03 inert-Undo
+  // lesson), and the delegate order inside this card is exactly what the clear has to survive.
+  function withScoreSheet(matchId, fn) {
+    const doc = bridge.doc;
+    const realCreate = doc.createElement;
+    let handler = null;
+    const scrim = {
+      id: '', className: '', style: {}, innerHTML: '',
+      addEventListener: (type, cb) => { if (type === 'click') handler = cb; },
+      querySelector: (sel) => (sel === '[data-mgss="close"]' ? { focus: () => {} } : null),
+      querySelectorAll: () => ({ forEach: () => {} }),
+    };
+    doc.createElement = () => scrim;
+    const realTimeout = bridge.swapTimeout((cb) => { cb(); return 0; });
+    try {
+      bridge.openScore(matchId);
+      if (!handler) throw new Error('the score card click handler was never bound');
+      const tap = (role) => handler({
+        target: { closest: (sel) => (sel === '[data-mgss]' ? { getAttribute: () => role } : null) },
+        preventDefault: () => {}, stopPropagation: () => {},
+      });
+      return fn(tap, scrim);
+    } finally { doc.createElement = realCreate; bridge.swapTimeout(realTimeout); }
+  }
+
+  it('an admin sees Clear on a finished bracket game, under the primary', () => {
+    const gf = FINISH_GF();
+    const html = bridge.buildScoreSheet(gf, 'a');
+    expect(html).toContain('data-mgss="clear"');
+    expect(html).toContain('>Clear this result<');
+    expect(html).not.toContain('Undo');
+    expect(html.indexOf('data-mgss="edit"')).toBeLessThan(html.indexOf('data-mgss="clear"'));
+  });
+
+  it('an unfinished game and a signed-in player never see it', () => {
+    const gf = FINISH_GF();
+    expect(bridge.buildScoreSheet({ ...gf, status: 'scheduled', score_a: null, score_b: null }, null))
+      .not.toContain('data-mgss="clear"');
+    bridge.getState().isAdmin = false;
+    try { expect(bridge.buildScoreSheet(gf, 'a')).not.toContain('data-mgss="clear"'); }
+    finally { bridge.getState().isAdmin = true; }
+  });
+
+  it('the edit hint promises what the card can now do', () => {
+    const gf = FINISH_GF();
+    const html = bridge.buildScoreSheet(gf, 'a');
+    expect(html).toContain('To change who won, clear the result first.');
+    expect(html).toContain('data-mgss="clear"');
+  });
+
+  it('the writer sends one argument and reads the count back, and never writes matches directly', async () => {
+    const gf = FINISH_GF();
+    const seen = [];
+    const undo = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return { data: 2, error: null }; });
+    try {
+      await expect(bridge.clearResult(gf)).resolves.toBe(2);
+      expect(seen).toEqual([['clear_bracket_atomic', { p_match: 'gf' }]]);
+    } finally { undo(); }
+    const fn = appSrc.slice(appSrc.indexOf('async function tdbClearBracketResult('), appSrc.indexOf('async function tdbResetBracket('));
+    expect(fn).not.toContain("from('matches')");
+  });
+
+  it('a zero count is a failure, not a success', async () => {
+    const gf = FINISH_GF();
+    const undo = bridge.swapSupaRpc(() => ({ data: 0, error: null }));
+    try { await expect(bridge.clearResult(gf)).rejects.toThrow('Nothing was cleared. Refresh and try again.'); }
+    finally { undo(); }
+  });
+
+  it('the RPC message is what the card shows, and an RPC-not-ready error degrades honestly', async () => {
+    const gf = FINISH_GF();
+    const undo = bridge.swapSupaRpc(() => ({ data: null, error: { message: 'A game further along is being scored right now. Finish that one first.' } }));
+    try { await expect(bridge.clearResult(gf)).rejects.toThrow('A game further along is being scored right now. Finish that one first.'); }
+    finally { undo(); }
+    const undo2 = bridge.swapSupaRpc(() => ({ data: null, error: { message: 'Could not find the function public.clear_bracket_atomic' } }));
+    try { await expect(bridge.clearResult(gf)).rejects.toThrow(/clear_bracket_atomic/); }
+    finally { undo2(); }
+  });
+
+  it('the confirm gates the call and the delegate reaches the control from a real tap', async () => {
+    FINISH_GF();
+    await withScoreSheet('gf', async (tap) => {
+      const c = bridge.mockScoreCard({ confirm: false });     // a cancelled confirm
+      try { tap('clear'); await Promise.resolve(); await Promise.resolve();
+        expect(c.calls.filter((x) => x[0] === 'clear').length).toBe(0);
+        expect(c.calls[0][0]).toBe('confirm');
+      } finally { c.restore(); }
+    });
+    FINISH_GF();
+    await withScoreSheet('gf', async (tap) => {
+      const y = bridge.mockScoreCard({ confirm: true, clear: () => 2 });
+      try {
+        tap('clear');
+        for (let i = 0; i < 8; i++) await Promise.resolve();
+        expect(y.calls.map((x) => x[0])).toEqual(['confirm', 'clear', 'refresh', 'close', 'after']);
+        expect(y.calls[0][1]).toBe('Clear this result');
+      } finally { y.restore(); }
+    });
+  });
+
+  it('every RPC the app needs appears as a literal in app.js', () => {
+    // This would have caught clear_bracket_atomic sitting dead in the database since 2026-06-19.
+    for (const name of ['clear_bracket_atomic', 'set_team_paid', 'read_action_log', 'register_team']) {
+      expect(appSrc).toContain("rpc('" + name + "'");
+    }
+  });
+
+  it('the clear control ships its own CSS and adds no !important', () => {
+    expect(count(css, '#mgss-sheet .mgv-scclear {')).toBe(1);
+    const block = css.slice(css.indexOf('#mgss-sheet .mgv-scclear {'), css.indexOf('#mgss-sheet .mgv-scclear {') + 300);
     expect(block).not.toContain('!important');
   });
 });

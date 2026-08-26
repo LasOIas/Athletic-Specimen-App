@@ -270,7 +270,9 @@ describe('public scoring for signed-in players (Mike 2026-08-25, reversing the 2
     expect(champ).toContain('data-mgss="final" disabled'); // no pick yet
   });
   it('the sheet is gated by canScoreMatch, not by isAdmin; the live save refuses 0-0; a public save repaints the tab', () => {
-    const fn = appSrcText.slice(appSrcText.indexOf('function openMgScoreSheet('), appSrcText.indexOf('function openMgScoreSheet(') + 5200);
+    // C101 Task 5: the window was a fixed 5200 characters, which the new doClear pushed the tail out of.
+    // It now runs to the next function, so the whole body is read whatever gets added inside it.
+    const fn = appSrcText.slice(appSrcText.indexOf('function openMgScoreSheet('), appSrcText.indexOf('async function mgPoolsDraw('));
     expect(fn).not.toContain('if (!state.isAdmin) return;');
     expect(fn).toContain('if (!canScoreMatch(match)) return;');
     expect(fn).toContain("fail('Add a point to at least one team first.')");
