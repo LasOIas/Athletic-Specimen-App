@@ -4767,11 +4767,10 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
 /* PORT NOTE, C101 Task 6 (Mike's §38 answer, 2026-08-25): the bracket strip carries two danger controls
    and they must not read alike. "Clear every result" is the OUTLINED one: the danger colour as a border
    and as text, a transparent fill, the same 12px radius and the same size as the button under it.
-   "Reset the bracket" is left exactly as it ships. GROUND TRUTH, so nobody is surprised: styles.css:2442
-   already draws .mgts-danger with a transparent background, so this variant states the outline
-   explicitly rather than inheriting it, and today the pair is told apart by border weight, text weight
-   and copy rather than by fill. Whether the RESET should become a filled red button so the contrast is a
-   fill is carried to Mike at the hand-back and is a one-line change if he says yes. No new !important. */
+   GROUND TRUTH, so nobody is surprised: styles.css:2442 already draws .mgts-danger with a transparent
+   background, so this variant states the outline explicitly rather than inheriting it. Mike answered the
+   open question on 2026-08-25: the RESET becomes the filled red one, so the pair is told apart by FILL
+   and not by border weight alone. .mgts-danger-filled, below, is that answer. No new !important. */
 .mgts-danger-outline {
   border: 1px solid oklch(0.55 0.16 25 / .22);
   background: transparent;
@@ -4779,6 +4778,17 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
   font-weight: 500;
 }
 .mgts-danger-outline + .mgbk-note { margin-bottom: 16px; }
+
+/* PORT NOTE, C101 follow-up (Mike, 2026-08-25): "Reset the bracket" is the ONE filled red button on the
+   strip, so the pair reads outlined Clear every result ABOVE a filled red Reset. Only the paint changes:
+   the size, radius, copy, position and the type-the-name unlock are all .mgts-danger's and stay exactly
+   as they ship. The border goes transparent the way prod's own button.danger (styles.css:253) does, and
+   the hover borrows that same rule's --danger-dark, because the global button:hover would otherwise
+   repaint a filled danger button in the BRAND colour. :active is prod's shared translateY(1px), left
+   alone. Class specificity beats the bare button selectors, so no !important. */
+.mgts-danger-filled { border-color: transparent; background: var(--danger); color: #fff; }
+@media (hover: hover) and (pointer: fine) { .mgts-danger-filled:hover { background: var(--danger-dark); } }
+
 
 
 

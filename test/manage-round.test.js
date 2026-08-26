@@ -2519,6 +2519,26 @@ describe('C101 Task 6 Clear every result', () => {
     const block = css.slice(css.indexOf('.mgts-danger-outline {'), css.indexOf('.mgts-danger-outline {') + 300);
     expect(block).not.toContain('!important');
   });
+
+  // C101 follow-up (Mike, 2026-08-25): the pair is told apart by FILL. Reset is the one filled red button
+  // and Clear every result is transparent, and only the PAINT differs - the size, radius and copy are
+  // .mgts-danger's and are shared. Asserted against the CSS text, the way this round asserts CSS.
+  it('Reset is the one filled red button and Clear every result is not', () => {
+    expect(count(css, '.mgts-danger-filled {')).toBe(1);
+    const filled = css.slice(css.indexOf('.mgts-danger-filled {'), css.indexOf('.mgts-danger-filled {') + 200);
+    expect(filled).toContain('background: var(--danger)');
+    expect(filled).toContain('color: #fff');
+    expect(filled).toContain('border-color: transparent');
+    expect(filled).not.toContain('!important');
+    // the global button:hover would repaint a filled danger button in the BRAND colour, so it says its own
+    expect(css).toContain('.mgts-danger-filled:hover { background: var(--danger-dark); }');
+    const outline = css.slice(css.indexOf('.mgts-danger-outline {'), css.indexOf('.mgts-danger-outline {') + 200);
+    expect(outline).toContain('background: transparent');
+    expect(outline).toContain('color: var(--danger)');
+    expect(outline).not.toContain('background: var(--danger)');
+    // neither variant restates the geometry: that stays .mgts-danger's single source
+    [filled, outline].forEach((b) => { expect(b).not.toContain('border-radius'); expect(b).not.toContain('padding'); });
+  });
 });
 
 // ── Final review fix wave: the Manage tab's 15s poll ──────────────────────────────────────────────────
@@ -2695,8 +2715,9 @@ describe('Task 9 the progress strip', () => {
     expect(html.indexOf('data-mgbk-clear')).toBeLessThan(html.indexOf('data-mgbk-reset'));
     // the filled one and the outlined one, told apart by class and by copy
     expect(html).toContain('class="mgts-danger mgts-danger-outline" data-mgbk-clear>Clear every result<');
-    expect(html).toContain('class="mgts-danger" data-mgbk-reset>Reset the bracket<');
+    expect(html).toContain('class="mgts-danger mgts-danger-filled" data-mgbk-reset>Reset the bracket<');
     expect(count(html, 'mgts-danger-outline')).toBe(1);
+    expect(count(html, 'mgts-danger-filled')).toBe(1);
     expect(html).toContain('The bracket keeps its shape and every seeded pairing stays.');
     expect(html).toContain('Clears the bracket and returns to pools. Pool games and scores are kept.');
     expect(count(html, 'Type the tournament name to confirm.')).toBe(2);   // both stay behind the unlock

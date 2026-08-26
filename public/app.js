@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.43'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.44'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -12867,14 +12867,15 @@ function mgBracketControlsHTML(t, completed) {
 
 // The BOTTOM of the bracket page: Reset closes the page under a plain hairline (.mgv-dsect is a label-less
 // .pl-sect — just the rule), the same grammar the sub-hub's danger zone uses.
-// C101 Task 6 (Mike's §38 answer, 2026-08-25): TWO danger controls on this strip, and they must not read
-// alike. "Clear every result" is the OUTLINED one and sits ABOVE the delete; "Reset the bracket" keeps the
-// class and the copy it ships with. Both stay behind the type-the-name unlock.
+// C101 Task 6 (Mike's §38 answer, 2026-08-25, settled the same day): TWO danger controls on this strip,
+// and they must not read alike. "Clear every result" is the OUTLINED one and sits ABOVE the delete;
+// "Reset the bracket" is the ONE FILLED red button, and keeps its copy, its size and its position. Both
+// stay behind the type-the-name unlock.
 function mgBracketResetHTML() {
   return `<div class="pl-sect mgv-dsect" aria-hidden="true"></div>`
     + `<button type="button" class="mgts-danger mgts-danger-outline" data-mgbk-clear>Clear every result</button>`
     + `<div class="mgbk-note">Blanks every bracket score. The bracket keeps its shape and every seeded pairing stays. Type the tournament name to confirm.</div>`
-    + `<button type="button" class="mgts-danger" data-mgbk-reset>Reset the bracket</button>`
+    + `<button type="button" class="mgts-danger mgts-danger-filled" data-mgbk-reset>Reset the bracket</button>`
     + `<div class="mgbk-note">Clears the bracket and returns to pools. Pool games and scores are kept. Type the tournament name to confirm.</div>`;
 }
 
