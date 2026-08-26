@@ -45,7 +45,20 @@ function makeDb({ denyWrites } = {}) {
     },
     channel: () => ({ on: () => ({ subscribe: noop }) }),
     removeChannel: noop,
-    rpc: async (name, args) => { rpcs.push({ name, args }); return { data: null, error: null }; },
+    rpc: async (name, args) => {
+      rpcs.push({ name, args });
+      // C101 Task 3: set_team_paid is a real write door now, so the fake DB has to BE one - the read-back
+      // only means something if the read sees what the write did. denyWrites keeps its meaning: the
+      // statement matches zero rows and still comes back error:null.
+      if (name === 'set_team_paid') {
+        const row = (tables.teams || []).find((t) => t.id === args.p_team);
+        if (!row) return { data: null, error: { message: 'That team is not here any more.' } };
+        writes.push({ table: 'teams', op: 'rpc:set_team_paid', payload: { paid: !!args.p_paid }, filters: [['id', args.p_team]] });
+        if (!denyWrites) row.paid = !!args.p_paid;
+        return { data: denyWrites ? null : { ...row }, error: null };
+      }
+      return { data: null, error: null };
+    },
     from(table) {
       const filters = [];
       let op = 'select', payload = null;
@@ -151,17 +164,46 @@ function loadApp(opts) {
 }
 
 describe('Mark as paid', () => {
-  it('writes paid on that team only, through the shipped teams update', async () => {
-    const { bridge, tables, writes } = loadApp();
+  // C101 Task 3 / migration 0060 FLIPS this: paid was a bare `from('teams').update({ paid })`, which
+  // could never leave an audit row (action_log has RLS on and zero policies). It is now one DEFINER RPC
+  // that writes the flag AND the log row and hands the row back.
+  it('writes paid on that team only, through the set_team_paid RPC', async () => {
+    const { bridge, tables, writes, rpcs } = loadApp();
     await bridge.boot('setup');
     await bridge.pay('team-sharks');
-    const w = writes.filter((x) => x.table === 'teams');
-    expect(w.length).toBe(1);
-    expect(w[0].op).toBe('update');
-    expect(w[0].payload).toEqual({ paid: true });
-    expect(w[0].filters).toEqual([['id', 'team-sharks']]);
+    expect(writes.filter((x) => x.op === 'update' && x.table === 'teams').length).toBe(0); // the old door is gone
+    expect(rpcs.filter((r) => r.name === 'set_team_paid').length).toBe(1);
+    expect(rpcs.find((r) => r.name === 'set_team_paid').args).toEqual({ p_team: 'team-sharks', p_paid: true });
     expect(tables.teams.find((t) => t.id === 'team-sharks').paid).toBe(true);
     expect(tables.teams.find((t) => t.id === 'team-gains').paid).toBe(true); // untouched
+  });
+
+  it('repaints the popup and the list row off the RETURNED row, not off a re-read', async () => {
+    const { bridge } = loadApp();
+    await bridge.boot('setup');
+    await bridge.pay('team-sharks');
+    const after = bridge.popup('team-sharks');
+    expect(after).toContain('mgv-pmeta is-paid');
+    expect(after).toContain('>Mark as unpaid<');
+  });
+
+  it('a silently refused RPC restores the button and says so, and never reports Paid', async () => {
+    const { bridge, tables } = loadApp({ denyWrites: true });
+    await bridge.boot('setup');
+    await bridge.pay('team-sharks');
+    expect(tables.teams.find((t) => t.id === 'team-sharks').paid).toBe(false);
+    expect(bridge.said().map((n) => `${n.title} ${n.message}`).join(' ')).toMatch(/did not save|Could not save/i);
+    expect(bridge.popup('team-sharks')).toContain('mgv-pmeta is-unpaid');
+  });
+
+  it('the direct paid door is gone from the source entirely', () => {
+    const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+    // Comments come out first: tdbSetTeamPaid's own header NAMES the door it replaced, which is exactly
+    // what a header should do, and a guard that reads comments bans the explanation along with the code
+    // (the 2026-08-24 §41 lesson).
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(?<!:)\/\/[^\n]*/g, ' ');
+    expect(code).not.toContain("from('teams').update({ paid");
+    expect(code).toContain("rpc('set_team_paid'");
   });
 
   it('moves the popup state word, the button and the list row together', async () => {
@@ -284,15 +326,15 @@ describe('the popup and the row it opens from', () => {
     expect(list).not.toContain('data-mgtp-withdraw');
   });
 
-  // The handoff's note said "Logged in the activity log with your name." That is not true today: action_log
-  // is written only from inside SECURITY DEFINER RPCs and paid rides a direct teams UPDATE, so the write
-  // leaves no log row. The app must not claim a record it does not keep.
-  it('does not claim an activity-log entry it does not write', async () => {
+  // C101 Task 3 / migration 0060 FLIPS this: set_team_paid writes teams AND action_log in one DEFINER
+  // call, so the popup may claim the entry now, and the handoff's own sentence comes back.
+  it('claims the activity-log entry it now really writes', async () => {
     const { bridge } = loadApp();
     await bridge.boot('setup');
     const popup = bridge.popup('team-sharks');
-    expect(popup).not.toMatch(/activity log/i);
-    expect(popup).toContain('Every admin sees this straight away.');
+    expect(popup).toContain('Logged in the activity log with your name.');
+    expect(popup).not.toContain('Every admin sees this straight away.');
+    expect(popup).not.toContain('—');
   });
 
   it('keeps the copy law', async () => {

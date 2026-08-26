@@ -1032,6 +1032,11 @@ describe('Task 5 add a team', () => {
     expect(html).toContain('data-mgta-paid');
     expect(html).toContain('$80 a team · no Venmo record for teams you add');
     expect(html).toContain('data-mgta-save');
+    // C101 Task 3 / migration 0060: the FORM still says nothing about the activity log, and that is what
+    // this line pins. What changed is the claim behind it: ticking paid on Add-a-team now DOES write a log
+    // row, through tdbSetTeamPaid at the paid branch of mgTeamAddSubmit. If Mike ever wants the screen to
+    // say so, the honest sentence is that the PAYMENT is logged and the registration is not, because
+    // tdbAddTeam's insert is still a direct write (spec: "the four direct-write doors").
     expect(html).not.toMatch(/activity log/i);
   });
 

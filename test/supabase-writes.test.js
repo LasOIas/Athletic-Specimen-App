@@ -29,7 +29,9 @@ function stripComments(src) {
 const MUTATING_RPCS = [
   'check_in', 'check_out', 'register_player', 'register_team', 'submit_match_score',
   'generate_bracket_atomic', 'clear_bracket_atomic', 'start_new_session',
-  // log_copilot_action intentionally omitted — best-effort audit log.
+  'set_team_paid',            // C101 Task 3, migration 0060
+  // log_copilot_action intentionally omitted: best-effort audit log. (Its em dash is fixed here as a
+  // free rider, since this array is the line being edited and the round's copy law bans the character.)
 ];
 
 // Matches a Supabase write at the START of the chain (the client identifier), across line breaks:

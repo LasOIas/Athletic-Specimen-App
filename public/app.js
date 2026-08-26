@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.38'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.39'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2173,11 +2173,19 @@ async function tdbSetTournamentFields(tournamentId, fields) {
     .update({ ...fields, updated_at: new Date().toISOString() }).eq('id', tournamentId);
   if (error) { console.error('tdbSetTournamentFields', error); throw error; }
 }
-// Admin: mark a registered team paid / unpaid.
+// Admin: mark a registered team paid / unpaid. C101 Task 3 / migration 0060: this was a bare
+// `from('teams').update({ paid })`, which could never leave an audit row (action_log has RLS on and zero
+// policies, 0002/0008) and could never prove itself (RLS on teams is a row FILTER, so a session that has
+// drifted off organizer membership gets error:null over zero rows). The DEFINER RPC does both: it writes
+// the flag and the action_log row in ONE call and RETURNS the team row, so the caller repaints off server
+// truth instead of re-reading the whole tournament to find out what happened.
 async function tdbSetTeamPaid(teamId, paid) {
   if (!supabaseClient || !teamId) throw new Error('No team.');
-  const { error } = await supabaseClient.from('teams').update({ paid: !!paid }).eq('id', teamId);
+  const { data, error } = await supabaseClient.rpc('set_team_paid', { p_team: teamId, p_paid: !!paid });
   if (error) { console.error('tdbSetTeamPaid', error); throw error; }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!row || !row.id) throw new Error('That did not save. Check you are signed in as an admin, then try again.');
+  return row;
 }
 
 // NF-3b: admin rename a team (fix a typo'd self-registered name without raw DB). Admin authenticated
@@ -11177,11 +11185,11 @@ function buildMgTeamSheetHTML(team) {
 // ── Teams-list actions (delegated via #app-content when manageView==='tournament' && mgtView==='teams') ──
 // THE paid write path. It was the Teams-list row toggle until the 2026-08-03 round (README §8) moved the
 // control into #team-pay-modal — "move the paid function inside the team you click open" — so the row now
-// only REPORTS state and this is called from the popup's Mark as paid. Same tdbSetTeamPaid update the
+// only REPORTS state and this is called from the popup's Mark as paid. Same tdbSetTeamPaid write the
 // body-level team sheet's switch uses: ONE write path, so the two surfaces can never disagree.
-// The refresh doubles as a READ-BACK: tdbRefreshTournaments re-reads teams from the server, so if RLS
-// silently filtered the update to zero rows (a row FILTER returns error:null, see tdbResetTournamentFull)
-// the re-read still says Unpaid and we say so instead of reporting a payment that was never recorded.
+// C101 Task 3 / migration 0060: the READ-BACK moved off the refresh and onto the RPC's returned row. The
+// refresh that follows is for the rest of the page (the list row's .mgv-pmeta, the "2 in · 1 paid" line),
+// not for this decision, so a refresh that fails no longer casts doubt on a write the server confirmed.
 async function mgTeamTogglePaid(teamId, btnEl) {
   if (!state.isAdmin || !teamId) return;
   const team = mgFindTeam(teamId);
@@ -11189,23 +11197,26 @@ async function mgTeamTogglePaid(teamId, btnEl) {
   const next = !team.paid;
   const label = () => (mgFindTeam(teamId) || team).paid ? 'Mark as unpaid' : 'Mark as paid';
   if (btnEl) { btnEl.disabled = true; btnEl.textContent = next ? 'Marking as paid…' : 'Marking as unpaid…'; }
+  let row;
   try {
-    await tdbSetTeamPaid(teamId, next);
-    await tdbRefreshTournaments();
+    row = await tdbSetTeamPaid(teamId, next);
   } catch (err) {
     if (btnEl) { btnEl.disabled = false; btnEl.textContent = label(); }
     appNotice({ title: 'Could not save that', message: (err && err.message) || 'Try again.' });
     return;
   }
-  const fresh = mgFindTeam(teamId);
+  if (!!row.paid !== next) {
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = label(); }
+    appNotice({ title: 'That did not save', message: 'The change did not go through. Check you are signed in as an admin, then try again.' });
+    return;
+  }
+  try { await tdbRefreshTournaments(); } catch (_) { /* the returned row already proved the write */ }
+  const fresh = mgFindTeam(teamId) || row;
   // Repaint the popup in place (body-level, so repaintManage never reaches it) and the list under it, so the
   // state word, the button label and the row's .mgv-pmeta all move together off the SAME server truth.
   const modal = document.getElementById('team-pay-modal');
-  if (modal && fresh) modal.innerHTML = buildMgTeamPayModalHTML(fresh);
+  if (modal) modal.innerHTML = buildMgTeamPayModalHTML(fresh);
   repaintManage();
-  if (fresh && !!fresh.paid !== next) {
-    appNotice({ title: 'That did not save', message: 'The change did not go through. Check you are signed in as an admin, then try again.' });
-  }
 }
 
 // Withdraw a registered team, from INSIDE the popup only (README §8 — the quiet red footer action; the list
@@ -11423,6 +11434,9 @@ async function mgTeamAddSubmit() {
     }
     if (paid) {
       try {
+        // C101 Task 3: this now goes through set_team_paid (0060), so ticking paid on Add-a-team DOES
+        // leave an activity-log row. The RPC's own message is swallowed here on purpose: the team
+        // registered, and this notice must not read as a failed registration.
         await tdbSetTeamPaid(team.id, true);
       } catch (err) {
         note('The team is in, but it could not be marked paid. Open it under Teams & payment.', true);
@@ -11528,7 +11542,7 @@ function openMgTeamSheet(teamId) {
       const on = !r.classList.contains('on');
       r.classList.toggle('on', on);
       r.setAttribute('aria-checked', on ? 'true' : 'false');
-      void mgtsWrite(() => tdbSetTeamPaid(teamId, on));
+      void mgtsWrite(() => tdbSetTeamPaid(teamId, on));   // C101 Task 3: the 0060 RPC, log row included
       return;
     }
     if (role === 'pool') {
@@ -11589,13 +11603,9 @@ function buildMgTeamPayModalHTML(team) {
       + `<div class="mgv-tf"><span class="mgv-tlabel">Roster</span>${roster}</div>`
       + fee
       + `<button type="button" class="mgv-tpay" data-mgtp-paid="${idAttr}">${paid ? 'Mark as unpaid' : 'Mark as paid'}</button>`
-      // COPY CHANGED FROM THE HANDOFF, deliberately. The prototype says "Logged in the activity log with
-      // your name." — that is not true today and the app must not claim it. The activity log (action_log,
-      // migrations 0002/0051) is written ONLY from inside SECURITY DEFINER RPCs and has no client INSERT
-      // policy; paid rides tdbSetTeamPaid, a direct teams UPDATE, so it leaves no log row. Making the
-      // sentence true needs a set_team_paid DEFINER RPC that writes teams + action_log in one call — a
-      // MIGRATION, which is db-agent's to write, not this slice's. Until then this says what is true.
-      + `<div class="mgv-tnote">Every admin sees this straight away.</div>`
+      // C101 Task 3 / migration 0060: paid now rides set_team_paid, a SECURITY DEFINER RPC that writes
+      // teams and action_log in one call, so the handoff's sentence is true and comes back.
+      + `<div class="mgv-tnote">Logged in the activity log with your name.</div>`
     + `</div>`
     + `<div class="mgv-tfoot">`
       + `<button type="button" class="mgv-twd" data-mgtp-withdraw="${idAttr}">Withdraw team</button>`
