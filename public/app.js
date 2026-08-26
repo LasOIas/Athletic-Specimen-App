@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.44'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.45'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2264,19 +2264,19 @@ async function tdbListMatches(tournamentId, phase) {
 // touched; the count tells us how many fixtures were rewritten.
 async function tdbMoveTeamToPool(teamId, poolId) {
   if (!supabaseClient || !teamId) return;
-  // OPEN, carried to Mike: the team sheet's "No pool" chip sends a null destination, which the bare
-  // teams.pool_id update this replaced accepted. 0064 takes `p_pool uuid` and looks the pool up, so a null
-  // would come back as "That pool is not in this tournament." and read as a bug. Until either 0064 learns
-  // to un-pool a team or the chip goes, the refusal is stated here in a sentence that is actually true.
-  if (!poolId) throw new Error('Pick a pool to move them to.');
+  // C101 follow-up / migration 0065: the team sheet's "No pool" chip sends a NULL destination, and that is
+  // a real move now, not a missing argument: the RPC takes it as "out of its pool", rebuilds the team's
+  // CURRENT pool without them and nulls teams.pool_id. Normalised to null here so an empty-string chip
+  // value and a null both reach the RPC as the same thing.
+  const dest = poolId || null;
   const t = mgActiveTournament();
   if (!t) throw new Error('No tournament selected.');
   const team = (state.tournamentTeams || []).find((x) => String(x.id) === String(teamId));
   const { plan } = poolMovePlan(
-    teamId, team ? (team.pool_id || null) : null, poolId,
+    teamId, team ? (team.pool_id || null) : null, dest,
     state.tournamentPools || [], state.tournamentTeams || [], state.tournamentMatches || []);
   const { data, error } = await supabaseClient.rpc('move_team_to_pool', {
-    p_tournament_id: t.id, p_team: teamId, p_pool: poolId, p_matches: plan,
+    p_tournament_id: t.id, p_team: teamId, p_pool: dest, p_matches: plan,
   });
   if (error) { console.error('tdbMoveTeamToPool', error); throw error; }
   // `Number(null)` is 0, which is FINITE, so a null answer would sail through a bare Number.isFinite check

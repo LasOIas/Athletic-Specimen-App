@@ -1435,7 +1435,19 @@ describe('poolMovePlan (C101 Task 7 - the plan move_team_to_pool applies)', () =
     expect(bNets).not.toContain(3);            // never pool C's net
   });
 
-  it('a missing destination plans nothing', () => {
-    expect(poolMovePlan('a3', 'pA', null, POOLS, TEAMS, MATCHES)).toEqual({ plan: [] });
+  // C101 follow-up / migration 0065 FLIPS this: a NULL destination is "out of its pool", not a missing
+  // argument. Only the pool being LEFT is rebuilt, without the leaving team in it.
+  it('a null destination rebuilds only the pool being left, without that team', () => {
+    const { plan } = poolMovePlan('a3', 'pA', null, POOLS, TEAMS, MATCHES);
+    expect([...new Set(plan.map((g) => g.pool_id))]).toEqual(['pA']);
+    expect(plan.length).toBe(1);               // pA drops to 2 teams: one game
+    expect(plan.every((g) => g.team_a_id !== 'a3' && g.team_b_id !== 'a3')).toBe(true);
+    expect(plan.every((g) => g.net === 1)).toBe(true);   // still only pA's own net
+    const untouched = MATCHES.filter((m) => m.pool_id !== 'pA').map((m) => m.queue_order);
+    expect(Math.min(...plan.map((g) => g.queue_order))).toBeGreaterThan(Math.max(...untouched));
+  });
+
+  it('a team with no pool asked to leave none plans nothing', () => {
+    expect(poolMovePlan('x9', null, null, POOLS, TEAMS, MATCHES)).toEqual({ plan: [] });
   });
 });

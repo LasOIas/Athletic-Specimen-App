@@ -2057,17 +2057,34 @@ describe('Task 8 pool controls', () => {
     expect(fn).toContain('poolMovePlan(');        // and the plan is never built in the writer
   });
 
-  // The team sheet's "No pool" chip sends a null destination. 0064 takes p_pool uuid and looks it up, so a
-  // null would come back as "That pool is not in this tournament." and read as a bug. Refused in the client
-  // with a sentence that is true, and carried to Mike as an open question at the hand-back.
-  it('a null destination is refused before any call, with copy that is actually true', async () => {
+  // C101 follow-up / migration 0065 FLIPS this. The team sheet's "No pool" chip sends a null destination,
+  // which the previous commit refused because 0064 could only look a pool UP. 0065 takes null as "out of
+  // its pool", so the chip is a real move again: one rebuilt pool (the one being left, without the team),
+  // p_pool null on the wire, and the same count read-back as any other move.
+  it('the No pool chip sends p_pool null with the from-pool plan, and reads the count back', async () => {
     seedPools(bridge, { matches: UNDRAWN });
     const seen = [];
     const undo = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return { data: 1, error: null }; });
     try {
-      await expect(bridge.moveTeamToPool('t1', null)).rejects.toThrow('Pick a pool to move them to.');
-      expect(seen).toEqual([]);
+      await expect(bridge.moveTeamToPool('t1', '')).resolves.toBe(1);   // the chip's value is the empty string
+      expect(seen.length).toBe(1);
+      expect(seen[0][0]).toBe('move_team_to_pool');
+      const args = seen[0][1];
+      expect(args.p_team).toBe('t1');
+      expect(args.p_pool).toBe(null);                                   // normalised, never the empty string
+      const st = bridge.getState();
+      expect(args.p_matches).toEqual(
+        bridge.movePlan('t1', 'p1', null, st.tournamentPools, st.tournamentTeams, st.tournamentMatches).plan
+      );
+      // only the pool being LEFT is rebuilt, and the leaving team is not in any of its games
+      expect(args.p_matches.every((g) => g.pool_id === 'p1')).toBe(true);
+      expect(args.p_matches.every((g) => g.team_a_id !== 't1' && g.team_b_id !== 't1')).toBe(true);
     } finally { undo(); }
+    // and an explicit null reaches the RPC exactly the same way the empty string does
+    const seen2 = [];
+    const undo2 = bridge.swapSupaRpc((name, args) => { seen2.push(args.p_pool); return { data: 0, error: null }; });
+    try { await expect(bridge.moveTeamToPool('t1', null)).resolves.toBe(0); expect(seen2).toEqual([null]); }
+    finally { undo2(); }
   });
 
   it('a refused move surfaces the RPC message and leaves the picker open', async () => {

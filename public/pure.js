@@ -980,14 +980,20 @@ function assignPoolGameSlots(teamIds, nets) {
 // (b) QUEUE_ORDER. The pools board reads queue_order as the round number (mgPoolsScheduleHTML derives
 //     maxRound and curRound from it), so the plan's values must be DISJOINT from the surviving rows of
 //     every untouched pool. Compute the offset from those rows; do not restart at 1.
+//
+// C101 follow-up / migration 0065: a NULL destination is "out of its pool", not a missing argument. Only
+// the FROM pool is rebuilt, and the ids filter below already drops the moving team from it, because no
+// real pool id can ever equal the empty destination. A team with no pool asked to leave none rebuilds
+// nothing and plans nothing, which is the 0 the RPC hands back.
 function poolMovePlan(teamId, fromPoolId, toPoolId, pools, teams, matches) {
   const to = String(toPoolId == null ? '' : toPoolId);
   const from = (fromPoolId == null || String(fromPoolId) === '') ? null : String(fromPoolId);
-  if (!to) return { plan: [] };
   const poolList = (pools || []).filter((p) => p && p.id != null)
     .slice().sort((a, b) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0));
   const poolMatches = (matches || []).filter((m) => m && (m.phase ? m.phase === 'pool' : !!m.pool_id));
-  const rebuilt = (from && from !== to) ? [from, to] : [to];
+  const rebuilt = to
+    ? ((from && from !== to) ? [from, to] : [to])
+    : (from ? [from] : []);
   const isRebuilt = (pid) => rebuilt.indexOf(String(pid == null ? '' : pid)) >= 0;
 
   const seenNets = [...new Set(poolMatches.filter((m) => m.net != null).map((m) => Number(m.net)))];
