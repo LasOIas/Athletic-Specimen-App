@@ -138,6 +138,18 @@ function pickMostDifferentTeams(candidates, previousTeams) {
   return tier[Math.floor(Math.random() * tier.length)];
 }
 
+// Mike (2026-08-25): the app never creates an ODD number of teams. evenCount rounds a wanted count DOWN to
+// the nearest even number and never below 2; evenTeamCount is the generator's count for a head count at a
+// team size (floor(players / size), then even). Remainders ride along per the balancer, as before.
+function evenCount(n) {
+  const k = Math.max(0, Math.floor(Number(n) || 0));
+  return Math.max(2, k - (k % 2));
+}
+function evenTeamCount(playerCount, teamSize) {
+  const size = Number(teamSize) || 4;
+  return evenCount(Math.floor((Number(playerCount) || 0) / size));
+}
+
 function generateBalancedGroups(players, checkedInKeys, groupCount, previousTeams) {
   const inSet = new Set(checkedInKeys || []);
   const eligible = players.filter((p) => inSet.has(playerIdentityKey(p)));
@@ -2035,6 +2047,8 @@ function passwordMeterScore(v) {
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
+    evenCount,
+    evenTeamCount,
     createLocalPlayerKey, playerIdentityKey, summarizeTeamFairness,
     generateOneBalancedCandidate, generateBalancedGroups, validateScores,
     countSharedTeammatePairs, pickMostDifferentTeams,

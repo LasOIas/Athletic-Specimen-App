@@ -2520,3 +2520,29 @@ describe('Task 9 the ported CSS', () => {
     expect(css).toContain('.mgv-bknext block that lived here');
   });
 });
+
+describe('Even team totals (Mike 2026-08-25)', () => {
+  const team = (i) => ({ id: 't' + i, name: 'Team ' + i, pool_id: null, paid: true });
+  it('the draw refuses an odd total, allows an even one, and still asks for two first', () => {
+    seedPools(bridge, { pools: [], matches: [], teams: [team(1), team(2), team(3)] });
+    let html = bridge.buildMgPools();
+    expect(html).toContain('data-mgps-draw disabled');
+    expect(html).toContain('Pool play needs an even number of teams. Add or remove one.');
+    expect(html).not.toContain('Add at least 2 teams first.');
+    seedPools(bridge, { pools: [], matches: [], teams: [team(1), team(2), team(3), team(4)] });
+    html = bridge.buildMgPools();
+    expect(html).toContain('data-mgps-draw>');
+    expect(html).not.toContain('even number of teams');
+    seedPools(bridge, { pools: [], matches: [], teams: [team(1)] });
+    html = bridge.buildMgPools();
+    expect(html).toContain('data-mgps-draw disabled');
+    expect(html).toContain('Add at least 2 teams first.');
+    expect(html).not.toContain('even number of teams');
+  });
+  it('the source: the generator and the copilot both take their count from evenTeamCount / evenCount', () => {
+    const gen = appSrc.slice(appSrc.indexOf('function mgtGenerateTeams'), appSrc.indexOf('function mgtGenerateTeams') + 600);
+    expect(gen).toContain('evenTeamCount(inNow, size)');
+    const mk = appSrc.slice(appSrc.indexOf('async make_teams(args)'), appSrc.indexOf('async make_teams(args)') + 700);
+    expect(mk).toContain('evenCount(');
+  });
+});

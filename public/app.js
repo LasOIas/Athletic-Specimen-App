@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.35'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.36'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -9546,12 +9546,12 @@ function buildManageTeamsHTML() {
 }
 
 // Generate balanced teams from the checked-in players at the selected size (reuses generateBalancedGroups +
-// the groupCount/lastTeamSize chip state). Team count = floor(checked-in / size), min 2; remainders ride
+// the groupCount/lastTeamSize chip state). Team count = floor(checked-in / size) rounded DOWN to even, min 2; remainders ride
 // along per the balancer. Persists via saveLocal (→ queueLiveStateSave, teams only) + a partial repaint.
 function mgtGenerateTeams() {
   const size = Number(mgtSize) || 4;
   const inNow = (state.checkedIn || []).length;
-  const numTeams = Math.max(2, Math.floor(inNow / size));
+  const numTeams = evenTeamCount(inNow, size); // Mike (2026-08-25): always an even number of teams, never below 2
   const gen = generateBalancedGroups(state.players, state.checkedIn, numTeams, state.generatedTeams);
   state.generatedTeams = gen.teams;
   state.generatedTeamsSummary = gen.summary;
@@ -11657,7 +11657,10 @@ function mgPoolsSetupHTML(t, teams, pools) {
     const pr = scoringRulesFor('pool', t);
     const br = scoringRulesFor('main', t);
     const preset = [`${size}s co-ed`, `Pool: ${mgRuleLine(pr)}`, `Bracket: ${mgRuleLine(br)}`];
-    const enough = teamCt >= 2;
+    // Mike (2026-08-25): pool play needs an EVEN number of teams; the draw refuses an odd total. Registration
+    // itself cannot refuse the odd team (the 3rd cannot wait for a 4th), so the draw is where the rule lives.
+    const even = teamCt % 2 === 0;
+    const enough = teamCt >= 2 && even;
     // Round 2026-08-03: the two full-width 40px grey text boxes for a single digit become ONE framed box
     // with a row per count — label left, pill stepper right, native spinners removed by the CSS. The input
     // ids are untouched (mgPoolsDraw still reads #mgps-poolcount / #mgps-nets), so the draw path is unchanged.
@@ -11671,7 +11674,7 @@ function mgPoolsSetupHTML(t, teams, pools) {
       + preset.map((p) => `<div class="mgps-sub">${escapeHTML(p)}</div>`).join('')
       + `<div class="mgps-note">Edit these in Event settings.</div>`
       + `<button type="button" class="mgt-cta" data-mgps-draw${enough ? '' : ' disabled'}>Draw pools</button>`
-      + (enough ? '' : `<div class="mgps-note">Add at least 2 teams first.</div>`);
+      + (enough ? '' : `<div class="mgps-note">${teamCt < 2 ? 'Add at least 2 teams first.' : 'Pool play needs an even number of teams. Add or remove one.'}</div>`);
   }
   return `<div class="pl-sect">Pools drawn</div>`
     + pools.map((p) => mgPoolTeamsBlockHTML(p, teams, null)).join('')
@@ -13400,7 +13403,7 @@ const copilotExecutors = {
   async make_teams(args) {
     const playerCount = (state.checkedIn || []).length;
     if (playerCount < 2) return { is_error: true, args, result: "Need at least 2 checked-in players to make teams." };
-    const count = Math.max(2, Math.min(playerCount, Math.floor(Number(args.count)) || 2)); // CT1: clamp to player count so we never make empty "Team of 0" nets
+    const count = evenCount(Math.min(playerCount, Math.floor(Number(args.count)) || 2)); // CT1: clamp to player count so we never make empty "Team of 0" nets; Mike (2026-08-25): and always an even number
     const prev = { teams: state.generatedTeams, order: state.liveCourtOrder, results: state.liveMatchResults,
       snaps: state.liveMatchSkillSnapshots, summary: state.generatedTeamsSummary, groupCount: state.groupCount, lastTeamSize: state.lastTeamSize };
     const gen = generateBalancedGroups(state.players, state.checkedIn, count, state.generatedTeams);
@@ -14651,7 +14654,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
   if (groupCountInput) {
     groupCountInput.addEventListener('change', () => {
       const val = parseInt(groupCountInput.value);
-      state.groupCount = isNaN(val) ? 2 : Math.max(2, val);
+      state.groupCount = isNaN(val) ? 2 : evenCount(val); // Mike (2026-08-25): an even number of teams, never below 2
     });
   }
 

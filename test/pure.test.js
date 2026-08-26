@@ -1284,3 +1284,18 @@ describe('manageNeedsYouModel — the silent-game item', () => {
     expect(manageNeedsYouModel({ ...base, matches: [noOrder] })[0].sub).toBe('A game is on and nothing is entered');
   });
 });
+
+describe('evenCount / evenTeamCount (Mike 2026-08-25: every generated team total is even)', () => {
+  it('rounds a count down to the nearest even number, never below 2', () => {
+    const { evenCount, evenTeamCount } = pure;
+    expect(evenCount(7)).toBe(6); expect(evenCount(6)).toBe(6); expect(evenCount(3)).toBe(2); expect(evenCount(1)).toBe(2); expect(evenCount(0)).toBe(2);
+    expect(evenTeamCount(8, 4)).toBe(2);
+    expect(evenTeamCount(16, 4)).toBe(4);
+    expect(evenTeamCount(30, 4)).toBe(6);   // floor(30 / 4) = 7, rounded down to 6
+    expect(evenTeamCount(12, 4)).toBe(2);   // 3 -> 2
+    expect(evenTeamCount(7, 4)).toBe(2);    // 1 -> the floor of 2
+    expect(evenTeamCount(0, 4)).toBe(2);
+    expect(evenTeamCount(20, 0)).toBe(4);   // a bad size falls back to 4 like the generator does
+    for (let n = 0; n < 60; n += 1) expect(evenTeamCount(n, 4) % 2).toBe(0);
+  });
+});
