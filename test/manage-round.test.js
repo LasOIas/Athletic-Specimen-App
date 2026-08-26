@@ -279,6 +279,30 @@ function loadApp() {
       // a plain property, so it can be swapped for the length of one case. Returns its own undo.
       swapSupaRpc: (fn) => { const was = supabaseClient.rpc; supabaseClient.rpc = async (...a) => fn(...a); return () => { supabaseClient.rpc = was; }; },
       clearResult: (m) => tdbClearBracketResult(m),
+      // C101 Task 6: the whole-bracket clear, its writer and its handler. mockBracketDanger swaps the
+      // unlock prompt and both danger writers for recorders, so a test can prove WHICH handler a tap
+      // reached and that a wrong typed name makes no call at all. Restored in a finally by every caller.
+      clearWhole: (id) => tdbClearWholeBracket(id),
+      clearAll: () => mgBracketClearAll(),
+      mockBracketDanger: (o) => {
+        o = o || {};
+        const calls = [];
+        const was = { appPrompt, tdbClearWholeBracket, tdbResetBracket, tdbRefreshTournaments, repaintManage, appNotice };
+        appPrompt = async (opts) => { calls.push(['prompt', opts && opts.title]); return o.typed === undefined ? null : o.typed; };
+        tdbClearWholeBracket = async (id) => { calls.push(['clearWhole', id]); return o.clearWhole ? o.clearWhole(id) : 0; };
+        tdbResetBracket = async (t) => { calls.push(['reset', t && t.id]); if (o.reset) return o.reset(t); };
+        tdbRefreshTournaments = async () => { calls.push(['refresh']); };
+        repaintManage = () => { calls.push(['repaint']); };
+        appNotice = (n) => { calls.push(['notice', n && n.title, n && n.message]); };
+        return { calls, restore: () => {
+          appPrompt = was.appPrompt;
+          tdbClearWholeBracket = was.tdbClearWholeBracket;
+          tdbResetBracket = was.tdbResetBracket;
+          tdbRefreshTournaments = was.tdbRefreshTournaments;
+          repaintManage = was.repaintManage;
+          appNotice = was.appNotice;
+        } };
+      },
       // C101 Task 5: the score card's clear path, every collaborator swapped for a recorder. Install it
       // AFTER the card is open: openMgScoreSheet calls closeMgScoreSheet on its way in, and a swapped one
       // would record a 'close' nobody tapped. These live in the SHARED vm context, so every caller runs
@@ -2355,6 +2379,68 @@ describe('C101 Task 5 Clear this result', () => {
   });
 });
 
+describe('C101 Task 6 Clear every result', () => {
+  it('the writer sends one argument, reads the count back, and never deletes', async () => {
+    const seen = [];
+    const undo = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return { data: 7, error: null }; });
+    try {
+      await expect(bridge.clearWhole('T')).resolves.toBe(7);
+      expect(seen).toEqual([['clear_whole_bracket', { p_tournament_id: 'T' }]]);
+    } finally { undo(); }
+    const fn = appSrc.slice(appSrc.indexOf('async function tdbClearWholeBracket('), appSrc.indexOf('async function tdbResetBracket('));
+    expect(fn).not.toContain('.delete(');
+    expect(fn).not.toContain("from('matches')");
+    const handler = appSrc.slice(appSrc.indexOf('async function mgBracketClearAll('), appSrc.indexOf('async function mgBracketReset('));
+    expect(handler).not.toContain('.delete(');
+    expect(handler).toContain('appPrompt');       // it is NOT the delete, and it still asks for the name
+  });
+
+  it('a wrong typed name makes no call at all, and the right one calls once', async () => {
+    setMainBracketFixture();
+    const m = bridge.mockBracketDanger({ typed: 'not the name' });
+    try { await bridge.clearAll(); expect(m.calls.filter((c) => c[0] === 'clearWhole').length).toBe(0); }
+    finally { m.restore(); }
+    const y = bridge.mockBracketDanger({ typed: bridge.leadTournament().name, clearWhole: () => 3 });
+    try {
+      await bridge.clearAll();
+      expect(y.calls.map((c) => c[0])).toEqual(['prompt', 'clearWhole', 'refresh', 'repaint', 'notice']);
+      expect(y.calls.find((c) => c[0] === 'notice')[1]).toBe('Bracket cleared');
+      expect(y.calls.find((c) => c[0] === 'notice')[2]).toBe('3 results cleared. The bracket kept its shape.');
+    } finally { y.restore(); }
+  });
+
+  it('a refused call surfaces the RPC message and clears nothing', async () => {
+    setMainBracketFixture();
+    const m = bridge.mockBracketDanger({
+      typed: bridge.leadTournament().name,
+      clearWhole: () => { throw new Error('There is no bracket to clear yet.'); },
+    });
+    try {
+      await bridge.clearAll();
+      expect(m.calls.find((c) => c[0] === 'notice')[1]).toBe('Could not clear the results');
+      expect(m.calls.find((c) => c[0] === 'notice')[2]).toBe('There is no bracket to clear yet.');
+      expect(m.calls.some((c) => c[0] === 'repaint')).toBe(false);
+    } finally { m.restore(); }
+  });
+
+  it('the delegate reaches BOTH controls from a real tap, and they go to different handlers', async () => {
+    setMainBracketFixture(); bridge.setMgtView('bracket');
+    const m = bridge.mockBracketDanger({ typed: '' });
+    try {
+      await withDelegate(async (tap) => { tap('data-mgbk-clear'); await Promise.resolve(); });
+      await withDelegate(async (tap) => { tap('data-mgbk-reset'); await Promise.resolve(); });
+      expect(m.calls.filter((c) => c[0] === 'prompt').map((c) => c[1]))
+        .toEqual(['Clear every result', 'Reset the bracket']);
+    } finally { m.restore(); }
+  });
+
+  it('the outlined variant ships once and adds no !important', () => {
+    expect(count(css, '.mgts-danger-outline {')).toBe(1);
+    const block = css.slice(css.indexOf('.mgts-danger-outline {'), css.indexOf('.mgts-danger-outline {') + 300);
+    expect(block).not.toContain('!important');
+  });
+});
+
 // ── Final review fix wave: the Manage tab's 15s poll ──────────────────────────────────────────────────
 // refreshTournamentLive branches on activeMainTab. Manage had no branch of its own, so it fell into the
 // off-tab else, which reloads state.tournaments and NOTHING else — the hub's live strip, the tournament
@@ -2511,7 +2597,12 @@ describe('Task 9 the progress strip', () => {
     expect(bridge.buildBracket()).toContain('class="bkr-count">4 of 11 games in<');
   });
 
-  it('rides between the controls and the board, and brings nothing from the data round with it', () => {
+  // C101 Task 6 / migration 0063: the data round DID land here, and this guard is strengthened rather
+  // than flipped. The strip now carries exactly two controls, "Clear every result" (the outlined,
+  // NON-destructive clear, Mike's §38 answer 2026-08-25) above "Reset the bracket" (the delete, which
+  // keeps its class and its copy). The three banned literals stay banned: no bkr-undo, no
+  // "Clear every score", no "Undo" anywhere.
+  it('rides between the controls and the board, and carries exactly the two named danger controls', () => {
     setMainBracketFixture();
     const html = bridge.buildBracket();
     expect(html.indexOf('data-mgbk-players')).toBeLessThan(html.indexOf('class="bkr-strip"'));
@@ -2519,7 +2610,16 @@ describe('Task 9 the progress strip', () => {
     expect(html).not.toContain('bkr-undo');
     expect(html).not.toContain('Clear every score');
     expect(html).not.toContain('Undo');
-    expect(html).toContain('data-mgbk-reset');   // the one destructive control this page already had
+    expect(count(html, 'data-mgbk-clear')).toBe(1);
+    expect(count(html, 'data-mgbk-reset')).toBe(1);
+    expect(html.indexOf('data-mgbk-clear')).toBeLessThan(html.indexOf('data-mgbk-reset'));
+    // the filled one and the outlined one, told apart by class and by copy
+    expect(html).toContain('class="mgts-danger mgts-danger-outline" data-mgbk-clear>Clear every result<');
+    expect(html).toContain('class="mgts-danger" data-mgbk-reset>Reset the bracket<');
+    expect(count(html, 'mgts-danger-outline')).toBe(1);
+    expect(html).toContain('The bracket keeps its shape and every seeded pairing stays.');
+    expect(html).toContain('Clears the bracket and returns to pools. Pool games and scores are kept.');
+    expect(count(html, 'Type the tournament name to confirm.')).toBe(2);   // both stay behind the unlock
   });
 });
 

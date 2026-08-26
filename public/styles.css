@@ -4764,6 +4764,23 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
 }
 #mgss-sheet .mgv-scclear:hover { box-shadow: 0 0 0 1px oklch(0.55 0.16 25 / .38); }
 
+/* PORT NOTE, C101 Task 6 (Mike's §38 answer, 2026-08-25): the bracket strip carries two danger controls
+   and they must not read alike. "Clear every result" is the OUTLINED one: the danger colour as a border
+   and as text, a transparent fill, the same 12px radius and the same size as the button under it.
+   "Reset the bracket" is left exactly as it ships. GROUND TRUTH, so nobody is surprised: styles.css:2442
+   already draws .mgts-danger with a transparent background, so this variant states the outline
+   explicitly rather than inheriting it, and today the pair is told apart by border weight, text weight
+   and copy rather than by fill. Whether the RESET should become a filled red button so the contrast is a
+   fill is carried to Mike at the hand-back and is a one-line change if he says yes. No new !important. */
+.mgts-danger-outline {
+  border: 1px solid oklch(0.55 0.16 25 / .22);
+  background: transparent;
+  color: var(--danger);
+  font-weight: 500;
+}
+.mgts-danger-outline + .mgbk-note { margin-bottom: 16px; }
+
+
 
 /* Round 2026-08-24 — the SAMPLE bracket before seeding ("a sample bracket based off the number of registered
    teams"). Reads as a diagram, not a scoreboard: nodes on the page tint, dashed. PORT NOTE: _rounds.css'

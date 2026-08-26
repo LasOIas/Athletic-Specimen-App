@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.41'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.42'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2616,6 +2616,19 @@ async function tdbClearBracketResult(match) {
   if (error) { console.error('tdbClearBracketResult', error); throw error; }
   const n = Number(Array.isArray(data) ? data[0] : data);
   if (!Number.isFinite(n) || n < 1) throw new Error('Nothing was cleared. Refresh and try again.');
+  return n;
+}
+
+// C101 Task 6 / migration 0063: blank every bracket score WITHOUT deleting the tree. This is NOT
+// tdbResetBracket, which deletes every phase='main' row and drops to 'pools'; the two live side by side on
+// the bracket page and must be impossible to confuse. The RPC returns the number of games that were FINAL
+// before the call, which is the number the copy and the log row both carry.
+async function tdbClearWholeBracket(tournamentId) {
+  if (!supabaseClient || !tournamentId) throw new Error('No tournament.');
+  const { data, error } = await supabaseClient.rpc('clear_whole_bracket', { p_tournament_id: tournamentId });
+  if (error) { console.error('tdbClearWholeBracket', error); throw error; }
+  const n = Number(Array.isArray(data) ? data[0] : data);
+  if (!Number.isFinite(n)) throw new Error('That did not go through. Refresh and try again.');
   return n;
 }
 
@@ -12827,8 +12840,13 @@ function mgBracketControlsHTML(t, completed) {
 
 // The BOTTOM of the bracket page: Reset closes the page under a plain hairline (.mgv-dsect is a label-less
 // .pl-sect — just the rule), the same grammar the sub-hub's danger zone uses.
+// C101 Task 6 (Mike's §38 answer, 2026-08-25): TWO danger controls on this strip, and they must not read
+// alike. "Clear every result" is the OUTLINED one and sits ABOVE the delete; "Reset the bracket" keeps the
+// class and the copy it ships with. Both stay behind the type-the-name unlock.
 function mgBracketResetHTML() {
   return `<div class="pl-sect mgv-dsect" aria-hidden="true"></div>`
+    + `<button type="button" class="mgts-danger mgts-danger-outline" data-mgbk-clear>Clear every result</button>`
+    + `<div class="mgbk-note">Blanks every bracket score. The bracket keeps its shape and every seeded pairing stays. Type the tournament name to confirm.</div>`
     + `<button type="button" class="mgts-danger" data-mgbk-reset>Reset the bracket</button>`
     + `<div class="mgbk-note">Clears the bracket and returns to pools. Pool games and scores are kept. Type the tournament name to confirm.</div>`;
 }
@@ -12874,6 +12892,25 @@ async function mgBracketGenerate() {
   } catch (err) {
     appNotice({ title: 'Could not generate the bracket', message: (err && err.message) || 'Try again.' });
   }
+}
+
+// C101 Task 6: the NON-destructive clear. Same type-the-name unlock as the reset beside it (appPrompt), a
+// different verb, and a read-back: the RPC returns the results it cleared, so the notice can say what
+// happened instead of assuming it.
+async function mgBracketClearAll() {
+  if (!state.isAdmin) return;
+  const t = mgBracketTournament();
+  if (!t) return;
+  const nm = (t.name || '').trim() || 'this tournament';
+  const typed = await appPrompt({ title: 'Clear every result', message: 'This blanks every bracket score. The bracket keeps its shape and every seeded pairing stays. Type the tournament name to confirm.', placeholder: nm, confirmText: 'Clear every result' });
+  if (String(typed || '').trim() !== nm) return;
+  try {
+    const n = await tdbClearWholeBracket(t.id);
+    state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null;
+    await tdbRefreshTournaments();
+    repaintManage();
+    appNotice({ title: 'Bracket cleared', message: n === 1 ? '1 result cleared. The bracket kept its shape.' : n + ' results cleared. The bracket kept its shape.' });
+  } catch (err) { appNotice({ title: 'Could not clear the results', message: (err && err.message) || 'Try again.' }); }
 }
 
 // Reset the bracket (type-name unlock, like T6/T7): the existing tdbResetBracket deletes the phase='main'
@@ -14257,6 +14294,7 @@ function attachHandlers() {
           if (seedDn) { mgBracketReseed(seedDn.getAttribute('data-mgbk-seeddown'), 1); return; }
           if (e.target.closest('[data-mgbk-seedreset]')) { state.seedOverride = null; repaintManage(); return; }
           if (e.target.closest('[data-mgbk-generate]')) { void mgBracketGenerate(); return; }
+          if (e.target.closest('[data-mgbk-clear]')) { void mgBracketClearAll(); return; }   // C101 Task 6
           if (e.target.closest('[data-mgbk-reset]')) { void mgBracketReset(); return; }
           if (e.target.closest('[data-mgbk-players]')) {
             // Route to the PUBLIC bracket page (the players' read-only tree): switch to the Tournament tab
