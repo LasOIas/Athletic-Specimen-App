@@ -1775,7 +1775,9 @@ describe('Task 8 pool controls', () => {
     // this fixture that leaves p2 nowhere to send anyone, so p2 offers no Move and still claims nothing:
     // it has not played, and saying so would be a sentence the app cannot honour.
     expect(count(cardB, 'data-pc-move=')).toBe(0);
-    expect(cardB).not.toContain('pc-lock');
+    // Mike (2026-08-26): and it says WHY. p2 has not played, so it must never claim it has; what is true
+    // is that the only pool it could send anyone to already has.
+    expect(cardB).toContain('<span class="pc-lock">The other pool has played, teams stay put.</span>');
     expect(html).not.toContain('The schedule is drawn, teams stay put.');
     expect(html).toContain('Move a team to another pool, change the nets a pool plays on');
     expect(html).not.toContain('before Start pool play');
@@ -1800,8 +1802,9 @@ describe('Task 8 pool controls', () => {
     const cardB = html.slice(html.indexOf('data-pc-card="p2"'));
     // C101 Task 7: only a PLAYED or PLAYING pool locks. A drawn-but-unplayed pool moves again.
     expect(cardA).toContain('<span class="pc-lock">Play has started, teams stay put.</span>');
-    expect(cardB).not.toContain('pc-lock');
-    expect(count(html, 'class="pc-lock"')).toBe(1);
+    expect(cardB).toContain('<span class="pc-lock">The other pool has played, teams stay put.</span>');
+    expect(cardB).not.toContain('Play has started');   // p2 has not played and never says it has
+    expect(count(html, 'class="pc-lock"')).toBe(2);
     seedPools(bridge, { matches: UNPLAYED });
     const drawn = bridge.buildMgPools({ controls: true });
     expect(drawn).not.toContain('The schedule is drawn, teams stay put.');
@@ -1809,6 +1812,8 @@ describe('Task 8 pool controls', () => {
     // those two pools, the live one is not a destination either, so nothing on this page can move.
     expect(drawn).toContain('Play has started, teams stay put.');
     expect(drawn).not.toContain('data-pc-move=');
+    expect(drawn).toContain('The other pool has played, teams stay put.');   // p2 is stranded, and says so
+    expect(count(drawn, 'class="pc-lock"')).toBe(2);
     // give the unplayed pool somewhere legal to send a team and Move is back on it alone
     seedPools(bridge, {
       pools: [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }, { id: 'p3', label: 'C' }],
@@ -1823,6 +1828,8 @@ describe('Task 8 pool controls', () => {
     expect(liveCard).not.toContain('data-pc-move=');
     expect(liveCard).toContain('Play has started, teams stay put.');
     expect(count(freeCard, 'data-pc-move=')).toBe(2);
+    expect(freeCard).not.toContain('pc-lock');         // p3 is a legal destination, so nothing is stranded
+    expect(three).not.toContain('The other pool has played, teams stay put.');
     // undrawn: the page is the pre-start setup block (Pools drawn + Start pool play), which carries no
     // controls panel and no lock line. C101 Task 1 gave Move its safe home HERE: nothing is drawn, so a
     // pool_id write has no fixtures to rebuild.
@@ -1847,6 +1854,10 @@ describe('Task 8 pool controls', () => {
     expect(count(html, 'class="pc-card"')).toBe(1);
     expect(html).toContain('data-mgps-team="t1"');   // the rows are all still there
     expect(html).not.toContain('data-pc-move=');     // there is simply nowhere to move to
+    // Mike's stranded line is gated on another pool EXISTING: here there is none, so saying one has
+    // played would be the same untrue sentence the "play has started" gate already refuses.
+    expect(html).not.toContain('The other pool has played, teams stay put.');
+    expect(html).not.toContain('pc-lock');
     expect(html).not.toContain('Play has started');  // nothing has been played, so that line never appears
     // and the dead-end state cannot be reached even if the module var somehow named a team
     const forced = bridge.buildMgPools({ controls: true, moveTeam: 't1' });
@@ -2670,7 +2681,49 @@ describe('C101 review wave Move is offered only where the RPC allows it', () => 
     const html = bridge.buildMgPools({ controls: true });
     const cardB = html.slice(html.indexOf('data-pc-card="p2"'));
     expect(cardB).not.toContain('data-pc-move=');   // p1 is live, so p2 has nowhere to send anyone
-    expect(cardB).not.toContain('pc-lock');         // and p2 itself has not played, so it claims nothing
+    expect(cardB).toContain('The other pool has played, teams stay put.');   // and it says why
+    expect(cardB).not.toContain('Play has started');   // never a claim p2 itself has played
+  });
+
+  // Mike's ruling (2026-08-26): in a TWO-pool event where the other pool has played, the unplayed card does
+  // not go quiet. It withholds Move, because the RPC would refuse the move on the played pool's side, and
+  // it says why in its own .pc-lock span rather than leaving the organizer to guess.
+  it('a two-pool event: the unplayed card withholds Move and says why', () => {
+    seedPools(bridge, { matches: [
+      { id: 'm1', phase: 'pool', pool_id: 'p1', net: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', score_a: 15, score_b: 9, winner_team_id: 't1', queue_order: 1 },
+      { id: 'm2', phase: 'pool', pool_id: 'p2', net: 2, status: 'scheduled', team_a_id: 't3', team_b_id: 't4', queue_order: 1 }] });
+    const html = bridge.buildMgPools({ controls: true });
+    const cardB = html.slice(html.indexOf('data-pc-card="p2"'));
+    expect(cardB).not.toContain('data-pc-move=');
+    expect(cardB).toContain('<span class="pc-lock">The other pool has played, teams stay put.</span>');
+    expect(cardB).not.toContain('Play has started');   // p2 has not played and must never claim it has
+    // and the same shape with the other pool LIVE rather than finished, since the RPC refuses both
+    seedPools(bridge, { matches: UNPLAYED });
+    const live = bridge.buildMgPools({ controls: true });
+    const liveB = live.slice(live.indexOf('data-pc-card="p2"'));
+    expect(liveB).not.toContain('data-pc-move=');
+    expect(liveB).toContain('The other pool has played, teams stay put.');
+  });
+
+  // OPEN, carried to the hand-back: with THREE pools where BOTH of the others have played, this same
+  // branch fires and the sentence is singular where the fact is plural. What is certainly right is pinned
+  // here; the wording is Mike's to settle, so no assertion blesses the singular in that case.
+  it('three pools with both others played: Move is withheld and the pool never claims it played', () => {
+    seedPools(bridge, {
+      pools: [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }, { id: 'p3', label: 'C' }],
+      teams: [{ id: 't1', name: 'Dink Responsibly', pool_id: 'p1' }, { id: 't2', name: 'Sets and Reps', pool_id: 'p1' },
+        { id: 't3', name: 'Block Party', pool_id: 'p2' }, { id: 't4', name: 'Net Gains', pool_id: 'p2' },
+        { id: 't5', name: 'Ace Holes', pool_id: 'p3' }, { id: 't6', name: 'Dig It', pool_id: 'p3' }],
+      matches: [
+        { id: 'm1', phase: 'pool', pool_id: 'p1', net: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', score_a: 15, score_b: 9, winner_team_id: 't1', queue_order: 1 },
+        { id: 'm2', phase: 'pool', pool_id: 'p3', net: 3, status: 'live', team_a_id: 't5', team_b_id: 't6', score_a: 4, score_b: 3, queue_order: 1 },
+        { id: 'm3', phase: 'pool', pool_id: 'p2', net: 2, status: 'scheduled', team_a_id: 't3', team_b_id: 't4', queue_order: 1 }],
+    });
+    const html = bridge.buildMgPools({ controls: true });
+    const cardB = html.slice(html.indexOf('data-pc-card="p2"'), html.indexOf('data-pc-card="p3"'));
+    expect(cardB).not.toContain('data-pc-move=');
+    expect(cardB).not.toContain('Play has started');
+    expect(cardB).toContain('class="pc-lock"');        // it says SOMETHING, and never nothing
   });
 
   it('the team sheet chips draw only what the RPC will accept, and the current one is inert', () => {
