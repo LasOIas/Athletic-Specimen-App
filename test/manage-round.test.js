@@ -124,6 +124,11 @@ function loadApp() {
       moveTeamToPool: (teamId, poolId) => tdbMoveTeamToPool(teamId, poolId),
       // C101 Task 7: the handler behind a pick, and the pure planner the writer must delegate to.
       movePool: (a, b) => mgPoolsMoveTeam(a, b),
+      openTeamSheet: (id) => openMgTeamSheet(id),
+      slotPlan: (ids, nets) => assignPoolGameSlots(ids, nets),
+      // C101 review wave: appNotice alone, without mockPoolWrites, which also swaps openMgTeamSheet and
+      // would stop the REAL sheet from ever mounting.
+      swapNotice: (fn) => { const was = appNotice; appNotice = fn; return () => { appNotice = was; }; },
       movePlan: (...a) => poolMovePlan(...a),
       // The two writes the open Pool controls can make, swapped for recorders (plus the team sheet, so a
       // Move tap that leaked through to it is visible rather than silent). This suite is offline — no tdb
@@ -442,10 +447,11 @@ function seedPools(bridge, o) {
     { teams, pools, matches: o.matches || [] });
 }
 
-// C101 Task 0 (2026-08-25): Move is offered only BEFORE the schedule is drawn. UNDRAWN is the movable
-// fixture (pools exist, no games yet); UNPLAYED (drawn, nothing final) is LOCKED with its own line.
+// C101 review wave (2026-08-26): Move is offered wherever move_team_to_pool would accept it, which means
+// neither side of the move holds a final or a live pool game. UNDRAWN is pools with no games at all, so
+// everything moves. UNPLAYED is drawn, and it carries a LIVE game on p1: so p1 is locked and is offered as
+// neither a source nor a destination, while p2 is unplayed and still moves.
 const UNDRAWN = [];
-// Pool play drawn with nothing final anywhere: nets show, Move does not.
 const UNPLAYED = [
   { id: 'a1', phase: 'pool', pool_id: 'p1', net: 1, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 1 },
   { id: 'a2', phase: 'pool', pool_id: 'p1', net: 2, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 2 },
@@ -1765,7 +1771,10 @@ describe('Task 8 pool controls', () => {
     expect(cardA).not.toContain('data-pc-move=');     // it has PLAYED, so it cannot be moved
     expect(cardA).not.toContain('>Move<');
     expect(cardA).toContain('Play has started, teams stay put.');
-    expect(count(cardB, 'data-pc-move=')).toBe(2);    // drawn but unplayed: both its teams move
+    // Review wave: p1 has a FINAL, so the RPC refuses it on EITHER side of a move. With only two pools in
+    // this fixture that leaves p2 nowhere to send anyone, so p2 offers no Move and still claims nothing:
+    // it has not played, and saying so would be a sentence the app cannot honour.
+    expect(count(cardB, 'data-pc-move=')).toBe(0);
     expect(cardB).not.toContain('pc-lock');
     expect(html).not.toContain('The schedule is drawn, teams stay put.');
     expect(html).toContain('Move a team to another pool, change the nets a pool plays on');
@@ -1796,9 +1805,24 @@ describe('Task 8 pool controls', () => {
     seedPools(bridge, { matches: UNPLAYED });
     const drawn = bridge.buildMgPools({ controls: true });
     expect(drawn).not.toContain('The schedule is drawn, teams stay put.');
-    expect(drawn).toContain('data-pc-move=');
-    // UNPLAYED carries a LIVE game on pool A, so pool A locks and pool B does not
+    // UNPLAYED carries a LIVE game on pool A, so pool A locks and pool B does not. Review wave: with only
+    // those two pools, the live one is not a destination either, so nothing on this page can move.
     expect(drawn).toContain('Play has started, teams stay put.');
+    expect(drawn).not.toContain('data-pc-move=');
+    // give the unplayed pool somewhere legal to send a team and Move is back on it alone
+    seedPools(bridge, {
+      pools: [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }, { id: 'p3', label: 'C' }],
+      teams: [{ id: 't1', name: 'Dink Responsibly', pool_id: 'p1' }, { id: 't2', name: 'Sets and Reps', pool_id: 'p1' },
+        { id: 't3', name: 'Block Party', pool_id: 'p2' }, { id: 't4', name: 'Net Gains', pool_id: 'p2' },
+        { id: 't5', name: 'Ace Holes', pool_id: 'p3' }, { id: 't6', name: 'Dig It', pool_id: 'p3' }],
+      matches: UNPLAYED,
+    });
+    const three = bridge.buildMgPools({ controls: true });
+    const liveCard = three.slice(three.indexOf('data-pc-card="p1"'), three.indexOf('data-pc-card="p2"'));
+    const freeCard = three.slice(three.indexOf('data-pc-card="p2"'), three.indexOf('data-pc-card="p3"'));
+    expect(liveCard).not.toContain('data-pc-move=');
+    expect(liveCard).toContain('Play has started, teams stay put.');
+    expect(count(freeCard, 'data-pc-move=')).toBe(2);
     // undrawn: the page is the pre-start setup block (Pools drawn + Start pool play), which carries no
     // controls panel and no lock line. C101 Task 1 gave Move its safe home HERE: nothing is drawn, so a
     // pool_id write has no fixtures to rebuild.
@@ -1871,11 +1895,21 @@ describe('Task 8 pool controls', () => {
     expect(liveOpen).not.toContain('class="pc-pick"');
     expect(liveOpen).not.toContain('data-pc-pick=');
     expect(liveOpen).toContain('Play has started, teams stay put.');
+    // Review wave: a picker needs a LEGAL destination, and the live p1 is not one, so the third pool is
+    // what t3 can actually be sent to.
+    seedPools(bridge, {
+      pools: [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }, { id: 'p3', label: 'C' }],
+      teams: [{ id: 't1', name: 'Dink Responsibly', pool_id: 'p1' }, { id: 't2', name: 'Sets and Reps', pool_id: 'p1' },
+        { id: 't3', name: 'Block Party', pool_id: 'p2' }, { id: 't4', name: 'Net Gains', pool_id: 'p2' },
+        { id: 't5', name: 'Ace Holes', pool_id: 'p3' }, { id: 't6', name: 'Dig It', pool_id: 'p3' }],
+      matches: UNPLAYED,
+    });
     const freeOpen = bridge.buildMgPools({ controls: true, moveTeam: 't3' });
     expect(freeOpen).toContain('class="pc-pick"');
-    expect(freeOpen).toContain('data-pc-pick="t3:p1"');
+    expect(freeOpen).toContain('data-pc-pick="t3:p3"');
+    expect(freeOpen).not.toContain('data-pc-pick="t3:p1"');   // being scored
     expect(freeOpen).not.toContain('data-pc-pick="t3:p2"');   // never its own pool
-    expect(freeOpen).toContain('Finished games stay where they were played. The rest are rescheduled.');
+    expect(freeOpen).toContain('Both pools get a fresh schedule.');
     // a team in a pool that HAS played can never have one, even if the module var somehow named it
     seedPools(bridge, { matches: [{ id: 'f1', phase: 'pool', pool_id: 'p1', net: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', score_a: 15, score_b: 9, winner_team_id: 't1', queue_order: 1 }] });
     expect(bridge.buildMgPools({ controls: true, moveTeam: 't1' })).not.toContain('class="pc-pick"');
@@ -2268,7 +2302,8 @@ describe('C101 Task 1 Move in the Pools drawn block', () => {
     expect(html).toContain('data-pc-card="p2"');
     expect(html).not.toContain('pc-lock');                  // nothing is locked yet
     expect(html).not.toContain('pc-card"');                 // the controls-panel card is NOT drawn here
-    expect(html).toContain('Move a team to another pool now. Once the schedule is drawn, teams stay put.');
+    expect(html).toContain('Move a team to another pool now. After the draw you can still move one until either pool has played.');
+    expect(html).not.toContain('Once the schedule is drawn, teams stay put.');
     expect(html).not.toContain('—');              // copy law: no em dashes
   });
 
@@ -2360,7 +2395,7 @@ describe('C101 Task 5 Clear this result', () => {
   // The REAL card, mounted the way the shipped opener mounts it, with its click handler captured off the
   // scrim it binds to. A grep of app.js proves nothing about what a tap does (the 2026-08-03 inert-Undo
   // lesson), and the delegate order inside this card is exactly what the clear has to survive.
-  function withScoreSheet(matchId, fn) {
+  async function withScoreSheet(matchId, fn) {
     const doc = bridge.doc;
     const realCreate = doc.createElement;
     let handler = null;
@@ -2379,7 +2414,7 @@ describe('C101 Task 5 Clear this result', () => {
         target: { closest: (sel) => (sel === '[data-mgss]' ? { getAttribute: () => role } : null) },
         preventDefault: () => {}, stopPropagation: () => {},
       });
-      return fn(tap, scrim);
+      return await fn(tap, scrim);   // awaited for the same reason withTeamSheet is
     } finally { doc.createElement = realCreate; bridge.swapTimeout(realTimeout); }
   }
 
@@ -2460,8 +2495,17 @@ describe('C101 Task 5 Clear this result', () => {
 
   it('every RPC the app needs appears as a literal in app.js', () => {
     // This would have caught clear_bracket_atomic sitting dead in the database since 2026-06-19.
-    for (const name of ['clear_bracket_atomic', 'set_team_paid', 'read_action_log', 'register_team']) {
-      expect(appSrc).toContain("rpc('" + name + "'");
+    // Review wave: the list is DERIVED from supabase-writes.test.js's MUTATING_RPCS rather than hand
+    // typed, so a name added there is covered here on the same commit. Four typed names is how
+    // clear_whole_bracket and move_team_to_pool sat outside this guard the day they were written.
+    const writes = readFileSync(new URL('./supabase-writes.test.js', import.meta.url), 'utf8');
+    const block = writes.slice(writes.indexOf('const MUTATING_RPCS = ['), writes.indexOf('];', writes.indexOf('const MUTATING_RPCS = [')));
+    const names = [...block.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+    expect(names).toContain('clear_whole_bracket');
+    expect(names).toContain('move_team_to_pool');
+    expect(names.length).toBeGreaterThanOrEqual(11);
+    for (const name of names.concat(['read_action_log'])) {
+      expect(appSrc, name + ' is in MUTATING_RPCS but never called from app.js').toContain("rpc('" + name + "'");
     }
   });
 
@@ -2555,6 +2599,200 @@ describe('C101 Task 6 Clear every result', () => {
     expect(outline).not.toContain('background: var(--danger)');
     // neither variant restates the geometry: that stays .mgts-danger's single source
     [filled, outline].forEach((b) => { expect(b).not.toContain('border-radius'); expect(b).not.toContain('padding'); });
+  });
+});
+
+// C101 review wave (2026-08-26): the client had to re-gate around what the server actually accepts.
+// move_team_to_pool refuses when EITHER side of a move holds a final or a live pool game, and 0067 answers
+// 0 to a same-pool tap, so a UI that offered those taps was drawing buttons whose only outcome was an
+// error. Every case here drives the real builder or the real sheet handler.
+describe('C101 review wave Move is offered only where the RPC allows it', () => {
+  // The REAL team sheet, mounted the way openMgTeamSheet mounts it, with its click handler captured off
+  // the scrim it binds to and its body exposed so a repaint-from-server-truth is readable.
+  async function withTeamSheet(teamId, fn) {
+    const doc = bridge.doc;
+    const realCreate = doc.createElement;
+    const realGet = doc.getElementById;
+    let handler = null;
+    const body = { innerHTML: '' };
+    const scrim = {
+      id: '', className: '', innerHTML: '',
+      setAttribute: () => {}, appendChild: () => {}, remove: () => {},
+      addEventListener: (type, cb) => { if (type === 'click') handler = cb; },
+      querySelector: (sel) => (sel === '.pd-reg-sheet' ? body : null),
+      querySelectorAll: () => ({ forEach: () => {} }),
+    };
+    doc.createElement = () => scrim;
+    doc.getElementById = (id) => (id === 'mgts-sheet' ? scrim : null);
+    try {
+      bridge.openTeamSheet(teamId);
+      if (!handler) throw new Error('the team sheet click handler was never bound');
+      const tap = (role, poolId, disabled) => handler({
+        target: {
+          closest: (sel) => (sel === '[data-mgts]' ? {
+            disabled: !!disabled,
+            getAttribute: (name) => (name === 'data-mgts' ? role : (name === 'data-mgts-pool' ? poolId : null)),
+            classList: { contains: () => false, add: () => {}, remove: () => {}, toggle: () => {} },
+            setAttribute: () => {},
+          } : null),
+        },
+      });
+      // AWAITED, not returned: this wrapper restores the document stubs in its finally, and a sync
+      // wrapper would restore them the moment an async fn handed back its promise - long before the
+      // write chain it started had reached the repaint that needs them.
+      return await fn(tap, body, scrim);
+    } finally { doc.createElement = realCreate; doc.getElementById = realGet; }
+  }
+
+  it('the picker offers only pools with no final and no live game', () => {
+    // UNPLAYED carries a LIVE game on p1, so p1 is neither a source nor a destination.
+    seedPools(bridge, { matches: UNPLAYED });
+    const open = bridge.buildMgPools({ controls: true, moveTeam: 't3' });   // t3 sits in the unplayed p2
+    expect(open).not.toContain('data-pc-pick="t3:p1"');   // p1 is being scored: never offered
+    expect(open).not.toContain('Finished games stay where they were played.');
+    // a third, unplayed pool IS offered, and the picker opens for it
+    seedPools(bridge, {
+      pools: [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }, { id: 'p3', label: 'C' }],
+      teams: [{ id: 't1', name: 'Dink Responsibly', pool_id: 'p1' }, { id: 't2', name: 'Sets and Reps', pool_id: 'p1' },
+        { id: 't3', name: 'Block Party', pool_id: 'p2' }, { id: 't4', name: 'Net Gains', pool_id: 'p2' },
+        { id: 't5', name: 'Ace Holes', pool_id: 'p3' }, { id: 't6', name: 'Dig It', pool_id: 'p3' }],
+      matches: UNPLAYED,
+    });
+    const three = bridge.buildMgPools({ controls: true, moveTeam: 't3' });
+    expect(three).toContain('class="pc-pick"');
+    expect(three).toContain('data-pc-pick="t3:p3"');
+    expect(three).not.toContain('data-pc-pick="t3:p1"');
+    expect(three).toContain('Both pools get a fresh schedule.');
+  });
+
+  it('a pool whose only other pools are playing offers no Move at all', () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    const html = bridge.buildMgPools({ controls: true });
+    const cardB = html.slice(html.indexOf('data-pc-card="p2"'));
+    expect(cardB).not.toContain('data-pc-move=');   // p1 is live, so p2 has nowhere to send anyone
+    expect(cardB).not.toContain('pc-lock');         // and p2 itself has not played, so it claims nothing
+  });
+
+  it('the team sheet chips draw only what the RPC will accept, and the current one is inert', () => {
+    seedPools(bridge, { matches: UNDRAWN });
+    const sheet = bridge.buildTeamSheet('t1');       // t1 is in p1, nothing drawn
+    expect(sheet).toContain('data-mgts-pool="p2"');
+    expect(sheet).toContain('data-mgts-pool=""');    // No pool is a real destination
+    // the current chip is on AND disabled: it says where the team is and a tap on it does nothing
+    expect(sheet).toContain('class="mgts-pchip on" disabled data-mgts="pool" data-mgts-pool="p1"');
+    expect(sheet).toContain('class="mgts-pchip" data-mgts="pool" data-mgts-pool="p2"');
+    expect(sheet).not.toContain('pc-lock');
+    // and the inert chip must not inherit prod's greyed-out disabled paint: it is the SELECTED one
+    expect(count(css, '.mgts-pchip.on:disabled {')).toBe(1);
+    expect(css).toContain('.mgts-pchip.on:disabled { opacity: 1; cursor: default; }');
+    const chipCss = css.slice(css.indexOf('.mgts-pchip.on:disabled {'), css.indexOf('.mgts-pchip.on:disabled {') + 120);
+    expect(chipCss).not.toContain('!important');
+  });
+
+  it('a playing pool is not offered, and a team inside one is offered nothing', () => {
+    seedPools(bridge, { matches: UNPLAYED });          // p1 is live
+    const fromUnplayed = bridge.buildTeamSheet('t3');  // t3 sits in p2
+    expect(fromUnplayed).toContain('data-mgts-pool="p2"');     // its own, inert
+    expect(fromUnplayed).not.toContain('data-mgts-pool="p1"'); // p1 is being scored
+    const fromPlaying = bridge.buildTeamSheet('t1');   // t1 sits in the LIVE pool
+    expect(fromPlaying).toContain('data-mgts-pool="p1"');
+    expect(fromPlaying).not.toContain('data-mgts-pool="p2"');
+    expect(fromPlaying).not.toContain('data-mgts-pool=""');
+    expect(fromPlaying).toContain('Play has started, teams stay put.');
+  });
+
+  it('past pool play the chips are the current one alone', () => {
+    seedPools(bridge, { tournament: { status: 'bracket' }, matches: UNDRAWN });
+    const sheet = bridge.buildTeamSheet('t1');
+    expect(sheet).toContain('data-mgts-pool="p1"');
+    expect(sheet).not.toContain('data-mgts-pool="p2"');
+    expect(sheet).toContain('Play has started, teams stay put.');
+  });
+
+  it('tapping the pool the team is already in makes no call at all', async () => {
+    seedPools(bridge, { matches: UNDRAWN });
+    const seen = [];
+    const undo = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return { data: 1, error: null }; });
+    try {
+      await withTeamSheet('t1', async (tap) => {
+        tap('pool', 'p1');                    // t1's own pool, tapped as if the chip were live
+        for (let i = 0; i < 6; i++) await Promise.resolve();
+        expect(seen).toEqual([]);
+        tap('pool', 'p1', true);              // and the inert chip is refused before anything else
+        for (let i = 0; i < 6; i++) await Promise.resolve();
+        expect(seen).toEqual([]);
+        tap('pool', 'p2');                    // a real destination still writes
+        for (let i = 0; i < 8; i++) await Promise.resolve();
+        expect(seen.map((c) => c[0])).toEqual(['move_team_to_pool']);
+        expect(seen[0][1].p_pool).toBe('p2');
+      });
+    } finally { undo(); }
+  });
+
+  it('a refused sheet write repaints the sheet from server truth', async () => {
+    seedPools(bridge, { matches: UNDRAWN });
+    const undo = bridge.swapSupaRpc(() => ({ data: null, error: { message: 'Those pools have games already played or in progress.' } }));
+    const said = [];
+    const wasNotice = bridge.swapNotice((n) => { said.push(n && n.title); });
+    try {
+      await withTeamSheet('t1', async (tap, body) => {
+        tap('pool', 'p2');
+        for (let i = 0; i < 14; i++) await Promise.resolve();
+        expect(said).toContain('That did not save');
+        // the optimistic paint is gone: the sheet says p1, which is where the team still is
+        expect(body.innerHTML).toContain('class="mgts-pchip on" disabled data-mgts="pool" data-mgts-pool="p1"');
+        expect(body.innerHTML).toContain('class="mgts-pchip" data-mgts="pool" data-mgts-pool="p2"');
+      });
+    } finally { wasNotice(); undo(); }
+  });
+
+  it('the whole-bracket clear surfaces the new live refusal word for word', async () => {
+    setMainBracketFixture();
+    const m = bridge.mockBracketDanger({
+      typed: bridge.leadTournament().name,
+      clearWhole: () => { throw new Error('A game is being scored right now. Finish that one first.'); },
+    });
+    try {
+      await bridge.clearAll();
+      const notice = m.calls.find((c) => c[0] === 'notice');
+      expect(notice[1]).toBe('Could not clear the results');
+      expect(notice[2]).toBe('A game is being scored right now. Finish that one first.');
+      expect(m.calls.some((c) => c[0] === 'repaint')).toBe(false);
+    } finally { m.restore(); }
+  });
+
+  // The regression the offset caused, read off the REAL board. Three pools of 4 / 2 / 4, each drawn on its
+  // own net, so the board reads "Round 1 of 6". Moving one team from A to B leaves the pools at 3 / 3 / 4:
+  // the TOTAL moves, because a round robin of 3 is not a round robin of 4, but the ROUND COUNT must not,
+  // because rounds run in parallel across pools. The offset made this board read "of 9" after one move.
+  it('a move leaves the pools board reading the same round count', () => {
+    const pools = [{ id: 'pA', label: 'A' }, { id: 'pB', label: 'B' }, { id: 'pC', label: 'C' }];
+    const teams = [];
+    [['pA', 4], ['pB', 2], ['pC', 4]].forEach((row) => {
+      for (let k = 1; k <= row[1]; k++) teams.push({ id: row[0] + k, name: row[0] + ' ' + k, pool_id: row[0] });
+    });
+    const drawn = [];
+    [['pA', 1], ['pB', 2], ['pC', 3]].forEach((row) => {
+      const ids = teams.filter((t) => t.pool_id === row[0]).map((t) => t.id);
+      bridge.slotPlan(ids, [row[1]]).forEach((g, i) => drawn.push({
+        id: row[0] + '-' + i, phase: 'pool', pool_id: row[0], net: g.net, queue_order: g.queue_order,
+        status: 'scheduled', team_a_id: g.team_a_id, team_b_id: g.team_b_id,
+      }));
+    });
+    seedPools(bridge, { pools, teams, matches: drawn, tournament: { net_count: 3 } });
+    const before = bridge.buildMgPools();
+    expect(before).toContain('Round 1 of 6');
+    expect(before).toContain('0 of 13 games done');
+
+    const plan = bridge.movePlan('pA4', 'pA', 'pB', pools, teams, drawn).plan;
+    const after = drawn.filter((m) => m.pool_id === 'pC')
+      .concat(plan.map((g, i) => Object.assign({ id: 'new-' + i, phase: 'pool', status: 'scheduled' }, g)));
+    const moved = teams.map((t) => (t.id === 'pA4' ? Object.assign({}, t, { pool_id: 'pB' }) : t));
+    seedPools(bridge, { pools, teams: moved, matches: after, tournament: { net_count: 3 } });
+    const board = bridge.buildMgPools();
+    expect(board).toContain('Round 1 of 6');          // the round count did NOT move
+    expect(board).toContain('0 of 12 games done');    // the total moved by the arithmetic of the move
+    expect(Math.max.apply(null, plan.map((g) => g.queue_order))).toBeLessThanOrEqual(6);
   });
 });
 

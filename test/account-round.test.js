@@ -2580,3 +2580,29 @@ describe('Motion - the page entrance plays once per navigation, not once per ren
     expect(slice).not.toMatch(/\n\s*mEnter\(\)\;/);
   });
 });
+
+// C101 Task 2 / migration 0059: the tell that the trigger shape is right is ZERO client churn. profiles.email
+// is written by a DEFINER trigger on auth.users, INSIDE GoTrue's own transaction, so the client must never
+// write it: `profiles self update` carries no with-check and no column list, so a client-side email write
+// would land BEFORE confirmation and contradict the account screen's own promise, "Until you tap it, sign in
+// with your old address." Read off the source, in the genre of tournament-round.test.js:273-279.
+describe('C101 Task 2 the email sync is the database s job, not the client s', () => {
+  const body = () => {
+    const start = appSrc.indexOf('async function onAuthEvent(');
+    expect(start).toBeGreaterThan(-1);
+    return appSrc.slice(start, appSrc.indexOf('function accRow(', start));
+  };
+
+  it('onAuthEvent writes no profiles row of any kind', () => {
+    const fn = body().replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(?<!:)\/\/[^\n]*/g, ' ');
+    expect(fn).not.toContain("from('profiles')");
+    expect(fn).not.toContain('profiles');
+    expect(fn).not.toContain('.update(');
+    expect(fn).not.toContain('.upsert(');
+  });
+
+  it('nowhere in the app writes an email onto profiles', () => {
+    const code = appSrc.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(?<!:)\/\/[^\n]*/g, ' ');
+    expect(code).not.toMatch(/from\('profiles'\)[\s\S]{0,120}?(update|upsert)\([^)]*email/);
+  });
+});

@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.45'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.46'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2302,7 +2302,7 @@ async function tdbDrawPools(tournament) {
   _poolSetupInFlight = true;
   try {
   const cur = (await supabaseClient.from('tournaments').select('status').eq('id', tournament.id).single()).data;
-  if (cur && cur.status !== 'setup') throw new Error('Pool play already started. Reset Pools first.');
+  if (cur && cur.status !== 'setup') throw new Error('Pool play has already started. Reset pools first.');
   const teams = await tdbListTeams(tournament.id);
   if (teams.length < 2) throw new Error('Add at least 2 teams first.');
   // C25 item 9: one delete for ALL existing pools of this tournament (was a per-pool delete loop).
@@ -2348,7 +2348,7 @@ async function tdbStartPoolPlay(tournament) {
   _poolSetupInFlight = true;
   try {
   const cur = (await supabaseClient.from('tournaments').select('status').eq('id', tournament.id).single()).data;
-  if (cur && cur.status !== 'setup') throw new Error('Pool play already started. Reset Pools first.');
+  if (cur && cur.status !== 'setup') throw new Error('Pool play has already started. Reset pools first.');
   const pools = await tdbListPools(tournament.id);
   if (!pools.length) throw new Error('Draw pools first.');
   const teams = await tdbListTeams(tournament.id);
@@ -11216,11 +11216,28 @@ function buildMgTeamSheetHTML(team) {
   const paidRow = `<div class="mgts-row"><div class="mg-rb"><div class="mg-rn">Paid</div>`
     + `<div class="mg-rs">Tap to mark the buy-in received</div></div>`
     + `<button type="button" class="mg-sw${paid ? ' on' : ''}" data-mgts="paid" role="switch" aria-checked="${paid ? 'true' : 'false'}" aria-label="Paid"></button></div>`;
+  // C101 review wave (2026-08-26): the chips draw exactly what move_team_to_pool will accept, and nothing
+  // more. Past pool play nothing moves; a move is refused when EITHER side holds a final or a live game,
+  // so a playing pool is not offered and a team whose OWN pool is playing is offered no destination at
+  // all; and the team's CURRENT chip is always drawn, on and INERT, because it says where the team is and
+  // a tap on it is a no-op the server answers 0 to. When nothing can move, the card says why in the
+  // sentence the pool card already ships.
+  const allMatches = Array.isArray(state.tournamentMatches) ? state.tournamentMatches : [];
+  const here = String(team.pool_id || '');
+  const canMovePool = (status === 'setup' || status === 'pools') && !mgPoolIsPlaying(here, allMatches);
+  const chip = (id, label) => {
+    const mine = here === id;
+    if (!mine && !(canMovePool && !mgPoolIsPlaying(id, allMatches))) return '';
+    return `<button type="button" class="mgts-pchip${mine ? ' on' : ''}"${mine ? ' disabled' : ''}`
+      + ` data-mgts="pool" data-mgts-pool="${escapeHTMLText(id)}">${escapeHTML(label)}</button>`;
+  };
+  const chips = pools.slice().sort((a, b) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0))
+    .map((p) => chip(String(p.id), 'Pool ' + String(p.label || ''))).join('')
+    + chip('', 'No pool');
   const poolRow = pools.length
-    ? `<div class="pl-sect">Pool</div><div class="mgts-pools">`
-      + pools.slice().sort((a, b) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0)).map((p) =>
-        `<button type="button" class="mgts-pchip${String(team.pool_id || '') === String(p.id) ? ' on' : ''}" data-mgts="pool" data-mgts-pool="${escapeHTMLText(String(p.id))}">Pool ${escapeHTML(String(p.label || ''))}</button>`).join('')
-      + `<button type="button" class="mgts-pchip${team.pool_id ? '' : ' on'}" data-mgts="pool" data-mgts-pool="">No pool</button></div>`
+    ? `<div class="pl-sect">Pool</div><div class="mgts-pools">${chips}`
+      + (canMovePool ? '' : `<span class="pc-lock">Play has started, teams stay put.</span>`)
+      + `</div>`
     : '';
   const withdrawRow = midPlay
     ? `<button type="button" class="mgts-warn" data-mgts="withdraw">Withdraw from the tournament<span class="mgts-sub">Forfeits their remaining games</span></button>`
@@ -11509,7 +11526,12 @@ function closeMgTeamSheet() { const el = document.getElementById('mgts-sheet'); 
 // The pool selector is the one that hurt — the tapped pill had already been given the `on` class by the
 // caller, so a move the DB rejected left the sheet SHOWING the new pool with nothing said. Every path
 // still repaints, which is what puts the pill back on the pool the team is actually in.
-async function mgtsWrite(fn) {
+// C101 review wave (2026-08-26): `teamId` is optional and, when given, the SHEET is repainted from server
+// truth after the write settles. The delegate paints the chip and the switch optimistically so the tap
+// feels immediate; without this a REFUSED write left that optimistic paint on screen next to a notice
+// saying it did not save, so the sheet showed a pool the team is not in. repaintManage() only reaches
+// #app-content, and this sheet lives on document.body, so it could never fix it.
+async function mgtsWrite(fn, teamId) {
   if (!state.isAdmin) return;
   try {
     await fn();
@@ -11518,7 +11540,20 @@ async function mgtsWrite(fn) {
     console.warn('mgts write', err);
     appNotice({ title: 'That did not save', message: (err && err.message) || MG_SAVE_FAILED });
   }
+  mgtsRepaintSheet(teamId);
   repaintManage();
+}
+
+// Re-render the OPEN sheet's body off the refreshed team row. The scrim and its listeners are untouched,
+// so nothing is rebound and the sheet cannot be reopened under the organizer. A closed sheet, a missing
+// team or no id at all is a no-op.
+function mgtsRepaintSheet(teamId) {
+  if (!teamId) return;
+  const team = mgFindTeam(teamId);
+  if (!team) return;
+  const scrim = document.getElementById('mgts-sheet');
+  const body = scrim && scrim.querySelector('.pd-reg-sheet');
+  if (body) body.innerHTML = buildMgTeamSheetHTML(team);
 }
 async function mgtsSaveName(teamId, el) {
   const val = String((el && el.value) || '').trim();
@@ -11590,14 +11625,21 @@ function openMgTeamSheet(teamId) {
       const on = !r.classList.contains('on');
       r.classList.toggle('on', on);
       r.setAttribute('aria-checked', on ? 'true' : 'false');
-      void mgtsWrite(() => tdbSetTeamPaid(teamId, on));   // C101 Task 3: the 0060 RPC, log row included
+      void mgtsWrite(() => tdbSetTeamPaid(teamId, on), teamId);   // C101 Task 3: the 0060 RPC + log row
       return;
     }
     if (role === 'pool') {
+      if (r.disabled) return;                                  // the current pool's chip is inert
       const pid = r.getAttribute('data-mgts-pool') || '';
+      // C101 review wave: tapping the pool the team is ALREADY in does nothing. 0067 answers 0 to it, so
+      // a call would be a wasted round trip that also deleted and recreated that pool's whole scheduled
+      // set on the way through 0066. Read the team back rather than trusting the closure, which is stale
+      // the moment any refresh lands.
+      const cur = mgFindTeam(teamId);
+      if (String((cur && cur.pool_id) || '') === pid) return;
       scrim.querySelectorAll('[data-mgts="pool"]').forEach((b) => b.classList.remove('on'));
       r.classList.add('on');
-      void mgtsWrite(() => tdbMoveTeamToPool(teamId, pid || null));   // C101 Task 7: the 0064 RPC
+      void mgtsWrite(() => tdbMoveTeamToPool(teamId, pid || null), teamId);   // C101 Task 7: the RPC
       return;
     }
     if (role === 'withdraw') { void mgtsWithdraw(teamId); return; }
@@ -11738,7 +11780,7 @@ function mgPoolsSetupHTML(t, teams, pools) {
     + pools.map((p) => mgPoolTeamsBlockHTML(p, teams, null, pools)).join('')
     // C101 Task 1: no .pc-lock line here, because nothing is locked yet. This block only ever renders
     // where the tournament has zero pool matches (buildMgPoolsHTML), so the sentence is true.
-    + `<div class="mgps-note">Move a team to another pool now. Once the schedule is drawn, teams stay put.</div>`
+    + `<div class="mgps-note">Move a team to another pool now. After the draw you can still move one until either pool has played.</div>`
     + `<button type="button" class="mgt-cta" data-mgps-start>Start pool play</button>`
     + `<button type="button" class="mgps-quiet" data-mgps-redraw>Draw again</button>`;
 }
@@ -11928,6 +11970,18 @@ function mgPoolGameRowHTML(g, order, teams) {
 // keep its games against the old pool and have none in the new one (C101 Task 0, 2026-08-25: the gate used
 // to wait for a FINAL game, which left that corruption path open between the draw and the first score).
 // The moment any game exists for the pool the Move label goes; the card's lock line says why.
+// C101 review wave (2026-08-26): the ONE place that answers "can 0067 still move a team in or out of
+// this pool". The RPC refuses a move when EITHER side holds a final or a live pool game, so the UI has to
+// stop offering such a pool as a source AND as a destination. Three callers: the pool card's Move gate,
+// that card's destination picker, and the team sheet's chips.
+function mgPoolIsPlaying(poolId, matches) {
+  const pid = String(poolId == null ? '' : poolId);
+  if (!pid) return false;
+  return (Array.isArray(matches) ? matches : []).some((m) => m
+    && (m.phase ? m.phase === 'pool' : !!m.pool_id)
+    && String(m.pool_id) === pid && (m.status === 'final' || m.status === 'live'));
+}
+
 function mgPoolCardHTML(pool, teams, pools, matches) {
   const pid = String(pool.id);
   const label = pool.label || '';
@@ -11944,10 +11998,12 @@ function mgPoolCardHTML(pool, teams, pools, matches) {
   // mgpMoveTeamId, drew an empty picker with no Cancel in it, and then manageNetsDirty() bailed every
   // background sync on a live-scoring page until the panel was closed.
   // C101 Task 7 / migration 0064: Task 0's `!drawn` gate retires with the RPC that replaced it. A pool that
-  // has PLAYED or is PLAYING still withholds Move, because 0064 refuses it: the UI now draws exactly what
-  // the server will accept, instead of drawing more than it will.
-  const others = pools.filter((p) => String(p.id) !== pid);
-  const played = matches.some((m) => String(m.pool_id) === pid && (m.status === 'final' || m.status === 'live'));
+  // has PLAYED or is PLAYING still withholds Move, because the RPC refuses it: the UI now draws exactly
+  // what the server will accept, instead of drawing more than it will.
+  // Review wave: the refusal covers BOTH sides of a move, so a playing pool is dropped from the
+  // DESTINATION list too. Offering it drew a button whose only outcome was an error message.
+  const played = mgPoolIsPlaying(pid, matches);
+  const others = pools.filter((p) => String(p.id) !== pid && !mgPoolIsPlaying(p.id, matches));
   const movable = others.length > 0 && !played;
   const rows = mine.length
     ? mine.map((tm) => {
@@ -11965,8 +12021,10 @@ function mgPoolCardHTML(pool, teams, pools, matches) {
         + others.map((p) => `<button type="button" class="pc-pbtn" data-pc-pick="${escapeHTMLText(tid + ':' + String(p.id))}">Pool ${escapeHTML(p.label || '')}</button>`).join('')
         + `<button type="button" class="pc-pcancel" data-pc-cancel>Cancel</button>`
         // C101 Task 7: the picker says what the move will do to the schedule, because after the draw a move
-        // is a two-pool regeneration and not a pool_id write.
-        + `<span class="pc-pnote">Finished games stay where they were played. The rest are rescheduled.</span>`
+        // is a two-pool regeneration and not a pool_id write. Review wave: it used to say finished games
+        // stay where they were played, which can never happen here - a pool holding a finished game is
+        // refused by the RPC and is not offered on either side of the move.
+        + `<span class="pc-pnote">Both pools get a fresh schedule.</span>`
         + `</div>`;
     }).join('')
     : `<div class="mgps-note">No teams in this pool.</div>`;
@@ -12478,6 +12536,10 @@ async function mgPoolsMoveTeam(teamId, poolId) {
   // TWO tries on purpose (fix round 1). The write and the redraw fail for different reasons and mean
   // different things: a refresh that fails AFTER the move landed must never be reported as "could not move
   // the team", because the team DID move and that notice invites a second tap on a write that succeeded.
+  // C101 review wave: the write is now ONE call to move_team_to_pool, which rewrites both pools' unplayed
+  // schedules atomically and hands back the number of games it wrote. It refuses when either pool holds a
+  // final or a live game, when the tournament is past pool play, and it answers 0 to a same-pool tap. So
+  // the first try is a real transaction and not a pool_id update, and its message is the server's.
   try {
     await tdbMoveTeamToPool(teamId, poolId);
   } catch (err) {

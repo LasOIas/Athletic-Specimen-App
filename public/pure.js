@@ -977,9 +977,13 @@ function assignPoolGameSlots(teamIds, nets) {
 //     net set would move an untouched pool's games onto a net another pool is mid-round on. A pool with no
 //     rows yet has no nets of its own, so it takes the share splitNetsAcrossPools would have given it out
 //     of the widest net number this tournament's pool games actually use.
-// (b) QUEUE_ORDER. The pools board reads queue_order as the round number (mgPoolsScheduleHTML derives
-//     maxRound and curRound from it), so the plan's values must be DISJOINT from the surviving rows of
-//     every untouched pool. Compute the offset from those rows; do not restart at 1.
+// (b) QUEUE_ORDER. It is the ROUND INDEX, and rounds run in PARALLEL across pools on different nets: the
+//     draw gives every pool rounds 1..k, and mgPoolsScheduleHTML reads the maximum across all pools as
+//     "Round n of m". So a rebuilt pool restarts at 1 exactly as the draw does. An earlier revision of
+//     this helper offset the plan past every untouched pool's highest round, which read as a correct
+//     "no collisions" rule and was not one: it pushed the board's round count up by the size of an
+//     untouched pool every time a team moved, and put the two rebuilt pools alone in rounds nobody else
+//     plays in. There is nothing to avoid colliding with; a shared round number is the point.
 //
 // C101 follow-up / migration 0065: a NULL destination is "out of its pool", not a missing argument. Only
 // the FROM pool is rebuilt, and the ids filter below already drops the moving team from it, because no
@@ -994,7 +998,6 @@ function poolMovePlan(teamId, fromPoolId, toPoolId, pools, teams, matches) {
   const rebuilt = to
     ? ((from && from !== to) ? [from, to] : [to])
     : (from ? [from] : []);
-  const isRebuilt = (pid) => rebuilt.indexOf(String(pid == null ? '' : pid)) >= 0;
 
   const seenNets = [...new Set(poolMatches.filter((m) => m.net != null).map((m) => Number(m.net)))];
   const totalNets = seenNets.length ? Math.max.apply(null, seenNets) : 1;
@@ -1008,9 +1011,6 @@ function poolMovePlan(teamId, fromPoolId, toPoolId, pools, teams, matches) {
     return (i >= 0 && share[i] && share[i].length) ? share[i].slice() : [1];
   };
 
-  const offset = poolMatches.filter((m) => !isRebuilt(m.pool_id))
-    .reduce((mx, m) => Math.max(mx, Number(m.queue_order) || 0), 0);
-
   const plan = [];
   rebuilt.forEach((pid) => {
     const ids = (teams || [])
@@ -1022,7 +1022,7 @@ function poolMovePlan(teamId, fromPoolId, toPoolId, pools, teams, matches) {
     assignPoolGameSlots(ids, netsOf(pid)).forEach((g) => plan.push({
       pool_id: String(pid),
       team_a_id: g.team_a_id, team_b_id: g.team_b_id,
-      net: g.net, queue_order: offset + g.queue_order,
+      net: g.net, queue_order: g.queue_order,
     }));
   });
   return { plan };
@@ -1132,7 +1132,8 @@ function bracketGameNumbers(mainMatches) {
 }
 
 // C101 Task 5: the client's mirror of clear_bracket_atomic's COLLECTION step, so the sweep is testable
-// without a database and the card can say how many results a clear will take. `reset` is the target plus
+// without a database. NOTHING renders it today: the score card asks the RPC and prints the count it hands
+// back, and no surface previews a clear. `reset` is the target plus
 // every downstream match reachable through winner_next_match_id / loser_next_match_id that is NOT
 // 'scheduled' (the RPC's `with recursive chain`); `blank` is one {match, slot} per fed slot those matches
 // point at, using the 0039 mapping where slot 1 means team_b_id and anything else means team_a_id.

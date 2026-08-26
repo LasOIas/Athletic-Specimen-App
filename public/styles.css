@@ -2437,6 +2437,12 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgts-pools { display: flex; flex-wrap: wrap; gap: 8px; }
 .mgts-pchip { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg); color: var(--muted); font: 600 13px 'Inter', sans-serif; cursor: pointer; }
 .mgts-pchip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+/* PORT NOTE, C101 review wave (2026-08-26): the chip for the pool the team is ALREADY in is rendered
+   disabled, because a tap on it is a no-op the RPC answers 0 to. Without this it would inherit prod's
+   `button:disabled { opacity: .5; cursor: not-allowed }` (styles.css:1713) and the SELECTED chip would
+   read as broken rather than as "you are here". Specificity (0,3,0) beats that rule's (0,1,1), the same
+   technique .pk-cta:disabled already uses at styles.css:2211. No !important. */
+.mgts-pchip.on:disabled { opacity: 1; cursor: default; }
 .mgts-warn { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; margin-top: 18px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: transparent; color: var(--warn-ink); font: 600 14.5px 'Inter', sans-serif; cursor: pointer; }
 .mgts-warn .mgts-sub { font-size: 12px; font-weight: 500; color: var(--muted); }
 .mgts-danger { width: 100%; margin-top: 12px; padding: 12px 14px; border: 1px solid oklch(0.55 0.16 25 / .4); border-radius: 12px; background: transparent; color: var(--danger); font: 600 14.5px 'Inter', sans-serif; cursor: pointer; }
@@ -4788,8 +4794,6 @@ body.m-enter .pd-bk-champbar :is(.pd-bk-cbh, .pd-bk-cbs) {
    alone. Class specificity beats the bare button selectors, so no !important. */
 .mgts-danger-filled { border-color: transparent; background: var(--danger); color: #fff; }
 @media (hover: hover) and (pointer: fine) { .mgts-danger-filled:hover { background: var(--danger-dark); } }
-
-
 
 
 /* Round 2026-08-24 — the SAMPLE bracket before seeding ("a sample bracket based off the number of registered

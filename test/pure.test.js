@@ -1333,9 +1333,9 @@ describe('bracketClearPlan (C101 Task 5 - the client mirror of clear_bracket_ato
     return realMatches.map((m) => ({
       id: idOf(m.key), phase: 'main', side: m.side, round: m.round, status: 'final',
       winner_next_match_id: m.winnerNext ? idOf(m.winnerNext.key) : null,
-      winner_next_slot: m.winnerNext ? (m.winnerNext.slot === 'b' ? 1 : 2) : null,
+      winner_next_slot: m.winnerNext ? (m.winnerNext.slot === 'b' ? 1 : 0) : null,   // prod: a is 0
       loser_next_match_id: m.loserNext ? idOf(m.loserNext.key) : null,
-      loser_next_slot: m.loserNext ? (m.loserNext.slot === 'b' ? 1 : 2) : null,
+      loser_next_slot: m.loserNext ? (m.loserNext.slot === 'b' ? 1 : 0) : null,      // app.js slotNum
     }));
   }
 
@@ -1403,10 +1403,21 @@ describe('poolMovePlan (C101 Task 7 - the plan move_team_to_pool applies)', () =
     expect(plan.every((g) => g.pool_id === 'pA' || g.pool_id === 'pB')).toBe(true);
   });
 
-  it('offsets queue_order past every untouched pool, so the board never reads two pools into one round', () => {
+  // C101 review wave (2026-08-26) REVERSES what this pinned. queue_order is the ROUND INDEX and rounds run
+  // in PARALLEL across pools on different nets: the draw gives every pool rounds 1..k, and the board reads
+  // the maximum across all pools as "Round n of m". The offset this used to assert read like a sound
+  // no-collision rule and was not one - it pushed the board's round count up by the size of an untouched
+  // pool on every move and stranded the rebuilt pools in rounds nobody else played in.
+  it('restarts queue_order at 1 like the draw does, and never runs past its own round count', () => {
     const { plan } = poolMovePlan('a3', 'pA', 'pB', POOLS, TEAMS, MATCHES);
-    const untouched = MATCHES.filter((m) => m.pool_id === 'pC').map((m) => m.queue_order);
-    expect(Math.min(...plan.map((g) => g.queue_order))).toBeGreaterThan(Math.max(...untouched));
+    expect(Math.min(...plan.map((g) => g.queue_order))).toBe(1);
+    const untouched = Math.max(...MATCHES.filter((m) => m.pool_id === 'pC').map((m) => m.queue_order));
+    expect(Math.max(...plan.map((g) => g.queue_order))).toBeLessThanOrEqual(untouched + 3);
+    // the sharp version: each rebuilt pool's rounds are numbered 1..(its own game count), nothing more
+    ['pA', 'pB'].forEach((pid) => {
+      const mine = plan.filter((g) => g.pool_id === pid).map((g) => g.queue_order);
+      expect(Math.max(...mine)).toBeLessThanOrEqual(mine.length);
+    });
   });
 
   it('rebuilds both pools with a complete round robin and no net double-booking', () => {
@@ -1443,8 +1454,7 @@ describe('poolMovePlan (C101 Task 7 - the plan move_team_to_pool applies)', () =
     expect(plan.length).toBe(1);               // pA drops to 2 teams: one game
     expect(plan.every((g) => g.team_a_id !== 'a3' && g.team_b_id !== 'a3')).toBe(true);
     expect(plan.every((g) => g.net === 1)).toBe(true);   // still only pA's own net
-    const untouched = MATCHES.filter((m) => m.pool_id !== 'pA').map((m) => m.queue_order);
-    expect(Math.min(...plan.map((g) => g.queue_order))).toBeGreaterThan(Math.max(...untouched));
+    expect(Math.min(...plan.map((g) => g.queue_order))).toBe(1);   // review wave: no offset
   });
 
   it('a team with no pool asked to leave none plans nothing', () => {
