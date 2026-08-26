@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.47'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.48'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -12006,10 +12006,13 @@ function mgPoolCardHTML(pool, teams, pools, matches) {
   const others = pools.filter((p) => String(p.id) !== pid && !mgPoolIsPlaying(p.id, matches));
   const movable = others.length > 0 && !played;
   // Mike (2026-08-26): a pool that has NOT played but has nowhere legal to send anyone says so, rather
-  // than going quiet. Gated on another pool EXISTING, because a one-pool event also has no destination and
-  // telling that organizer another pool has played would be a sentence the app cannot honour (the same
-  // fix-round-1 trap the lock line below is gated against).
-  const stranded = !played && !movable && pools.some((p) => String(p.id) !== pid);
+  // than going quiet. Counted, not just detected: the sentence names how many pools it is talking about,
+  // and a count of zero is what keeps a ONE-pool event silent, because telling that organizer another pool
+  // has played would be a sentence the app cannot honour (the same fix-round-1 trap the lock line below is
+  // gated against). With every other pool playing, this count IS the number of other pools, which is why
+  // it can carry the plural on its own.
+  const othersPlayed = pools.filter((p) => String(p.id) !== pid && mgPoolIsPlaying(p.id, matches)).length;
+  const stranded = !played && !movable && othersPlayed > 0;
   const rows = mine.length
     ? mine.map((tm) => {
       const tid = String(tm.id);
@@ -12039,7 +12042,9 @@ function mgPoolCardHTML(pool, teams, pools, matches) {
   // scored would be copy the app cannot honour.
   // The schedule-is-drawn line retires with the gate that drew it (C101 Task 7).
   const lock = played ? `<span class="pc-lock">Play has started, teams stay put.</span>`
-    : (stranded ? `<span class="pc-lock">The other pool has played, teams stay put.</span>` : '');
+    : (stranded
+      ? `<span class="pc-lock">The other pool${othersPlayed === 1 ? ' has' : 's have'} played, teams stay put.</span>`
+      : '');
   return `<div class="pc-card" data-pc-card="${escapeHTMLText(pid)}">`
     + `<div class="pc-hd"><span class="pc-name">Pool ${escapeHTML(label)}</span>${head}${lock}</div>`
     + rows + `</div>`;

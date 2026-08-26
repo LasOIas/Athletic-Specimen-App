@@ -2696,6 +2696,7 @@ describe('C101 review wave Move is offered only where the RPC allows it', () => 
     const cardB = html.slice(html.indexOf('data-pc-card="p2"'));
     expect(cardB).not.toContain('data-pc-move=');
     expect(cardB).toContain('<span class="pc-lock">The other pool has played, teams stay put.</span>');
+    expect(cardB).not.toContain('The other pools have played');   // exactly one, so never the plural
     expect(cardB).not.toContain('Play has started');   // p2 has not played and must never claim it has
     // and the same shape with the other pool LIVE rather than finished, since the RPC refuses both
     seedPools(bridge, { matches: UNPLAYED });
@@ -2705,10 +2706,10 @@ describe('C101 review wave Move is offered only where the RPC allows it', () => 
     expect(liveB).toContain('The other pool has played, teams stay put.');
   });
 
-  // OPEN, carried to the hand-back: with THREE pools where BOTH of the others have played, this same
-  // branch fires and the sentence is singular where the fact is plural. What is certainly right is pinned
-  // here; the wording is Mike's to settle, so no assertion blesses the singular in that case.
-  it('three pools with both others played: Move is withheld and the pool never claims it played', () => {
+  // Mike's ruling on the plural (2026-08-26): the line COUNTS the other pools that have played. One reads
+  // "The other pool has played"; more than one reads "The other pools have played". This is the case that
+  // was left un-asserted while the wording was open, and it now pins the plural.
+  it('three pools with both others played: Move is withheld and the line reads plural', () => {
     seedPools(bridge, {
       pools: [{ id: 'p1', label: 'A' }, { id: 'p2', label: 'B' }, { id: 'p3', label: 'C' }],
       teams: [{ id: 't1', name: 'Dink Responsibly', pool_id: 'p1' }, { id: 't2', name: 'Sets and Reps', pool_id: 'p1' },
@@ -2722,8 +2723,9 @@ describe('C101 review wave Move is offered only where the RPC allows it', () => 
     const html = bridge.buildMgPools({ controls: true });
     const cardB = html.slice(html.indexOf('data-pc-card="p2"'), html.indexOf('data-pc-card="p3"'));
     expect(cardB).not.toContain('data-pc-move=');
-    expect(cardB).not.toContain('Play has started');
-    expect(cardB).toContain('class="pc-lock"');        // it says SOMETHING, and never nothing
+    expect(cardB).not.toContain('Play has started');   // p2 has not played and never claims it has
+    expect(cardB).toContain('<span class="pc-lock">The other pools have played, teams stay put.</span>');
+    expect(cardB).not.toContain('The other pool has played');   // two of them, so never the singular
   });
 
   it('the team sheet chips draw only what the RPC will accept, and the current one is inert', () => {
