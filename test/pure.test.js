@@ -1288,7 +1288,16 @@ describe('manageNeedsYouModel — the silent-game item', () => {
 });
 
 
-describe('evenCount / evenTeamCount (Mike 2026-08-25: an even number of teams, every team at or under the chosen size, sizes as equal as possible)', () => {
+describe('evenCount / evenTeamCount (Mike 2026-08-25 and 2026-08-26: an even number of teams, nobody on their own, sizes as equal as possible)', () => {
+  // Does an even count exist that keeps every team at 2 or more AND at or under the size? When one does,
+  // the helper must find it; when none does, the size is the rule that gives way, never the pair.
+  const sizeRuleFits = (n, size) => {
+    for (let c = 2; c <= Math.max(2, n); c += 2) {
+      if (Math.floor(n / c) >= 2 && Math.ceil(n / c) <= size) return true;
+    }
+    return false;
+  };
+
   it('evenCount rounds a wanted count down to even, never below 2', () => {
     const { evenCount } = pure;
     expect(evenCount(7)).toBe(6); expect(evenCount(6)).toBe(6); expect(evenCount(3)).toBe(2); expect(evenCount(1)).toBe(2); expect(evenCount(0)).toBe(2);
@@ -1303,24 +1312,55 @@ describe('evenCount / evenTeamCount (Mike 2026-08-25: an even number of teams, e
     expect(evenTeamCount(7, 4)).toBe(2);     // 4 and 3
     expect(evenTeamCount(0, 4)).toBe(2);
     expect(evenTeamCount(20, 0)).toBe(6);    // a bad size falls back to 4 like the generator does
+  });
+
+  // Mike (2026-08-26): NEVER a team below 2 players. Where the size-driven even count would leave someone
+  // standing alone, the count steps down in twos until every team has at least a pair, and going ONE over
+  // the chosen size beats a solo team.
+  it('never leaves a team of one: the count steps down rather than strand a player', () => {
+    const { evenTeamCount } = pure;
+    expect(evenTeamCount(10, 2)).toBe(4);    // 3,3,2,2 - never six teams with two players left alone
+    expect(evenTeamCount(6, 2)).toBe(2);     // 3,3
+    expect(evenTeamCount(14, 2)).toBe(6);    // 3,3,2,2,2,2
+    expect(evenTeamCount(18, 2)).toBe(8);
+    expect(evenTeamCount(7, 3)).toBe(2);     // 4,3
+    expect(evenTeamCount(9, 3)).toBe(4);     // 3,2,2,2
+    expect(evenTeamCount(30, 4)).toBe(8);    // unchanged: the size rule never had to give way
+    expect(evenTeamCount(12, 4)).toBe(4);
+    expect(evenTeamCount(23, 6)).toBe(4);
+    expect(evenTeamCount(3, 4)).toBe(2);     // 2,1 - unavoidable under four players, so the rule stops
+  });
+
+  it('the invariants hold for every head count under 80 at every size', () => {
+    const { evenTeamCount } = pure;
     for (let n = 0; n < 80; n += 1) for (const size of [2, 3, 4, 6]) {
       const k = evenTeamCount(n, size);
       expect(k % 2).toBe(0);
       expect(k).toBeGreaterThanOrEqual(2);
-      if (n >= 2) expect(Math.ceil(n / k)).toBeLessThanOrEqual(size);   // no team over the size
+      // nobody on their own, once there are enough players for that to be possible at all
+      if (n >= 4) expect(Math.floor(n / k)).toBeGreaterThanOrEqual(2);
+      // the size rule still binds wherever it CAN be honoured alongside the pair rule
+      if (n >= 2 && sizeRuleFits(n, size)) expect(Math.ceil(n / k)).toBeLessThanOrEqual(size);
+      // and where it had to give way, it gives way by exactly one. The floor of two teams is the one
+      // place that bound cannot be promised: 7 players at 2s is 4 and 3, because the only other even
+      // count is 4 and that means 2,2,2,1. Two teams is the floor, so there is nothing below it to step to.
+      if (n >= 2 && k > 2) expect(Math.ceil(n / k)).toBeLessThanOrEqual(size + 1);
     }
   });
   it('the real balancer at that count keeps every team within the size and within one player of each other', () => {
     const { evenTeamCount } = pure;
-    for (const [n, size] of [[30, 4], [26, 4], [12, 4], [20, 4], [7, 4], [17, 3], [23, 6], [9, 2]]) {
+    for (const [n, size] of [[30, 4], [26, 4], [12, 4], [20, 4], [7, 4], [17, 3], [23, 6], [9, 2], [10, 2], [14, 2]]) {
       const players = Array.from({ length: n }, (_, i) => ({ id: String(i + 1), skill: 1 + (i % 9) }));
       const keys = players.map(playerIdentityKey);
       const out = generateBalancedGroups(players, keys, evenTeamCount(n, size));
       const counts = out.teams.map((tm) => tm.length);
       expect(counts.length % 2).toBe(0);
-      expect(Math.max(...counts)).toBeLessThanOrEqual(size);
       expect(Math.max(...counts) - Math.min(...counts)).toBeLessThanOrEqual(1);
       expect(counts.reduce((a, b) => a + b, 0)).toBe(n);
+      // Mike (2026-08-26), read off the REAL balancer rather than off the count alone: nobody plays alone,
+      // and the chosen size gives way by at most one where the pair rule forced it to.
+      expect(Math.min(...counts)).toBeGreaterThanOrEqual(2);
+      expect(Math.max(...counts)).toBeLessThanOrEqual(sizeRuleFits(n, size) ? size : size + 1);
     }
   });
 });

@@ -144,6 +144,12 @@ function pickMostDifferentTeams(candidates, previousTeams) {
 // count at a team size: the SMALLEST even count that keeps every team at or under the size (ceil(players /
 // size), rounded UP to even), so 30 players at 4 make eight teams of 4,4,4,4,4,4,3,3 and never a 5; the
 // balancer then spreads the players as evenly as it can.
+//
+// Mike (2026-08-26), the rule that now sits ON TOP of that one: NEVER a team below 2 players. Where the
+// even count would leave someone standing on their own, the count steps DOWN by two until every team has
+// at least a pair, and going over the chosen size by ONE is preferred to a solo team. Ten players at 2s
+// make FOUR teams (3,3,2,2), not six (2,2,2,2,1,1); fourteen make six, not eight. Never below two teams,
+// and under four players a solo team is unavoidable, so the rule stops asking.
 function evenCount(n) {
   const k = Math.max(0, Math.floor(Number(n) || 0));
   return Math.max(2, k - (k % 2));
@@ -152,7 +158,11 @@ function evenTeamCount(playerCount, teamSize) {
   const size = Number(teamSize) || 4;
   const n = Math.max(0, Math.floor(Number(playerCount) || 0));
   const need = Math.ceil(n / size);
-  return Math.max(2, need + (need % 2));
+  let count = Math.max(2, need + (need % 2));
+  // Step down in twos while the smallest team would be a single player. floor(n / count) is that smallest
+  // team, the count stays even because it moves by two, and it never falls below two teams.
+  while (count > 2 && n >= 4 && Math.floor(n / count) < 2) count -= 2;
+  return count;
 }
 
 function generateBalancedGroups(players, checkedInKeys, groupCount, previousTeams) {
