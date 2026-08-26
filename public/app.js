@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.48'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.49'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2272,9 +2272,18 @@ async function tdbMoveTeamToPool(teamId, poolId) {
   const t = mgActiveTournament();
   if (!t) throw new Error('No tournament selected.');
   const team = (state.tournamentTeams || []).find((x) => String(x.id) === String(teamId));
-  const { plan } = poolMovePlan(
+  const matches = Array.isArray(state.tournamentMatches) ? state.tournamentMatches : [];
+  // C101 review wave (2026-08-26): BEFORE the draw the plan is EMPTY, and that is the whole fix for a live
+  // defect. The pre-start block (mgPoolTeamsBlockHTML) is reachable only where the tournament has zero pool
+  // matches, and poolMovePlan asked what a full round robin of those pools would look like and got one. The
+  // RPC would then INSERT that schedule while the tournament was still 'setup', buildMgPoolsHTML would see
+  // a pool match and leave the setup step, and the organizer would be left with no Start pool play button
+  // anywhere. An empty plan makes the call a plain pool_id move: the delete matches nothing because nothing
+  // is scheduled, the insert writes nothing, and the RPC's 0 is the honest answer the read-back accepts.
+  const drawn = matches.some((m) => m && (m.phase ? m.phase === 'pool' : !!m.pool_id));
+  const plan = (!drawn || t.status === 'setup') ? [] : poolMovePlan(
     teamId, team ? (team.pool_id || null) : null, dest,
-    state.tournamentPools || [], state.tournamentTeams || [], state.tournamentMatches || []);
+    state.tournamentPools || [], state.tournamentTeams || [], matches, t.net_count).plan;
   const { data, error } = await supabaseClient.rpc('move_team_to_pool', {
     p_tournament_id: t.id, p_team: teamId, p_pool: dest, p_matches: plan,
   });
@@ -11527,10 +11536,13 @@ function closeMgTeamSheet() { const el = document.getElementById('mgts-sheet'); 
 // caller, so a move the DB rejected left the sheet SHOWING the new pool with nothing said. Every path
 // still repaints, which is what puts the pill back on the pool the team is actually in.
 // C101 review wave (2026-08-26): `teamId` is optional and, when given, the SHEET is repainted from server
-// truth after the write settles. The delegate paints the chip and the switch optimistically so the tap
-// feels immediate; without this a REFUSED write left that optimistic paint on screen next to a notice
-// saying it did not save, so the sheet showed a pool the team is not in. repaintManage() only reaches
-// #app-content, and this sheet lives on document.body, so it could never fix it.
+// truth ON A REFUSAL ONLY. The delegate paints the chip and the switch optimistically so the tap feels
+// immediate; a refused write left that optimistic paint on screen next to a notice saying it did not save,
+// so the sheet showed a pool the team is not in, and repaintManage() could never fix it because it only
+// reaches #app-content while this sheet lives on document.body. The SUCCESS path is deliberately left
+// alone: the refresh already made the state true, and replacing the body there would throw away whatever
+// the organizer had typed into the name or roster fields mid-save. The repaint is inside its own try, so a
+// failure to redraw can never turn into an unhandled rejection on top of the failure being reported.
 async function mgtsWrite(fn, teamId) {
   if (!state.isAdmin) return;
   try {
@@ -11539,8 +11551,8 @@ async function mgtsWrite(fn, teamId) {
   } catch (err) {
     console.warn('mgts write', err);
     appNotice({ title: 'That did not save', message: (err && err.message) || MG_SAVE_FAILED });
+    try { mgtsRepaintSheet(teamId); } catch (e2) { console.warn('mgts repaint', e2); }
   }
-  mgtsRepaintSheet(teamId);
   repaintManage();
 }
 
@@ -12539,9 +12551,13 @@ async function mgPoolsSaveNets(poolId) {
   }
 }
 
-// Move a team into another pool. Offered only while the SOURCE pool has no final game (see mgPoolCardHTML)
-// because tdbMoveTeamToPool is a bare teams.pool_id update. On success the destination card flashes, so the
-// answer to "where did it go" is on screen rather than a scroll away.
+// Move a team into another pool. Offered only where move_team_to_pool would ACCEPT it: neither the pool it
+// leaves nor the pool it joins may hold a final or a live game, and the tournament must still be in setup or
+// pools (mgPoolCardHTML and the team sheet both draw off that same rule, mgPoolIsPlaying). The writer is the
+// RPC, not a teams.pool_id update: the client builds the two pools' new unplayed schedules with poolMovePlan
+// and the server deletes, inserts and flips them in one transaction, returning the games it wrote. A move
+// made BEFORE the draw sends an EMPTY plan, because there is no schedule to rebuild yet. On success the
+// destination card flashes, so the answer to "where did it go" is on screen rather than a scroll away.
 async function mgPoolsMoveTeam(teamId, poolId) {
   if (!state.isAdmin || !teamId || !poolId) return;
   // TWO tries on purpose (fix round 1). The write and the redraw fail for different reasons and mean

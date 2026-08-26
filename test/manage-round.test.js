@@ -452,6 +452,11 @@ function seedPools(bridge, o) {
 // everything moves. UNPLAYED is drawn, and it carries a LIVE game on p1: so p1 is locked and is offered as
 // neither a source nor a destination, while p2 is unplayed and still moves.
 const UNDRAWN = [];
+// Drawn and untouched: both pools hold a scheduled game, so a move here really does rebuild a schedule.
+const DRAWN = [
+  { id: 'd1', phase: 'pool', pool_id: 'p1', net: 1, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 1 },
+  { id: 'd2', phase: 'pool', pool_id: 'p2', net: 2, status: 'scheduled', team_a_id: 't3', team_b_id: 't4', queue_order: 1 },
+];
 const UNPLAYED = [
   { id: 'a1', phase: 'pool', pool_id: 'p1', net: 1, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 1 },
   { id: 'a2', phase: 'pool', pool_id: 'p1', net: 2, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', queue_order: 2 },
@@ -2076,7 +2081,7 @@ describe('Task 8 pool controls', () => {
   // teams.pool_id update; that write door is gone. What has to be proven now is that the plan is built by
   // the PURE helper and handed to the RPC, and that a non-numeric answer is a failure.
   it('tdbMoveTeamToPool builds the plan in pure.js and applies it through the RPC', async () => {
-    seedPools(bridge, { matches: UNDRAWN });
+    seedPools(bridge, { matches: DRAWN });   // review wave: a plan only exists once a schedule does
     const seen = [];
     let answer = { data: 6, error: null };
     const undo = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return answer; });
@@ -2091,8 +2096,9 @@ describe('Task 8 pool controls', () => {
       expect(Array.isArray(args.p_matches)).toBe(true);
       // the plan is EXACTLY what the pure helper returns for the same inputs
       const st = bridge.getState();
+      expect(args.p_matches.length).toBeGreaterThan(0);
       expect(args.p_matches).toEqual(
-        bridge.movePlan('t1', 'p1', 'p2', st.tournamentPools, st.tournamentTeams, st.tournamentMatches).plan
+        bridge.movePlan('t1', 'p1', 'p2', st.tournamentPools, st.tournamentTeams, st.tournamentMatches, 3).plan
       );
       answer = { data: null, error: null };
       await expect(bridge.moveTeamToPool('t1', 'p2')).rejects.toThrow('The move did not save. Check you are signed in as an admin.');
@@ -2107,7 +2113,7 @@ describe('Task 8 pool controls', () => {
   // its pool", so the chip is a real move again: one rebuilt pool (the one being left, without the team),
   // p_pool null on the wire, and the same count read-back as any other move.
   it('the No pool chip sends p_pool null with the from-pool plan, and reads the count back', async () => {
-    seedPools(bridge, { matches: UNDRAWN });
+    seedPools(bridge, { matches: DRAWN });   // review wave: a plan only exists once a schedule does
     const seen = [];
     const undo = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return { data: 1, error: null }; });
     try {
@@ -2119,7 +2125,7 @@ describe('Task 8 pool controls', () => {
       expect(args.p_pool).toBe(null);                                   // normalised, never the empty string
       const st = bridge.getState();
       expect(args.p_matches).toEqual(
-        bridge.movePlan('t1', 'p1', null, st.tournamentPools, st.tournamentTeams, st.tournamentMatches).plan
+        bridge.movePlan('t1', 'p1', null, st.tournamentPools, st.tournamentTeams, st.tournamentMatches, 3).plan
       );
       // only the pool being LEFT is rebuilt, and the leaving team is not in any of its games
       expect(args.p_matches.every((g) => g.pool_id === 'p1')).toBe(true);
@@ -2129,6 +2135,35 @@ describe('Task 8 pool controls', () => {
     const seen2 = [];
     const undo2 = bridge.swapSupaRpc((name, args) => { seen2.push(args.p_pool); return { data: 0, error: null }; });
     try { await expect(bridge.moveTeamToPool('t1', null)).resolves.toBe(0); expect(seen2).toEqual([null]); }
+    finally { undo2(); }
+  });
+
+  // C101 review wave (2026-08-26), a LIVE defect. The pre-start block is reachable only where the
+  // tournament has zero pool matches, and the writer used to ask poolMovePlan for a plan anyway: it got a
+  // full round robin for both pools, the RPC INSERTED it while the tournament was still 'setup', and
+  // buildMgPoolsHTML then left the setup step because a pool match existed. The organizer was left with no
+  // Start pool play button anywhere. A pre-draw move now sends an empty plan and stays a pool_id move.
+  it('a move BEFORE the draw sends no schedule at all, and the setup step survives it', async () => {
+    seedPools(bridge, { tournament: { status: 'setup' }, matches: UNDRAWN });
+    expect(bridge.buildMgPools()).toContain('Start pool play');   // the step we must not lose
+    const seen = [];
+    const undo = bridge.swapSupaRpc((name, args) => { seen.push(args); return { data: 0, error: null }; });
+    try {
+      await expect(bridge.moveTeamToPool('t1', 'p2')).resolves.toBe(0);   // 0 written IS the right answer
+      expect(seen.length).toBe(1);
+      expect(seen[0].p_matches).toEqual([]);
+      expect(seen[0].p_pool).toBe('p2');
+    } finally { undo(); }
+    // the page is still the setup step, because nothing was scheduled on the way through
+    const after = bridge.buildMgPools();
+    expect(after).toContain('Start pool play');
+    expect(after).toContain('Pools drawn');
+    expect(after).not.toContain('class="pc-card"');
+    // and the same is true of a 'pools' tournament that simply has not been drawn yet
+    seedPools(bridge, { matches: UNDRAWN });
+    const seen2 = [];
+    const undo2 = bridge.swapSupaRpc((name, args) => { seen2.push(args); return { data: 0, error: null }; });
+    try { await bridge.moveTeamToPool('t1', 'p2'); expect(seen2[0].p_matches).toEqual([]); }
     finally { undo2(); }
   });
 
@@ -2799,6 +2834,32 @@ describe('C101 review wave Move is offered only where the RPC allows it', () => 
         expect(body.innerHTML).toContain('class="mgts-pchip" data-mgts="pool" data-mgts-pool="p2"');
       });
     } finally { wasNotice(); undo(); }
+  });
+
+  // C101 review wave: the repaint is a REFUSAL repair, not a routine one. On the success path the refresh
+  // has already made the state true, and replacing the sheet body there would throw away whatever the
+  // organizer had typed into the name or roster fields while the write was in flight.
+  it('a successful sheet write leaves the body alone; only a refusal replaces it', async () => {
+    seedPools(bridge, { matches: DRAWN });
+    const ok = bridge.swapSupaRpc(() => ({ data: 2, error: null }));
+    try {
+      await withTeamSheet('t1', async (tap, body) => {
+        tap('pool', 'p2');
+        for (let i = 0; i < 14; i++) await Promise.resolve();
+        expect(body.innerHTML).toBe('');          // never touched: the refresh is the repaint
+      });
+    } finally { ok(); }
+    const no = bridge.swapSupaRpc(() => ({ data: null, error: { message: 'Those pools have games already played or in progress.' } }));
+    const said = [];
+    const wasNotice = bridge.swapNotice((n) => { said.push(n && n.title); });
+    try {
+      await withTeamSheet('t1', async (tap, body) => {
+        tap('pool', 'p2');
+        for (let i = 0; i < 14; i++) await Promise.resolve();
+        expect(said).toContain('That did not save');
+        expect(body.innerHTML).not.toBe('');      // and a refusal DOES repair the optimistic paint
+      });
+    } finally { wasNotice(); no(); }
   });
 
   it('the whole-bracket clear surfaces the new live refusal word for word', async () => {

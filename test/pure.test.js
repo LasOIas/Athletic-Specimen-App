@@ -1411,13 +1411,15 @@ describe('poolMovePlan (C101 Task 7 - the plan move_team_to_pool applies)', () =
   it('restarts queue_order at 1 like the draw does, and never runs past its own round count', () => {
     const { plan } = poolMovePlan('a3', 'pA', 'pB', POOLS, TEAMS, MATCHES);
     expect(Math.min(...plan.map((g) => g.queue_order))).toBe(1);
-    const untouched = Math.max(...MATCHES.filter((m) => m.pool_id === 'pC').map((m) => m.queue_order));
-    expect(Math.max(...plan.map((g) => g.queue_order))).toBeLessThanOrEqual(untouched + 3);
-    // the sharp version: each rebuilt pool's rounds are numbered 1..(its own game count), nothing more
+    // The sharp version, replacing an "untouched + 3" bound that almost any plan would have satisfied:
+    // each rebuilt pool's rounds are numbered 1..(its own game count) and nothing more, and no planned
+    // game lands on a (net, round) slot an untouched pool's surviving row already holds.
     ['pA', 'pB'].forEach((pid) => {
       const mine = plan.filter((g) => g.pool_id === pid).map((g) => g.queue_order);
       expect(Math.max(...mine)).toBeLessThanOrEqual(mine.length);
     });
+    const held = new Set(MATCHES.filter((m) => m.pool_id === 'pC').map((m) => m.net + '@' + m.queue_order));
+    plan.forEach((g) => expect(held.has(g.net + '@' + g.queue_order)).toBe(false));
   });
 
   it('rebuilds both pools with a complete round robin and no net double-booking', () => {
@@ -1436,6 +1438,52 @@ describe('poolMovePlan (C101 Task 7 - the plan move_team_to_pool applies)', () =
     const { plan } = poolMovePlan('x1', null, 'pB', POOLS, teams, MATCHES);
     expect([...new Set(plan.map((g) => g.pool_id))]).toEqual(['pB']);
     expect(plan.length).toBe(3);               // pB rises to 3 teams
+  });
+
+  // C101 review wave (2026-08-26), the reviewer's repro. Pool A is UNTOUCHED on net 1, rounds 1-3. B is on
+  // net 2. C has no rows at all. Moving a team from B to C used to hand C splitNetsAcrossPools' share by
+  // POSITION, which could be net 1 - harmless while the plan was offset past every other pool's rounds, and
+  // a same-net same-round double booking the moment that offset was removed. C now takes the tournament's
+  // net range minus every net an untouched pool is using.
+  const R_POOLS = [{ id: 'pA', label: 'A', display_order: 0 }, { id: 'pB', label: 'B', display_order: 1 },
+                   { id: 'pC', label: 'C', display_order: 2 }];
+  const R_TEAMS = [
+    { id: 'a1', pool_id: 'pA' }, { id: 'a2', pool_id: 'pA' }, { id: 'a3', pool_id: 'pA' },
+    { id: 'b1', pool_id: 'pB' }, { id: 'b2', pool_id: 'pB' }, { id: 'b3', pool_id: 'pB' },
+    { id: 'c1', pool_id: 'pC' }, { id: 'c2', pool_id: 'pC' },
+  ];
+  const R_MATCHES = [
+    { id: 'a-1', phase: 'pool', pool_id: 'pA', net: 1, queue_order: 1, status: 'scheduled' },
+    { id: 'a-2', phase: 'pool', pool_id: 'pA', net: 1, queue_order: 2, status: 'scheduled' },
+    { id: 'a-3', phase: 'pool', pool_id: 'pA', net: 1, queue_order: 3, status: 'scheduled' },
+    { id: 'b-1', phase: 'pool', pool_id: 'pB', net: 2, queue_order: 1, status: 'scheduled' },
+    { id: 'b-2', phase: 'pool', pool_id: 'pB', net: 2, queue_order: 2, status: 'scheduled' },
+    { id: 'b-3', phase: 'pool', pool_id: 'pB', net: 2, queue_order: 3, status: 'scheduled' },
+  ];
+
+  it('an EMPTY rebuilt pool never takes a net an untouched pool is playing on', () => {
+    const { plan } = poolMovePlan('b3', 'pB', 'pC', R_POOLS, R_TEAMS, R_MATCHES, 3);
+    // pool A keeps net 1 and its three rounds, and nothing in the plan lands on any of those slots
+    const held = new Set(R_MATCHES.filter((m) => m.pool_id === 'pA').map((m) => m.net + '@' + m.queue_order));
+    plan.forEach((g) => expect(held.has(g.net + '@' + g.queue_order)).toBe(false));
+    expect(plan.every((g) => g.net !== 1)).toBe(true);
+    expect(plan.filter((g) => g.pool_id === 'pC').every((g) => g.net === 3)).toBe(true);
+    // and no plan row double books another plan row either
+    const slots = plan.map((g) => g.net + '@' + g.queue_order);
+    expect(new Set(slots).size).toBe(slots.length);
+  });
+
+  it('when every net is spoken for, the two rebuilt pools share and run in sequence', () => {
+    // net_count 2 with pool A mid-round on net 1: the only free net is pB's own, so pC has to share it.
+    const { plan } = poolMovePlan('b3', 'pB', 'pC', R_POOLS, R_TEAMS, R_MATCHES, 2);
+    const slots = plan.map((g) => g.net + '@' + g.queue_order);
+    expect(new Set(slots).size).toBe(slots.length);       // no same-net same-round pair between them
+    expect(plan.some((g) => g.pool_id === 'pB')).toBe(true);
+    expect(plan.some((g) => g.pool_id === 'pC')).toBe(true);
+    expect(plan.every((g) => g.net === 2)).toBe(true);     // shared, because net 1 is pool A's
+    // sequential: the second pool's rounds start after the first pool's last
+    const bMax = Math.max(...plan.filter((g) => g.pool_id === 'pB').map((g) => g.queue_order));
+    expect(Math.min(...plan.filter((g) => g.pool_id === 'pC').map((g) => g.queue_order))).toBeGreaterThan(bMax);
   });
 
   it('a pool with no rows yet takes its splitNetsAcrossPools share, not the whole net set', () => {

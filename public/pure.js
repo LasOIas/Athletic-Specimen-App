@@ -972,11 +972,17 @@ function assignPoolGameSlots(teamIds, nets) {
 // weight, because the server keeps rows by NOT DELETING them rather than by being told which to keep. It
 // takes the full pools list and the tournament's whole match set because both of its properties need them.
 //
-// (a) NETS. The plan may use only the nets the two rebuilt pools ALREADY OWN, computed as the distinct
-//     `net` values on those pools' existing phase='pool' rows. Handing the layout the tournament's whole
-//     net set would move an untouched pool's games onto a net another pool is mid-round on. A pool with no
-//     rows yet has no nets of its own, so it takes the share splitNetsAcrossPools would have given it out
-//     of the widest net number this tournament's pool games actually use.
+// (a) NETS. A rebuilt pool that HAS rows keeps its own nets, computed as the distinct `net` values on its
+//     existing phase='pool' rows. Handing the layout the tournament's whole net set would move an
+//     untouched pool's games onto a net another pool is mid-round on. A rebuilt pool with NO rows yet
+//     takes the tournament's net range MINUS every net an untouched pool is using. An earlier revision
+//     gave it splitNetsAcrossPools' share of the widest net seen, which hands out nets by POSITION and
+//     can therefore hand back one an untouched pool is playing on: harmless while the plan was offset
+//     past every other pool's rounds, and a same-net same-round double booking the moment that offset
+//     was removed. When every net is spoken for and that free set comes back empty, the pool shares the
+//     OTHER rebuilt pool's nets and the two are laid out JOINTLY, in sequential rounds, so the one
+//     collision the client can still prevent is prevented. `netCount` is the tournament's net_count and
+//     falls back to the widest net actually in use.
 // (b) QUEUE_ORDER. It is the ROUND INDEX, and rounds run in PARALLEL across pools on different nets: the
 //     draw gives every pool rounds 1..k, and mgPoolsScheduleHTML reads the maximum across all pools as
 //     "Round n of m". So a rebuilt pool restarts at 1 exactly as the draw does. An earlier revision of
@@ -989,7 +995,7 @@ function assignPoolGameSlots(teamIds, nets) {
 // the FROM pool is rebuilt, and the ids filter below already drops the moving team from it, because no
 // real pool id can ever equal the empty destination. A team with no pool asked to leave none rebuilds
 // nothing and plans nothing, which is the 0 the RPC hands back.
-function poolMovePlan(teamId, fromPoolId, toPoolId, pools, teams, matches) {
+function poolMovePlan(teamId, fromPoolId, toPoolId, pools, teams, matches, netCount) {
   const to = String(toPoolId == null ? '' : toPoolId);
   const from = (fromPoolId == null || String(fromPoolId) === '') ? null : String(fromPoolId);
   const poolList = (pools || []).filter((p) => p && p.id != null)
@@ -999,19 +1005,49 @@ function poolMovePlan(teamId, fromPoolId, toPoolId, pools, teams, matches) {
     ? ((from && from !== to) ? [from, to] : [to])
     : (from ? [from] : []);
 
-  const seenNets = [...new Set(poolMatches.filter((m) => m.net != null).map((m) => Number(m.net)))];
-  const totalNets = seenNets.length ? Math.max.apply(null, seenNets) : 1;
-  const share = splitNetsAcrossPools(totalNets, poolList.length || 1);
+  const isRebuilt = (pid) => rebuilt.indexOf(String(pid == null ? '' : pid)) >= 0;
+  const netsUsedBy = (rows) => [...new Set(rows.filter((m) => m.net != null)
+    .map((m) => Number(m.net)))].sort((a, b) => a - b);
+  const seenNets = netsUsedBy(poolMatches);
+  const total = Math.max(1, Math.floor(Number(netCount) || 0)
+    || (seenNets.length ? Math.max.apply(null, seenNets) : 1));
+  // Every net an UNTOUCHED pool is playing on. A rebuilt pool with no rows of its own may not take one:
+  // both pools would then hold round 1 on that net, and the board would call two games onto it at once.
+  const taken = netsUsedBy(poolMatches.filter((m) => !isRebuilt(m.pool_id)));
+  const free = [];
+  for (let n = 1; n <= total; n++) if (taken.indexOf(n) < 0) free.push(n);
+
+  const ownNets = {};
+  rebuilt.forEach((pid) => {
+    const own = netsUsedBy(poolMatches.filter((m) => String(m.pool_id) === String(pid)));
+    if (own.length) ownNets[pid] = own;
+  });
   const netsOf = (pid) => {
-    const own = [...new Set(poolMatches
-      .filter((m) => String(m.pool_id) === String(pid) && m.net != null)
-      .map((m) => Number(m.net)))].sort((a, b) => a - b);
-    if (own.length) return own;
-    const i = poolList.findIndex((p) => String(p.id) === String(pid));
-    return (i >= 0 && share[i] && share[i].length) ? share[i].slice() : [1];
+    if (ownNets[pid]) return ownNets[pid];
+    const other = rebuilt.filter((x) => x !== pid).map((x) => ownNets[x]).filter(Boolean)[0] || [];
+    // Free nets the OTHER rebuilt pool is not on are worth preferring: both pools then keep rounds 1..k
+    // and run in parallel, which is what the draw itself produces and what the board expects to read.
+    const exclusive = free.filter((n) => other.indexOf(n) < 0);
+    if (exclusive.length) return exclusive;
+    if (free.length) return free.slice();
+    // Every net belongs to a pool that is mid-round. Share the other rebuilt pool's nets rather than
+    // invent one: the joint layout below then keeps those two out of each other's rounds.
+    if (other.length) return other.slice();
+    const all = [];
+    for (let n = 1; n <= total; n++) all.push(n);
+    return all;
   };
 
+  // Do the two rebuilt pools end up on any of the SAME nets? Then their rounds cannot both start at 1,
+  // because assignPoolGameSlots numbers each pool's rounds from 1 and two pools sharing a net would land
+  // the same (net, round) pair twice. Running them sequentially is the only arrangement that fits.
+  const netsFor = {};
+  rebuilt.forEach((pid) => { netsFor[pid] = netsOf(pid); });
+  const sharesNets = rebuilt.length > 1
+    && netsFor[rebuilt[0]].some((n) => netsFor[rebuilt[1]].indexOf(n) >= 0);
+
   const plan = [];
+  let roundOffset = 0;
   rebuilt.forEach((pid) => {
     const ids = (teams || [])
       .filter((tm) => tm && tm.id != null)
@@ -1019,11 +1055,16 @@ function poolMovePlan(teamId, fromPoolId, toPoolId, pools, teams, matches) {
         ? String(pid) === to
         : String(tm.pool_id || '') === String(pid)))
       .map((tm) => String(tm.id));
-    assignPoolGameSlots(ids, netsOf(pid)).forEach((g) => plan.push({
-      pool_id: String(pid),
-      team_a_id: g.team_a_id, team_b_id: g.team_b_id,
-      net: g.net, queue_order: g.queue_order,
-    }));
+    const off = sharesNets ? roundOffset : 0;
+    assignPoolGameSlots(ids, netsFor[pid]).forEach((g) => {
+      const q = off + g.queue_order;
+      if (q > roundOffset) roundOffset = q;
+      plan.push({
+        pool_id: String(pid),
+        team_a_id: g.team_a_id, team_b_id: g.team_b_id,
+        net: g.net, queue_order: q,
+      });
+    });
   });
   return { plan };
 }
