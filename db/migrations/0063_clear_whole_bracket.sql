@@ -23,6 +23,8 @@
 --
 -- version bumps on every touched row (see 0062). RETURNS int. Writes a log row with prose.
 --
+-- ROLLBACK: drop function if exists public.clear_whole_bracket(uuid); (the client control is removed with it).
+--
 -- APPLIED 2026-08-25 via the Supabase MCP (apply_migration), C101 inline round.
 
 create or replace function public.clear_whole_bracket(p_tournament_id uuid) returns int

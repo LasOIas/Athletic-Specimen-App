@@ -21,6 +21,8 @@
 --
 -- RETURNS the matches written. Writes a log row with prose.
 --
+-- ROLLBACK: drop function if exists public.move_team_to_pool(uuid, uuid, uuid, jsonb); the client returns to the pre-draw-only Move (v2026.08.25.42 app.js).
+--
 -- APPLIED 2026-08-25 via the Supabase MCP (apply_migration), C101 inline round.
 
 create or replace function public.move_team_to_pool(

@@ -10,6 +10,8 @@
 -- setup or pools, a live game is never deleted, matches_pool_pair_uq cannot fire because the final/live
 -- refusal ran first. A team with no pool asked to leave no pool is a no-op that still returns 0.
 --
+-- ROLLBACK: re-apply the body in 0064.
+--
 -- APPLIED 2026-08-26 via the Supabase MCP (apply_migration), C101 inline round.
 
 create or replace function public.move_team_to_pool(

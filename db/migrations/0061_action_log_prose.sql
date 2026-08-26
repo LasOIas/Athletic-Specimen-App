@@ -26,6 +26,8 @@
 --
 -- FREE RIDERS: the shipped raises with an em dash in these functions are rewritten as plain sentences.
 --
+-- ROLLBACK: re-apply the pre-round bodies of read_action_log and set_member_role (0051), draw_pools_atomic and start_pool_play_atomic (0048), register_team (0054) and set_team_paid (0060); then alter table public.action_log drop column if exists prose;
+--
 -- APPLIED 2026-08-25 via the Supabase MCP (apply_migration), C101 inline round.
 
 alter table public.action_log add column if not exists prose text;

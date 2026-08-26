@@ -3,6 +3,8 @@
 -- Found by the rolled-back smoke of 0065 ("moved ZZ One out of pool A, 1 games rescheduled"). Body
 -- identical to 0065 except the plural in detail and prose.
 --
+-- ROLLBACK: re-apply the body in 0065.
+--
 -- APPLIED 2026-08-26 via the Supabase MCP (apply_migration), C101 inline round.
 
 create or replace function public.move_team_to_pool(

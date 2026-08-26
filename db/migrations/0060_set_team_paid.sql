@@ -13,6 +13,8 @@
 -- LOG ROW: action 'set_team_paid', entity 'team', detail 'marked <team> paid' or '... unpaid'. The prose
 -- column arrives in 0061, which rewrites this function to carry the same sentence there too.
 --
+-- ROLLBACK: drop function if exists public.set_team_paid(uuid, boolean); and return the three client call sites to the direct teams update (v2026.08.25.37 app.js).
+--
 -- APPLIED 2026-08-25 via the Supabase MCP (apply_migration), C101 inline round.
 
 create or replace function public.set_team_paid(p_team uuid, p_paid boolean) returns public.teams

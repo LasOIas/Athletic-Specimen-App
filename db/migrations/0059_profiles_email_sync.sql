@@ -22,6 +22,8 @@
 -- row (no organizer actor exists inside GoTrue's transaction). Never raises: a raise here would fail the
 -- person's own email change. Touches public.profiles alone, so no tournament row is reachable.
 --
+-- ROLLBACK: drop trigger if exists on_auth_user_email_changed on auth.users; drop function if exists public.handle_user_email_change(); (the backfilled profiles.email values stay; they were true).
+--
 -- APPLIED 2026-08-25 via the Supabase MCP (apply_migration), C101 inline round.
 
 create or replace function public.handle_user_email_change() returns trigger

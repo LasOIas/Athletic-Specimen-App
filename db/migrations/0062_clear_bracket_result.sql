@@ -24,6 +24,8 @@
 --
 -- RETURNS the number of matches reset (>= 1), the client's read-back. Writes a log row with prose.
 --
+-- ROLLBACK: drop function if exists public.clear_bracket_atomic(uuid); then re-apply 0056's create or replace (returns void) and its grant lines.
+--
 -- APPLIED 2026-08-25 via the Supabase MCP (apply_migration), C101 inline round.
 
 drop function if exists public.clear_bracket_atomic(uuid);
