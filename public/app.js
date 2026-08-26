@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.37'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.38'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -11677,7 +11677,10 @@ function mgPoolsSetupHTML(t, teams, pools) {
       + (enough ? '' : `<div class="mgps-note">${teamCt < 2 ? 'Add at least 2 teams first.' : 'Pool play needs an even number of teams. Add or remove one.'}</div>`);
   }
   return `<div class="pl-sect">Pools drawn</div>`
-    + pools.map((p) => mgPoolTeamsBlockHTML(p, teams, null)).join('')
+    + pools.map((p) => mgPoolTeamsBlockHTML(p, teams, null, pools)).join('')
+    // C101 Task 1: no .pc-lock line here, because nothing is locked yet. This block only ever renders
+    // where the tournament has zero pool matches (buildMgPoolsHTML), so the sentence is true.
+    + `<div class="mgps-note">Move a team to another pool now. Once the schedule is drawn, teams stay put.</div>`
     + `<button type="button" class="mgt-cta" data-mgps-start>Start pool play</button>`
     + `<button type="button" class="mgps-quiet" data-mgps-redraw>Draw again</button>`;
 }
@@ -11745,20 +11748,46 @@ function mgpSyncDrawHint() {
 
 // One pool's teams (each tappable → the T6 openMgTeamSheet for move/edit). Serves the drawn-not-started
 // step. (Round 2026-08-24: the expanded Pool controls used to share this too, with a `showEditNets` flag.
-// They now render mgPoolCardHTML instead, so the flag and its Edit-nets button are gone — this step's
-// markup is byte-identical to what it always emitted, because it only ever passed the flag as false.)
-function mgPoolTeamsBlockHTML(pool, teams, matches) {
+// They now render mgPoolCardHTML instead, so the flag and its Edit-nets button are gone.)
+// C101 Task 1 (2026-08-25): the fourth argument. `pools` defaults to null, so every caller that does not
+// pass it renders byte-identically to what this emitted before. When it IS passed, each row gains the
+// SAME Move span and the SAME .pc-pick block the controls card draws, and the rows are wrapped in one
+// [data-pc-card] so mgPoolsMoveTeam's destination flash has something to find (without the wrapper
+// mPlay(null, ...) returns and the move lands silently). This block is reachable ONLY from
+// buildMgPoolsHTML's zero-pool-matches branch, so a move here has no fixtures to rebuild. The
+// server-side refusal is 0064, Task 7, and not before.
+function mgPoolTeamsBlockHTML(pool, teams, matches, pools) {
+  const pid = String(pool.id);
   const label = pool.label || '';
-  const mine = teams.filter((tm) => String(tm.pool_id || '') === String(pool.id));
+  const mine = teams.filter((tm) => String(tm.pool_id || '') === pid);
   let sub = `Pool ${escapeHTML(label)}`;
   if (matches) {
     const nets = [...new Set(matches.filter((m) => m.pool_id === pool.id && m.net != null).map((m) => m.net))].sort((a, b) => a - b);
     if (nets.length) sub += ` · Net${nets.length > 1 ? 's' : ''} ${escapeHTML(formatNetList(nets))}`;
   }
+  // A one-pool draw has nowhere to move a team TO, so Move is not offered at all (the fix-round-1 lesson
+  // from mgPoolCardHTML: offering it there set mgpMoveTeamId, drew an empty picker with no Cancel, and
+  // manageNetsDirty() then bailed every background sync until the panel was closed).
+  const others = (pools || []).filter((p) => String(p.id) !== pid);
+  const movable = others.length > 0;
   const rows = mine.length
-    ? mine.map((tm) => `<button type="button" class="mgps-pteam" data-mgps-team="${escapeHTMLText(String(tm.id))}"><span class="mgps-ptn">${escapeHTML(tm.name || 'Team')}</span>${MG_CHEV}</button>`).join('')
+    ? mine.map((tm) => {
+      const tid = String(tm.id);
+      const open = movable && mgpMoveTeamId === tm.id;
+      const row = `<button type="button" class="mgps-pteam" data-mgps-team="${escapeHTMLText(tid)}"${open ? ' data-pc-open="1"' : ''}>`
+        + `<span class="mgps-ptn">${escapeHTML(tm.name || 'Team')}</span>`
+        + (movable ? `<span class="pc-move" data-pc-move="${escapeHTMLText(tid)}">Move</span>` : '')
+        + MG_CHEV + `</button>`;
+      if (!open) return row;
+      return row + `<div class="pc-pick">`
+        + `<span class="pc-pl">Move <b>${escapeHTML(tm.name || 'Team')}</b> to &rarr;</span>`
+        + others.map((p) => `<button type="button" class="pc-pbtn" data-pc-pick="${escapeHTMLText(tid + ':' + String(p.id))}">Pool ${escapeHTML(p.label || '')}</button>`).join('')
+        + `<button type="button" class="pc-pcancel" data-pc-cancel>Cancel</button>`
+        + `</div>`;
+    }).join('')
     : `<div class="mgps-note">No teams in this pool.</div>`;
-  return `<div class="pl-sect">${sub}</div>${rows}`;
+  if (!pools) return `<div class="pl-sect">${sub}</div>${rows}`;
+  return `<div class="pl-sect">${sub}</div><div data-pc-card="${escapeHTMLText(pid)}">${rows}</div>`;
 }
 
 // The post-draw schedule — reuses the public buildPoolsSchedulePageHTML shape (pool + Seeding tabs,

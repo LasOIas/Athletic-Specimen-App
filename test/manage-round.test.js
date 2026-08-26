@@ -1736,12 +1736,13 @@ describe('Task 8 pool controls', () => {
     expect(drawn).not.toContain('Play has started');
     expect(drawn).not.toContain('data-pc-move=');
     // undrawn: the page is the pre-start setup block (Pools drawn + Start pool play), which carries no
-    // controls panel, no lock line and, until C101 item 7 gives Move a safe home there, no Move either
+    // controls panel and no lock line. C101 Task 1 gave Move its safe home HERE: nothing is drawn, so a
+    // pool_id write has no fixtures to rebuild.
     seedPools(bridge, { matches: UNDRAWN });
     const open = bridge.buildMgPools({ controls: true });
     expect(open).toContain('Start pool play');
     expect(open).not.toContain('pc-lock');
-    expect(open).not.toContain('data-pc-move=');
+    expect(count(open, 'data-pc-move=')).toBe(4);
   });
 
   // Fix round 1: tdbDrawPoolsAtomic clamps to at least one pool, so a 2-3 team event is ONE pool. Move used
@@ -1777,7 +1778,10 @@ describe('Task 8 pool controls', () => {
     expect(drawn).toContain('Start pool play');
     expect(drawn).toContain('data-mgps-team="t1"');
     expect(drawn).toContain('class="mgps-pteam"');
-    expect(drawn).not.toContain('pc-card');
+    // C101 Task 1: the pre-start rows now sit inside a bare [data-pc-card] wrapper, which is the flash
+    // target mgPoolsMoveTeam queries and nothing else. The claim this guard makes is unchanged and is
+    // now stated sharply: the controls-panel CARD is still not drawn here.
+    expect(drawn).not.toContain('class="pc-card"');
     expect(drawn).not.toContain('Edit nets');
   });
 
@@ -2099,6 +2103,96 @@ describe('Task 8 pool controls', () => {
     const m = /const APP_VERSION = '(\d{4})\.(\d{2})\.(\d{2})\.(\d+)'/.exec(appSrc);
     expect(m).not.toBeNull();
     expect(Number(m[1] + m[2] + m[3]) * 1000 + Number(m[4])).toBeGreaterThanOrEqual(20260825 * 1000 + 14);
+  });
+});
+
+// C101 Task 1 (2026-08-25): Move gets a home in the PRE-START block. Reachable only from
+// buildMgPoolsHTML's zero-pool-matches branch, so a move there is a bare teams.pool_id write with no
+// fixtures to rebuild and no server guard yet - that arrives with 0064 in Task 7. Every case drives the
+// real builder or the real click delegate (the 2026-08-03 inert-Undo lesson: a grep proves nothing about
+// what a tap does).
+describe('C101 Task 1 Move in the Pools drawn block', () => {
+  it('renders one Move per team, inside a pc-card wrapper, with no lock line', () => {
+    seedPools(bridge, { matches: UNDRAWN });
+    const html = bridge.buildMgPools();
+    expect(html).toContain('Pools drawn');
+    expect(html).toContain('Start pool play');
+    expect(count(html, 'data-pc-move=')).toBe(4);          // four teams across two pools
+    expect(html).toContain('data-pc-move="t1"');
+    expect(html).toContain('class="mgps-pteam"');           // the pre-start row class is unchanged
+    expect(html).toContain('data-pc-card="p1"');            // the flash target mgPoolsMoveTeam looks for
+    expect(html).toContain('data-pc-card="p2"');
+    expect(html).not.toContain('pc-lock');                  // nothing is locked yet
+    expect(html).not.toContain('pc-card"');                 // the controls-panel card is NOT drawn here
+    expect(html).toContain('Move a team to another pool now. Once the schedule is drawn, teams stay put.');
+    expect(html).not.toContain('—');              // copy law: no em dashes
+  });
+
+  it('a one-pool draw renders no Move at all, because there is nowhere to move to', () => {
+    seedPools(bridge, {
+      pools: [{ id: 'p1', label: 'A' }],
+      teams: [{ id: 't1', name: 'Dink Responsibly', pool_id: 'p1' }, { id: 't2', name: 'Sets and Reps', pool_id: 'p1' }],
+      matches: UNDRAWN,
+    });
+    const html = bridge.buildMgPools();
+    expect(html).toContain('data-mgps-team="t1"');          // the rows are all still there
+    expect(html).not.toContain('data-pc-move=');
+    expect(html).not.toContain('class="pc-pick"');
+    const forced = bridge.buildMgPools({ moveTeam: 't1' }); // even with the module var naming a team
+    expect(forced).not.toContain('data-pc-pick=');
+  });
+
+  it('a tap opens the picker: the other pools, a Cancel, and the team named', () => {
+    seedPools(bridge, { matches: UNDRAWN });
+    const open = bridge.buildMgPools({ moveTeam: 't1' });
+    expect(open).toContain('data-pc-open="1"');
+    expect(open).toContain('class="pc-pick"');
+    expect(open).toContain('Move <b>Dink Responsibly</b> to &rarr;');
+    expect(count(open, 'data-pc-pick=')).toBe(1);           // one other pool, so one button
+    expect(open).toContain('data-pc-pick="t1:p2"');
+    expect(open).not.toContain('data-pc-pick="t1:p1"');     // never its own pool
+    expect(open).toContain('data-pc-cancel');
+  });
+
+  it('a real tap on Move opens it and a real tap on a pool calls moveTeamToPool with the pair', async () => {
+    seedPools(bridge, { matches: UNDRAWN });
+    bridge.buildMgPools();
+    const m = bridge.mockPoolWrites({});
+    try {
+      const calls = await withDelegate(async (tap) => {
+        tap(['data-pc-move', 'data-mgps-team'], 't1');       // the Move span sits INSIDE the team row
+        expect(bridge.moveTeamId()).toBe('t1');
+        expect(m.calls.some((c) => c[0] === 'sheet')).toBe(false); // never falls through to the team sheet
+        tap('data-pc-pick', 't1:p2');
+        await Promise.resolve();
+        return m.calls.slice();
+      });
+      expect(calls).toContainEqual(['move', 't1', 'p2']);
+    } finally { m.restore(); }
+  });
+
+  it('the poll guard treats the pre-start picker as unsaved work', () => {
+    seedPools(bridge, { matches: UNDRAWN });
+    bridge.buildMgPools();
+    expect(bridge.netsDirty()).toBe(false);
+    bridge.buildMgPools({ moveTeam: 't1' });
+    expect(bridge.netsDirty()).toBe(true);
+    bridge.buildMgPools();
+    expect(bridge.netsDirty()).toBe(false);
+  });
+
+  it('the DRAWN block still renders no Move: this task moved nothing post-draw', () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    const drawn = bridge.buildMgPools({ controls: true });
+    expect(drawn).not.toContain('data-pc-move=');
+    expect(drawn).toContain('The schedule is drawn, teams stay put.');
+  });
+
+  it('the two pre-start CSS rules ship once and add no !important', () => {
+    expect(count(css, '.mgps-pteam .pc-move {')).toBe(1);
+    expect(count(css, '.mgps-pteam[data-pc-open="1"] {')).toBe(1);
+    const block = css.slice(css.indexOf('.mgps-pteam .pc-move {'), css.indexOf('.mgps-pteam .pc-move {') + 400);
+    expect(block).not.toContain('!important');
   });
 });
 
