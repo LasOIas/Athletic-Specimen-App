@@ -51,13 +51,17 @@ const AUTH_CONTROL_IDS = [
   'claim-back', 'claim-search', 'claim-results',
 ];
 
+// A BARE id ('#thing') is the registry's business; anything else - including a descendant selector that
+// merely begins with an id, like C102's '#app-header .pd-hgrp' - is a hook. The old test was
+// `startsWith('#')`, which read that selector as the id "app-header .pd-hgrp" and answered null forever.
+const isIdSel = (sel) => /^#[A-Za-z0-9_-]+$/.test(sel);
 function matches(node, sel) {
-  if (sel.startsWith('#')) return node.id === sel.slice(1);
+  if (isIdSel(sel)) return node.id === sel.slice(1);
   return hooks[sel] === node;
 }
 function resolve(sel) {
   if (typeof sel !== 'string') return null;
-  if (sel.startsWith('#')) return registry[sel.slice(1)] || null;
+  if (isIdSel(sel)) return registry[sel.slice(1)] || null;
   return hooks[sel] || null;
 }
 
@@ -92,7 +96,7 @@ function mkNode(tag) {
     // render that did NOT declare a control from binding a handler to it anyway (the form state was
     // silently binding #auth-resend, so the sent screen's test fired the form state's stale closure).
     _owns(sel) {
-      if (!sel.startsWith('#')) return true;
+      if (!isIdSel(sel)) return true;
       if (!this._html) return true;   // a bare fixture node that never had markup set
       return this._html.includes('id="' + sel.slice(1) + '"');
     },
@@ -305,6 +309,11 @@ function loadApp() {
       authInitial: () => authInitial(),
       nameFill: () => promptNameFillIfNeeded(),
       renderCount: () => __renders,
+      // C102 Task 1: the chip repaint and the shared chip builder, so a case can prove the header element
+      // itself is never rewritten (it also carries the PUBLIC badge and #js-sync-notice).
+      repaintChip: () => repaintAccountChip(),
+      chipHTML: () => accountChipHTML(),
+      nameFillSave: () => onNameFillSave({ preventDefault() {} }),
       // Task 5: the account overlay's own repaint, and the module var the pending screen names and
       // resends to. Repainting the same view is how a case proves a bind cannot stack.
       renderAcct: () => renderAcctPageInner(),
@@ -1198,8 +1207,12 @@ describe('Account round Task 3 - the account card and the sign-out confirm', () 
   });
 
   it('the header chip repaints when the profile name lands after sign-in', async () => {
-    // The profile read resolves long AFTER the sign-in render, and only render() paints the header, so
-    // caching the name without a repaint left the chip wearing the email's letter until the next nav tap.
+    // C102: the chip has its own repaint now, so the name landing after sign-in never rebuilds six tab
+    // panels for one letter.
+    const header = bridge.node('header'); header.id = 'app-header'; bridge.registry['app-header'] = header;
+    header.innerHTML = '<span class="app-header-mode">PUBLIC</span><div class="pd-hgrp"></div><div id="js-sync-notice">x</div>';
+    const grp = bridge.node('div'); bridge.hook('#app-header .pd-hgrp', grp);
+    const notice = bridge.node('div'); notice.id = 'js-sync-notice'; bridge.registry['js-sync-notice'] = notice;
     bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, null);
     bridge.setPainted(true);
     expect(bridge.authInitial()).toBe('M');
@@ -1207,7 +1220,8 @@ describe('Account round Task 3 - the account card and the sign-out confirm', () 
     bridge.supaNext('profileRead', { data: { first_name: 'Ada', last_name: 'Blake' }, error: null });
     await bridge.nameFill();
     expect(bridge.authInitial()).toBe('A');
-    expect(bridge.renderCount()).toBe(before + 1);
+    expect(bridge.renderCount()).toBe(before);
+    expect(grp.innerHTML).toContain('>A<');
   });
 
   it('signing out drops the cached name and the account edit page', async () => {
@@ -1364,6 +1378,10 @@ describe('Account round Task 4 - Your name', () => {
   it('a saved name updates the cache, repaints the chip, reopens the card and toasts once', async () => {
     openName();
     type('Ada', 'Blake');
+    const header = bridge.node('header'); header.id = 'app-header'; bridge.registry['app-header'] = header;
+    header.innerHTML = '<span class="app-header-mode">PUBLIC</span><div class="pd-hgrp"></div><div id="js-sync-notice">x</div>';
+    const grp = bridge.node('div'); bridge.hook('#app-header .pd-hgrp', grp);
+    const notice = bridge.node('div'); notice.id = 'js-sync-notice'; bridge.registry['js-sync-notice'] = notice;
     bridge.setPainted(true);
     const renders = bridge.renderCount();
     bridge.supaNext('profileUpdate', { data: [{ id: 'u1' }], error: null });
@@ -1375,8 +1393,9 @@ describe('Account round Task 4 - Your name', () => {
     expect(card.innerHTML).toContain('class="acc-nm">Ada Blake<');
     expect(card.innerHTML).toContain('class="acc-rv">Ada Blake<');
     expect(bridge.authInitial()).toBe('A');
-    // Only render() paints the header chip, so a rename has to ask for one (the Task 3 precedent).
-    expect(bridge.renderCount()).toBe(renders + 1);
+    // C102: the chip has its own repaint now, so a rename never rebuilds six tab panels for one letter.
+    expect(bridge.renderCount()).toBe(renders);
+    expect(grp.innerHTML).toContain('>A<');
 
     const t = toasts();
     expect(t.length).toBe(1);
@@ -2604,5 +2623,66 @@ describe('C101 Task 2 the email sync is the database s job, not the client s', (
   it('nowhere in the app writes an email onto profiles', () => {
     const code = appSrc.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(?<!:)\/\/[^\n]*/g, ' ');
     expect(code).not.toMatch(/from\('profiles'\)[\s\S]{0,120}?(update|upsert)\([^)]*email/);
+  });
+});
+
+// C102 Task 1 (2026-08-26): the header chip is its own paint now. Every site that changes the cached name
+// used to ask for a full render() - six tab panels rebuilt so one letter could change - and the chip is
+// the only thing on screen that reads from that cache.
+describe('C102 Task 1: the header chip repaints on its own', () => {
+  beforeEach(() => bridge.reset());
+
+  // The sandbox resolves '#id' from the registry and any other selector from bridge.hook(sel, node).
+  // A header node and a hooked .pd-hgrp node are staged so the case can see WHICH element was written.
+  function stageHeader() {
+    const header = bridge.node('header'); header.id = 'app-header'; bridge.registry['app-header'] = header;
+    header.innerHTML = '<span class="app-header-mode">PUBLIC</span><div class="pd-hgrp"></div><div id="js-sync-notice">x</div>';
+    const grp = bridge.node('div'); bridge.hook('#app-header .pd-hgrp', grp);
+    const notice = bridge.node('div'); notice.id = 'js-sync-notice'; bridge.registry['js-sync-notice'] = notice;
+    return { header, grp, notice };
+  }
+
+  it('accountChipHTML is exactly what the header builder inlines (signed out and signed in)', () => {
+    // The shell string must not change by a byte: the chip builder is a factoring, not a redesign.
+    bridge.setSignedOut();
+    expect(bridge.chipHTML()).toContain('class="pd-avic" id="pd-account" aria-label="Sign in"');
+    bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, null);
+    expect(bridge.chipHTML()).toBe('<button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">M</button>');
+  });
+
+  it('repaintAccountChip writes .pd-hgrp only and never the header element', () => {
+    const { header, grp } = stageHeader();
+    const headerBefore = header.innerHTML;
+    bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, { first: 'Ada', last: 'Blake' });
+    bridge.repaintChip();
+    expect(grp.innerHTML).toContain('>A<');
+    expect(header.innerHTML).toBe(headerBefore);            // the PUBLIC badge and #js-sync-notice survive
+    expect(bridge.registry['js-sync-notice']).toBeTruthy();
+  });
+
+  it('repaintAccountChip is a no-op with no header on screen', () => {
+    bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, null);
+    expect(() => bridge.repaintChip()).not.toThrow();
+  });
+
+  it('the name-fill save repaints the chip without a full render, and does nothing before the boot paint', async () => {
+    const { grp } = stageHeader();
+    bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, null);
+    bridge.registry['namefill-first'].value = 'Ada';
+    bridge.registry['namefill-last'].value = 'Blake';
+    bridge.setPainted(true);
+    const before = bridge.renderCount();
+    await bridge.nameFillSave();
+    expect(bridge.authInitial()).toBe('A');
+    expect(bridge.renderCount()).toBe(before);
+    expect(grp.innerHTML).toContain('>A<');
+    // Before the paint the guard holds: no render, no throw, the cache still updates.
+    bridge.setAccountName(null);
+    bridge.setPainted(false);
+    bridge.registry['namefill-first'].value = 'Ada';
+    bridge.registry['namefill-last'].value = 'Blake';
+    await bridge.nameFillSave();
+    expect(bridge.renderCount()).toBe(before);
+    expect(bridge.authInitial()).toBe('A');
   });
 });

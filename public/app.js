@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.50'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.26.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7207,10 +7207,10 @@ async function promptNameFillIfNeeded() {
   }
   if (first && last) {
     accountName = { first, last };
-    // Review fix (2026-08-25): the header chip draws its initial from this cache, and the sign-in render
-    // has already happened by the time this read resolves, so nothing would repaint it. Same full render
-    // as onNameFillSave below, for the same reason: only render() paints the header.
-    if (state.loaded && bootPaintDone) { try { render(); } catch (_) {} }
+    // C102 (2026-08-26): the chip draws its initial from this cache, and the sign-in repaint has already
+    // happened by the time this read resolves, so repaint the chip alone; a full render() rebuilt six tab
+    // panels for one letter.
+    if (state.loaded && bootPaintDone) { try { repaintAccountChip(); } catch (_) {} }
     if (!identityConnectAttempted) {
       try { await connectProfileByName(first, last); }
       catch (err) { console.error('connect_profile_by_name', err); }
@@ -7273,7 +7273,8 @@ async function onNameFillSave(e) {
     accountName = { first: nm.first, last: nm.last };
     const el = document.getElementById('namefill-page');
     if (el) el.remove();
-    try { render(); } catch (_) {}
+    // C102: the chip alone, behind the same boot gate as every other post-boot repaint.
+    if (state.loaded && bootPaintDone) { try { repaintAccountChip(); } catch (_) {} }
   } catch (err) {
     console.error('connect_profile_by_name (name fill)', err);
     showErr("Couldn't save your name. Try again.");
@@ -7711,9 +7712,9 @@ async function onAcctNameSave(e) {
     if (error || !Array.isArray(data) || !data.length) { failed(ACCT_SAVE_FAIL); return; }
     accountName = { first: nm.first, last: nm.last };
     closeAcctPage();
-    // Only render() paints the header chip, and its letter comes from this cache, so a rename has to ask
-    // for one or the chip wears the old letter until the next nav tap (the promptNameFillIfNeeded fix).
-    if (state.loaded && bootPaintDone) { try { render(); } catch (_) {} }
+    // C102: only the chip wears the name's letter; repaint it alone (the card behind already shows the
+    // new name).
+    if (state.loaded && bootPaintDone) { try { repaintAccountChip(); } catch (_) {} }
     openAccountMenu();
     // The card behind the toast already shows the new name, so the toast only has to say the write landed.
     // It is created and settled in one breath: the in-flight state is the disabled "Saving…" button, so the
@@ -7922,12 +7923,26 @@ function buildPublicHeaderHTML() {
       <div class="pd-wm-2">COLORADO</div>
     </div>
     <div class="pd-hgrp">
-      ${state.authSession
-        ? `<button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">${escapeHTML(authInitial())}</button>`
-        : `<button type="button" class="pd-avic" id="pd-account" aria-label="Sign in">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
-      </button>`}
+      ${accountChipHTML()}
     </div>`;
+}
+
+// C102 (2026-08-26): the account chip's own markup, shared by the header builder and the targeted repaint.
+// Byte-identical to the ternary the header builder inlined before, so the shell string never changed.
+function accountChipHTML() {
+  return state.authSession
+    ? `<button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">${escapeHTML(authInitial())}</button>`
+    : `<button type="button" class="pd-avic" id="pd-account" aria-label="Sign in">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>
+      </button>`;
+}
+
+// Repaint ONLY .pd-hgrp: #app-header also carries the PUBLIC badge and #js-sync-notice (partialRender
+// depends on it), and the header's click delegate is bound on #app-header itself, so a child swap keeps
+// every tap working. Never touch the #app-header element or its other children.
+function repaintAccountChip() {
+  const g = document.querySelector('#app-header .pd-hgrp');
+  if (g) g.innerHTML = accountChipHTML();
 }
 
 // The single glyph shown in the signed-in account chip and on the account card. Account round
