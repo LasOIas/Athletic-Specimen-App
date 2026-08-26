@@ -122,6 +122,9 @@ function loadApp() {
       // swapped for the length of one case. Returns its own undo.
       swapSupaFrom: (fn) => { const was = supabaseClient.from; supabaseClient.from = fn; return () => { supabaseClient.from = was; }; },
       moveTeamToPool: (teamId, poolId) => tdbMoveTeamToPool(teamId, poolId),
+      // C101 Task 7: the handler behind a pick, and the pure planner the writer must delegate to.
+      movePool: (a, b) => mgPoolsMoveTeam(a, b),
+      movePlan: (...a) => poolMovePlan(...a),
       // The two writes the open Pool controls can make, swapped for recorders (plus the team sheet, so a
       // Move tap that leaked through to it is visible rather than silent). This suite is offline — no tdb
       // call is ever real — and any of them may throw to drive its refusal branch.
@@ -1752,17 +1755,21 @@ describe('Task 8 pool controls', () => {
     expect(count(html, 'class="pc-card"')).toBe(2);
     expect(count(html, 'data-pc-editnets=')).toBe(2);
     expect(html).toContain('>Nets 1<');
-    // C101 Task 0: pool B is drawn (a scheduled game), so it is locked too; only an UNDRAWN pool moves
-    expect(html).not.toContain('data-pc-move=');
-    // the sharp version of the line above: the pools tab strip also says "Pool B", so slice the CARDS
+    // C101 Task 7 / migration 0064: Move is BACK post-draw, behind the RPC that refuses once a pool has a
+    // final or live game. Pool A here has a final, so it is locked; pool B is drawn but unplayed, so its
+    // teams move. Task 0's "the schedule is drawn" gate retired with the server guard that replaced it.
+    // The pools tab strip also says "Pool B", so slice the CARDS.
     const cardA = html.slice(html.indexOf('data-pc-card="p1"'), html.indexOf('data-pc-card="p2"'));
     const cardB = html.slice(html.indexOf('data-pc-card="p2"'));
     expect(cardA).toContain('data-mgps-team="t1"');   // the row is still there, and still opens the sheet
-    expect(cardA).not.toContain('data-pc-move=');     // it just cannot be moved any more
+    expect(cardA).not.toContain('data-pc-move=');     // it has PLAYED, so it cannot be moved
     expect(cardA).not.toContain('>Move<');
-    expect(count(cardB, 'data-pc-move=')).toBe(0);    // pool B is drawn: teams stay put until the draw is redone
-    expect(cardB).toContain('The schedule is drawn, teams stay put.');
-    expect(html).toContain('before Start pool play');
+    expect(cardA).toContain('Play has started, teams stay put.');
+    expect(count(cardB, 'data-pc-move=')).toBe(2);    // drawn but unplayed: both its teams move
+    expect(cardB).not.toContain('pc-lock');
+    expect(html).not.toContain('The schedule is drawn, teams stay put.');
+    expect(html).toContain('Move a team to another pool, change the nets a pool plays on');
+    expect(html).not.toContain('before Start pool play');
     expect(html).not.toContain('before play starts');
     expect(html).not.toContain('Scores follow the team');
     expect(html).toContain('class="mgv-danger"');
@@ -1782,15 +1789,16 @@ describe('Task 8 pool controls', () => {
     const html = bridge.buildMgPools({ controls: true });
     const cardA = html.slice(html.indexOf('data-pc-card="p1"'), html.indexOf('data-pc-card="p2"'));
     const cardB = html.slice(html.indexOf('data-pc-card="p2"'));
+    // C101 Task 7: only a PLAYED or PLAYING pool locks. A drawn-but-unplayed pool moves again.
     expect(cardA).toContain('<span class="pc-lock">Play has started, teams stay put.</span>');
-    expect(cardB).toContain('<span class="pc-lock">The schedule is drawn, teams stay put.</span>');
-    expect(count(html, 'class="pc-lock"')).toBe(2);
-    // drawn but nothing final anywhere: every card says the schedule is drawn, none claims play started
+    expect(cardB).not.toContain('pc-lock');
+    expect(count(html, 'class="pc-lock"')).toBe(1);
     seedPools(bridge, { matches: UNPLAYED });
     const drawn = bridge.buildMgPools({ controls: true });
-    expect(drawn).toContain('The schedule is drawn, teams stay put.');
-    expect(drawn).not.toContain('Play has started');
-    expect(drawn).not.toContain('data-pc-move=');
+    expect(drawn).not.toContain('The schedule is drawn, teams stay put.');
+    expect(drawn).toContain('data-pc-move=');
+    // UNPLAYED carries a LIVE game on pool A, so pool A locks and pool B does not
+    expect(drawn).toContain('Play has started, teams stay put.');
     // undrawn: the page is the pre-start setup block (Pools drawn + Start pool play), which carries no
     // controls panel and no lock line. C101 Task 1 gave Move its safe home HERE: nothing is drawn, so a
     // pool_id write has no fixtures to rebuild.
@@ -1856,12 +1864,18 @@ describe('Task 8 pool controls', () => {
   });
 
   it('the move picker offers the other pools, never its own, and names the team it is moving', () => {
-    // C101 Task 0: a drawn pool never opens the picker, even when the module var names a team in it
+    // C101 Task 7 / migration 0064: a pool that is PLAYING never opens the picker, even when the module
+    // var names a team in it. UNPLAYED carries a live game on pool A, so t1 is locked and t3 is not.
     seedPools(bridge, { matches: UNPLAYED });
-    const drawnOpen = bridge.buildMgPools({ controls: true, moveTeam: 't1' });
-    expect(drawnOpen).not.toContain('class="pc-pick"');
-    expect(drawnOpen).not.toContain('data-pc-pick=');
-    expect(drawnOpen).toContain('The schedule is drawn, teams stay put.');
+    const liveOpen = bridge.buildMgPools({ controls: true, moveTeam: 't1' });
+    expect(liveOpen).not.toContain('class="pc-pick"');
+    expect(liveOpen).not.toContain('data-pc-pick=');
+    expect(liveOpen).toContain('Play has started, teams stay put.');
+    const freeOpen = bridge.buildMgPools({ controls: true, moveTeam: 't3' });
+    expect(freeOpen).toContain('class="pc-pick"');
+    expect(freeOpen).toContain('data-pc-pick="t3:p1"');
+    expect(freeOpen).not.toContain('data-pc-pick="t3:p2"');   // never its own pool
+    expect(freeOpen).toContain('Finished games stay where they were played. The rest are rescheduled.');
     // a team in a pool that HAS played can never have one, even if the module var somehow named it
     seedPools(bridge, { matches: [{ id: 'f1', phase: 'pool', pool_id: 'p1', net: 1, status: 'final', team_a_id: 't1', team_b_id: 't2', score_a: 15, score_b: 9, winner_team_id: 't1', queue_order: 1 }] });
     expect(bridge.buildMgPools({ controls: true, moveTeam: 't1' })).not.toContain('class="pc-pick"');
@@ -2013,29 +2027,86 @@ describe('Task 8 pool controls', () => {
     } finally { restore(); doc.getElementById = realGet; }
   });
 
-  // Fix round 1: RLS on teams is a row FILTER, not a RAISE — an UPDATE from a session that has drifted off
-  // organizer membership matches zero rows and comes back error: null. Driven against a fake PostgREST
-  // chain, because a grep for ".select('id')" proves nothing about what the function DOES with the result.
-  it('tdbMoveTeamToPool refuses to report a move that RLS silently dropped', async () => {
+  // C101 Task 7 / migration 0064 FLIPS this. The old guard proved the zero-row read-back on a bare
+  // teams.pool_id update; that write door is gone. What has to be proven now is that the plan is built by
+  // the PURE helper and handed to the RPC, and that a non-numeric answer is a failure.
+  it('tdbMoveTeamToPool builds the plan in pure.js and applies it through the RPC', async () => {
+    seedPools(bridge, { matches: UNDRAWN });
     const seen = [];
-    let rows = [];
-    const undo = bridge.swapSupaFrom((table) => {
-      seen.push(['from', table]);
-      return { update: (patch) => {
-        seen.push(['update', patch]);
-        return { eq: (col, val) => {
-          seen.push(['eq', col, val]);
-          return { select: (cols) => { seen.push(['select', cols]); return Promise.resolve({ data: rows, error: null }); } };
-        } };
-      } };
-    });
+    let answer = { data: 6, error: null };
+    const undo = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return answer; });
     try {
+      await expect(bridge.moveTeamToPool('t1', 'p2')).resolves.toBe(6);
+      expect(seen.length).toBe(1);
+      expect(seen[0][0]).toBe('move_team_to_pool');
+      const args = seen[0][1];
+      expect(Object.keys(args).sort()).toEqual(['p_matches', 'p_pool', 'p_team', 'p_tournament_id']);
+      expect(args.p_team).toBe('t1');
+      expect(args.p_pool).toBe('p2');
+      expect(Array.isArray(args.p_matches)).toBe(true);
+      // the plan is EXACTLY what the pure helper returns for the same inputs
+      const st = bridge.getState();
+      expect(args.p_matches).toEqual(
+        bridge.movePlan('t1', 'p1', 'p2', st.tournamentPools, st.tournamentTeams, st.tournamentMatches).plan
+      );
+      answer = { data: null, error: null };
       await expect(bridge.moveTeamToPool('t1', 'p2')).rejects.toThrow('The move did not save. Check you are signed in as an admin.');
-      expect(seen).toEqual([['from', 'teams'], ['update', { pool_id: 'p2' }], ['eq', 'id', 't1'], ['select', 'id']]);
-      // the row comes back: the same call resolves, with no invented error
-      rows = [{ id: 't1' }];
-      await expect(bridge.moveTeamToPool('t1', 'p2')).resolves.toBeUndefined();
     } finally { undo(); }
+    const fn = appSrc.slice(appSrc.indexOf('async function tdbMoveTeamToPool('), appSrc.indexOf('let _poolSetupInFlight'));
+    expect(fn).not.toContain("from('teams')");    // the direct door is gone
+    expect(fn).toContain('poolMovePlan(');        // and the plan is never built in the writer
+  });
+
+  // The team sheet's "No pool" chip sends a null destination. 0064 takes p_pool uuid and looks it up, so a
+  // null would come back as "That pool is not in this tournament." and read as a bug. Refused in the client
+  // with a sentence that is true, and carried to Mike as an open question at the hand-back.
+  it('a null destination is refused before any call, with copy that is actually true', async () => {
+    seedPools(bridge, { matches: UNDRAWN });
+    const seen = [];
+    const undo = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return { data: 1, error: null }; });
+    try {
+      await expect(bridge.moveTeamToPool('t1', null)).rejects.toThrow('Pick a pool to move them to.');
+      expect(seen).toEqual([]);
+    } finally { undo(); }
+  });
+
+  it('a refused move surfaces the RPC message and leaves the picker open', async () => {
+    seedPools(bridge, { matches: UNPLAYED });
+    const m = bridge.mockPoolWrites({ move: () => { throw new Error('Those pools have games already played or in progress.'); } });
+    try {
+      bridge.buildMgPools({ controls: true, moveTeam: 't3' });
+      await bridge.movePool('t3', 'p1');
+      expect(m.calls.find((c) => c[0] === 'notice')[1]).toBe('Could not move the team');
+      expect(bridge.moveTeamId()).toBe('t3');     // the picker is still open, so the tap can be retried
+    } finally { m.restore(); }
+  });
+
+  it('the write / refresh split still reports "The team moved" when only the refresh failed', async () => {
+    seedPools(bridge, { matches: UNDRAWN });
+    const m = bridge.mockPoolWrites({ refresh: () => { throw new Error('offline'); } });
+    try {
+      await bridge.movePool('t1', 'p2');
+      expect(m.calls.find((c) => c[0] === 'notice')[1]).toBe('The team moved');
+    } finally { m.restore(); }
+  });
+
+  it('the delegate reaches Move from a real tap in BOTH homes', async () => {
+    // pre-start (Task 1's home)
+    seedPools(bridge, { matches: UNDRAWN });
+    bridge.buildMgPools();
+    let m = bridge.mockPoolWrites({});
+    try {
+      await withDelegate(async (tap) => { tap(['data-pc-move', 'data-mgps-team'], 't1'); tap('data-pc-pick', 't1:p2'); await Promise.resolve(); });
+      expect(m.calls).toContainEqual(['move', 't1', 'p2']);
+    } finally { m.restore(); }
+    // post-draw (Task 7's home): pool B is drawn but unplayed
+    seedPools(bridge, { matches: UNPLAYED });
+    bridge.buildMgPools({ controls: true });
+    m = bridge.mockPoolWrites({});
+    try {
+      await withDelegate(async (tap) => { tap(['data-pc-move', 'data-mgps-team'], 't3'); tap('data-pc-pick', 't3:p1'); await Promise.resolve(); });
+      expect(m.calls).toContainEqual(['move', 't3', 'p1']);
+    } finally { m.restore(); }
   });
 
   it('the poll guard: a typed nets field or an open picker is unsaved work', () => {
@@ -2237,11 +2308,16 @@ describe('C101 Task 1 Move in the Pools drawn block', () => {
     expect(bridge.netsDirty()).toBe(false);
   });
 
-  it('the DRAWN block still renders no Move: this task moved nothing post-draw', () => {
-    seedPools(bridge, { matches: UNPLAYED });
-    const drawn = bridge.buildMgPools({ controls: true });
-    expect(drawn).not.toContain('data-pc-move=');
-    expect(drawn).toContain('The schedule is drawn, teams stay put.');
+  // C101 Task 7 / migration 0064 FLIPS the second half of this: Move came BACK post-draw behind the RPC.
+  // What Task 1 actually owns is the PRE-START block, and that is what stays pinned here: the pre-start
+  // rows carry Move with no lock line at all, because nothing is drawn and nothing can be locked.
+  it('the pre-start block is Task 1 home: Move on every row, no lock line, no controls card', () => {
+    seedPools(bridge, { matches: UNDRAWN });
+    const pre = bridge.buildMgPools({ controls: true });
+    expect(count(pre, 'data-pc-move=')).toBe(4);
+    expect(pre).not.toContain('pc-lock');
+    expect(pre).not.toContain('class="pc-card"');
+    expect(pre).not.toContain('The schedule is drawn, teams stay put.');
   });
 
   it('the two pre-start CSS rules ship once and add no !important', () => {
@@ -2387,6 +2463,10 @@ describe('C101 Task 6 Clear every result', () => {
       await expect(bridge.clearWhole('T')).resolves.toBe(7);
       expect(seen).toEqual([['clear_whole_bracket', { p_tournament_id: 'T' }]]);
     } finally { undo(); }
+    // a null answer is a FAILURE, not "0 results cleared": Number(null) is 0 and passes Number.isFinite
+    const undoNull = bridge.swapSupaRpc(() => ({ data: null, error: null }));
+    try { await expect(bridge.clearWhole('T')).rejects.toThrow('That did not go through. Refresh and try again.'); }
+    finally { undoNull(); }
     const fn = appSrc.slice(appSrc.indexOf('async function tdbClearWholeBracket('), appSrc.indexOf('async function tdbResetBracket('));
     expect(fn).not.toContain('.delete(');
     expect(fn).not.toContain("from('matches')");

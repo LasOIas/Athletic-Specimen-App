@@ -968,6 +968,60 @@ function assignPoolGameSlots(teamIds, nets) {
   }));
 }
 
+// C101 Task 7: the plan move_team_to_pool applies. Returns { plan } only: the digest's `keep` half is dead
+// weight, because the server keeps rows by NOT DELETING them rather than by being told which to keep. It
+// takes the full pools list and the tournament's whole match set because both of its properties need them.
+//
+// (a) NETS. The plan may use only the nets the two rebuilt pools ALREADY OWN, computed as the distinct
+//     `net` values on those pools' existing phase='pool' rows. Handing the layout the tournament's whole
+//     net set would move an untouched pool's games onto a net another pool is mid-round on. A pool with no
+//     rows yet has no nets of its own, so it takes the share splitNetsAcrossPools would have given it out
+//     of the widest net number this tournament's pool games actually use.
+// (b) QUEUE_ORDER. The pools board reads queue_order as the round number (mgPoolsScheduleHTML derives
+//     maxRound and curRound from it), so the plan's values must be DISJOINT from the surviving rows of
+//     every untouched pool. Compute the offset from those rows; do not restart at 1.
+function poolMovePlan(teamId, fromPoolId, toPoolId, pools, teams, matches) {
+  const to = String(toPoolId == null ? '' : toPoolId);
+  const from = (fromPoolId == null || String(fromPoolId) === '') ? null : String(fromPoolId);
+  if (!to) return { plan: [] };
+  const poolList = (pools || []).filter((p) => p && p.id != null)
+    .slice().sort((a, b) => (Number(a.display_order) || 0) - (Number(b.display_order) || 0));
+  const poolMatches = (matches || []).filter((m) => m && (m.phase ? m.phase === 'pool' : !!m.pool_id));
+  const rebuilt = (from && from !== to) ? [from, to] : [to];
+  const isRebuilt = (pid) => rebuilt.indexOf(String(pid == null ? '' : pid)) >= 0;
+
+  const seenNets = [...new Set(poolMatches.filter((m) => m.net != null).map((m) => Number(m.net)))];
+  const totalNets = seenNets.length ? Math.max.apply(null, seenNets) : 1;
+  const share = splitNetsAcrossPools(totalNets, poolList.length || 1);
+  const netsOf = (pid) => {
+    const own = [...new Set(poolMatches
+      .filter((m) => String(m.pool_id) === String(pid) && m.net != null)
+      .map((m) => Number(m.net)))].sort((a, b) => a - b);
+    if (own.length) return own;
+    const i = poolList.findIndex((p) => String(p.id) === String(pid));
+    return (i >= 0 && share[i] && share[i].length) ? share[i].slice() : [1];
+  };
+
+  const offset = poolMatches.filter((m) => !isRebuilt(m.pool_id))
+    .reduce((mx, m) => Math.max(mx, Number(m.queue_order) || 0), 0);
+
+  const plan = [];
+  rebuilt.forEach((pid) => {
+    const ids = (teams || [])
+      .filter((tm) => tm && tm.id != null)
+      .filter((tm) => (String(tm.id) === String(teamId)
+        ? String(pid) === to
+        : String(tm.pool_id || '') === String(pid)))
+      .map((tm) => String(tm.id));
+    assignPoolGameSlots(ids, netsOf(pid)).forEach((g) => plan.push({
+      pool_id: String(pid),
+      team_a_id: g.team_a_id, team_b_id: g.team_b_id,
+      net: g.net, queue_order: offset + g.queue_order,
+    }));
+  });
+  return { plan };
+}
+
 // Re-lay EXISTING games onto a new net block (the "Edit nets" repair path). Games that already shared a
 // queue_order were simultaneous, so they were disjoint — regrouping by the current queue_order recovers the
 // rounds and keeps that guarantee. Without this, re-netting mid-event re-introduces the double-booking the
@@ -2102,6 +2156,7 @@ if (typeof module !== "undefined" && module.exports) {
     scoringRulesFor, gameScoreStatus,
     splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
     layoutRoundsOnNets, assignPoolGameSlots, relayoutPoolGamesOnNets, poolNetRange, teamNetRange,
+    poolMovePlan,
     bracketGameNumbers, bracketSourceLabel,
     bracketClearPlan,
     shouldAutoPromptBracket, assignBracketNets,

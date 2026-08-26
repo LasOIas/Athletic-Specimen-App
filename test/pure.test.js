@@ -16,6 +16,7 @@ const {
   resolveTournamentMatch, publicHubStatus,
   scoringRulesFor, gameScoreStatus,
   splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
+  layoutRoundsOnNets, assignPoolGameSlots, poolMovePlan,
   bracketGameNumbers, bracketSourceLabel,
   bracketClearPlan,
   shouldAutoPromptBracket, assignBracketNets,
@@ -1376,5 +1377,65 @@ describe('bracketClearPlan (C101 Task 5 - the client mirror of clear_bracket_ato
 
   it('an unknown id plans nothing', () => {
     expect(bracketClearPlan('nope', [{ id: 'a', status: 'final' }])).toEqual({ reset: [], blank: [] });
+  });
+});
+
+describe('poolMovePlan (C101 Task 7 - the plan move_team_to_pool applies)', () => {
+  const POOLS = [{ id: 'pA', label: 'A', display_order: 0 }, { id: 'pB', label: 'B', display_order: 1 },
+                 { id: 'pC', label: 'C', display_order: 2 }];
+  const TEAMS = [
+    { id: 'a1', pool_id: 'pA' }, { id: 'a2', pool_id: 'pA' }, { id: 'a3', pool_id: 'pA' },
+    { id: 'b1', pool_id: 'pB' }, { id: 'b2', pool_id: 'pB' },
+    { id: 'c1', pool_id: 'pC' }, { id: 'c2', pool_id: 'pC' }, { id: 'c3', pool_id: 'pC' },
+  ];
+  const MATCHES = [
+    { id: 'm1', phase: 'pool', pool_id: 'pA', net: 1, queue_order: 1, status: 'scheduled' },
+    { id: 'm2', phase: 'pool', pool_id: 'pA', net: 1, queue_order: 2, status: 'scheduled' },
+    { id: 'm3', phase: 'pool', pool_id: 'pB', net: 2, queue_order: 1, status: 'scheduled' },
+    { id: 'm4', phase: 'pool', pool_id: 'pC', net: 3, queue_order: 1, status: 'scheduled' },
+    { id: 'm5', phase: 'pool', pool_id: 'pC', net: 3, queue_order: 4, status: 'final' },
+  ];
+
+  it('uses ONLY the nets the two rebuilt pools already own', () => {
+    const { plan } = poolMovePlan('a3', 'pA', 'pB', POOLS, TEAMS, MATCHES);
+    const nets = [...new Set(plan.map((g) => g.net))].sort();
+    expect(nets).toEqual([1, 2]);              // never 3: pool C is mid-round on it
+    expect(plan.every((g) => g.pool_id === 'pA' || g.pool_id === 'pB')).toBe(true);
+  });
+
+  it('offsets queue_order past every untouched pool, so the board never reads two pools into one round', () => {
+    const { plan } = poolMovePlan('a3', 'pA', 'pB', POOLS, TEAMS, MATCHES);
+    const untouched = MATCHES.filter((m) => m.pool_id === 'pC').map((m) => m.queue_order);
+    expect(Math.min(...plan.map((g) => g.queue_order))).toBeGreaterThan(Math.max(...untouched));
+  });
+
+  it('rebuilds both pools with a complete round robin and no net double-booking', () => {
+    const { plan } = poolMovePlan('a3', 'pA', 'pB', POOLS, TEAMS, MATCHES);
+    const inA = plan.filter((g) => g.pool_id === 'pA');
+    const inB = plan.filter((g) => g.pool_id === 'pB');
+    expect(inA.length).toBe(1);                // pA drops to 2 teams: one game
+    expect(inB.length).toBe(3);                // pB rises to 3 teams: three games
+    const slots = plan.map((g) => g.net + '@' + g.queue_order);
+    expect(new Set(slots).size).toBe(slots.length);
+    expect(plan.every((g) => g.team_a_id !== g.team_b_id)).toBe(true);
+  });
+
+  it('an UNPOOLED team rebuilds only the destination', () => {
+    const teams = TEAMS.concat([{ id: 'x1', pool_id: null }]);
+    const { plan } = poolMovePlan('x1', null, 'pB', POOLS, teams, MATCHES);
+    expect([...new Set(plan.map((g) => g.pool_id))]).toEqual(['pB']);
+    expect(plan.length).toBe(3);               // pB rises to 3 teams
+  });
+
+  it('a pool with no rows yet takes its splitNetsAcrossPools share, not the whole net set', () => {
+    const bare = MATCHES.filter((m) => m.pool_id !== 'pB');
+    const { plan } = poolMovePlan('a3', 'pA', 'pB', POOLS, TEAMS, bare);
+    const bNets = [...new Set(plan.filter((g) => g.pool_id === 'pB').map((g) => g.net))];
+    expect(bNets.length).toBeGreaterThan(0);
+    expect(bNets).not.toContain(3);            // never pool C's net
+  });
+
+  it('a missing destination plans nothing', () => {
+    expect(poolMovePlan('a3', 'pA', null, POOLS, TEAMS, MATCHES)).toEqual({ plan: [] });
   });
 });

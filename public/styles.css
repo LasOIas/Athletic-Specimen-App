@@ -5825,6 +5825,9 @@ input.pc-nin:focus { outline: none; box-shadow: inset 0 0 0 1.5px var(--accent),
 /* ADDED, not in the round: Save nets re-lays the pool's unplayed games, so the open field says so. It
    takes the whole second line of the head, under the field and its button. */
 .pc-nhint { flex: 1 0 100%; order: 9; font-size: 11.5px; color: var(--muted); }
+/* PORT NOTE, C101 Task 7 (2026-08-25): the picker says what a move will do to the schedule, on its own
+   line under the pool buttons. Same shape as .pc-nhint above it. No new !important. */
+.pc-pnote { flex: 1 0 100%; order: 11; font-size: 11.5px; color: var(--muted); }
 
 /* ADDED, not in the round (the controller's ruling, fix round 1): a card whose Move has been withheld says
    so on the card. The panel note above the cards was the only explanation, which is no explanation at all

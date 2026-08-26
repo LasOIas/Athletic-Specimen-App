@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.25.42'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.25.43'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2257,15 +2257,34 @@ async function tdbListMatches(tournamentId, phase) {
   return data || [];
 }
 
-// Fix round 1 (2026-08-25): a MANDATORY read-back, the same guard tdbDeleteTournament carries. RLS on
-// teams is a row FILTER, not a RAISE — a session that has drifted off organizer membership gets an UPDATE
-// matching zero rows back as `error: null`, so without this the caller would report a move that never
-// happened and flash the destination card green over it. Zero rows returned = the write did not land.
+// C101 Task 7 / migration 0064: a move is a two-pool schedule REGENERATION, not a pool_id write. The plan
+// is built by the pure helper (the round-aware net layout proven across 1,984 configs by C76) and applied
+// atomically by the DEFINER RPC, which refuses once either pool has a final or live game and once the
+// tournament is past pool play. The zero-row read-back this replaced could only tell us that SOME row was
+// touched; the count tells us how many fixtures were rewritten.
 async function tdbMoveTeamToPool(teamId, poolId) {
   if (!supabaseClient || !teamId) return;
-  const { data, error } = await supabaseClient.from('teams').update({ pool_id: poolId || null }).eq('id', teamId).select('id');
+  // OPEN, carried to Mike: the team sheet's "No pool" chip sends a null destination, which the bare
+  // teams.pool_id update this replaced accepted. 0064 takes `p_pool uuid` and looks the pool up, so a null
+  // would come back as "That pool is not in this tournament." and read as a bug. Until either 0064 learns
+  // to un-pool a team or the chip goes, the refusal is stated here in a sentence that is actually true.
+  if (!poolId) throw new Error('Pick a pool to move them to.');
+  const t = mgActiveTournament();
+  if (!t) throw new Error('No tournament selected.');
+  const team = (state.tournamentTeams || []).find((x) => String(x.id) === String(teamId));
+  const { plan } = poolMovePlan(
+    teamId, team ? (team.pool_id || null) : null, poolId,
+    state.tournamentPools || [], state.tournamentTeams || [], state.tournamentMatches || []);
+  const { data, error } = await supabaseClient.rpc('move_team_to_pool', {
+    p_tournament_id: t.id, p_team: teamId, p_pool: poolId, p_matches: plan,
+  });
   if (error) { console.error('tdbMoveTeamToPool', error); throw error; }
-  if (!Array.isArray(data) || !data.length) throw new Error('The move did not save. Check you are signed in as an admin.');
+  // `Number(null)` is 0, which is FINITE, so a null answer would sail through a bare Number.isFinite check
+  // and report a move nothing wrote. The raw value is tested for null first, deliberately.
+  const raw = Array.isArray(data) ? data[0] : data;
+  const n = Number(raw);
+  if (raw == null || !Number.isFinite(n)) throw new Error('The move did not save. Check you are signed in as an admin.');
+  return n;
 }
 
 // Wave 1c (2026-06-25): in-flight guard for the pool-setup writers. tdbDrawPools/tdbStartPoolPlay
@@ -2627,8 +2646,11 @@ async function tdbClearWholeBracket(tournamentId) {
   if (!supabaseClient || !tournamentId) throw new Error('No tournament.');
   const { data, error } = await supabaseClient.rpc('clear_whole_bracket', { p_tournament_id: tournamentId });
   if (error) { console.error('tdbClearWholeBracket', error); throw error; }
-  const n = Number(Array.isArray(data) ? data[0] : data);
-  if (!Number.isFinite(n)) throw new Error('That did not go through. Refresh and try again.');
+  // Same trap as tdbMoveTeamToPool: `Number(null)` is 0 and passes Number.isFinite, so a null answer would
+  // be read back as "0 results cleared" instead of as the failure it is. Test the raw value first.
+  const raw = Array.isArray(data) ? data[0] : data;
+  const n = Number(raw);
+  if (raw == null || !Number.isFinite(n)) throw new Error('That did not go through. Refresh and try again.');
   return n;
 }
 
@@ -11575,7 +11597,7 @@ function openMgTeamSheet(teamId) {
       const pid = r.getAttribute('data-mgts-pool') || '';
       scrim.querySelectorAll('[data-mgts="pool"]').forEach((b) => b.classList.remove('on'));
       r.classList.add('on');
-      void mgtsWrite(() => tdbMoveTeamToPool(teamId, pid || null));
+      void mgtsWrite(() => tdbMoveTeamToPool(teamId, pid || null));   // C101 Task 7: the 0064 RPC
       return;
     }
     if (role === 'withdraw') { void mgtsWithdraw(teamId); return; }
@@ -11921,10 +11943,12 @@ function mgPoolCardHTML(pool, teams, pools, matches) {
   // least one pool, so 2-3 teams is a single pool) has nowhere to move a team TO. Offering Move there set
   // mgpMoveTeamId, drew an empty picker with no Cancel in it, and then manageNetsDirty() bailed every
   // background sync on a live-scoring page until the panel was closed.
+  // C101 Task 7 / migration 0064: Task 0's `!drawn` gate retires with the RPC that replaced it. A pool that
+  // has PLAYED or is PLAYING still withholds Move, because 0064 refuses it: the UI now draws exactly what
+  // the server will accept, instead of drawing more than it will.
   const others = pools.filter((p) => String(p.id) !== pid);
-  const played = matches.some((m) => String(m.pool_id) === pid && m.status === 'final');
-  const drawn = matches.some((m) => String(m.pool_id) === pid);
-  const movable = others.length > 0 && !drawn;
+  const played = matches.some((m) => String(m.pool_id) === pid && (m.status === 'final' || m.status === 'live'));
+  const movable = others.length > 0 && !played;
   const rows = mine.length
     ? mine.map((tm) => {
       const tid = String(tm.id);
@@ -11940,6 +11964,9 @@ function mgPoolCardHTML(pool, teams, pools, matches) {
         + `<span class="pc-pl">Move <b>${escapeHTML(tm.name || 'Team')}</b> to &rarr;</span>`
         + others.map((p) => `<button type="button" class="pc-pbtn" data-pc-pick="${escapeHTMLText(tid + ':' + String(p.id))}">Pool ${escapeHTML(p.label || '')}</button>`).join('')
         + `<button type="button" class="pc-pcancel" data-pc-cancel>Cancel</button>`
+        // C101 Task 7: the picker says what the move will do to the schedule, because after the draw a move
+        // is a two-pool regeneration and not a pool_id write.
+        + `<span class="pc-pnote">Finished games stay where they were played. The rest are rescheduled.</span>`
         + `</div>`;
     }).join('')
     : `<div class="mgps-note">No teams in this pool.</div>`;
@@ -11947,8 +11974,8 @@ function mgPoolCardHTML(pool, teams, pools, matches) {
   // leaving the panel note above two cards as the only explanation. Gated on `played`, NOT on `!movable` —
   // a one-pool event also has no Move, and telling that organizer "play has started" when nothing has been
   // scored would be copy the app cannot honour.
-  const lock = played ? `<span class="pc-lock">Play has started, teams stay put.</span>`
-    : (drawn ? `<span class="pc-lock">The schedule is drawn, teams stay put.</span>` : '');
+  // The schedule-is-drawn line retires with the gate that drew it (C101 Task 7).
+  const lock = played ? `<span class="pc-lock">Play has started, teams stay put.</span>` : '';
   return `<div class="pc-card" data-pc-card="${escapeHTMLText(pid)}">`
     + `<div class="pc-hd"><span class="pc-name">Pool ${escapeHTML(label)}</span>${head}${lock}</div>`
     + rows + `</div>`;
@@ -11969,7 +11996,7 @@ function mgPoolsControlsHTML(t, teams, pools, matches) {
   }
   return `<div class="pl-sect">Pool controls</div>`
     + `<div class="pc-top">`
-      + `<p class="pc-note">Move a team to another pool before Start pool play, change the nets a pool plays on, or start the draw over.</p>`
+      + `<p class="pc-note">Move a team to another pool, change the nets a pool plays on, or start the draw over.</p>`
       + `<button type="button" class="pc-done" data-mgps-controls>Done</button></div>`
     + pools.map((p) => mgPoolCardHTML(p, teams, pools, matches)).join('')
     + `<div class="pl-sect mgv-dsect" aria-hidden="true"></div>`

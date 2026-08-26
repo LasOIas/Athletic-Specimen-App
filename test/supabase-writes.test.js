@@ -31,6 +31,7 @@ const MUTATING_RPCS = [
   'generate_bracket_atomic', 'clear_bracket_atomic', 'start_new_session',
   'set_team_paid',            // C101 Task 3, migration 0060
   'clear_whole_bracket',      // C101 Task 6, migration 0063
+  'move_team_to_pool',        // C101 Task 7, migration 0064
   // log_copilot_action intentionally omitted: best-effort audit log. (Its em dash is fixed here as a
   // free rider, since this array is the line being edited and the round's copy law bans the character.)
 ];
