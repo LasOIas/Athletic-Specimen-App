@@ -1864,6 +1864,35 @@ describe('buildMgLogHTML — the day-grouped activity log (pick R6, mockup m-b)'
     expect(html).toContain('Loading the activity log');
   });
 
+  // C101 Task 4 / migration 0061: read_action_log now returns action_log.prose when the writer left one and
+  // falls back to `action · detail` for every pre-C101 row, so ONE list carries both shapes. buildMgLogHTML
+  // is unchanged and stays unchanged: it prints `summary` verbatim and escaped, which is the whole reason
+  // the prose is written at WRITE time rather than shaped here.
+  it('renders a prose row and a legacy action · detail row in the same list', () => {
+    setAdminsState();
+    const log = [
+      { at: iso(0, 21, 12), actor: 'Mikey', summary: 'marked Sand Sharks paid' },       // prose (post-0061)
+      { at: iso(0, 20, 44), actor: 'Mikey', summary: 'drew 2 pools for August 2026' },  // prose (post-0061)
+      { at: iso(1, 19, 2), actor: 'anon', summary: 'submit_score · 21-19 win:a' },      // legacy (pre-C101)
+    ];
+    const html = bridge.buildAdmins({ view: 'log', log });
+    expect(html).toContain('<b>Mikey</b> marked Sand Sharks paid');
+    expect(html).toContain('<b>Mikey</b> drew 2 pools for August 2026');
+    expect(html).toContain('<b>anon</b> submit_score · 21-19 win:a');
+    expect(html.indexOf('marked Sand Sharks paid')).toBeLessThan(html.indexOf('submit_score'));
+    expect(html).not.toContain('—');   // copy law: no em dashes
+  });
+
+  it('a summary carrying markup is escaped, prose or not', () => {
+    setAdminsState();
+    const html = bridge.buildAdmins({ view: 'log', log: [
+      { at: iso(0, 12, 0), actor: 'Mikey', summary: 'made <b>x@y.z</b> an organizer' },
+    ] });
+    expect(html).not.toContain('<b>x@y.z</b>');
+    expect(html).toContain('&lt;b&gt;');
+    expect(html).toContain('<b>Mikey</b> made');   // the ACTOR bold is the renderer's, not the summary's
+  });
+
   it('escapes actor + summary content (never injects markup)', () => {
     setAdminsState();
     const log = [{ at: iso(0, 12, 0), actor: '<b>x</b>', summary: '<script>alert(1)</script>' }];
