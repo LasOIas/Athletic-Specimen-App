@@ -11,7 +11,7 @@ const {
   computeStandings, computeSeeding, computeChampion, summarizeTeamFairness,
   generateBalancedGroups, playerIdentityKey, disambiguatePlayersByName,
   countSharedTeammatePairs, pickMostDifferentTeams,
-  groupRosterPlayersBySection, isValidFullName, buildCopilotContext,
+  isValidFullName, buildCopilotContext,
   resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
   resolveTournamentMatch, publicHubStatus,
   scoringRulesFor, gameScoreStatus,
@@ -387,6 +387,9 @@ describe('generateBalancedGroups re-roll (C31 #1 — varied but fair)', () => {
 
 // C36 T1 — kiosk "tap your name" search. Pure: name-substring filter (case-insensitive),
 // drops __as_* sentinels, prefix-matches sort first, max 12, NO skill in the result shape.
+// Groups round (2026-08-29): the row shape lost its `group` key. The INPUT fixtures below keep theirs on
+// purpose: they stand in for raw Supabase rows, and they are what makes the exact-shape assertion below
+// go red if the key is ever put back.
 describe('disambiguatePlayersByName (C36 T1 kiosk search)', () => {
   const players = [
     { id: '1', name: 'Anna Reed', group: 'Mon', skill: 9, checked_in: false },
@@ -423,12 +426,14 @@ describe('disambiguatePlayersByName (C36 T1 kiosk search)', () => {
     expect(out[0].id).toBe('1');
   });
 
-  it('returns the no-skill shape {id,name,group,initials,checkedIn} and never leaks skill', () => {
+  it('returns the no-skill shape {id,name,initials,checkedIn} and never leaks skill', () => {
     const out = disambiguatePlayersByName(players, 'adam');
     expect(out.length).toBe(1);
     const row = out[0];
-    expect(row).toEqual({ id: '2', name: 'Adam Cole', group: 'Wed', initials: 'AC', checkedIn: true });
+    // Adam Cole's fixture carries group: 'Wed'; the row must drop it (groups round, 2026-08-29).
+    expect(row).toEqual({ id: '2', name: 'Adam Cole', initials: 'AC', checkedIn: true });
     expect('skill' in row).toBe(false);
+    expect('group' in row).toBe(false);
   });
 
   it('caps results at 12', () => {
@@ -437,64 +442,24 @@ describe('disambiguatePlayersByName (C36 T1 kiosk search)', () => {
   });
 });
 
-// C48.5 — grouped collapsible roster sections (admin Players "Option C").
-describe('groupRosterPlayersBySection', () => {
-  // resolver mirrors app.js getPlayerGroups: primary first, then extra memberships
-  const groupsOf = (p) => {
-    const primary = String(p.group || '').trim();
-    const extra = (p.groups || []).map((g) => String(g || '').trim()).filter(Boolean);
-    if (!primary) return extra;
-    return [primary, ...extra.filter((g) => g !== primary)];
-  };
-
-  it('groups players under their group and pins "Ungrouped" last', () => {
-    const players = [
-      { id: '1', name: 'Ana', group: 'Wed' },
-      { id: '2', name: 'Bo', group: 'Mon' },
-      { id: '3', name: 'Cy', group: '' },        // ungrouped
-      { id: '4', name: 'Di', group: 'Wed' },
-    ];
-    const out = groupRosterPlayersBySection(players, groupsOf);
-    expect(out.map((s) => s.name)).toEqual(['Mon', 'Wed', 'Ungrouped']); // alpha, Ungrouped last
-    expect(out[out.length - 1].isUngrouped).toBe(true);
-    expect(out.find((s) => s.name === 'Wed').players.map((p) => p.id)).toEqual(['1', '4']);
-  });
-
-  it('uses a lowercased key for the section and __ungrouped__ for the no-group bucket', () => {
-    const out = groupRosterPlayersBySection(
-      [{ id: '1', name: 'Ana', group: 'Wed Night' }, { id: '2', name: 'Bo', group: '' }],
-      groupsOf
-    );
-    expect(out.find((s) => s.name === 'Wed Night').key).toBe('wed night');
-    expect(out.find((s) => s.isUngrouped).key).toBe('__ungrouped__');
-  });
-
-  it('places a multi-group player in EVERY group they belong to', () => {
-    const players = [{ id: '1', name: 'Ana', group: 'Wed', groups: ['Wed', 'Mon'] }];
-    const out = groupRosterPlayersBySection(players, groupsOf);
-    expect(out.map((s) => s.name).sort()).toEqual(['Mon', 'Wed']);
-    expect(out.every((s) => s.players.length === 1)).toBe(true);
-  });
-
-  it('never emits an empty section and tolerates empty input', () => {
-    expect(groupRosterPlayersBySection([], groupsOf)).toEqual([]);
-    const out = groupRosterPlayersBySection([{ id: '1', name: 'Ana', group: 'Wed' }], groupsOf);
-    expect(out.every((s) => s.players.length > 0)).toBe(true);
-  });
-
-  it('preserves the incoming player order within a section (A-Z strip relies on it)', () => {
-    const players = [
-      { id: '1', name: 'Aaron', group: 'Wed' },
-      { id: '2', name: 'Bella', group: 'Wed' },
-      { id: '3', name: 'Cara', group: 'Wed' },
-    ];
-    const out = groupRosterPlayersBySection(players, groupsOf);
-    expect(out[0].players.map((p) => p.name)).toEqual(['Aaron', 'Bella', 'Cara']);
+// Inverted in the groups round (2026-08-29, Task 10). groupRosterPlayersBySection sectioned an already
+// sorted admin roster by group name and pinned an "Ungrouped" bucket last; Mike removed groups from the
+// product, its last caller left with Surface G, and the helper went with it. Its five behavior cases are
+// replaced by the one trip-wire that still says something true: the export table does not carry it, so no
+// surface can quietly section a roster by group again.
+describe('groupRosterPlayersBySection (removed with groups, 2026-08-29)', () => {
+  it('is not exported by pure.js at all', () => {
+    expect(pure.groupRosterPlayersBySection).toBeUndefined();
+    expect(Object.keys(pure)).not.toContain('groupRosterPlayersBySection');
   });
 });
 
 describe('buildCopilotContext (C28 — co-pilot read context)', () => {
-  it('attendance: counts checked-in players, groups them, excludes not-checked-in', () => {
+  // Inverted in the groups round (2026-08-29, fix round 1): the attendance snapshot carried a byGroup
+  // bucket and a per-attendee group key, both of which would have dead-ended into a permanent
+  // { Ungrouped: N } once the column drops. The fixtures below KEEP their group values, so a re-added
+  // dimension turns the whole-object toEqual and the JSON scan red.
+  it('attendance: counts checked-in players, excludes not-checked-in, and carries no group dimension', () => {
     const ctx = buildCopilotContext({
       players: [
         { name: 'Mikey Olas', group: 'KC Volleyball', checked_in: true, skill: 9 },
@@ -503,13 +468,13 @@ describe('buildCopilotContext (C28 — co-pilot read context)', () => {
         { name: 'Jaakan Mullet', group: 'KC Volleyball', checked_in: false, skill: 8 },
       ],
     });
-    expect(ctx.attendance.total).toBe(3);
-    expect(ctx.attendance.byGroup).toEqual({ 'KC Volleyball': 2, 'Ungrouped': 1 });
-    expect(ctx.attendance.here).toEqual([
-      { name: 'Mikey Olas', group: 'KC Volleyball' },
-      { name: 'Allie Hotz', group: 'KC Volleyball' },
-      { name: 'Rich Wells', group: '' },
-    ]);
+    expect(ctx.attendance).toEqual({
+      total: 3,
+      here: [{ name: 'Mikey Olas' }, { name: 'Allie Hotz' }, { name: 'Rich Wells' }],
+    });
+    expect('byGroup' in ctx.attendance).toBe(false);
+    expect(JSON.stringify(ctx)).not.toContain('KC Volleyball');
+    expect(JSON.stringify(ctx)).not.toContain('Ungrouped');
   });
 
   it('REDACTION: no skill key and no skill value leaks (players + generatedTeams)', () => {
@@ -557,7 +522,7 @@ describe('buildCopilotContext (C28 — co-pilot read context)', () => {
 
   it('empty: nothing going on -> nulls + zero attendance', () => {
     expect(buildCopilotContext({})).toEqual({
-      attendance: { total: 0, byGroup: {}, here: [] },
+      attendance: { total: 0, here: [] },   // no byGroup since the 2026-08-29 groups round
       casualCourts: null,
       tournament: null,
     });
@@ -571,14 +536,17 @@ describe('C28 Slice 2 — co-pilot acting pure helpers', () => {
     { id: 'p3', name: 'Jet', group: 'AS', checked_in: true, skill: 5 },
   ];
 
-  it('resolvePlayerByName: exact full-name match wins, no skill leaks', () => {
+  // Inverted in the groups round (2026-08-29): the resolved shape lost its `group` key with the kiosk row
+  // shape it is built from. The fixtures above keep their group values, so a re-added key goes red here.
+  it('resolvePlayerByName: exact full-name match wins, no skill and no group leaks', () => {
     const r = resolvePlayerByName(players, 'mikey olas');
-    expect(r).toEqual({ ok: true, player: { id: 'p1', name: 'Mikey Olas', group: 'KC' } });
+    expect(r).toEqual({ ok: true, player: { id: 'p1', name: 'Mikey Olas' } });
     expect(JSON.stringify(r)).not.toContain('9');
     expect(JSON.stringify(r)).not.toContain('skill');
+    expect(JSON.stringify(r)).not.toContain('KC');
   });
   it('resolvePlayerByName: single substring match resolves', () => {
-    expect(resolvePlayerByName(players, 'jet')).toEqual({ ok: true, player: { id: 'p3', name: 'Jet', group: 'AS' } });
+    expect(resolvePlayerByName(players, 'jet')).toEqual({ ok: true, player: { id: 'p3', name: 'Jet' } });
   });
   it('resolvePlayerByName: ambiguous -> reason + match names', () => {
     const r = resolvePlayerByName(players, 'mike');
@@ -586,7 +554,7 @@ describe('C28 Slice 2 — co-pilot acting pure helpers', () => {
     expect(r.reason).toBe('ambiguous');
     expect(r.matches).toHaveLength(2);
     expect(r.matches.map((m) => m.name).sort()).toEqual(['Mike Stevens', 'Mikey Olas']);
-    expect(r.matches.every((m) => m.group === 'KC')).toBe(true);
+    expect(r.matches.every((m) => !('group' in m))).toBe(true);
   });
   it('resolvePlayerByName: no match -> none', () => {
     expect(resolvePlayerByName(players, 'zzz')).toEqual({ ok: false, reason: 'none', matches: [] });

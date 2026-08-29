@@ -13,19 +13,21 @@
 // it survives partialRender so a background sync repaints the current Manage surface, never a full render().
 let manageView = 'lead';  // 'lead' = the needs-you lead; 'pickup'/'pickup-form' (Task 2); 'players' (Task 3); else an area id (placeholder)
 // Manage -> Check-in (2026-07-19 spec): chip filter, live search text, last toggle for UNDO.
-// mgckLast survives background container repaints (module scope); all three reset on page entry.
+// mgckLast survives background container repaints (module scope); all FOUR of these (the card's own
+// message below included) reset on page entry, at app.js's data-mg-area handler.
 let mgckFilter = 'all';
 let mgckQ = '';
 let mgckLast = null; // { key, name, dir: 'in'|'out' }
+// Round 2026-08-29: the card's own one-shot message ("{name} updated" / "{name} added"), which carries NO
+// UNDO. A card save writes a name, a rating and possibly an attendance flip, and one button cannot undo
+// three things. mgckLast stays exactly what it was: the last ROW TAP, which UNDO can and does reverse.
+let mgckNotice = null;
 let pickupEditId = null;  // Task 2: the pickup_days row id being edited in 'pickup-form' (null = adding a new day)
 // Task 3 (Players directory, pick R4): the live-search value + Select(bulk) state. All survive the container-
 // swap repaint AND guard the poll-clobber (a background sync must never wipe a half-typed query or a selection).
 let mgPlayerQuery = '';         // the current #mg-player-search value
 let mgSelectMode = false;       // bulk Select mode on/off
 let mgSelected = new Set();     // selected player identity keys (playerIdentityKey) while in Select mode
-let mgGroupsOpen = false;       // the inline group manager (toggled from the meta group count)
-let mgMoveOpen = false;         // the Move-to-group chip row (toggled from the bar's "Move to group")
-let mgRenameGroup = null;       // the group name being inline-renamed in the group manager (null = none)
 // Task 4 (Teams page, pick R5 trimmed): the selected team-SIZE chip (4s default). Survives the
 // container-swap repaint (a background sync must not reset a chosen size).
 let mgtSize = 4;                // the active size chip (2/3/4/6); 4s default per the mockup
@@ -946,9 +948,11 @@ async function removePickupDay(id) {
 
 // ── Task 3: Players directory (session-10 pick R4-B) — one A–Z directory ─────────────────────────────
 // Mockup r10-manage/l-b. Reuses the manage-area chrome (pd-pagehdr/pd-back/pd-htitle) + MG_CHEV; the mgp-*
-// kit carries the search box, meta line, A–Z rows, IN tag, admin-only skill, Select(bulk) bar + group
-// manager. Tap a row → the EXISTING openPlayerEditPopup (body-level modal, poll-clobber-immune). Skill is
-// ADMIN-ONLY data (never on a public surface). NO initials bubbles anywhere.
+// kit carries the search box, meta line, A–Z rows, IN tag, admin-only skill and the Select(bulk) bar. The
+// inline group manager that used to hang off the meta left on 2026-08-29 with groups themselves (Mike:
+// DELETE GROUPS EVERYWHERE). Tap a row → the EXISTING openPlayerEditPopup (body-level modal,
+// poll-clobber-immune). Skill is ADMIN-ONLY data (never on a public surface). NO initials bubbles
+// anywhere.
 const MGP_SEARCH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>';
 const MGP_CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 
@@ -991,8 +995,6 @@ function buildMgpListHTML() {
     const letter = /[A-Z]/.test(first) ? first : '#';
     const anchor = letter !== lastLetter ? letter : '';
     lastLetter = letter;
-    const grp = getPlayerPrimaryGroup(p);
-    const gpHTML = grp ? `<span class="mgp-gp">${escapeHTML(grp)}</span>` : '';
     const inHTML = inSet.has(key) ? `<span class="mgp-in">IN</span>` : '';
     const skPos = Number(p.skill) > 0;
     const skHTML = `<span class="mgp-sk${skPos ? '' : ' n'}">${mgpSkillText(p.skill)}</span>`;
@@ -1001,38 +1003,16 @@ function buildMgpListHTML() {
     const nameHTML = qLower ? highlightMatch(nm, q) : escapeHTML(nm);
     return `<a class="mgp-row${on}" data-mgp-id="${escapeHTMLText(key)}">`
       + `${cb}<span class="mgp-al">${anchor}</span>`
-      + `<span class="mgp-pn">${nameHTML}${gpHTML}</span>`
+      + `<span class="mgp-pn">${nameHTML}</span>`
       + `${inHTML}${skHTML}</a>`;
   }).join('');
 }
 
-// The inline group manager (flat, under the meta) — opened from the meta group count. Reuses the group
-// catalog helpers (ensure/rename/delete). Rename toggles a per-row inline input via mgRenameGroup.
-function buildMgpGroupsHTML() {
-  const groups = getAvailableGroups();
-  const rows = groups.length
-    ? groups.map((g) => {
-        if (mgRenameGroup && normalizeGroupKey(mgRenameGroup) === normalizeGroupKey(g)) {
-          return `<div class="mgp-grow"><input class="mgp-grn" id="mgp-grename-input" type="text" value="${escapeHTMLText(g)}" autocomplete="off" />`
-            + `<button type="button" class="mgp-gact" data-mgp-grename-save="${escapeHTMLText(g)}">Save</button>`
-            + `<button type="button" class="mgp-gact" data-mgp-grename-cancel>Cancel</button></div>`;
-        }
-        return `<div class="mgp-grow"><span class="mgp-gname">${escapeHTML(g)}</span>`
-          + `<button type="button" class="mgp-gact" data-mgp-grename="${escapeHTMLText(g)}">Rename</button>`
-          + `<button type="button" class="mgp-gact del" data-mgp-gdelete="${escapeHTMLText(g)}">Delete</button></div>`;
-      }).join('')
-    : `<div class="mgp-gempty">No groups yet.</div>`;
-  return `<div class="mgp-grp"><div class="mgp-glabel">Groups</div>${rows}`
-    + `<div class="mgp-gadd"><input id="mgp-gadd-input" type="text" placeholder="New group name" autocomplete="off" />`
-    + `<button type="button" data-mgp-gadd>Add</button></div></div>`;
-}
-
-// The Players directory view (mockup l-b): header + Select toggle, search box, meta line, optional group
-// manager, the A–Z list, and (in Select mode) the bottom action bar.
+// The Players directory view (mockup l-b): header + Select toggle, search box, a two-count meta line, the
+// A–Z list, and (in Select mode) the bottom action bar.
 function buildManagePlayersHTML() {
   const roster = (state.players || []).length;
   const inNow = (state.checkedIn || []).length;
-  const groupCount = getAvailableGroups().length;
 
   const header = `<div class="pd-pagehdr">`
     + `<button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>`
@@ -1047,29 +1027,22 @@ function buildManagePlayersHTML() {
   const meta = `<div class="mgp-meta">`
     + `<span class="mgp-m"><b>${roster}</b> ${roster === 1 ? 'player' : 'players'}</span>`
     + `<span class="mgp-m"><b>${inNow}</b> checked in</span>`
-    + `<button type="button" class="mgp-m mgp-mg${mgGroupsOpen ? ' on' : ''}" data-mgp-groups><b>${groupCount}</b> ${groupCount === 1 ? 'group' : 'groups'}</button>`
     + `</div>`;
 
-  const groupsSection = mgGroupsOpen ? buildMgpGroupsHTML() : '';
   const listSection = `<div id="mgp-list">${buildMgpListHTML()}</div>`;
 
-  // Select-mode bottom bar (fixed above the nav). "Move to group" reveals a chip row of destination groups.
+  // Select-mode bottom bar (fixed above the nav). Three actions since the 2026-08-29 groups round: the
+  // fourth was "Move to group", which left with the chip row it opened.
   let bar = '';
   if (mgSelectMode) {
-    const moveChips = mgMoveOpen
-      ? (getAvailableGroups().length
-          ? `<div class="mgp-movebar">${getAvailableGroups().map((g) => `<button type="button" class="mgp-movechip" data-mgp-movegrp="${escapeHTMLText(g)}">${escapeHTML(g)}</button>`).join('')}</div>`
-          : `<div class="mgp-movebar mgp-movehint">Add a group first (tap the group count above)</div>`)
-      : '';
-    bar = moveChips + `<div class="mgp-bar">`
+    bar = `<div class="mgp-bar">`
       + `<button type="button" class="pri" data-mgp-bulk="in">Check in</button>`
       + `<button type="button" data-mgp-bulk="out">Check out</button>`
-      + `<button type="button" data-mgp-bulk="move">Move to group</button>`
       + `<button type="button" class="mut" data-mgp-bulk="cancel">Cancel</button>`
       + `</div>`;
   }
 
-  return header + search + meta + groupsSection + listSection + bar;
+  return header + search + meta + listSection + bar;
 }
 
 // Manage -> Check-in (2026-07-19 spec, Mike-approved d73f26e): tap a name to toggle attendance,
@@ -1083,7 +1056,6 @@ function mgckRows() {
     id: p.id,
     name: p.name,
     skill: p.skill,
-    group: getPlayerPrimaryGroup(p), // mirrors buildMgpListHTML's grp derivation (:7324) so the two Manage lists read identically
     checkedIn: inSet.has(playerIdentityKey(p)),
   }));
 }
@@ -1094,6 +1066,9 @@ function mgckMetaHTML(model) {
 }
 
 function mgckStripHTML() {
+  // The card's message wins while it is set and carries no UNDO. A row tap clears it (mgckToggleByKey),
+  // and the UNDO strip comes straight back.
+  if (mgckNotice) return `<span class="mgck-st">${escapeHTML(mgckNotice)}</span>`;
   if (!mgckLast) return '';
   const verb = mgckLast.dir === 'in' ? 'checked in' : 'checked out';
   return `<span class="mgck-st">${escapeHTML(mgckLast.name)} ${verb}</span>`
@@ -1106,12 +1081,33 @@ function mgckListHTML(model) {
     return '<div class="mgck-empty">No players on the roster yet.</div>';
   }
   const row = (r) => {
-    const gp = r.group ? `<span class="ckx-gp">${escapeHTML(r.group)}</span>` : '';
     const tag = r.checkedIn ? 'IN' : 'CHECK IN';
     const n = Number(r && r.skill);
     const skPos = Number.isFinite(n) && n > 0;
+    // Round 2026-08-29: the pencil sits between the name and the rating and opens the app's own player
+    // card over the list. It carries the identity key so the delegate and the focus-return never have to
+    // walk the DOM.
+    //
+    // KNOWN LIMITATION, ledgered rather than solved (review round 1). A span is used because the row is a
+    // <button> and a nested button is invalid HTML (README:120-123), but the span does NOT settle the
+    // question, it only avoids the parse error:
+    //   - button's content model forbids a descendant with tabindex just as it forbids a nested button,
+    //     so tabindex="0" in here is non-conforming too. Nothing breaks in the parser.
+    //   - role="button" is "children presentational", so a screen reader flattens everything inside
+    //     .ckx-row: the pencil is not reachable as its own control and its aria-label folds into the ROW
+    //     button's accessible name ("Blake Harmon Edit Blake Harmon 6.0 CHECK IN").
+    // Sighted keyboard reach is unaffected: tabindex is honoured inside a button, Tab lands on the pencil,
+    // and a span has no activation behaviour so Enter/Space fire only the delegate in app.js, once.
+    // The real fix is the handoff's own (README:120-122): make the row a container with two SIBLING
+    // buttons, the row body and the edit, keeping the 34x34 hit box. That is a row-shape change across
+    // every .ckx-row surface, so it belongs to the Manage CSS/row round, not to this string builder.
+    const pencil = `<span class="mgck-edit" role="button" tabindex="0" data-mgck-edit="${escapeHTMLText(r.key)}"`
+      + ` aria-label="Edit ${escapeHTMLText(r.name)}">`
+      + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+      + `<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span>`;
     return `<button class="ckx-row${r.checkedIn ? ' is-in' : ''}" type="button" data-mgck-id="${escapeHTMLText(r.key)}">`
-      + `<span class="ckx-nm">${highlightMatch(r.name, mgckQ)}${gp}</span>`
+      + `<span class="ckx-nm">${highlightMatch(r.name, mgckQ)}</span>`
+      + pencil
       + `<span class="mgck-sk${skPos ? '' : ' n'}">${mgpSkillText(r.skill)}</span>`
       + `<span class="ckx-go">${tag}</span></button>`;
   };
@@ -1140,6 +1136,8 @@ function buildManageCheckinHTML() {
   return `<div class="pd-pagehdr">
       <button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>
       <div class="pd-htitle">Check-in</div>
+      <button type="button" class="mgck-add" data-mgck-new aria-label="Add a player to the roster">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add player</span></button>
     </div>
     <div class="mgck-meta" id="mgck-meta">${mgckMetaHTML(model)}</div>
     <div class="pl-tabs">${chip('all', 'All')}${chip('in', 'In')}${chip('out', 'Out')}</div>
@@ -1147,7 +1145,7 @@ function buildManageCheckinHTML() {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input id="mgck-search" type="text" placeholder="Search the roster" autocapitalize="words" autocomplete="off" spellcheck="false" aria-label="Search the roster" value="${escapeHTMLText(mgckQ)}" />
     </div>
-    <div class="mgck-strip" id="mgck-strip"${mgckLast ? '' : ' hidden'}>${mgckStripHTML()}</div>
+    <div class="mgck-strip" id="mgck-strip"${(mgckLast || mgckNotice) ? '' : ' hidden'}>${mgckStripHTML()}</div>
     <div id="mgck-list">${mgckListHTML(model)}</div>`;
 }
 
@@ -1163,7 +1161,7 @@ function mgckRepaint() {
   const metaEl = document.getElementById('mgck-meta');
   if (metaEl) metaEl.innerHTML = mgckMetaHTML(model);
   const stripEl = document.getElementById('mgck-strip');
-  if (stripEl) { stripEl.innerHTML = mgckStripHTML(); stripEl.hidden = !mgckLast; }
+  if (stripEl) { stripEl.innerHTML = mgckStripHTML(); stripEl.hidden = !(mgckLast || mgckNotice); }
   if (panel) panel.scrollTop = saved;
 }
 
@@ -1171,6 +1169,10 @@ function mgckRepaint() {
 function mgckToggleByKey(key, dir, opts) {
   const player = (state.players || []).find((p) => playerIdentityKey(p) === key);
   if (!player) return;
+  // BELOW the guard (fix round 1): a toggle against a key that is not on the roster returns without
+  // repainting, so wiping the message up there left the DOM and the module var out of step. A row tap that
+  // really happens is undoable, so the card's message steps aside and UNDO returns.
+  mgckNotice = null;
   if (dir === 'in') {
     if (checkInPlayer(player) && supabaseClient && player.id) {
       (async () => {
@@ -1208,6 +1210,20 @@ function mgckToggleRow(key) {
   mgckToggleByKey(key, inSet.has(key) ? 'out' : 'in');
 }
 
+// The card's write-back: set the message, drop the UNDO pointer, repaint the list in place, then flash the
+// row. The flash runs AFTER the repaint because mgckRepaint replaces #mgck-list's innerHTML and would
+// throw the class away. mPlay is the app's own helper at the app's own 440ms (app.js:5357,
+// styles.css:4693), and it is already suppressed under body.no-motion and prefers-reduced-motion.
+function mgckCardNotice(text, key) {
+  mgckNotice = String(text || '');
+  mgckLast = null;
+  mgckRepaint();
+  if (!key) return;
+  const sel = (typeof CSS !== 'undefined' && CSS && CSS.escape) ? CSS.escape(key) : String(key).replace(/"/g, '\\"');
+  const row = document.querySelector(`.ckx-row[data-mgck-id="${sel}"]`);
+  if (row) mPlay(row, 'm-flash', 440);
+}
+
 // Add-and-check-in: the kiosk Wave-1d atomic register path, admin voice. Mirrors app.js:10424-10503.
 async function mgckAddAndCheckIn(name) {
   const msg = (t) => { const el = document.getElementById('mgck-msg'); if (el) el.textContent = t; };
@@ -1217,7 +1233,7 @@ async function mgckAddAndCheckIn(name) {
   if (!isValidFullName(trimmed)) { msg('Enter a first and last name'); return; }
   const exists = state.players.find((p) => normalize(p.name) === normalize(trimmed));
   if (exists) { mgckToggleByKey(playerIdentityKey(exists), 'in'); return; }
-  const inserted = { name: trimmed, skill: 0.0, group: CLUB_GROUP, groups: [CLUB_GROUP], pending: true };
+  const inserted = { name: trimmed, skill: 0.0, pending: true };
   state.players = [...state.players, inserted];
   checkInPlayer(inserted);
   mgckLast = { key: playerIdentityKey(inserted), name: trimmed, dir: 'in' };
@@ -1228,20 +1244,113 @@ async function mgckAddAndCheckIn(name) {
   mgckRepaint();
   if (supabaseClient) {
     try {
-      const { data, error } = await supabaseClient.rpc('register_player', { p_name: trimmed, p_group: CLUB_GROUP, p_checked_in: true });
+      const { data, error } = await supabaseClient.rpc('register_player', { p_name: trimmed, p_checked_in: true });
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
-      if (row && row.id) inserted.id = row.id;
+      if (row && row.id) {
+        // The identity key CHANGES the moment the id lands: local:<k> becomes id:<uuid> (pure.js:11-18).
+        // Two things were still pointing at the old one, and both are fixed here (2026-08-29), the same
+        // way mgckAddFromCard fixes them:
+        //   1. the checkedIn entry the optimistic check-in wrote. saveLocal drops any entry whose key no
+        //      longer matches a roster row (normalizeCheckedInEntries), so without the carry-across a
+        //      player added from the search miss reads OUT again on the very next repaint.
+        //   2. the UNDO pointer. mgckLast was stamped with the local key before the insert returned, so
+        //      mgckToggleByKey found no row and UNDO was a button that did nothing. It is re-pointed
+        //      only when it still holds the key this add wrote, so a tap in between keeps its own.
+        const wasKey = playerIdentityKey(inserted);
+        inserted.id = row.id;
+        const nowKey = playerIdentityKey(inserted);
+        if (nowKey !== wasKey) {
+          state.checkedIn = (state.checkedIn || []).map((k) => (k === wasKey ? nowKey : k));
+          if (mgckLast && mgckLast.key === wasKey) mgckLast = { ...mgckLast, key: nowKey };
+        }
+      }
       if (inserted.id) inserted.pending = false;
       queueSupabaseRefresh();
     } catch (err) {
       console.error('mgck register error', err);
       inserted.pending = true;
-      outboxEnqueue({ key: 'reg:' + normalize(trimmed) + ':' + CLUB_GROUP, kind: 'register', payload: { name: trimmed, group: CLUB_GROUP, checked_in: true }, ts: Date.now() });
+      outboxEnqueue({ key: 'reg:' + normalize(trimmed), kind: 'register', payload: { name: trimmed, checked_in: true }, ts: Date.now() });
     }
     saveLocal();
     mgckRepaint();
   }
+}
+
+// The header card's add. Mike (2026-08-29) kept BOTH doors: mgckAddAndCheckIn is the in-list search miss
+// and always checks in; this one honours the card's own status toggle and defaults OUT. register_player
+// inserts with skill 0 (db/migrations/0068_normalize_player_groups.sql:125), so a rated new player needs a
+// second write once the insert returns an id. The row lands under the right section head for free, because
+// mgckRepaint rebuilds the list from checkinConsoleModel, which sections by checkedIn (pure.js:1582-1589).
+async function mgckAddFromCard(name, skill, wantIn) {
+  const trimmed = String(name || '').trim();
+  // The three gates below already ran in the save branch, WHILE THE CARD WAS STILL OPEN, because a refusal
+  // has to land somewhere the organiser can read it. They are repeated here so the function is safe to
+  // call from anywhere, and so a later caller cannot skip the app's standing rules.
+  if (!trimmed || !state.loaded || !isValidFullName(trimmed)) return;
+  if ((state.players || []).some((p) => normalize(p.name) === normalize(trimmed))) return;
+  const n = Number(skill);
+  const sk = (Number.isFinite(n) && n > 0) ? Math.max(0, Math.min(10, Math.round(n * 10) / 10)) : 0;
+  const inserted = { name: trimmed, skill: sk, pending: true };
+  state.players = [...(state.players || []), inserted];
+  if (wantIn) checkInPlayer(inserted);
+  saveLocal();
+  mgckCardNotice(trimmed + ' added' + (wantIn ? ' · checked in' : ''), playerIdentityKey(inserted));
+  // Fix round 1 (M5): persist the settled flag. Without the saveLocal the row is written to storage as
+  // pending: true and never corrected, because the trailing saveLocal is below this return.
+  if (!supabaseClient) { inserted.pending = false; saveLocal(); return; }
+  try {
+    // TWO keys, no group argument - the same two every register caller sends since the groups removal
+    // (2026-08-29). Safe ONLY against a database where 0068 has already been applied. The pre-0068
+    // function dedups on (lower(btrim(name)), coalesce("group",'')), so dropping the group key there
+    // would miss every grouped player and insert a SECOND row that the unique index does not block. 0068
+    // ships before any client push (spec:944, :1343). The signature keeps the group parameter with a
+    // default in both versions, so this call always binds - the ordering is about the DEDUP, not arity.
+    const { data, error } = await supabaseClient.rpc('register_player', { p_name: trimmed, p_checked_in: !!wantIn });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    if (row && row.id) {
+      // The identity key CHANGES the moment the id lands: local:<k> becomes id:<uuid> (pure.js:11-18).
+      // saveLocal drops any checkedIn entry whose key no longer matches a roster row
+      // (normalizeCheckedInEntries, app.js:1521), so the entry is carried across here. Without this a
+      // player added checked-in reads OUT again on the very next repaint, until a refresh heals it from
+      // the server - and never, if the device is offline.
+      const wasKey = playerIdentityKey(inserted);
+      // Fix round 1 (I1): register_player NEVER errors on a name that is already taken - it selects the
+      // existing row and returns it (0068_normalize_player_groups.sql:118-124), so an insert and a match
+      // look identical from here. Taking a matched id as our own would run the card's rating over a real
+      // player's while the strip said "added". Roll the optimistic row back and say what happened.
+      // 0069 closes the residual the local guess could not: `is_new` is true ONLY on the insert path, so
+      // an add from a roster this device has not synced yet - which returns an id we have never seen and
+      // reads as an insert to the guess below - is now named for what it is. The server's answer WINS
+      // whenever it is present; the local-id clash stays as the fallback for a first run against a server
+      // still on the three-argument function, which returns no such key.
+      const clash = (state.players || []).some((p) => p !== inserted && String(p.id) === String(row.id));
+      const alreadyHere = (typeof row.is_new === 'boolean') ? (row.is_new === false) : clash;
+      if (alreadyHere) {
+        state.players = (state.players || []).filter((p) => p !== inserted);
+        state.checkedIn = (state.checkedIn || []).filter((k) => k !== wasKey);
+        saveLocal();
+        mgckCardNotice(trimmed + ' is already on the roster', 'id:' + row.id);
+        return;
+      }
+      inserted.id = row.id;
+      const nowKey = playerIdentityKey(inserted);
+      if (nowKey !== wasKey) state.checkedIn = (state.checkedIn || []).map((k) => (k === wasKey ? nowKey : k));
+    }
+    if (inserted.id) {
+      inserted.pending = false;
+      if (sk > 0) await updatePlayerFieldsSupabase(inserted.id, { skill: sk });
+    }
+    queueSupabaseRefresh();
+  } catch (err) {
+    console.error('mgck card register error', err);
+    inserted.pending = true;
+    outboxEnqueue({ key: 'reg:' + normalize(trimmed), kind: 'register',
+                    payload: { name: trimmed, checked_in: !!wantIn, skill: sk }, ts: Date.now() });
+  }
+  saveLocal();
+  mgckRepaint();
 }
 
 // Bulk check-in / check-out over the Select-mode selection. Optimistic locally, then the per-id
@@ -1265,7 +1374,7 @@ async function mgpBulkAttendance(shouldCheckIn) {
     if (p.id) remoteIds.push(p.id);
   });
   saveLocal();
-  mgSelectMode = false; mgSelected = new Set(); mgMoveOpen = false;
+  mgSelectMode = false; mgSelected = new Set();
   repaintManage();
   if (supabaseClient && remoteIds.length) {
     try {
@@ -1281,59 +1390,23 @@ async function mgpBulkAttendance(shouldCheckIn) {
   }
 }
 
-// Bulk move the selection into a group (adds membership + promotes to primary), reusing
-// updatePlayerFieldsSupabase per row + ensureGroupCatalogEntriesSupabase for the catalog.
-async function mgpBulkGroup(dest) {
-  const name = normalizeGroupName(dest);
-  const targets = mgSelectedPlayers();
-  if (!name || !targets.length) return;
-  const idSet = new Set(targets.map((p) => playerIdentityKey(p)));
-  const remoteUpdates = [];
-  state.players = (state.players || []).map((p) => {
-    if (!idSet.has(playerIdentityKey(p))) return p;
-    const cur = getPlayerGroups(p);
-    const next = normalizeGroupList([name, ...cur.filter((g) => g !== name)]);
-    const primary = next[0] || '';
-    const np = { ...p, group: primary, groups: next };
-    if (np.id) remoteUpdates.push({ id: np.id, group: primary, groups: next });
-    return np;
-  });
-  if (!(state.groups || []).includes(name)) state.groups = Array.from(new Set([...(state.groups || []), name]));
-  saveLocal();
-  mgSelectMode = false; mgSelected = new Set(); mgMoveOpen = false;
-  repaintManage();
-  if (supabaseClient) {
-    let failed = false;
-    try {
-      await ensureGroupCatalogEntriesSupabase([name]);
-      for (const u of remoteUpdates) {
-        const ok = await updatePlayerFieldsSupabase(u.id, { group: u.group, groups: u.groups });
-        if (!ok) failed = true;
-      }
-      const synced = await syncFromSupabase();
-      if (!synced) failed = true;
-    } catch (err) { failed = true; console.error('mgp bulk group error', err); }
-    if (failed) await reconcileToSupabaseAuthority('mgp-bulk-group');
-  }
-}
-
 // Add a brand-new player from the search-miss dashed row: a first+last name is required (mix-up prevention),
 // duplicates are ignored, then the row is inserted (optimistic + Supabase) and the edit sheet opens to set
-// skill/group. Mirrors the admin add insert (name + skill 0 + group).
+// skill. Mirrors the admin add insert (name + skill 0).
 async function mgpAddPlayer(rawName) {
   const name = String(rawName || '').trim();
   if (!name) return;
   if (!isValidFullName(name)) { appNotice({ title: 'Add a player', message: 'Enter a first and last name.' }); return; }
   const existing = (state.players || []).find((p) => normalize(p.name) === normalize(name));
   if (existing) { mgPlayerQuery = ''; repaintManage(); openPlayerEditPopup(playerIdentityKey(existing)); return; }
-  const inserted = { name, skill: 0, group: '', groups: [], pending: true };
+  const inserted = { name, skill: 0, pending: true };
   state.players = [...(state.players || []), inserted];
   saveLocal();
   mgPlayerQuery = '';
   repaintManage();
   if (supabaseClient) {
     try {
-      const insertRow = HAS_TAG ? { name, skill: 0, group: '', tag: '' } : { name, skill: 0, group: '' };
+      const insertRow = { name, skill: 0 };
       const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
       if (error) throw error;
       if (Array.isArray(data) && data[0]) { inserted.id = data[0].id; inserted.pending = false; }
@@ -1348,80 +1421,6 @@ async function mgpAddPlayer(rawName) {
   }
   const live = (state.players || []).find((p) => normalize(p.name) === normalize(name));
   if (live) openPlayerEditPopup(playerIdentityKey(live));
-}
-
-// Group manager writes (reuse the catalog helpers). Add reads the inline field; rename/delete operate on a
-// named group and also fix player memberships locally so the roster stays consistent before the sync.
-async function mgpAddGroup() {
-  const inp = document.getElementById('mgp-gadd-input');
-  const name = normalizeGroupName(inp ? inp.value : '');
-  if (!name) return;
-  if (!(state.groups || []).some((g) => normalizeGroupKey(g) === normalizeGroupKey(name))) {
-    state.groups = ['All', ...normalizeGroupList([...(state.groups || []).filter((g) => g && g !== 'All'), name])];
-  }
-  saveLocal();
-  if (inp) inp.value = '';
-  repaintManage();
-  if (supabaseClient) { try { await ensureGroupCatalogEntrySupabase(name); } catch (err) { console.error('mgp add group error', err); } }
-}
-
-async function mgpRenameGroupCommit(oldName) {
-  const inp = document.getElementById('mgp-grename-input');
-  const next = normalizeGroupName(inp ? inp.value : '');
-  const old = normalizeGroupName(oldName);
-  if (!old || !next) { mgRenameGroup = null; repaintManage(); return; }
-  const oldKey = normalizeGroupKey(old);
-  const nextKey = normalizeGroupKey(next);
-  state.groups = ['All', ...normalizeGroupList((state.groups || [])
-    .filter((g) => g && g !== 'All')
-    .map((g) => (normalizeGroupKey(g) === oldKey ? next : g)))];
-  state.players = (state.players || []).map((p) => {
-    const gs = getPlayerGroups(p);
-    if (!gs.some((g) => normalizeGroupKey(g) === oldKey)) return p;
-    const ng = normalizeGroupList(gs.map((g) => (normalizeGroupKey(g) === oldKey ? next : g)));
-    return { ...p, group: ng[0] || '', groups: ng };
-  });
-  saveLocal();
-  mgRenameGroup = null;
-  repaintManage();
-  if (supabaseClient && oldKey !== nextKey) {
-    try {
-      await renameGroupCatalogEntrySupabase(old, next);
-      const updates = (state.players || []).filter((p) => p.id).map((p) => ({ id: p.id, group: getPlayerPrimaryGroup(p), groups: getPlayerGroups(p) }));
-      for (const u of updates) await updatePlayerFieldsSupabase(u.id, { group: u.group, groups: u.groups });
-      await syncFromSupabase();
-    } catch (err) { console.error('mgp rename group error', err); await reconcileToSupabaseAuthority('mgp-rename-group'); }
-  }
-}
-
-async function mgpDeleteGroup(groupName) {
-  const name = normalizeGroupName(groupName);
-  if (!name) return;
-  const ok = await appConfirm({
-    title: `Delete group "${name}"?`,
-    message: 'It is removed from every player. This cannot be auto-undone.',
-    confirmText: 'Delete',
-    danger: true
-  });
-  if (!ok) return;
-  const key = normalizeGroupKey(name);
-  state.groups = ['All', ...normalizeGroupList((state.groups || []).filter((g) => g && g !== 'All' && normalizeGroupKey(g) !== key))];
-  state.players = (state.players || []).map((p) => {
-    const gs = getPlayerGroups(p);
-    if (!gs.some((g) => normalizeGroupKey(g) === key)) return p;
-    const ng = gs.filter((g) => normalizeGroupKey(g) !== key);
-    return { ...p, group: ng[0] || '', groups: ng };
-  });
-  saveLocal();
-  repaintManage();
-  if (supabaseClient) {
-    try {
-      await deleteGroupCatalogEntrySupabase(name);
-      const updates = (state.players || []).filter((p) => p.id).map((p) => ({ id: p.id, group: getPlayerPrimaryGroup(p), groups: getPlayerGroups(p) }));
-      for (const u of updates) await updatePlayerFieldsSupabase(u.id, { group: u.group, groups: u.groups });
-      await syncFromSupabase();
-    } catch (err) { console.error('mgp delete group error', err); await reconcileToSupabaseAuthority('mgp-delete-group'); }
-  }
 }
 
 // ── Task 4: Teams page (session-10 pick R5 TRIMMED) — chips + generate + stacked teams ───────────────

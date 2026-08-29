@@ -533,21 +533,6 @@ select:focus {
 .checkin-stat-num   { font-size: 1.6rem; font-weight: 700; line-height: 1; color: var(--brand); }
 .checkin-stat-label { font-size: .9rem; color: var(--text-3); font-weight: 500; }
 
-.checkin-group-breakdown { display: flex; flex-direction: column; gap: 4px; }
-.checkin-group-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 10px;
-  background: var(--surface);
-  border-radius: 6px;
-  border: 1px solid var(--accent-soft);
-  font-size: .85rem;
-}
-.checkin-group-name     { color: var(--text-2); font-weight: 500; }
-.checkin-group-fraction { font-weight: 600; color: var(--brand); }
-.checkin-group-sep      { color: var(--text-4); margin: 0 2px; }
-.checkin-stats-group-label { text-align: center; color: var(--text-3); font-size: .85rem; margin: 0; }
 
 /* ── Player Cards ── */
 
@@ -695,32 +680,8 @@ select:focus {
 /* legacy — .primary on checkin/checkout was removed but keep compat */
 .card-actions { display: none; }
 
-/* ── Player groups ── */
-.player-groups-inline {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  margin-top: 4px;
-}
-.player-group-badge {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: .72rem;
-  font-weight: 500;
-  background: var(--surface-3);
-  color: var(--text-2);
-  border: 1px solid var(--border);
-  white-space: nowrap;
-  vertical-align: middle;
-}
-.player-group-badge.is-primary {
-  background: var(--accent-soft);
-  color: var(--brand-dark);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-.player-group-none { color: var(--text-4); font-size: .75rem; }
+/* The player group badges stood here until 2026-08-29. Groups left the product and nothing in public/
+   emits any of those three classes any more, so the rules left with their markup. */
 
 /* ── Badges ── */
 .badge {
@@ -767,48 +728,8 @@ select:focus {
 @media (hover: hover) and (pointer: fine) { .btn-save-edit:hover { background: #15803d; } }
 .btn-cancel-edit      { height: 38px; padding: 0 12px; }
 
-/* ── Group select (in edit row) ── */
-.group-select { position: relative; display: inline-block; }
-.group-select .group-btn {
-  height: 38px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border-2);
-  background: var(--surface);
-  cursor: pointer;
-  color: var(--text);
-  font-size: 14px !important;
-}
-.group-select .group-list {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 60;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: 0 6px 18px rgba(0,0,0,.1);
-  border-radius: 8px;
-  display: none;
-  min-width: 160px;
-  padding: 4px;
-}
-.group-select.open .group-list { display: block; }
-.group-list .group-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 8px 10px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  border-radius: 4px;
-  color: var(--text);
-  font-size: 14px !important;
-  min-height: 0;
-}
-@media (hover: hover) and (pointer: fine) { .group-list .group-item:hover { background: var(--surface-3); } }
-
-.group-chips { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+/* The edit row's group picker (the button, the drop list, its items and the chip strip) stood here
+   until 2026-08-29. It went with the client group layer: nothing emits those nodes any more. */
 
 /* ── Admin player form ── */
 
@@ -891,30 +812,7 @@ select:focus {
   font-size: 15px;
   box-sizing: border-box;
 }
-.popup-edit-row .group-select { width: 100%; margin-top: 2px; }
-.popup-edit-row .group-btn {
-  width: 100%;
-  height: 42px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  text-align: left;
-  padding: 0 12px;
-  font-size: 15px;
-  cursor: pointer;
-}
-.popup-edit-row .group-list {
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  margin-top: 4px;
-  display: none;
-}
-.popup-edit-row .group-select.open .group-list { display: block; }
-.popup-edit-row .group-chips { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+/* The card variant of that same group picker went with it on 2026-08-29. */
 .popup-edit-row .btn-save-edit,
 .popup-edit-row .btn-cancel-edit { flex: 1; min-height: 44px; font-size: 15px !important; }
 .popup-edit-row .edit-actions { display: flex; gap: 8px; }
@@ -1165,37 +1063,9 @@ select:focus {
   align-items: center;
   gap: 9px;
 }
-.ad-statbig {
-  display: flex;
-  align-items: baseline;
-  gap: 9px;
-}
-.ad-statnum {
-  font-family: 'Sora', 'Inter', sans-serif;
-  font-size: 34px;
-  font-weight: 800;
-  line-height: 1;
-  color: var(--ink);
-}
-.ad-statlab {
-  font-size: 13px;
-  color: var(--muted);
-  font-weight: 500;
-}
-.ad-grpline {
-  display: flex;
-  gap: 14px;
-  margin-top: 12px;
-  flex-wrap: wrap;
-}
-.ad-grpline span {
-  font-size: 11.5px;
-  color: var(--faint);
-}
-.ad-grpline b {
-  color: var(--ink);
-  font-weight: 700;
-}
+/* The dashboard stat block's three rules stood here until 2026-08-29. Their only emitter was
+   buildDashboardStatHTML, which the groups removal deleted a day earlier; a zero-emitter read across
+   public/ was taken again before these went. */
 
 
 .cop-msg {
@@ -1465,8 +1335,10 @@ body.copilot-open #cop-chat {
 /* Mike pick X (task-#10, no bubbles): big bordered tap ROW. Kept as a <button> for keyboard/focus
    a11y (the mockup drew a <div>; the visual is identical). The matched search prefix reads accent-bold
    (renderCheckinButton/highlightMatch); right tag = TAP TO CHECK IN, or grayed ALREADY IN when the
-   person is checked in. NO initials/avatar bubble — Mike's explicit delta. Same-name rows keep a muted
-   group line (.ckx-gp) as the only differentiator (skill NEVER renders on a public surface). */
+   person is checked in. NO initials/avatar bubble, Mike's explicit delta. Groups left every surface on
+   2026-08-29, and Mike ruled out a replacement tiebreaker ("thats almost impossible to have the same full
+   name, just leave it"), so two same-name people render as IDENTICAL rows and skill NEVER renders on a
+   public surface (AS-1). */
 .ckx-row {
   display: flex;
   align-items: center;
@@ -1486,7 +1358,6 @@ body.copilot-open #cop-chat {
 .ckx-row:active { transform: translateY(1px); }
 .ckx-nm { flex: 1; min-width: 0; font-size: 17px; font-weight: 600; color: var(--text); white-space: normal; overflow-wrap: anywhere; }
 .ckx-nm b { color: var(--accent); font-weight: 700; }
-.ckx-gp { display: block; font-size: 12.5px; font-weight: 500; color: var(--muted); margin-top: 2px; }
 .ckx-go { flex-shrink: 0; font: 700 12px var(--font-display); letter-spacing: .06em; color: var(--accent); white-space: nowrap; }
 .ckx-row.is-in { opacity: .55; }
 .ckx-row.is-in .ckx-go { color: var(--live-ink); }
@@ -2230,14 +2101,10 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgp-meta { display: flex; gap: 16px; align-items: center; margin: 0 0 4px; }
 .mgp-m { font-size: 12px; color: var(--muted); background: none; border: none; padding: 0; }
 .mgp-m b { color: var(--ink); font-weight: 700; }
-.mgp-mg { cursor: pointer; }
-.mgp-mg b { margin-right: 4px; } /* §27 catch: the global button reset collapses the <b>N</b> / "groups" gap */
-.mgp-mg.on, .mgp-mg.on b { color: var(--accent); }
 .mgp-row { display: flex; align-items: center; gap: 11px; padding: 9px 2px; border-top: 1px solid var(--border); text-decoration: none; color: inherit; cursor: pointer; width: 100%; text-align: left; background: none; }
 .mgp-al { font: 800 12px var(--font-display); color: var(--faint); width: 20px; flex: none; text-align: center; }
 .mgp-pn { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mgp-pn b { font-weight: 800; color: var(--accent); }
-.mgp-gp { font-size: 11.5px; color: var(--muted); font-weight: 500; margin-left: 7px; }
 .mgp-in { flex: none; font: 700 10.5px var(--font-display); letter-spacing: .06em; color: var(--live-ink); }
 .mgp-sk { flex: none; font: 800 14px var(--font-display); color: var(--accent); width: 34px; text-align: right; }
 .mgp-sk.n { color: var(--faint); }
@@ -2247,29 +2114,12 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgp-add { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 10px; padding: 12px; border: 1.5px dashed var(--accent-bd); border-radius: 11px; background: transparent; color: var(--accent); font: 600 13.5px 'Inter', sans-serif; cursor: pointer; }
 .mgp-add svg { width: 16px; height: 16px; }
 .mgp-empty { padding: 30px 16px; text-align: center; color: var(--muted); font-size: 13px; }
-/* inline group manager (from the meta group count) */
-.mgp-grp { margin: 2px 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--card); }
-.mgp-glabel { font: 700 11px var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
-.mgp-grow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); }
-.mgp-grow:first-of-type { border-top: none; }
-.mgp-gname { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
-.mgp-grn { flex: 1; min-width: 0; border: none; border-bottom: 1.5px solid var(--accent-bd); background: transparent; padding: 5px 2px; font-size: 16px; color: var(--ink); }
-.mgp-grn:focus { outline: none; border-bottom-color: var(--accent); }
-.mgp-gact { flex: none; font: 600 12px 'Inter', sans-serif; color: var(--muted); background: none; border: none; padding: 2px 4px; cursor: pointer; }
-.mgp-gact.del { color: var(--danger); }
-.mgp-gempty { font-size: 12.5px; color: var(--muted); padding: 4px 0; }
-.mgp-gadd { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
-.mgp-gadd input { flex: 1; min-width: 0; border: none; border-bottom: 1.5px solid var(--accent-bd); background: transparent; padding: 6px 2px; font-size: 16px; color: var(--ink); }
-.mgp-gadd input:focus { outline: none; border-bottom-color: var(--accent); }
-.mgp-gadd button { flex: none; font: 700 13px 'Inter', sans-serif; color: var(--accent); background: none; border: none; cursor: pointer; }
-/* Select-mode bottom action bar + Move-to-group chip row (fixed above the floating nav) */
+/* Select-mode bottom action bar (fixed above the floating nav). The Move-to-group chip row that used to
+   sit above it left on 2026-08-29 with groups. */
 .mgp-bar { position: fixed; left: 12px; right: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 40; display: flex; gap: 6px; padding: 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--card); box-shadow: 0 4px 14px oklch(0.18 0.005 75 / .12); }
 .mgp-bar button { flex: 1; padding: 10px 6px; border-radius: 9px; border: none; background: var(--surface-3); color: var(--ink); font: 600 12.5px 'Inter', sans-serif; cursor: pointer; }
 .mgp-bar button.pri { background: var(--accent); color: #fff; }
 .mgp-bar button.mut { background: transparent; color: var(--muted); }
-.mgp-movebar { position: fixed; left: 12px; right: 12px; bottom: calc(140px + env(safe-area-inset-bottom)); z-index: 40; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--card); box-shadow: 0 4px 14px oklch(0.18 0.005 75 / .12); }
-.mgp-movechip { font: 600 12.5px 'Inter', sans-serif; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-bd); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
-.mgp-movehint { font-size: 12px; color: var(--muted); }
 
 /* -- Manage -> Check-in (2026-07-19 spec): chips reuse .pl-tab, search reuses .cik-search,
    rows reuse .ckx-* (the kiosk kit). Only the page-specific bits live here. -- */
@@ -2288,6 +2138,61 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgck-msg:empty { display: none; }
 .mgck-sk { flex: none; font: 800 13px var(--font-display); color: var(--accent); min-width: 26px; text-align: right; }
 .mgck-sk.n { color: var(--faint); }
+
+/* Round 2026-08-29 (i) - "on the check in page i need to be able to edit the players". The pencil sits
+   between the name and the skill, quiet until it is wanted. .ckx-row.is-in runs at opacity .55 and opacity
+   on the parent caps every child, so a checked-in row's pencil cannot opt out of it: it gets a darker rest
+   ink instead of an override that would not work. */
+.mgck-edit {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  color: oklch(0.62 0.01 75);
+  cursor: pointer;
+  transition: color 140ms cubic-bezier(.2,.7,.3,1),
+              background 140ms cubic-bezier(.2,.7,.3,1),
+              border-color 140ms cubic-bezier(.2,.7,.3,1);
+}
+.mgck-edit svg { width: 15px; height: 15px; }
+.mgck-edit:hover,
+.mgck-edit:focus-visible {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-bd);
+  outline: none;
+}
+.mgck-edit + .mgck-sk { margin-left: 10px; }
+.ckx-row.is-in .mgck-edit { color: oklch(0.45 0.01 75); }
+
+/* Round 2026-08-29 (v) - "i need a way to add a new player with a similar pop up". The pill sits in the
+   page header next to the title, pinned right the way .mgp-selbtn is on the Players page (styles.css:2224),
+   and opens the SAME card the pencil opens, in its new-player state. */
+.mgck-add {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  height: 32px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--accent-bd);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .01em;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, transform .09s ease;
+}
+.mgck-add svg { width: 14px; height: 14px; }
+.mgck-add:hover { background: oklch(0.92 0.04 250); }
+.mgck-add:active { transform: scale(.97); }
 
 /* ── Manage → Teams (Task 4, session-10 pick R5 TRIMMED) — chips + generate + stacked teams. mgt-* kit from
    the r10-manage k-h1 mockup. Size chips reuse the pl-tab grammar; the casual courts board is CUT (no net
@@ -2897,12 +2802,12 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   body.pd-public-active #tab-players > .container { max-width: 640px; }
   /* Manage (session-10 R1): the admin Manage lead + area pages stay a centered ~720px reading column. */
   body.pd-public-active #tab-manage > .container { max-width: 720px; }
-  /* Task 3 (§41): the Players Select-mode action bar + move-chip row are position:fixed — clamp them to the
-     centered Manage column on desktop instead of spanning the full viewport. */
-  body.pd-public-active .mgp-bar,
-  body.pd-public-active .mgp-movebar { left: 50%; transform: translateX(-50%); width: 100%; max-width: 720px; }
+  /* Task 3 (§41): the Players Select-mode action bar is position:fixed, so clamp it to the centered Manage
+     column on desktop instead of spanning the full viewport. */
+  body.pd-public-active .mgp-bar { left: 50%; transform: translateX(-50%); width: 100%; max-width: 720px; }
   /* (2026-08-25: the selector list above dangled into the .pd-thero rule below, so the clamp never shipped
-     and the two bars took its 22px type — found by the Tournament recon.) */
+     and the bar took its 22px type, found by the Tournament recon. The move-chip row it also named left
+     with groups on 2026-08-29.) */
 
   /* ---- typography: Sora titles up a notch on the surfaces that go wide (A direction) ---- */
   body.pd-public-active .pd-thero .pd-h { font-size: 22px; }
@@ -3341,31 +3246,78 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   border-radius: 18px;
   overflow: hidden;
 }
+/* Round 2026-08-29 (ii, iii) - "it very bland, fix that" and "the pop up is still bland". A card that
+   edits a PLAYER on game day reads as the app's own register, not a settings form: an accent-tint strip
+   with the mark ghosted behind it at 9%, the initial set as a white tile, and a display-font eyebrow over
+   the name. There is no black or near-black surface anywhere in this app and none is introduced. */
 .pe-head {
+  position: relative;
+  overflow: hidden;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 15px 16px;
-  border-bottom: 1px solid var(--border);
+  /* the handoff's own reset (_shared.css:943), which the spec's B2 block dropped. .popup-header (:864)
+     ships margin-bottom: 12px, and this element is class="popup-header pe-head", so without this a 12px
+     band of card white sits between the tinted strip's bottom border and .pe-body. */
+  margin: 0;
+  padding: 16px 14px 15px 16px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--accent-bd);
 }
+.pe-mark {
+  position: absolute;
+  right: -34px;
+  bottom: -46px;
+  width: 128px;
+  height: 128px;
+  color: var(--accent);
+  opacity: .09;
+  pointer-events: none;
+}
+.pe-mark svg { width: 100%; height: 100%; }
+/* the avatar radius is 13px from the handoff's round-iii code (_shared.css:1176). README:173 and 497 still
+   say 14px, which was round ii (_shared.css:954); the later code wins, the same way it does on the stepper. */
 .pe-av {
+  position: relative;
   flex: none;
-  width: 42px;
-  height: 42px;
+  width: 46px;
+  height: 46px;
   display: grid;
   place-items: center;
-  border-radius: 999px;
-  background: var(--accent-soft);
+  border-radius: 13px;
+  background: #fff;
   border: 1px solid var(--accent-bd);
   color: var(--accent);
-  font-size: 16px;
-  font-weight: 700;
+  font: 800 19px/1 var(--font-display);
+  letter-spacing: .02em;
 }
-.pe-who { display: grid; gap: 2px; min-width: 0; }
-.pe-who h3 { margin: 0; font-size: 17px; line-height: 1.2; }
-/* check-in state reuses the players-list IN pill, sat left of the close button */
-.pe-in { flex: none; margin-left: auto; }
+.pe-av.is-new { background: transparent; border-style: dashed; font-weight: 700; font-size: 22px; }
+.pe-who { position: relative; display: grid; gap: 3px; min-width: 0; }
+.pe-eyebrow {
+  font: 700 10px var(--font-display);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+/* section heads inside the card, one weight down from a page's (.pl-sect at :2177 is ink plus a rule) */
+.pe-sect { margin: 0 0 11px; font-size: 11px; }
+.pe-sect:not(:first-child) { margin-top: 20px; }
+.pe-who h3 { margin: 0; font: 700 21px/1.15 var(--font-display); letter-spacing: .01em; color: var(--ink); }
+.pe-in {
+  position: relative;
+  flex: none;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid oklch(0.86 0.06 150);
+  background: oklch(0.95 0.04 150);
+  color: oklch(0.44 0.11 150);
+  font: 700 10px/1 var(--font-display);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
 .pe-x {
+  position: relative;   /* above the watermark */
   flex: none;
   display: grid;
   place-items: center;
@@ -3382,8 +3334,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   line-height: 1;
   cursor: pointer;
 }
-.pe-x:hover { color: var(--ink); border-color: oklch(0.82 0.008 75); }
-.pe-head { flex: none; }
+.pe-x:hover { color: var(--accent); border-color: var(--accent); background: #fff; }
 .pe-body {
   flex: 1 1 auto;
   min-height: 0;             /* flex items default to min-height:auto and won't shrink */
@@ -3423,8 +3374,89 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-.pe-skillrow { display: grid; gap: 6px; }
-.pe-skillin { width: 108px; font-variant-numeric: tabular-nums; }
+/* Round 2026-08-29 (ii): the rating is a stepper, like every other number the organizer sets. The value
+   sits in the frame with no focus ring of its own, because the frame IS the visual container. */
+.pe-skillrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pe-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: oklch(0.985 0.003 75);
+}
+.pe-sb {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+}
+.pe-sb:hover { color: var(--accent); border-color: var(--accent-bd); background: var(--accent-soft); }
+#player-edit-modal .pe-skillin {
+  flex: none;   /* the global input[type="number"] rule (styles.css:264) sets flex: 1 at :276; .pe-stepper is a flex row */
+  width: 74px;
+  height: 38px;
+  text-align: center;
+  font: 700 17px var(--font-display);
+  font-variant-numeric: tabular-nums;
+  border-color: transparent;
+  background: transparent;
+  -moz-appearance: textfield;
+}
+#player-edit-modal .pe-skillin::-webkit-outer-spin-button,
+#player-edit-modal .pe-skillin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#player-edit-modal .pe-skillin:focus { box-shadow: none; border-color: transparent; }
+/* Round 2026-08-29 (iii): the check-in state is one button that does the thing it names. It says "Check
+   in" while the player is out and "Check out" once they are in, and the header pill follows it in the same
+   tick. Green is the app's live/positive family and is used here on purpose; the primary Save stays
+   accent, because green is reserved for status, never for a primary. */
+.pe-inbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid oklch(0.80 0.10 150);
+  border-radius: 13px;
+  background: oklch(0.95 0.045 150);
+  color: oklch(0.40 0.11 150);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease, transform .09s ease;
+}
+/* The 14px above never lands: the iOS zoom guard button { font-size: 16px !important } (styles.css:241)
+   holds the button at 16px and no specificity beats it, so the label span, which is not a button, carries
+   the handoff's size instead. Kept as its own rule so the block still reads as the design wrote it. */
+.pe-inbtn [data-pe-inlabel] { font-size: 14px; }
+.pe-inbtn:hover { background: oklch(0.92 0.06 150); }
+.pe-inbtn:active { transform: scale(.99); }
+.pe-inbtn .pe-ico { width: 17px; height: 17px; flex: none; }
+.pe-inbtn .pe-ico-out,
+.pe-inbtn.is-in .pe-ico-in { display: none; }
+.pe-inbtn.is-in .pe-ico-out { display: block; }
+/* already in: the action left is undoing it, so it stops shouting */
+.pe-inbtn.is-in { border-color: var(--border); background: #fff; color: var(--ink); }
+.pe-inbtn.is-in:hover { background: oklch(0.97 0.003 75); border-color: oklch(0.82 0.008 75); }
+/* the card's own status line, for the three refusals the add path can hand back. Same shape as the
+   console's #mgck-msg (manage.js:1160, styles.css:2287), with the card's own gutter instead of the
+   list's. */
+.pe-msg { font-size: 12.5px; color: var(--danger); margin: 10px 0 0; }
+.pe-msg:empty { display: none; }
 .pe-hint { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
 .pe-2col { grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
 .pe-cell { display: grid; gap: 7px; min-width: 0; }
@@ -3460,6 +3492,26 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   font-weight: 600;
   cursor: pointer;
 }
+
+/* Round 2026-08-29 (vi) - "why does this move after checking in, have it always be on the far right for
+   all pop ups". The pin used to belong to the IN pill: .pe-in carried margin-left: auto, which is why
+   openPlayerEditPopup had to emit an empty aria-hidden .pe-in spacer for a player who was still out. An
+   empty flex item still absorbs the free space, so the button did land at the right edge in BOTH states,
+   but only for as long as that phantom child was kept in sync with the pill. The spacer is gone and the
+   TITLE takes the slack instead: .pe-who is the only growable item, so it eats the free space and the
+   button ends at the right content edge. The auto margin below is the fallback for a header whose title
+   cannot grow, and .pe-in + .pe-x overrides it with plain separation when the pill IS there, so the pill
+   no longer has any say in which column the button lands in.
+   Two dialogs emit .popup-header and BOTH were read against these rules: the player card (app.js
+   openPlayerEditPopup) and the Home rules sheet (app.js hmRulesModalHTML). #hm-rules-modal .hmv-rtitles
+   (styles.css:4233) sets only display, gap and min-width, so nothing here fights it, and with
+   justify-content: space-between and two children the auto margin is inert there. */
+.popup-header .pe-who,
+.popup-header .hmv-rtitles { flex: 1 1 auto; min-width: 0; }
+.popup-header .pe-in { margin-left: 0; }
+.popup-header .pe-x,
+.popup-header .hmv-rx { margin-left: auto; }
+.popup-header .pe-in + .pe-x { margin-left: 10px; }
 
 /* Round 2026-08-03 — "add more to each part already in the Tournament sub-hub"
    + "somewhere the reset and a delete tournament are".

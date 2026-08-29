@@ -604,8 +604,8 @@ function generateDoubleElim(N, resetEnabled) {
 
 // C36 T1: kiosk "tap your name" search. PURE (no DOM / no app state) so the kiosk handler can
 // feed it state.players + the live search text and render the result buttons. Returns a NO-SKILL
-// row shape {id,name,group,initials,checkedIn} — skill is admin-only and must never reach this
-// public surface (rulebook §AS-1). Disambiguation is by group + full name, never skill.
+// row shape {id,name,initials,checkedIn}; skill is admin-only and must never reach this public
+// surface (rulebook §AS-1). Rows are disambiguated by full name alone (Mike, 2026-08-29).
 //   - case-insensitive name SUBSTRING match
 //   - drops __as_* sentinel rows (the "All Players" pseudo-row etc.)
 //   - prefix matches sort before mid-string matches (typing your first name surfaces you first)
@@ -617,7 +617,8 @@ function disambiguatePlayersByName(players, query) {
   for (const p of (players || [])) {
     if (!p || typeof p !== 'object') continue;
     const name = String(p.name || '');
-    // sentinel rows are keyed by id OR by name (__as_group__:, __as_tournament_state__) — exclude both
+    // sentinel rows are keyed by id OR by name (the tournament-state blob, and any straggler group
+    // catalog row from before groups left) - exclude both, on the shared __as_ prefix
     if ((typeof p.id === 'string' && p.id.indexOf('__as_') === 0) || name.indexOf('__as_') === 0) continue;
     const lower = name.toLowerCase();
     const pos = lower.indexOf(q);
@@ -629,61 +630,12 @@ function disambiguatePlayersByName(players, query) {
     scored.push({
       _prefix: pos === 0 ? 0 : 1,
       _name: lower,
-      row: { id: p.id, name, group: p.group || '', initials, checkedIn: !!p.checked_in }
+      row: { id: p.id, name, initials, checkedIn: !!p.checked_in }
     });
   }
   // prefix matches first, then alphabetical by name for a stable, predictable order
   scored.sort((a, b) => (a._prefix - b._prefix) || a._name.localeCompare(b._name));
   return scored.slice(0, 12).map((s) => s.row);
-}
-
-// C48.5: group an already-filtered + already-sorted roster into collapsible group sections
-// (admin Players "Option C"). PURE (no DOM / no app state): the caller passes the players in the
-// exact display order it wants AND a resolver that returns each player's group names (primary first).
-// Returns ordered sections [{ key, name, isUngrouped, players }]:
-//   - a player appears in EVERY group they belong to (multi-group players show in each section)
-//   - a player with no groups goes into a single "Ungrouped" section
-//   - group sections are sorted case-insensitively by name; "Ungrouped" is ALWAYS last
-//   - players inside each section keep the incoming order (the caller pre-sorts alphabetically),
-//     so the A-Z jump strip (document order across sections) stays correct
-//   - empty sections are never produced (a section exists only if it has >=1 player)
-// `key` is a stable, lowercased identity for the section (group name folded; '__ungrouped__' for the
-// no-group bucket) — used as the sessionStorage collapse key so it survives renames-by-case.
-function groupRosterPlayersBySection(players, getGroupsFn) {
-  const resolve = typeof getGroupsFn === 'function' ? getGroupsFn : () => [];
-  const sections = new Map(); // key -> { key, name, isUngrouped, players, order }
-  const UNGROUPED_KEY = '__ungrouped__';
-  let groupOrder = 0;
-  for (const player of (players || [])) {
-    if (!player || typeof player !== 'object') continue;
-    const groups = (resolve(player) || []).filter((g) => String(g || '').trim());
-    if (!groups.length) {
-      let sec = sections.get(UNGROUPED_KEY);
-      if (!sec) {
-        // sort-order Infinity pins Ungrouped last regardless of insertion order
-        sec = { key: UNGROUPED_KEY, name: 'Ungrouped', isUngrouped: true, players: [], order: Infinity };
-        sections.set(UNGROUPED_KEY, sec);
-      }
-      sec.players.push(player);
-      continue;
-    }
-    for (const groupName of groups) {
-      const name = String(groupName).trim();
-      const key = name.toLowerCase();
-      let sec = sections.get(key);
-      if (!sec) {
-        sec = { key, name, isUngrouped: false, players: [], order: groupOrder++ };
-        sections.set(key, sec);
-      }
-      sec.players.push(player);
-    }
-  }
-  return Array.from(sections.values())
-    .sort((a, b) => {
-      if (a.isUngrouped !== b.isUngrouped) return a.isUngrouped ? 1 : -1; // Ungrouped last
-      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-    })
-    .map(({ key, name, isUngrouped, players: secPlayers }) => ({ key, name, isUngrouped, players: secPlayers }));
 }
 
 // CommonJS export for the test runner; skipped in the browser (module is undefined there).
@@ -758,18 +710,15 @@ function buildCopilotContext(input) {
   const liveData = inp.liveData || {};
   const tour = inp.tournament || null;
 
-  // attendance (redacted: name + group only)
+  // attendance (redacted: name only). The byGroup bucket and the per-attendee group key left on
+  // 2026-08-29 with groups themselves: after the column drop every attendee would have landed in a
+  // single 'Ungrouped' bucket, telling the model about a dimension that no longer exists.
   const here = [];
-  const byGroup = {};
   players.forEach((p) => {
     if (!p || !p.checked_in) return;
-    const name = String(p.name || '').trim();
-    const group = String(p.group || '').trim();
-    here.push({ name, group });
-    const key = group || 'Ungrouped';
-    byGroup[key] = (byGroup[key] || 0) + 1;
+    here.push({ name: String(p.name || '').trim() });
   });
-  const attendance = { total: here.length, byGroup, here };
+  const attendance = { total: here.length, here };
 
   // casual courts (redacted rosters; null when no teams)
   let casualCourts = null;
@@ -809,17 +758,19 @@ function buildCopilotContext(input) {
 }
 
 // C28 Slice 2 — co-pilot acting helpers (pure; no DOM/state/skill).
-// resolvePlayerByName: name -> a single player {id,name,group} (no skill), or a typed failure the
-// co-pilot can act on (ask which one / not found). Reuses the skill-free disambiguator.
+// resolvePlayerByName: name -> a single player {id,name} (no skill), or a typed failure the co-pilot can
+// act on (ask which one / not found). Reuses the skill-free disambiguator. The group that used to ride
+// along here went with groups themselves on 2026-08-29: its source row no longer has one, so keeping the
+// key would have shipped a permanent empty string to the co-pilot.
 function resolvePlayerByName(players, name) {
   const q = String(name == null ? '' : name).trim().toLowerCase();
   if (!q) return { ok: false, reason: 'none', matches: [] };
-  const rows = disambiguatePlayersByName(players, q); // [{id,name,group,...}] — already skill-free
+  const rows = disambiguatePlayersByName(players, q); // [{id,name,initials,checkedIn}], already skill-free
   const exact = rows.filter((r) => String(r.name || '').trim().toLowerCase() === q);
   const pick = exact.length === 1 ? exact[0] : (rows.length === 1 ? rows[0] : null);
-  if (pick) return { ok: true, player: { id: pick.id, name: pick.name, group: pick.group || '' } };
+  if (pick) return { ok: true, player: { id: pick.id, name: pick.name } };
   if (rows.length === 0) return { ok: false, reason: 'none', matches: [] };
-  return { ok: false, reason: 'ambiguous', matches: rows.map((r) => ({ name: r.name, group: r.group || '' })) };
+  return { ok: false, reason: 'ambiguous', matches: rows.map((r) => ({ name: r.name })) };
 }
 
 // Per-tool safety policy (Mike's hybrid): instant+undo for the cleanly-reversible, confirm-first for
@@ -1566,7 +1517,8 @@ function checkinHeroModel(rows) {
   return { id: p.id, name: String(p.name) };
 }
 
-// Manage -> Check-in view model (2026-07-19 spec). rows: [{key,id,name,group,checkedIn}].
+// Manage -> Check-in view model (2026-07-19 spec). rows: [{key,id,name,skill,checkedIn}] - the group
+// term left the shape on 2026-08-29 when mgckRows stopped deriving one.
 // filter: 'all'|'in'|'out'. Sorting + substring narrowing live HERE; counts are always
 // global (the UI labels read "Still out · counts.out" even mid-search). showAdd checks the
 // FULL roster (not the filtered slice) so an exact name never re-registers.
@@ -2207,7 +2159,7 @@ if (typeof module !== "undefined" && module.exports) {
     countSharedTeammatePairs, pickMostDifferentTeams,
     generateRoundRobin, decideWinner, computeStandings, applyHeadToHeadGroups,
     nextPow2, seedOrder, computeSeeding, computeChampion, resolveHistoryChampion, generateDoubleElim,
-    disambiguatePlayersByName, groupRosterPlayersBySection, isValidFullName, splitFullNameParts, splitFullName,
+    disambiguatePlayersByName, isValidFullName, splitFullNameParts, splitFullName,
     copilotRosterNames, copilotUpNextByNet, buildCopilotContext,
     resolvePlayerByName, COPILOT_TOOL_POLICY, validateCopilotToolArgs,
     resolveTournamentMatch, publicHubStatus,

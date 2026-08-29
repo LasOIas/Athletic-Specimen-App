@@ -5,8 +5,5 @@
 const SUPABASE_URL = 'https://mlzblkzflgylnjorgjcp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1semJsa3pmbGd5bG5qb3JnamNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTM5MDY1NzEsImV4cCI6MjA2OTQ4MjU3MX0.tqK5lCOKWy1wEaDwNGF6fTo08QxRdhp50LREHMpIVXs';
 const SUPABASE_ANON_KEY = SUPABASE_KEY; // alias consumed by checkin.html
-// Wave 1d (2026-06-25): the canonical club group for anon self-serve registration. Shared here (one
-// owner) so the standalone door (checkin.html) and the in-app kiosk register into the SAME group —
-// otherwise the same person checking in at the two doors becomes two rows (dedup keys on name+group)
-// and is invisible in the other door's roster, splitting attendance + inflating headcount.
-const CLUB_GROUP = 'Athletic Specimen';
+// A club-group constant used to sit here, one owner for both anon doors. The name+group dedup it existed
+// for is gone: register_player dedups on name alone (0068).

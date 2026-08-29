@@ -7,10 +7,12 @@ const require = createRequire(import.meta.url);
 const pure = require('../public/pure.js');
 const { checkinConsoleModel } = pure;
 
-const R = (name, checkedIn, group) => ({ key: 'id:' + name, id: name, name, group: group || '', checkedIn: !!checkedIn });
+// Groups round (2026-08-29): mgckRows stopped emitting a `group` key, so the fixture stopped carrying one.
+// checkinConsoleModel never read it (it filters, sorts and counts on name + checkedIn alone).
+const R = (name, checkedIn) => ({ key: 'id:' + name, id: name, name, checkedIn: !!checkedIn });
 const roster = [
   R('Drew Lane', false), R('Aaron Bell', true), R('amara diaz', true),
-  R('Ben Fisher', false), R('Cam Holt', false, 'Guests'),
+  R('Ben Fisher', false), R('Cam Holt', false),
 ];
 
 describe('checkinConsoleModel', () => {

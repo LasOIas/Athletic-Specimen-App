@@ -81,13 +81,12 @@ function loadApp() {
       buildPickup: () => buildPickupDaysHTML(),
       buildPickupForm: (id) => { pickupEditId = (id == null ? null : id); manageView = 'pickup-form'; return buildPickupDayFormHTML(); },
       checkinNav: () => checkinNavVisible(),
+      // Groups round (2026-08-29): the mgGroupsOpen / mgMoveOpen assignments left with the bindings.
       buildPlayers: (opts) => {
         opts = opts || {};
         mgPlayerQuery = opts.query || '';
         mgSelectMode = !!opts.select;
         mgSelected = new Set(opts.selected || []);
-        mgGroupsOpen = !!opts.groups;
-        mgMoveOpen = !!opts.move;
         return buildManagePlayersHTML();
       },
       buildTeams: (opts) => {
@@ -506,11 +505,15 @@ describe('Task 1 foundations', () => {
     expect(bridge.buildScoreSheet({ ...base, score_a: 21, score_b: 15 }, 'a')).toContain('class="mgv-scfinal" data-mgss="edit">');
   });
 
-  it('the 08-05b field style and the 08-23 button restyle are in styles.css once', () => {
+  it('the 08-05b field style, the 08-23 button restyle and the 08-29 header pin are in styles.css once', () => {
     expect(count(css, '#app-shell input.pk-fv:not(.mgv-sv)')).toBe(1);
     expect(count(css, '#player-edit-modal .pe-save')).toBeGreaterThanOrEqual(1);
     expect(css).toContain('@keyframes m-menu');
     expect(css).not.toMatch(/\.popup-edit-input\s*\{[^}]*!important/);
+    // Round 2026-08-29 (vi): the pin lives on the header, not on the pill, so the close button does not
+    // move when a player checks in. The 08-23 button block above is untouched by that round.
+    expect(css).toMatch(/\.popup-header \.pe-x,\s*\.popup-header \.hmv-rx \{ margin-left: auto; \}/);
+    expect(count(css, '#player-edit-modal .pe-cancel')).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -3251,7 +3254,11 @@ describe('Task 9 keyboard reach', () => {
     let twiceDoc = null;
     const twice = withKeys(({ onDoc, onEl }) => {
       twiceDoc = onDoc;
-      expect(onEl.length).toBe(4);   // the ELEMENT listeners do re-bind: they ride on the new node
+      // The ELEMENT listeners do re-bind: they ride on the new node. THREE of them per call as of the
+      // check-in pop-ups round (2026-08-29) - the team-add Escape, the bracket row's Enter/Space and the
+      // check-in pencil's Enter/Space - so two calls bind six. The exact count is the point: it is what
+      // makes the twice - once difference below a statement about the DOCUMENT pair alone.
+      expect(onEl.length).toBe(6);
       expect(bridge.docKeysBound()).toBe(true);
       return onDoc.length;
     }, 2);
