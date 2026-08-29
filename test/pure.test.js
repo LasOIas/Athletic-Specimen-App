@@ -387,6 +387,9 @@ describe('generateBalancedGroups re-roll (C31 #1 — varied but fair)', () => {
 
 // C36 T1 — kiosk "tap your name" search. Pure: name-substring filter (case-insensitive),
 // drops __as_* sentinels, prefix-matches sort first, max 12, NO skill in the result shape.
+// Groups round (2026-08-29): the row shape lost its `group` key. The INPUT fixtures below keep theirs on
+// purpose: they stand in for raw Supabase rows, and they are what makes the exact-shape assertion below
+// go red if the key is ever put back.
 describe('disambiguatePlayersByName (C36 T1 kiosk search)', () => {
   const players = [
     { id: '1', name: 'Anna Reed', group: 'Mon', skill: 9, checked_in: false },
@@ -423,12 +426,14 @@ describe('disambiguatePlayersByName (C36 T1 kiosk search)', () => {
     expect(out[0].id).toBe('1');
   });
 
-  it('returns the no-skill shape {id,name,group,initials,checkedIn} and never leaks skill', () => {
+  it('returns the no-skill shape {id,name,initials,checkedIn} and never leaks skill', () => {
     const out = disambiguatePlayersByName(players, 'adam');
     expect(out.length).toBe(1);
     const row = out[0];
-    expect(row).toEqual({ id: '2', name: 'Adam Cole', group: 'Wed', initials: 'AC', checkedIn: true });
+    // Adam Cole's fixture carries group: 'Wed'; the row must drop it (groups round, 2026-08-29).
+    expect(row).toEqual({ id: '2', name: 'Adam Cole', initials: 'AC', checkedIn: true });
     expect('skill' in row).toBe(false);
+    expect('group' in row).toBe(false);
   });
 
   it('caps results at 12', () => {
@@ -571,14 +576,17 @@ describe('C28 Slice 2 — co-pilot acting pure helpers', () => {
     { id: 'p3', name: 'Jet', group: 'AS', checked_in: true, skill: 5 },
   ];
 
-  it('resolvePlayerByName: exact full-name match wins, no skill leaks', () => {
+  // Inverted in the groups round (2026-08-29): the resolved shape lost its `group` key with the kiosk row
+  // shape it is built from. The fixtures above keep their group values, so a re-added key goes red here.
+  it('resolvePlayerByName: exact full-name match wins, no skill and no group leaks', () => {
     const r = resolvePlayerByName(players, 'mikey olas');
-    expect(r).toEqual({ ok: true, player: { id: 'p1', name: 'Mikey Olas', group: 'KC' } });
+    expect(r).toEqual({ ok: true, player: { id: 'p1', name: 'Mikey Olas' } });
     expect(JSON.stringify(r)).not.toContain('9');
     expect(JSON.stringify(r)).not.toContain('skill');
+    expect(JSON.stringify(r)).not.toContain('KC');
   });
   it('resolvePlayerByName: single substring match resolves', () => {
-    expect(resolvePlayerByName(players, 'jet')).toEqual({ ok: true, player: { id: 'p3', name: 'Jet', group: 'AS' } });
+    expect(resolvePlayerByName(players, 'jet')).toEqual({ ok: true, player: { id: 'p3', name: 'Jet' } });
   });
   it('resolvePlayerByName: ambiguous -> reason + match names', () => {
     const r = resolvePlayerByName(players, 'mike');
@@ -586,7 +594,7 @@ describe('C28 Slice 2 — co-pilot acting pure helpers', () => {
     expect(r.reason).toBe('ambiguous');
     expect(r.matches).toHaveLength(2);
     expect(r.matches.map((m) => m.name).sort()).toEqual(['Mike Stevens', 'Mikey Olas']);
-    expect(r.matches.every((m) => m.group === 'KC')).toBe(true);
+    expect(r.matches.every((m) => !('group' in m))).toBe(true);
   });
   it('resolvePlayerByName: no match -> none', () => {
     expect(resolvePlayerByName(players, 'zzz')).toEqual({ ok: false, reason: 'none', matches: [] });

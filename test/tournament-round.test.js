@@ -370,7 +370,11 @@ describe('port guards (things the recon said must NOT ship)', () => {
     expect(cssText).toContain('.tn-statsub {');
   });
   it('the desktop Manage bar clamp is a real rule now (the dangling-comma bug)', () => {
-    expect(cssText).toMatch(/body\.pd-public-active \.mgp-movebar \{ left: 50%; transform: translateX\(-50%\); width: 100%; max-width: 720px; \}/);
+    // Inverted in the groups round (2026-08-29): the clamp used to name two fixed bars and .mgp-movebar
+    // (the Move-to-group chip row) left with groups, so the Select bar is the whole selector list. The
+    // dangling-comma regression this case was written for is still what the match pins.
+    expect(cssText).toMatch(/body\.pd-public-active \.mgp-bar \{ left: 50%; transform: translateX\(-50%\); width: 100%; max-width: 720px; \}/);
+    expect(cssText).not.toContain('mgp-movebar');
   });
   it('no em dash in the new player-facing strings', () => {
     const pub = appSrcText.slice(appSrcText.indexOf('function buildBracketHTML('), appSrcText.indexOf('function resolveRegisterTournament('));

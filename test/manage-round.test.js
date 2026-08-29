@@ -86,8 +86,6 @@ function loadApp() {
         mgPlayerQuery = opts.query || '';
         mgSelectMode = !!opts.select;
         mgSelected = new Set(opts.selected || []);
-        mgGroupsOpen = !!opts.groups;
-        mgMoveOpen = !!opts.move;
         return buildManagePlayersHTML();
       },
       buildTeams: (opts) => {

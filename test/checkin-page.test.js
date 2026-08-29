@@ -117,8 +117,14 @@ describe('renderCheckinButton — big tap rows, no bubbles (X)', () => {
     expect(html).toContain('<b>Tom &amp;</b> Jerry');
   });
 
-  it('keeps the group differentiator for same-name disambiguation (minus any skill data)', () => {
-    const html = bridge.row({ id: 'p4', name: 'John Smith', group: 'Sunday Ballers', checkedIn: false }, 'john');
-    expect(html).toContain('class="ckx-gp">Sunday Ballers<');
+  it('two players with the same full name render as identical rows (Mike 2026-08-29: no tiebreaker)', () => {
+    // Inverted in the groups round (2026-08-29). Mike: "thats almost impossible to have the same full
+    // name, just leave it." The crew subline that used to differentiate them is gone with groups, and
+    // skill can never render on a public surface (AS-1). The two fixtures keep DIFFERENT group values so
+    // that re-adding the subline makes the identity comparison fail rather than quietly still pass.
+    const a = bridge.row({ id: 'p4', name: 'John Smith', group: 'Sunday Ballers', checkedIn: false }, 'john');
+    const b = bridge.row({ id: 'p9', name: 'John Smith', group: 'Tuesday Crew', checkedIn: false }, 'john');
+    expect(a).not.toContain('ckx-gp');
+    expect(a.replace('p4', 'ID')).toBe(b.replace('p9', 'ID'));
   });
 });

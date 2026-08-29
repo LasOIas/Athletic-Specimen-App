@@ -23,9 +23,6 @@ let pickupEditId = null;  // Task 2: the pickup_days row id being edited in 'pic
 let mgPlayerQuery = '';         // the current #mg-player-search value
 let mgSelectMode = false;       // bulk Select mode on/off
 let mgSelected = new Set();     // selected player identity keys (playerIdentityKey) while in Select mode
-let mgGroupsOpen = false;       // the inline group manager (toggled from the meta group count)
-let mgMoveOpen = false;         // the Move-to-group chip row (toggled from the bar's "Move to group")
-let mgRenameGroup = null;       // the group name being inline-renamed in the group manager (null = none)
 // Task 4 (Teams page, pick R5 trimmed): the selected team-SIZE chip (4s default). Survives the
 // container-swap repaint (a background sync must not reset a chosen size).
 let mgtSize = 4;                // the active size chip (2/3/4/6); 4s default per the mockup
@@ -946,8 +943,10 @@ async function removePickupDay(id) {
 
 // ── Task 3: Players directory (session-10 pick R4-B) — one A–Z directory ─────────────────────────────
 // Mockup r10-manage/l-b. Reuses the manage-area chrome (pd-pagehdr/pd-back/pd-htitle) + MG_CHEV; the mgp-*
-// kit carries the search box, meta line, A–Z rows, IN tag, admin-only skill, Select(bulk) bar + group
-// manager. Tap a row → the EXISTING openPlayerEditPopup (body-level modal, poll-clobber-immune). Skill is
+// kit carries the search box, meta line, A–Z rows, IN tag, admin-only skill and the Select(bulk) bar. The
+// inline group manager that used to hang off the meta left on 2026-08-29 with groups themselves (Mike:
+// DELETE GROUPS EVERYWHERE). Tap a row → the EXISTING openPlayerEditPopup (body-level modal,
+// poll-clobber-immune). Skill is
 // ADMIN-ONLY data (never on a public surface). NO initials bubbles anywhere.
 const MGP_SEARCH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>';
 const MGP_CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
@@ -991,8 +990,6 @@ function buildMgpListHTML() {
     const letter = /[A-Z]/.test(first) ? first : '#';
     const anchor = letter !== lastLetter ? letter : '';
     lastLetter = letter;
-    const grp = getPlayerPrimaryGroup(p);
-    const gpHTML = grp ? `<span class="mgp-gp">${escapeHTML(grp)}</span>` : '';
     const inHTML = inSet.has(key) ? `<span class="mgp-in">IN</span>` : '';
     const skPos = Number(p.skill) > 0;
     const skHTML = `<span class="mgp-sk${skPos ? '' : ' n'}">${mgpSkillText(p.skill)}</span>`;
@@ -1001,38 +998,16 @@ function buildMgpListHTML() {
     const nameHTML = qLower ? highlightMatch(nm, q) : escapeHTML(nm);
     return `<a class="mgp-row${on}" data-mgp-id="${escapeHTMLText(key)}">`
       + `${cb}<span class="mgp-al">${anchor}</span>`
-      + `<span class="mgp-pn">${nameHTML}${gpHTML}</span>`
+      + `<span class="mgp-pn">${nameHTML}</span>`
       + `${inHTML}${skHTML}</a>`;
   }).join('');
 }
 
-// The inline group manager (flat, under the meta) — opened from the meta group count. Reuses the group
-// catalog helpers (ensure/rename/delete). Rename toggles a per-row inline input via mgRenameGroup.
-function buildMgpGroupsHTML() {
-  const groups = getAvailableGroups();
-  const rows = groups.length
-    ? groups.map((g) => {
-        if (mgRenameGroup && normalizeGroupKey(mgRenameGroup) === normalizeGroupKey(g)) {
-          return `<div class="mgp-grow"><input class="mgp-grn" id="mgp-grename-input" type="text" value="${escapeHTMLText(g)}" autocomplete="off" />`
-            + `<button type="button" class="mgp-gact" data-mgp-grename-save="${escapeHTMLText(g)}">Save</button>`
-            + `<button type="button" class="mgp-gact" data-mgp-grename-cancel>Cancel</button></div>`;
-        }
-        return `<div class="mgp-grow"><span class="mgp-gname">${escapeHTML(g)}</span>`
-          + `<button type="button" class="mgp-gact" data-mgp-grename="${escapeHTMLText(g)}">Rename</button>`
-          + `<button type="button" class="mgp-gact del" data-mgp-gdelete="${escapeHTMLText(g)}">Delete</button></div>`;
-      }).join('')
-    : `<div class="mgp-gempty">No groups yet.</div>`;
-  return `<div class="mgp-grp"><div class="mgp-glabel">Groups</div>${rows}`
-    + `<div class="mgp-gadd"><input id="mgp-gadd-input" type="text" placeholder="New group name" autocomplete="off" />`
-    + `<button type="button" data-mgp-gadd>Add</button></div></div>`;
-}
-
-// The Players directory view (mockup l-b): header + Select toggle, search box, meta line, optional group
-// manager, the A–Z list, and (in Select mode) the bottom action bar.
+// The Players directory view (mockup l-b): header + Select toggle, search box, a two-count meta line, the
+// A–Z list, and (in Select mode) the bottom action bar.
 function buildManagePlayersHTML() {
   const roster = (state.players || []).length;
   const inNow = (state.checkedIn || []).length;
-  const groupCount = getAvailableGroups().length;
 
   const header = `<div class="pd-pagehdr">`
     + `<button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>`
@@ -1047,29 +1022,22 @@ function buildManagePlayersHTML() {
   const meta = `<div class="mgp-meta">`
     + `<span class="mgp-m"><b>${roster}</b> ${roster === 1 ? 'player' : 'players'}</span>`
     + `<span class="mgp-m"><b>${inNow}</b> checked in</span>`
-    + `<button type="button" class="mgp-m mgp-mg${mgGroupsOpen ? ' on' : ''}" data-mgp-groups><b>${groupCount}</b> ${groupCount === 1 ? 'group' : 'groups'}</button>`
     + `</div>`;
 
-  const groupsSection = mgGroupsOpen ? buildMgpGroupsHTML() : '';
   const listSection = `<div id="mgp-list">${buildMgpListHTML()}</div>`;
 
-  // Select-mode bottom bar (fixed above the nav). "Move to group" reveals a chip row of destination groups.
+  // Select-mode bottom bar (fixed above the nav). Three actions since the 2026-08-29 groups round: the
+  // fourth was "Move to group", which left with the chip row it opened.
   let bar = '';
   if (mgSelectMode) {
-    const moveChips = mgMoveOpen
-      ? (getAvailableGroups().length
-          ? `<div class="mgp-movebar">${getAvailableGroups().map((g) => `<button type="button" class="mgp-movechip" data-mgp-movegrp="${escapeHTMLText(g)}">${escapeHTML(g)}</button>`).join('')}</div>`
-          : `<div class="mgp-movebar mgp-movehint">Add a group first (tap the group count above)</div>`)
-      : '';
-    bar = moveChips + `<div class="mgp-bar">`
+    bar = `<div class="mgp-bar">`
       + `<button type="button" class="pri" data-mgp-bulk="in">Check in</button>`
       + `<button type="button" data-mgp-bulk="out">Check out</button>`
-      + `<button type="button" data-mgp-bulk="move">Move to group</button>`
       + `<button type="button" class="mut" data-mgp-bulk="cancel">Cancel</button>`
       + `</div>`;
   }
 
-  return header + search + meta + groupsSection + listSection + bar;
+  return header + search + meta + listSection + bar;
 }
 
 // Manage -> Check-in (2026-07-19 spec, Mike-approved d73f26e): tap a name to toggle attendance,
@@ -1083,7 +1051,6 @@ function mgckRows() {
     id: p.id,
     name: p.name,
     skill: p.skill,
-    group: getPlayerPrimaryGroup(p), // mirrors buildMgpListHTML's grp derivation (:7324) so the two Manage lists read identically
     checkedIn: inSet.has(playerIdentityKey(p)),
   }));
 }
@@ -1106,7 +1073,6 @@ function mgckListHTML(model) {
     return '<div class="mgck-empty">No players on the roster yet.</div>';
   }
   const row = (r) => {
-    const gp = r.group ? `<span class="ckx-gp">${escapeHTML(r.group)}</span>` : '';
     const tag = r.checkedIn ? 'IN' : 'CHECK IN';
     const n = Number(r && r.skill);
     const skPos = Number.isFinite(n) && n > 0;
@@ -1132,7 +1098,7 @@ function mgckListHTML(model) {
       + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
       + `<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span>`;
     return `<button class="ckx-row${r.checkedIn ? ' is-in' : ''}" type="button" data-mgck-id="${escapeHTMLText(r.key)}">`
-      + `<span class="ckx-nm">${highlightMatch(r.name, mgckQ)}${gp}</span>`
+      + `<span class="ckx-nm">${highlightMatch(r.name, mgckQ)}</span>`
       + pencil
       + `<span class="mgck-sk${skPos ? '' : ' n'}">${mgpSkillText(r.skill)}</span>`
       + `<span class="ckx-go">${tag}</span></button>`;
@@ -1239,7 +1205,7 @@ async function mgckAddAndCheckIn(name) {
   if (!isValidFullName(trimmed)) { msg('Enter a first and last name'); return; }
   const exists = state.players.find((p) => normalize(p.name) === normalize(trimmed));
   if (exists) { mgckToggleByKey(playerIdentityKey(exists), 'in'); return; }
-  const inserted = { name: trimmed, skill: 0.0, group: CLUB_GROUP, groups: [CLUB_GROUP], pending: true };
+  const inserted = { name: trimmed, skill: 0.0, pending: true };
   state.players = [...state.players, inserted];
   checkInPlayer(inserted);
   mgckLast = { key: playerIdentityKey(inserted), name: trimmed, dir: 'in' };
@@ -1250,7 +1216,7 @@ async function mgckAddAndCheckIn(name) {
   mgckRepaint();
   if (supabaseClient) {
     try {
-      const { data, error } = await supabaseClient.rpc('register_player', { p_name: trimmed, p_group: CLUB_GROUP, p_checked_in: true });
+      const { data, error } = await supabaseClient.rpc('register_player', { p_name: trimmed, p_checked_in: true });
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
       if (row && row.id) inserted.id = row.id;
@@ -1259,7 +1225,7 @@ async function mgckAddAndCheckIn(name) {
     } catch (err) {
       console.error('mgck register error', err);
       inserted.pending = true;
-      outboxEnqueue({ key: 'reg:' + normalize(trimmed) + ':' + CLUB_GROUP, kind: 'register', payload: { name: trimmed, group: CLUB_GROUP, checked_in: true }, ts: Date.now() });
+      outboxEnqueue({ key: 'reg:' + normalize(trimmed), kind: 'register', payload: { name: trimmed, checked_in: true }, ts: Date.now() });
     }
     saveLocal();
     mgckRepaint();
@@ -1287,7 +1253,7 @@ async function mgpBulkAttendance(shouldCheckIn) {
     if (p.id) remoteIds.push(p.id);
   });
   saveLocal();
-  mgSelectMode = false; mgSelected = new Set(); mgMoveOpen = false;
+  mgSelectMode = false; mgSelected = new Set();
   repaintManage();
   if (supabaseClient && remoteIds.length) {
     try {
@@ -1303,59 +1269,23 @@ async function mgpBulkAttendance(shouldCheckIn) {
   }
 }
 
-// Bulk move the selection into a group (adds membership + promotes to primary), reusing
-// updatePlayerFieldsSupabase per row + ensureGroupCatalogEntriesSupabase for the catalog.
-async function mgpBulkGroup(dest) {
-  const name = normalizeGroupName(dest);
-  const targets = mgSelectedPlayers();
-  if (!name || !targets.length) return;
-  const idSet = new Set(targets.map((p) => playerIdentityKey(p)));
-  const remoteUpdates = [];
-  state.players = (state.players || []).map((p) => {
-    if (!idSet.has(playerIdentityKey(p))) return p;
-    const cur = getPlayerGroups(p);
-    const next = normalizeGroupList([name, ...cur.filter((g) => g !== name)]);
-    const primary = next[0] || '';
-    const np = { ...p, group: primary, groups: next };
-    if (np.id) remoteUpdates.push({ id: np.id, group: primary, groups: next });
-    return np;
-  });
-  if (!(state.groups || []).includes(name)) state.groups = Array.from(new Set([...(state.groups || []), name]));
-  saveLocal();
-  mgSelectMode = false; mgSelected = new Set(); mgMoveOpen = false;
-  repaintManage();
-  if (supabaseClient) {
-    let failed = false;
-    try {
-      await ensureGroupCatalogEntriesSupabase([name]);
-      for (const u of remoteUpdates) {
-        const ok = await updatePlayerFieldsSupabase(u.id, { group: u.group, groups: u.groups });
-        if (!ok) failed = true;
-      }
-      const synced = await syncFromSupabase();
-      if (!synced) failed = true;
-    } catch (err) { failed = true; console.error('mgp bulk group error', err); }
-    if (failed) await reconcileToSupabaseAuthority('mgp-bulk-group');
-  }
-}
-
 // Add a brand-new player from the search-miss dashed row: a first+last name is required (mix-up prevention),
 // duplicates are ignored, then the row is inserted (optimistic + Supabase) and the edit sheet opens to set
-// skill/group. Mirrors the admin add insert (name + skill 0 + group).
+// skill. Mirrors the admin add insert (name + skill 0).
 async function mgpAddPlayer(rawName) {
   const name = String(rawName || '').trim();
   if (!name) return;
   if (!isValidFullName(name)) { appNotice({ title: 'Add a player', message: 'Enter a first and last name.' }); return; }
   const existing = (state.players || []).find((p) => normalize(p.name) === normalize(name));
   if (existing) { mgPlayerQuery = ''; repaintManage(); openPlayerEditPopup(playerIdentityKey(existing)); return; }
-  const inserted = { name, skill: 0, group: '', groups: [], pending: true };
+  const inserted = { name, skill: 0, pending: true };
   state.players = [...(state.players || []), inserted];
   saveLocal();
   mgPlayerQuery = '';
   repaintManage();
   if (supabaseClient) {
     try {
-      const insertRow = HAS_TAG ? { name, skill: 0, group: '', tag: '' } : { name, skill: 0, group: '' };
+      const insertRow = { name, skill: 0 };
       const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
       if (error) throw error;
       if (Array.isArray(data) && data[0]) { inserted.id = data[0].id; inserted.pending = false; }
@@ -1370,80 +1300,6 @@ async function mgpAddPlayer(rawName) {
   }
   const live = (state.players || []).find((p) => normalize(p.name) === normalize(name));
   if (live) openPlayerEditPopup(playerIdentityKey(live));
-}
-
-// Group manager writes (reuse the catalog helpers). Add reads the inline field; rename/delete operate on a
-// named group and also fix player memberships locally so the roster stays consistent before the sync.
-async function mgpAddGroup() {
-  const inp = document.getElementById('mgp-gadd-input');
-  const name = normalizeGroupName(inp ? inp.value : '');
-  if (!name) return;
-  if (!(state.groups || []).some((g) => normalizeGroupKey(g) === normalizeGroupKey(name))) {
-    state.groups = ['All', ...normalizeGroupList([...(state.groups || []).filter((g) => g && g !== 'All'), name])];
-  }
-  saveLocal();
-  if (inp) inp.value = '';
-  repaintManage();
-  if (supabaseClient) { try { await ensureGroupCatalogEntrySupabase(name); } catch (err) { console.error('mgp add group error', err); } }
-}
-
-async function mgpRenameGroupCommit(oldName) {
-  const inp = document.getElementById('mgp-grename-input');
-  const next = normalizeGroupName(inp ? inp.value : '');
-  const old = normalizeGroupName(oldName);
-  if (!old || !next) { mgRenameGroup = null; repaintManage(); return; }
-  const oldKey = normalizeGroupKey(old);
-  const nextKey = normalizeGroupKey(next);
-  state.groups = ['All', ...normalizeGroupList((state.groups || [])
-    .filter((g) => g && g !== 'All')
-    .map((g) => (normalizeGroupKey(g) === oldKey ? next : g)))];
-  state.players = (state.players || []).map((p) => {
-    const gs = getPlayerGroups(p);
-    if (!gs.some((g) => normalizeGroupKey(g) === oldKey)) return p;
-    const ng = normalizeGroupList(gs.map((g) => (normalizeGroupKey(g) === oldKey ? next : g)));
-    return { ...p, group: ng[0] || '', groups: ng };
-  });
-  saveLocal();
-  mgRenameGroup = null;
-  repaintManage();
-  if (supabaseClient && oldKey !== nextKey) {
-    try {
-      await renameGroupCatalogEntrySupabase(old, next);
-      const updates = (state.players || []).filter((p) => p.id).map((p) => ({ id: p.id, group: getPlayerPrimaryGroup(p), groups: getPlayerGroups(p) }));
-      for (const u of updates) await updatePlayerFieldsSupabase(u.id, { group: u.group, groups: u.groups });
-      await syncFromSupabase();
-    } catch (err) { console.error('mgp rename group error', err); await reconcileToSupabaseAuthority('mgp-rename-group'); }
-  }
-}
-
-async function mgpDeleteGroup(groupName) {
-  const name = normalizeGroupName(groupName);
-  if (!name) return;
-  const ok = await appConfirm({
-    title: `Delete group "${name}"?`,
-    message: 'It is removed from every player. This cannot be auto-undone.',
-    confirmText: 'Delete',
-    danger: true
-  });
-  if (!ok) return;
-  const key = normalizeGroupKey(name);
-  state.groups = ['All', ...normalizeGroupList((state.groups || []).filter((g) => g && g !== 'All' && normalizeGroupKey(g) !== key))];
-  state.players = (state.players || []).map((p) => {
-    const gs = getPlayerGroups(p);
-    if (!gs.some((g) => normalizeGroupKey(g) === key)) return p;
-    const ng = gs.filter((g) => normalizeGroupKey(g) !== key);
-    return { ...p, group: ng[0] || '', groups: ng };
-  });
-  saveLocal();
-  repaintManage();
-  if (supabaseClient) {
-    try {
-      await deleteGroupCatalogEntrySupabase(name);
-      const updates = (state.players || []).filter((p) => p.id).map((p) => ({ id: p.id, group: getPlayerPrimaryGroup(p), groups: getPlayerGroups(p) }));
-      for (const u of updates) await updatePlayerFieldsSupabase(u.id, { group: u.group, groups: u.groups });
-      await syncFromSupabase();
-    } catch (err) { console.error('mgp delete group error', err); await reconcileToSupabaseAuthority('mgp-delete-group'); }
-  }
 }
 
 // ── Task 4: Teams page (session-10 pick R5 TRIMMED) — chips + generate + stacked teams ───────────────

@@ -1465,8 +1465,10 @@ body.copilot-open #cop-chat {
 /* Mike pick X (task-#10, no bubbles): big bordered tap ROW. Kept as a <button> for keyboard/focus
    a11y (the mockup drew a <div>; the visual is identical). The matched search prefix reads accent-bold
    (renderCheckinButton/highlightMatch); right tag = TAP TO CHECK IN, or grayed ALREADY IN when the
-   person is checked in. NO initials/avatar bubble — Mike's explicit delta. Same-name rows keep a muted
-   group line (.ckx-gp) as the only differentiator (skill NEVER renders on a public surface). */
+   person is checked in. NO initials/avatar bubble, Mike's explicit delta. Groups left every surface on
+   2026-08-29, and Mike ruled out a replacement tiebreaker ("thats almost impossible to have the same full
+   name, just leave it"), so two same-name people render as IDENTICAL rows and skill NEVER renders on a
+   public surface (AS-1). */
 .ckx-row {
   display: flex;
   align-items: center;
@@ -1486,7 +1488,6 @@ body.copilot-open #cop-chat {
 .ckx-row:active { transform: translateY(1px); }
 .ckx-nm { flex: 1; min-width: 0; font-size: 17px; font-weight: 600; color: var(--text); white-space: normal; overflow-wrap: anywhere; }
 .ckx-nm b { color: var(--accent); font-weight: 700; }
-.ckx-gp { display: block; font-size: 12.5px; font-weight: 500; color: var(--muted); margin-top: 2px; }
 .ckx-go { flex-shrink: 0; font: 700 12px var(--font-display); letter-spacing: .06em; color: var(--accent); white-space: nowrap; }
 .ckx-row.is-in { opacity: .55; }
 .ckx-row.is-in .ckx-go { color: var(--live-ink); }
@@ -2230,14 +2231,10 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgp-meta { display: flex; gap: 16px; align-items: center; margin: 0 0 4px; }
 .mgp-m { font-size: 12px; color: var(--muted); background: none; border: none; padding: 0; }
 .mgp-m b { color: var(--ink); font-weight: 700; }
-.mgp-mg { cursor: pointer; }
-.mgp-mg b { margin-right: 4px; } /* §27 catch: the global button reset collapses the <b>N</b> / "groups" gap */
-.mgp-mg.on, .mgp-mg.on b { color: var(--accent); }
 .mgp-row { display: flex; align-items: center; gap: 11px; padding: 9px 2px; border-top: 1px solid var(--border); text-decoration: none; color: inherit; cursor: pointer; width: 100%; text-align: left; background: none; }
 .mgp-al { font: 800 12px var(--font-display); color: var(--faint); width: 20px; flex: none; text-align: center; }
 .mgp-pn { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mgp-pn b { font-weight: 800; color: var(--accent); }
-.mgp-gp { font-size: 11.5px; color: var(--muted); font-weight: 500; margin-left: 7px; }
 .mgp-in { flex: none; font: 700 10.5px var(--font-display); letter-spacing: .06em; color: var(--live-ink); }
 .mgp-sk { flex: none; font: 800 14px var(--font-display); color: var(--accent); width: 34px; text-align: right; }
 .mgp-sk.n { color: var(--faint); }
@@ -2247,29 +2244,12 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgp-add { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 10px; padding: 12px; border: 1.5px dashed var(--accent-bd); border-radius: 11px; background: transparent; color: var(--accent); font: 600 13.5px 'Inter', sans-serif; cursor: pointer; }
 .mgp-add svg { width: 16px; height: 16px; }
 .mgp-empty { padding: 30px 16px; text-align: center; color: var(--muted); font-size: 13px; }
-/* inline group manager (from the meta group count) */
-.mgp-grp { margin: 2px 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--card); }
-.mgp-glabel { font: 700 11px var(--font-display); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
-.mgp-grow { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--border); }
-.mgp-grow:first-of-type { border-top: none; }
-.mgp-gname { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
-.mgp-grn { flex: 1; min-width: 0; border: none; border-bottom: 1.5px solid var(--accent-bd); background: transparent; padding: 5px 2px; font-size: 16px; color: var(--ink); }
-.mgp-grn:focus { outline: none; border-bottom-color: var(--accent); }
-.mgp-gact { flex: none; font: 600 12px 'Inter', sans-serif; color: var(--muted); background: none; border: none; padding: 2px 4px; cursor: pointer; }
-.mgp-gact.del { color: var(--danger); }
-.mgp-gempty { font-size: 12.5px; color: var(--muted); padding: 4px 0; }
-.mgp-gadd { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
-.mgp-gadd input { flex: 1; min-width: 0; border: none; border-bottom: 1.5px solid var(--accent-bd); background: transparent; padding: 6px 2px; font-size: 16px; color: var(--ink); }
-.mgp-gadd input:focus { outline: none; border-bottom-color: var(--accent); }
-.mgp-gadd button { flex: none; font: 700 13px 'Inter', sans-serif; color: var(--accent); background: none; border: none; cursor: pointer; }
-/* Select-mode bottom action bar + Move-to-group chip row (fixed above the floating nav) */
+/* Select-mode bottom action bar (fixed above the floating nav). The Move-to-group chip row that used to
+   sit above it left on 2026-08-29 with groups. */
 .mgp-bar { position: fixed; left: 12px; right: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 40; display: flex; gap: 6px; padding: 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--card); box-shadow: 0 4px 14px oklch(0.18 0.005 75 / .12); }
 .mgp-bar button { flex: 1; padding: 10px 6px; border-radius: 9px; border: none; background: var(--surface-3); color: var(--ink); font: 600 12.5px 'Inter', sans-serif; cursor: pointer; }
 .mgp-bar button.pri { background: var(--accent); color: #fff; }
 .mgp-bar button.mut { background: transparent; color: var(--muted); }
-.mgp-movebar { position: fixed; left: 12px; right: 12px; bottom: calc(140px + env(safe-area-inset-bottom)); z-index: 40; display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--card); box-shadow: 0 4px 14px oklch(0.18 0.005 75 / .12); }
-.mgp-movechip { font: 600 12.5px 'Inter', sans-serif; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent-bd); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
-.mgp-movehint { font-size: 12px; color: var(--muted); }
 
 /* -- Manage -> Check-in (2026-07-19 spec): chips reuse .pl-tab, search reuses .cik-search,
    rows reuse .ckx-* (the kiosk kit). Only the page-specific bits live here. -- */
@@ -2927,12 +2907,12 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   body.pd-public-active #tab-players > .container { max-width: 640px; }
   /* Manage (session-10 R1): the admin Manage lead + area pages stay a centered ~720px reading column. */
   body.pd-public-active #tab-manage > .container { max-width: 720px; }
-  /* Task 3 (§41): the Players Select-mode action bar + move-chip row are position:fixed — clamp them to the
-     centered Manage column on desktop instead of spanning the full viewport. */
-  body.pd-public-active .mgp-bar,
-  body.pd-public-active .mgp-movebar { left: 50%; transform: translateX(-50%); width: 100%; max-width: 720px; }
+  /* Task 3 (§41): the Players Select-mode action bar is position:fixed, so clamp it to the centered Manage
+     column on desktop instead of spanning the full viewport. */
+  body.pd-public-active .mgp-bar { left: 50%; transform: translateX(-50%); width: 100%; max-width: 720px; }
   /* (2026-08-25: the selector list above dangled into the .pd-thero rule below, so the clamp never shipped
-     and the two bars took its 22px type — found by the Tournament recon.) */
+     and the bar took its 22px type, found by the Tournament recon. The move-chip row it also named left
+     with groups on 2026-08-29.) */
 
   /* ---- typography: Sora titles up a notch on the surfaces that go wide (A direction) ---- */
   body.pd-public-active .pd-thero .pd-h { font-size: 22px; }

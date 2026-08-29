@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.29.6'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.29.8'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -171,9 +171,6 @@ function openPlayerEditPopup(playerKey) {
   const player = state.players.find(p => playerIdentityKey(p) === playerKey);
   if (!player) return;
 
-  const playerGroup  = (player.groups && player.groups[0]) || player.group || '';
-  const playerGroups = Array.isArray(player.groups) ? player.groups : (playerGroup ? [playerGroup] : []);
-  const groupsValue  = escapeHTMLText(JSON.stringify(playerGroups));
   const playerId     = escapeHTMLText(String(player.id || ''));
   const keyAttr      = escapeHTMLText(playerKey);
 
@@ -240,13 +237,10 @@ function openPlayerEditPopup(playerKey) {
         <svg class="pe-ico pe-ico-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 4.5H18a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-2.5"/><path d="M9.5 8.5 6 12l3.5 3.5"/><path d="M6 12h9"/></svg>
         <span data-pe-inlabel>${isIn ? 'Check out' : 'Check in'}</span>
       </button>
-      <!-- The Groups control and the Account row came OUT of this dialog in the 2026-08-03 round, so group
-           membership has no editor here (README open question 2, unanswered). These two hidden inputs stay:
-           the delegated Save reads them, and dropping them would silently WIPE a player's groups every time
-           an organiser fixed a name. The .group-item / set-primary-group handlers are untouched, just
-           unreachable from this dialog. -->
-      <input type="hidden" class="edit-group"  value="${escapeHTMLText(playerGroup)}" />
-      <input type="hidden" class="edit-groups" value="${groupsValue}" />
+      <!-- The Groups control came OUT of this dialog in the 2026-08-03 round, and the two hidden inputs that
+           carried the value through the Save went with groups themselves on 2026-08-29 (Mike: DELETE GROUPS
+           EVERYWHERE). They were kept because dropping them would have WIPED a player's groups every time an
+           organiser fixed a name; with the column going there is nothing left to wipe. -->
     </div>
     </div>
     <div class="edit-actions pe-actions">
@@ -514,8 +508,6 @@ function findInlineEditRowByPlayerKey(playerKey) {
     const nameInput  = row.querySelector('.edit-name');
     const lastInput  = row.querySelector('.edit-lastname');
     const skillInput = row.querySelector('.edit-skill');
-    const groupInput = row.querySelector('.edit-group');
-    const groupsInput = row.querySelector('.edit-groups');
 
     // Round 2026-08-03: the dialog splits the stored name across First (.edit-name) + Last (.edit-lastname).
     // Rejoin here. With no last-name field present, .edit-name still carries the whole name (old behaviour).
@@ -523,12 +515,6 @@ function findInlineEditRowByPlayerKey(playerKey) {
       ? [(nameInput?.value || '').trim(), (lastInput.value || '').trim()].filter(Boolean).join(' ')
       : (nameInput?.value || '')).replace(/\s+/g, ' ').trim();
     let   skill = parseFloat(skillInput?.value);
-    const parsedGroups = parseEditGroupsValue(groupsInput?.value || '');
-    const fallbackGroup = normalizeGroupName(groupInput?.value || '');
-    const groups = parsedGroups.length
-      ? parsedGroups
-      : (fallbackGroup ? [fallbackGroup] : []);
-    const group = groups[0] || '';
 
     // 2026-08-29 (Mike): unrated IS skill 0, saved normally. This used to be
     // `if (!name || Number.isNaN(skill)) return;`. A blank rating aborted the save in SILENCE, so an
@@ -550,7 +536,7 @@ function findInlineEditRowByPlayerKey(playerKey) {
     if (idx < 0 || !state.players[idx]) return;
 
     const prev = state.players[idx];
-    const next = { ...prev, name, skill, group, groups };
+    const next = { ...prev, name, skill };
     // If this row was never saved (no id yet), mark it pending so a racing
     // authoritative sync doesn't drop it before the insert lands (mergePlayersAfterSync).
     if (!next.id) next.pending = true;
@@ -578,33 +564,15 @@ function findInlineEditRowByPlayerKey(playerKey) {
         try {
           let remoteOK = false;
           if (next.id) {
-            remoteOK = await updatePlayerFieldsSupabase(next.id, { name, skill, group, groups });
+            remoteOK = await updatePlayerFieldsSupabase(next.id, { name, skill });
           } else {
-            const encodedGroupsTag = serializePlayerGroupsTag(groups, group);
-            try {
-              const insertRow = HAS_TAG
-                ? { name, skill, group, tag: encodedGroupsTag }
-                : { name, skill, group };
-              const { data, error } = await supabaseClient.from('players').insert([insertRow]).select();
-              if (error) throw error;
-              // Capture the inserted id so a later re-Save updates this row instead of
-              // inserting a duplicate. See reliability check 2026-06-18.
-              if (Array.isArray(data) && data.length > 0) next.id = data[0].id;
-            } catch {
-              try {
-                const { data, error } = await supabaseClient.from('players').insert([{ name, skill, tag: group }]).select();
-                if (error) throw error;
-                if (Array.isArray(data) && data.length > 0) next.id = data[0].id;
-              } catch {
-                const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
-                if (error) throw error;
-                if (Array.isArray(data) && data.length > 0) next.id = data[0].id;
-              }
-            }
+            const { data, error } = await supabaseClient.from('players').insert([{ name, skill }]).select();
+            if (error) throw error;
+            // Capture the inserted id so a later re-Save updates this row instead of inserting a duplicate.
+            if (Array.isArray(data) && data.length > 0) next.id = data[0].id;
             remoteOK = true;
           }
 
-          await ensureGroupCatalogEntriesSupabase(groups);
           // Reliability (2026-06-24): only clear `pending` once an id is assigned. If the insert "succeeded"
           // but returned no row (no id), keeping pending=true lets the post-sync merge preserve this player
           // instead of dropping it (the merge keeps a local row only while !id && pending).
@@ -6193,14 +6161,16 @@ function currentTabKey() { return state.isAdmin ? 'as_main_tab_admin' : 'as_main
 // Task 13 (2026-07-11): the code login is retired — email+password IS the admin sign-in.
 // Mike pick X (task-#10, 2026-07-10): big bordered tap ROW — matched prefix accent-bold, right-side
 // tag (TAP TO CHECK IN / grayed ALREADY IN). NO initials/avatar bubble (Mike's explicit delta — they
-// read as furniture). Same-name rows keep the group differentiator only (never skill). The tap attr
-// (data-checkin-id) is unchanged so the existing #checkin-results click handler keeps working.
+// read as furniture). The tap attr (data-checkin-id) is unchanged so the existing #checkin-results click
+// handler keeps working.
+// Mike (2026-08-29), on two players with the same full name: "thats almost impossible to have the same
+// full name, just leave it." Identical rows are accepted; there is no replacement differentiator, and
+// skill can NEVER render here (AS-1, admin-only ratings).
 function renderCheckinButton(row, query) {
   const inClass = row.checkedIn ? ' is-in' : '';
   const tag = row.checkedIn ? 'ALREADY IN' : 'TAP TO CHECK IN';
-  const group = row.group ? `<span class="ckx-gp">${escapeHTML(row.group)}</span>` : '';
   return `<button class="ckx-row${inClass}" type="button" data-checkin-id="${escapeHTML(String(row.id))}">`
-    + `<span class="ckx-nm">${highlightMatch(row.name, query)}${group}</span>`
+    + `<span class="ckx-nm">${highlightMatch(row.name, query)}</span>`
     + `<span class="ckx-go">${tag}</span></button>`;
 }
 
@@ -6220,7 +6190,7 @@ function highlightMatch(name, query) {
 // Reliability fix (2026-06-20): module-level so BOTH the kiosk closure (renderCheckinResultsForQuery)
 // and partialRender's public-kiosk branch derive the big name buttons identically. Overlays the LIVE
 // state.checkedIn truth onto the synced player.checked_in so a just-tapped / cross-device check-in
-// reflects at once. NO skill (public surface) — disambiguation is name + group only.
+// reflects at once. NO skill (public surface); rows are disambiguated by name alone (Mike, 2026-08-29).
 function buildKioskResultsHTML(query) {
   const inSet = new Set(state.checkedIn || []);
   const list = disambiguatePlayersByName(state.players, query).map((row) => {
@@ -8647,7 +8617,7 @@ const copilotExecutors = {
   async check_in(args) {
     const r = resolvePlayerByName(state.players, args.name);
     if (!r.ok) return { is_error: true, args, result: r.reason === 'ambiguous'
-      ? `More than one match for "${args.name}": ${r.matches.map((m) => m.name + (m.group ? ` (${m.group})` : '')).join(', ')}. Which one?`
+      ? `More than one match for "${args.name}": ${r.matches.map((m) => m.name).join(', ')}. Which one?`
       : `I couldn't find a player named "${args.name}".` };
     const player = (state.players || []).find((p) => p.id === r.player.id) || r.player;
     if (!checkInPlayer(player)) return { args: { name: r.player.name }, result: `${r.player.name} is already checked in.` };
@@ -9287,23 +9257,15 @@ function attachHandlers() {
       if (pkRemove) { void removePickupDay(pkRemove.getAttribute('data-pk-remove')); return; }
       if (e.target.closest('[data-pk-qr]')) { openQrModal(); return; }              // reuse the shared QR modal
       if (e.target.closest('[data-pk-fresh]')) { void startNewSessionFlow(); return; } // reuse start_new_session (no gate — all 4 admins)
-      // Players directory (Task 3, pick R4): Select toggle, group manager, bulk bar, add-a-player, row taps.
+      // Players directory (Task 3, pick R4): Select toggle, bulk bar, add-a-player, row taps.
       // All are container-swap partial repaints (the mg* players module vars survive); a normal row tap opens
       // the EXISTING body-level edit sheet. Checked BEFORE the generic data-mg-area so a row/button here never
       // falls through to navigation (the page's own back button carries data-mg-area="lead", handled below).
       if (manageView === 'players') {
-        if (e.target.closest('[data-mgp-select]')) { mgSelectMode = !mgSelectMode; mgSelected = new Set(); mgMoveOpen = false; repaintManage(); return; }
-        if (e.target.closest('[data-mgp-groups]')) { mgGroupsOpen = !mgGroupsOpen; mgRenameGroup = null; repaintManage(); return; }
-        if (e.target.closest('[data-mgp-gadd]')) { void mgpAddGroup(); return; }
-        const gRen = e.target.closest('[data-mgp-grename]'); if (gRen) { mgRenameGroup = gRen.getAttribute('data-mgp-grename'); repaintManage(); return; }
-        const gRenSave = e.target.closest('[data-mgp-grename-save]'); if (gRenSave) { void mgpRenameGroupCommit(gRenSave.getAttribute('data-mgp-grename-save')); return; }
-        if (e.target.closest('[data-mgp-grename-cancel]')) { mgRenameGroup = null; repaintManage(); return; }
-        const gDel = e.target.closest('[data-mgp-gdelete]'); if (gDel) { void mgpDeleteGroup(gDel.getAttribute('data-mgp-gdelete')); return; }
+        if (e.target.closest('[data-mgp-select]')) { mgSelectMode = !mgSelectMode; mgSelected = new Set(); repaintManage(); return; }
         if (e.target.closest('[data-mgp-bulk="in"]')) { void mgpBulkAttendance(true); return; }
         if (e.target.closest('[data-mgp-bulk="out"]')) { void mgpBulkAttendance(false); return; }
-        if (e.target.closest('[data-mgp-bulk="move"]')) { mgMoveOpen = !mgMoveOpen; repaintManage(); return; }
-        if (e.target.closest('[data-mgp-bulk="cancel"]')) { mgSelectMode = false; mgSelected = new Set(); mgMoveOpen = false; repaintManage(); return; }
-        const moveChip = e.target.closest('[data-mgp-movegrp]'); if (moveChip) { void mgpBulkGroup(moveChip.getAttribute('data-mgp-movegrp')); return; }
+        if (e.target.closest('[data-mgp-bulk="cancel"]')) { mgSelectMode = false; mgSelected = new Set(); repaintManage(); return; }
         const addRow = e.target.closest('[data-mgp-add]'); if (addRow) { void mgpAddPlayer(addRow.getAttribute('data-mgp-add') || ''); return; }
         const mgpRow = e.target.closest('[data-mgp-id]');
         if (mgpRow) {
@@ -9595,7 +9557,7 @@ function attachHandlers() {
         if (nextArea === 'checkin') { mgckFilter = 'all'; mgckQ = ''; mgckLast = null; }
         // Entering the Players directory fresh: reset the search + Select state so a re-open starts clean.
         if (nextArea === 'players' && manageView !== 'players') {
-          mgPlayerQuery = ''; mgSelectMode = false; mgSelected = new Set(); mgGroupsOpen = false; mgMoveOpen = false; mgRenameGroup = null;
+          mgPlayerQuery = ''; mgSelectMode = false; mgSelected = new Set();
         }
         // Entering the Teams page fresh: 4s default. Nothing else is stateful here any more.
         if (nextArea === 'teams' && manageView !== 'teams') { mgtSize = 4; }
@@ -9872,15 +9834,9 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
           return;
         }
 
-        const activeGroupForRegister = normalizeActiveGroupSelection(state.activeGroup || 'All');
-        // Wave 1d: a public-kiosk registration with no group selected defaults to CLUB_GROUP (the same
-        // canonical group checkin.html uses) so the two doors don't create duplicate, mutually-invisible
-        // people. An admin who has a real group selected still registers into THAT group.
-        const group = (activeGroupForRegister && activeGroupForRegister !== 'All' && activeGroupForRegister !== UNGROUPED_FILTER_VALUE) ? activeGroupForRegister : CLUB_GROUP;
-        const groups = group ? [group] : [];
         const skill = 0.0;
         // pending:true keeps this in-flight row alive through a racing sync (mergePlayersAfterSync).
-        const inserted = { name, skill, group, groups, pending: true };
+        const inserted = { name, skill, pending: true };
         state.players = [...state.players, inserted];
         // kiosk intent: a "new" player is here and checking in now — check them in optimistically too.
         checkInPlayer(inserted);
@@ -9898,11 +9854,10 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
             // server checked_in=false if the page closed/lost network between the calls, silently dropping
             // a first-timer who was told "you're checked in" from the count. Migration 0015's register_player
             // records the check_ins row when p_checked_in.
-            const { data, error } = await supabaseClient.rpc('register_player', { p_name: name, p_group: group, p_checked_in: true });
+            const { data, error } = await supabaseClient.rpc('register_player', { p_name: name, p_checked_in: true });
             if (error) throw error;
             const row = Array.isArray(data) ? data[0] : data;
             if (row && row.id) inserted.id = row.id;
-            await ensureGroupCatalogEntriesSupabase(group ? [group] : []);
             // Reliability (2026-06-24): only clear pending if we got an id (else the merge could drop this new player).
             if (inserted.id) inserted.pending = false;
             queueSupabaseRefresh();
@@ -9910,7 +9865,7 @@ if (supabaseClient && supabaseClient.auth && typeof supabaseClient.auth.onAuthSt
             console.error('Supabase insert error', err);
             inserted.pending = true;
             // Wave 1d: carry the checked-in intent so the offline retry registers atomically too.
-            outboxEnqueue({ key: 'reg:' + normalize(name) + ':' + (group || ''), kind: 'register', payload: { name, group, checked_in: true }, ts: Date.now() });
+            outboxEnqueue({ key: 'reg:' + normalize(name), kind: 'register', payload: { name, checked_in: true }, ts: Date.now() });
             showCheckinToast('Saved on this device. Will sync when online');
           }
           saveLocal();
