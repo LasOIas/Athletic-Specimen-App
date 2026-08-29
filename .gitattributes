@@ -1,0 +1,2 @@
+# Every blob in this repo is already LF; this pin makes every checkout match, on every machine.
+* text=auto eol=lf
