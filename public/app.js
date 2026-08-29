@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.26.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.26.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7376,9 +7376,16 @@ async function onAuthEvent(event, session) {
     closeAuthPage();
     closeGatePage(); // Account round: signing in from the wall drops it; the tab behind is theirs now
     // bootPaintDone gate (2026-07-12): during boot, INITIAL_SESSION restores can land while the
-    // splash is still up — state is set above, and the single boot render() paints it. Post-boot
-    // (a real sign-in from the auth page) this renders immediately, unchanged.
-    if (state.loaded && bootPaintDone) { try { render(); } catch {} }   // show signed-in immediately
+    // splash is still up — state is set above, and the single boot render() paints it.
+    // C102 (2026-08-26): a sign-in changes the chip, the Tournament tab body (the wall's gate body becomes
+    // the hub) and the wall itself. Each has an in-place repaint; a full render() rebuilt every panel and
+    // reset the viewer's scroll for it. Three separate trys so one failure never blocks the others.
+    // partialRender has no in-place branch for the Check In tab and falls through to render() there.
+    if (state.loaded && bootPaintDone) {
+      try { repaintAccountChip(); } catch (_) {}
+      try { syncGatePage(); } catch (_) {}      // closeGatePage ran above; this states the decision explicitly
+      try { partialRender(); } catch (_) {}
+    }
     // Slice 3b: a signed-out "claim your team" tap routed through sign-in — finish the journey.
     // Deferred: openClaimPage does a .from() read, and supabase calls inline in this callback deadlock.
     if (claimIntent) {

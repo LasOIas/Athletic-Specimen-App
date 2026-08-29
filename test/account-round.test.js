@@ -327,6 +327,9 @@ function loadApp() {
       headerHTML: () => buildPublicHeaderHTML(),
       nameFillSave: () => onNameFillSave({ preventDefault() {} }),
       partialCount: () => __partials,
+      // C102 Task 2: the string the Tournament tab body IS, so a case can prove the panel behind the wall
+      // was rebuilt from the signed-in state rather than left showing the gate.
+      tournamentRoot: () => buildPublicTournamentRootHTML(),
       // Task 5: the account overlay's own repaint, and the module var the pending screen names and
       // resends to. Repainting the same view is how a case proves a bind cannot stack.
       renderAcct: () => renderAcctPageInner(),
@@ -2723,5 +2726,70 @@ describe('C102 Task 1: the header chip repaints on its own', () => {
     expect(bridge.renderCount()).toBe(before);
     expect(bridge.partialCount()).toBe(partials + 1);
     expect(bridge.authInitial()).toBe('A');
+  });
+});
+
+// C102 Task 2 (2026-08-26): a sign-in used to ask for a full render() to change three things - the header
+// chip, the signed-out wall, and the tab body behind it. Every panel was rebuilt and the viewer's scroll
+// was reset for that. Each of the three has its own in-place paint now.
+describe('C102 Task 2: a sign-in repaints in place', () => {
+  beforeEach(() => bridge.reset());
+  afterAll(() => { bridge.getState().tournaments = []; });
+
+  // partialRender falls back to a FULL render() when #root has no children (public/app.js:736), and its
+  // Tournament branch only rebuilds '#tab-tournament .container' when tournamentNavVisible() is true -
+  // which is the same condition that puts the Bracket nav button on screen in the first place, so a
+  // viewer can only BE on this tab when it holds. Both are staged so the case exercises the real
+  // in-place path instead of measuring the fallback.
+  function stageShell() {
+    const root = bridge.node('div'); root.id = 'root'; bridge.registry.root = root;
+    root.appendChild(bridge.node('div'));
+    const panel = bridge.node('div'); panel.id = 'tab-tournament'; bridge.registry['tab-tournament'] = panel;
+    const c = bridge.node('div'); bridge.hook('#tab-tournament .container', c);
+    const grp = bridge.node('div'); bridge.hook('#app-header .pd-hgrp', grp);
+    bridge.getState().tournaments = [{ id: 't1', name: 'Summer Open', status: 'pools', registration_open: false }];
+    return { c, grp };
+  }
+  const session = { user: { id: 'u9', email: 'kai@email.com', email_confirmed_at: '2026-08-01T00:00:00Z' } };
+
+  it('on the Tournament tab: no full render, the chip and the tab body repaint, the wall drops', async () => {
+    const { c, grp } = stageShell();
+    bridge.setSignedOut();
+    bridge.setPainted(true);
+    bridge.tab('tournament');                                  // opens the wall for a signed-out viewer
+    expect(bridge.registry['gate-page']).toBeTruthy();
+    const gateBody = bridge.tournamentRoot();                  // what the signed-out panel shows
+    const renders = bridge.renderCount();
+    const partials = bridge.partialCount();
+    await bridge.authEvent('SIGNED_IN', session);
+    expect(bridge.renderCount()).toBe(renders);
+    expect(bridge.partialCount()).toBe(partials + 1);
+    expect(grp.innerHTML).toContain('is-signedin');
+    expect(bridge.registry['gate-page']).toBeFalsy();
+    expect(c.innerHTML).toBe(bridge.tournamentRoot());         // rebuilt from the signed-in state
+    expect(c.innerHTML).not.toBe(gateBody);
+  });
+
+  it('before the boot paint a restored session paints nothing (the boot render carries it)', async () => {
+    stageShell();
+    bridge.setSignedOut();
+    bridge.setPainted(false);
+    const renders = bridge.renderCount();
+    const partials = bridge.partialCount();
+    await bridge.authEvent('INITIAL_SESSION', session);
+    expect(bridge.getState().authSession).toBeTruthy();
+    expect(bridge.renderCount()).toBe(renders);
+    expect(bridge.partialCount()).toBe(partials);
+  });
+
+  it('a repeat auth event for the same account paints nothing at all', async () => {
+    stageShell();
+    bridge.setPainted(true);
+    await bridge.authEvent('SIGNED_IN', session);
+    const renders = bridge.renderCount();
+    const partials = bridge.partialCount();
+    await bridge.authEvent('TOKEN_REFRESHED', session);
+    expect(bridge.renderCount()).toBe(renders);
+    expect(bridge.partialCount()).toBe(partials);
   });
 });
