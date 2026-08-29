@@ -1247,7 +1247,24 @@ async function mgckAddAndCheckIn(name) {
       const { data, error } = await supabaseClient.rpc('register_player', { p_name: trimmed, p_checked_in: true });
       if (error) throw error;
       const row = Array.isArray(data) ? data[0] : data;
-      if (row && row.id) inserted.id = row.id;
+      if (row && row.id) {
+        // The identity key CHANGES the moment the id lands: local:<k> becomes id:<uuid> (pure.js:11-18).
+        // Two things were still pointing at the old one, and both are fixed here (2026-08-29), the same
+        // way mgckAddFromCard fixes them:
+        //   1. the checkedIn entry the optimistic check-in wrote. saveLocal drops any entry whose key no
+        //      longer matches a roster row (normalizeCheckedInEntries), so without the carry-across a
+        //      player added from the search miss reads OUT again on the very next repaint.
+        //   2. the UNDO pointer. mgckLast was stamped with the local key before the insert returned, so
+        //      mgckToggleByKey found no row and UNDO was a button that did nothing. It is re-pointed
+        //      only when it still holds the key this add wrote, so a tap in between keeps its own.
+        const wasKey = playerIdentityKey(inserted);
+        inserted.id = row.id;
+        const nowKey = playerIdentityKey(inserted);
+        if (nowKey !== wasKey) {
+          state.checkedIn = (state.checkedIn || []).map((k) => (k === wasKey ? nowKey : k));
+          if (mgckLast && mgckLast.key === wasKey) mgckLast = { ...mgckLast, key: nowKey };
+        }
+      }
       if (inserted.id) inserted.pending = false;
       queueSupabaseRefresh();
     } catch (err) {
@@ -1283,11 +1300,12 @@ async function mgckAddFromCard(name, skill, wantIn) {
   // pending: true and never corrected, because the trailing saveLocal is below this return.
   if (!supabaseClient) { inserted.pending = false; saveLocal(); return; }
   try {
-    // TWO keys, no p_group. Safe ONLY against a database where 0068 has already been applied. The
-    // pre-0068 function dedups on (lower(btrim(name)), coalesce("group",'')), so omitting p_group there
+    // TWO keys, no group argument - the same two every register caller sends since the groups removal
+    // (2026-08-29). Safe ONLY against a database where 0068 has already been applied. The pre-0068
+    // function dedups on (lower(btrim(name)), coalesce("group",'')), so dropping the group key there
     // would miss every grouped player and insert a SECOND row that the unique index does not block. 0068
-    // ships before any client push (spec:944, :1343). The signature keeps p_group with a default in both
-    // versions, so this call always binds - the ordering is about the DEDUP, not the arity.
+    // ships before any client push (spec:944, :1343). The signature keeps the group parameter with a
+    // default in both versions, so this call always binds - the ordering is about the DEDUP, not arity.
     const { data, error } = await supabaseClient.rpc('register_player', { p_name: trimmed, p_checked_in: !!wantIn });
     if (error) throw error;
     const row = Array.isArray(data) ? data[0] : data;
@@ -1300,15 +1318,16 @@ async function mgckAddFromCard(name, skill, wantIn) {
       const wasKey = playerIdentityKey(inserted);
       // Fix round 1 (I1): register_player NEVER errors on a name that is already taken - it selects the
       // existing row and returns it (0068_normalize_player_groups.sql:118-124), so an insert and a match
-      // look identical from here. If the returned id is one THIS DEVICE already has, the server matched
-      // somebody. Taking that id as our own would run the card's rating over a real player's while the
-      // strip said "added". Roll the optimistic row back and say what actually happened.
-      // Residual, and it needs the server to close: an add from a roster this device has not synced yet
-      // returns an id we have never seen, so this guess cannot tell it from an insert. 0069 gives
-      // register_player an `is_new boolean`; when it lands, gate the skill write and the copy on THAT
-      // here and in flushOutbox, and this local guess becomes a fallback.
+      // look identical from here. Taking a matched id as our own would run the card's rating over a real
+      // player's while the strip said "added". Roll the optimistic row back and say what happened.
+      // 0069 closes the residual the local guess could not: `is_new` is true ONLY on the insert path, so
+      // an add from a roster this device has not synced yet - which returns an id we have never seen and
+      // reads as an insert to the guess below - is now named for what it is. The server's answer WINS
+      // whenever it is present; the local-id clash stays as the fallback for a first run against a server
+      // still on the three-argument function, which returns no such key.
       const clash = (state.players || []).some((p) => p !== inserted && String(p.id) === String(row.id));
-      if (clash) {
+      const alreadyHere = (typeof row.is_new === 'boolean') ? (row.is_new === false) : clash;
+      if (alreadyHere) {
         state.players = (state.players || []).filter((p) => p !== inserted);
         state.checkedIn = (state.checkedIn || []).filter((k) => k !== wasKey);
         saveLocal();

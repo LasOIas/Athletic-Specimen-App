@@ -31,21 +31,15 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.29.9'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.29.10'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
-const LS_GROUPS_KEY = 'athletic_specimen_groups';
-const LS_ACTIVE_GROUP_KEY = 'athletic_specimen_active_group';
 // The Manage hub's PINNED tournament (2026-08-25 handoff). The organizer's pick has to survive a reload
 // or the inline picker is a per-session toy: he switches to next month, refreshes, and Manage is silently
 // back on the live event. Only an EXPLICIT pick is written (mgTournamentPinned); an inferred one belongs
 // to the resolver and must never be frozen into localStorage.
 const LS_MG_TOURNAMENT_KEY = 'as-manage-tournament';
-const UNGROUPED_FILTER_VALUE = '__ungrouped__';
-const UNGROUPED_FILTER_LABEL = 'Ungrouped (No Groups)';
-const GROUP_CATALOG_NAME_PREFIX = '__as_group__:';
-const GROUPS_TAG_PREFIX = '__as_groups__:';
 const TOURNAMENT_STATE_ROW_NAME = '__as_tournament_state__';
 const SUPABASE_AUTHORITATIVE = true;
 const SHARED_SYNC_PENDING = 'pending';
@@ -53,48 +47,6 @@ const SHARED_SYNC_LIVE = 'live';
 const SHARED_SYNC_FALLBACK = 'fallback';
 const SHARED_SYNC_LOCAL_ONLY = 'local-only';
 const SHARED_SYNC_CONFLICT_RESOLVED = 'conflict-resolved';
-
-
-function computeCheckedInByGroup() {
-  const byGroup = new Map();
-  const isIn = new Set(state.checkedIn || []);
-
-  for (const p of state.players || []) {
-    const primary = getPlayerPrimaryGroup(p);
-    const groupKey = primary || UNGROUPED_FILTER_VALUE;
-    const groupLabel = primary || UNGROUPED_FILTER_LABEL;
-
-    if (!byGroup.has(groupKey)) {
-      byGroup.set(groupKey, {
-        groupKey,
-        groupLabel,
-        isUngrouped: !primary,
-        total: 0,
-        in: 0
-      });
-    }
-
-    const row = byGroup.get(groupKey);
-    row.total += 1;
-    if (isIn.has(playerIdentityKey(p))) row.in += 1;
-  }
-
-  // return sorted entries by name
-  return Array.from(byGroup.values())
-    .sort((a, b) => a.groupLabel.localeCompare(b.groupLabel));
-}
-
-function normalizeActiveGroupSelection(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return 'All';
-  if (raw === 'All' || raw === UNGROUPED_FILTER_VALUE) return raw;
-  if (raw === UNGROUPED_FILTER_LABEL) return UNGROUPED_FILTER_VALUE;
-  if (raw === 'Ungrouped') {
-    const hasNamedUngroupedGroup = getAvailableGroups().includes('Ungrouped');
-    if (!hasNamedUngroupedGroup) return UNGROUPED_FILTER_VALUE;
-  }
-  return raw;
-}
 
 // C21: loadAdminCodes() removed — there are no client-side admin codes anymore (server-only).
 
@@ -196,7 +148,7 @@ function openPlayerEditPopup(playerKey, mode) {
 
   // The add card is the same element with no roster row behind it: empty fields, no pill, status OUT.
   const player = (peMode === 'new')
-    ? { id: '', name: '', skill: 0, groups: [] }
+    ? { id: '', name: '', skill: 0 }
     : state.players.find(p => playerIdentityKey(p) === playerKey);
   if (!player) return;
 
@@ -341,7 +293,6 @@ function closeInlineEditRow(row) {
   row.classList.remove('show');
   const card = row.closest('.player-card');
   if (card) card.classList.remove('is-editing');
-  row.querySelectorAll('.group-select.open').forEach((el) => el.classList.remove('open'));
 }
 
 
@@ -358,7 +309,10 @@ function findInlineEditRowByPlayerKey(playerKey) {
 }
 
 
-// -- Robust global click handler for player card menus (capture phase) --
+// -- Robust global click handler for the registration page CTAs (capture phase) --
+// It carried the edit row's group picker too - the open/close toggle, the chip taps and the outside-click
+// close - until groups left the product (2026-08-29). Nothing emits those nodes any more, so what is left
+// is the registration page's own three buttons.
 (function ensureMenuActionsBound() {
   if (window.__menusBound) return;
   window.__menusBound = true;
@@ -392,88 +346,6 @@ function findInlineEditRowByPlayerKey(playerKey) {
       claimIntent = true;
       openAuthPage();
       return;
-    }
-
-
-    // Group select toggle / selection (inside edit-row)
-    const groupBtn = e.target.closest('.group-btn');
-    if (groupBtn) {
-      e.stopPropagation();
-      e.preventDefault();
-      // close other open group-selects
-      document.querySelectorAll('.group-select.open').forEach(el => {
-        if (el !== groupBtn.closest('.group-select')) el.classList.remove('open');
-      });
-      const wrap = groupBtn.closest('.group-select');
-      if (wrap) wrap.classList.toggle('open');
-      return;
-    }
-
-    const setPrimaryBtn = e.target.closest('[data-role="set-primary-group"]');
-    if (setPrimaryBtn) {
-      e.stopPropagation();
-      e.preventDefault();
-      const row = setPrimaryBtn.closest('.edit-row');
-      if (!row) return;
-      const groups = getEditGroupsFromRow(row);
-      const index = parseInt(setPrimaryBtn.getAttribute('data-group-index'), 10);
-      if (!Number.isInteger(index) || index < 0 || index >= groups.length) return;
-      const selected = groups[index];
-      const next = [selected, ...groups.filter((_, idx) => idx !== index)];
-      updateEditRowGroupUI(row, next);
-      return;
-    }
-
-    const removeGroupBtn = e.target.closest('[data-role="remove-group"]');
-    if (removeGroupBtn) {
-      e.stopPropagation();
-      e.preventDefault();
-      const row = removeGroupBtn.closest('.edit-row');
-      if (!row) return;
-      const groups = getEditGroupsFromRow(row);
-      const index = parseInt(removeGroupBtn.getAttribute('data-group-index'), 10);
-      if (!Number.isInteger(index) || index < 0 || index >= groups.length) return;
-      const next = groups.filter((_, idx) => idx !== index);
-      updateEditRowGroupUI(row, next);
-      return;
-    }
-
-    const groupItem = e.target.closest('.group-item');
-    if (groupItem) {
-      e.stopPropagation();
-      e.preventDefault();
-      const val = normalizeGroupName(groupItem.getAttribute('data-value') || '');
-      const select = groupItem.closest('.group-select');
-      const row = select ? select.closest('.edit-row') : null;
-      if (!select || !row || !val) return;
-
-      const groups = getEditGroupsFromRow(row);
-      const next = [val, ...groups.filter((group) => group !== val)];
-      updateEditRowGroupUI(row, next);
-
-      // add chosen group to state.groups if it's new
-      try {
-        if (!(state.groups || []).includes(val)) {
-          state.groups = [...(state.groups || []), val];
-          saveLocal();
-        }
-      } catch {}
-
-      select.classList.remove('open');
-      return;
-    }
-
-    // Keep clicks inside the open group picker from closing it via bubbling
-    if (e.target.closest('.group-select')) {
-      e.stopPropagation();
-      return;
-    }
-
-
-
-    // 4) Clicked outside controls: close only when truly outside.
-    if (!e.target.closest('.group-select')) {
-      document.querySelectorAll('.group-select.open').forEach((el) => el.classList.remove('open'));
     }
   }, true); // capture phase so we always see the click
 })();
@@ -510,10 +382,7 @@ function findInlineEditRowByPlayerKey(playerKey) {
       const buttonPlayerKey = String(cancelBtn.getAttribute('data-player-key') || '').trim();
       const row = cancelBtn.closest('.edit-row') || findInlineEditRowByPlayerKey(buttonPlayerKey);
       closePlayerEditPopup();
-      if (row) {
-        closeInlineEditRow(row);
-        row.querySelectorAll('.group-select.open').forEach((select) => select.classList.remove('open'));
-      }
+      if (row) closeInlineEditRow(row);
       render();
       peRestoreFocus();   // AFTER the render, which rebuilds the list the pencil lives in
       return;
@@ -1150,330 +1019,9 @@ function installErrorBoundary() {
   });
 }
 
-function normalizeGroupName(value) {
-  return String(value || '').trim();
-}
-
-function normalizeGroupKey(value) {
-  return normalizeGroupName(value).toLowerCase();
-}
-
-function toGroupCatalogRowName(groupName) {
-  const normalized = normalizeGroupName(groupName);
-  if (!normalized) return '';
-  return `${GROUP_CATALOG_NAME_PREFIX}${normalized}`;
-}
-
-function parseGroupCatalogRowName(rowName) {
-  const name = String(rowName || '');
-  if (!name.startsWith(GROUP_CATALOG_NAME_PREFIX)) return '';
-  return normalizeGroupName(name.slice(GROUP_CATALOG_NAME_PREFIX.length));
-}
-
 function isTournamentStateRow(row) {
   return String(row && row.name || '').trim() === TOURNAMENT_STATE_ROW_NAME;
 }
-
-
-function serializePlayerGroupsTag(groups, primaryGroup = '') {
-  const primary = normalizeGroupName(primaryGroup);
-  const normalized = normalizeGroupList(groups);
-  const ordered = normalizeGroupList([
-    ...(primary ? [primary] : []),
-    ...normalized
-  ]);
-  if (!ordered.length) return '';
-  try {
-    return `${GROUPS_TAG_PREFIX}${encodeURIComponent(JSON.stringify(ordered))}`;
-  } catch {
-    return '';
-  }
-}
-
-function parsePlayerGroupsTag(rawTagValue) {
-  const raw = String(rawTagValue || '').trim();
-  if (!raw.startsWith(GROUPS_TAG_PREFIX)) return null;
-  const encoded = raw.slice(GROUPS_TAG_PREFIX.length);
-  if (!encoded) return [];
-  try {
-    const parsed = JSON.parse(decodeURIComponent(encoded));
-    return normalizeGroupList(parsed);
-  } catch {
-    return [];
-  }
-}
-
-function parseRemotePlayerGroupDetails(row) {
-  const primaryGroup = normalizeGroupName(row && row.group);
-  const encodedGroups = parsePlayerGroupsTag(row && row.tag);
-
-  if (Array.isArray(encodedGroups) && encodedGroups.length) {
-    return {
-      groups: normalizeGroupList([
-        ...(primaryGroup ? [primaryGroup] : []),
-        ...encodedGroups
-      ]),
-      hasEncodedGroups: true
-    };
-  }
-
-  const fallbackTag = normalizeGroupName(row && row.tag);
-  return {
-    groups: normalizeGroupList([
-      ...(primaryGroup ? [primaryGroup] : []),
-      ...(fallbackTag ? [fallbackTag] : [])
-    ]),
-    hasEncodedGroups: false
-  };
-}
-
-function mergeRemoteGroupCatalogIntoState(groupNames) {
-  const normalized = normalizeGroupList(groupNames);
-  if (!normalized.length) return;
-
-  const localGroups = Array.isArray(state.groups) ? state.groups : [];
-  const merged = normalizeGroupList([
-    ...localGroups.filter((groupName) => groupName && groupName !== 'All'),
-    ...normalized
-  ]);
-  state.groups = ['All', ...merged];
-}
-
-function normalizeGroupList(values) {
-  if (!Array.isArray(values)) return [];
-  const seen = new Set();
-  const out = [];
-  values.forEach((value) => {
-    const group = normalizeGroupName(value);
-    const key = normalizeGroupKey(group);
-    if (!group || !key || seen.has(key)) return;
-    seen.add(key);
-    out.push(group);
-  });
-  return out;
-}
-
-function getPlayerGroups(player) {
-  if (!player || typeof player !== 'object') return [];
-  const primary = normalizeGroupName(player.group || player.tag || '');
-  const fromArray = normalizeGroupList(player.groups);
-  if (!primary) return fromArray;
-  if (!fromArray.length) return [primary];
-  if (fromArray[0] === primary) return fromArray;
-  return [primary, ...fromArray.filter((g) => g !== primary)];
-}
-
-function getPlayerPrimaryGroup(player) {
-  const groups = getPlayerGroups(player);
-  return groups.length ? groups[0] : '';
-}
-
-function playerBelongsToGroup(player, groupName) {
-  const targetKey = normalizeGroupKey(groupName);
-  if (!targetKey) return false;
-  return getPlayerGroups(player).some((group) => normalizeGroupKey(group) === targetKey);
-}
-
-function isPlayerUngrouped(player) {
-  return getPlayerGroups(player).length === 0;
-}
-
-function sanitizePlayersAgainstAllowedGroups(allowedGroups) {
-  const allowed = normalizeGroupList(allowedGroups);
-  if (!allowed.length) return false;
-  const allowedKeys = new Set(allowed.map((groupName) => normalizeGroupKey(groupName)));
-
-  let changed = false;
-  state.players = (state.players || []).map((player) => {
-    if (!player || typeof player !== 'object') return player;
-    const currentGroups = getPlayerGroups(player);
-    const nextGroups = currentGroups.filter((groupName) => allowedKeys.has(normalizeGroupKey(groupName)));
-    const nextPrimary = nextGroups[0] || '';
-    const currentPrimary = normalizeGroupName(player.group || '');
-    const groupsUnchanged = currentGroups.length === nextGroups.length &&
-      currentGroups.every((groupName, index) => groupName === nextGroups[index]);
-    if (groupsUnchanged && currentPrimary === nextPrimary) return player;
-    changed = true;
-    return { ...player, group: nextPrimary, groups: nextGroups };
-  });
-
-  return changed;
-}
-
-function enforceCanonicalGroupState(options = {}) {
-  const catalogGroups = Array.isArray(options.catalogGroups)
-    ? normalizeGroupList(options.catalogGroups)
-    : null;
-  const includeExistingGroupsWhenNoCatalog = options.includeExistingGroupsWhenNoCatalog !== false;
-  const hasCatalog = Array.isArray(catalogGroups) && catalogGroups.length > 0;
-
-  normalizePlayerGroupsInState();
-  if (hasCatalog) {
-    sanitizePlayersAgainstAllowedGroups(catalogGroups);
-  }
-  normalizePlayerGroupsInState();
-
-  const groupsFromPlayers = normalizeGroupList(
-    (state.players || []).flatMap((player) => getPlayerGroups(player))
-  );
-  const existingGroups = includeExistingGroupsWhenNoCatalog
-    ? normalizeGroupList((state.groups || []).filter((groupName) => groupName && groupName !== 'All'))
-    : [];
-  const canonicalGroups = hasCatalog
-    ? catalogGroups
-    : normalizeGroupList([
-        ...existingGroups,
-        ...groupsFromPlayers
-      ]);
-  state.groups = ['All', ...canonicalGroups];
-
-  const currentActive = normalizeActiveGroupSelection(state.activeGroup || 'All');
-  if (currentActive === 'All' || currentActive === UNGROUPED_FILTER_VALUE) {
-    state.activeGroup = currentActive;
-  } else {
-    const activeKey = normalizeGroupKey(currentActive);
-    const match = canonicalGroups.find((groupName) => normalizeGroupKey(groupName) === activeKey);
-    state.activeGroup = match || 'All';
-  }
-}
-
-function persistCanonicalGroupCache() {
-  try {
-    localStorage.setItem(LS_GROUPS_KEY, JSON.stringify(getAvailableGroups()));
-    localStorage.setItem(LS_ACTIVE_GROUP_KEY, normalizeActiveGroupSelection(state.activeGroup || 'All'));
-  } catch {}
-}
-
-function normalizePlayerGroupShape(player) {
-  if (!player || typeof player !== 'object') return false;
-  const normalizedGroups = getPlayerGroups(player);
-  const normalizedPrimary = normalizedGroups[0] || '';
-
-  let changed = false;
-  if (player.group !== normalizedPrimary) {
-    player.group = normalizedPrimary;
-    changed = true;
-  }
-
-  if (!Array.isArray(player.groups) || player.groups.length !== normalizedGroups.length ||
-      player.groups.some((group, idx) => group !== normalizedGroups[idx])) {
-    player.groups = normalizedGroups;
-    changed = true;
-  }
-
-  return changed;
-}
-
-function normalizePlayerGroupsInState() {
-  let changed = false;
-  (state.players || []).forEach((player) => {
-    if (normalizePlayerGroupShape(player)) changed = true;
-  });
-  return changed;
-}
-
-function enforceSharedPlayerModelParity() {
-  if (!supabaseClient || !SUPABASE_AUTHORITATIVE || !PLAYERS_SCHEMA_DETECTED) return false;
-  if (HAS_GROUP && HAS_TAG) return false;
-
-  const supportsPrimaryOnly = HAS_GROUP || HAS_TAG;
-  let changed = false;
-
-  state.players = (state.players || []).map((player) => {
-    if (!player || typeof player !== 'object') return player;
-    const currentGroups = getPlayerGroups(player);
-    const primary = supportsPrimaryOnly ? normalizeGroupName(currentGroups[0] || player.group || '') : '';
-    const nextGroups = primary ? [primary] : [];
-    const currentPrimary = normalizeGroupName(player.group || '');
-    const sameShape =
-      currentPrimary === primary &&
-      currentGroups.length === nextGroups.length &&
-      currentGroups.every((groupName, idx) => groupName === nextGroups[idx]);
-    if (sameShape) return player;
-    changed = true;
-    return { ...player, group: primary, groups: nextGroups };
-  });
-
-  return changed;
-}
-
-
-function parseEditGroupsValue(rawValue) {
-  if (!rawValue) return [];
-  try {
-    const parsed = JSON.parse(rawValue);
-    return normalizeGroupList(parsed);
-  } catch {
-    const fallback = normalizeGroupName(rawValue);
-    return fallback ? [fallback] : [];
-  }
-}
-
-function getEditGroupsFromRow(row) {
-  if (!row) return [];
-  const groupsInput = row.querySelector('.edit-groups');
-  const primaryInput = row.querySelector('.edit-group');
-  const fromGroupsInput = parseEditGroupsValue(groupsInput?.value || '');
-  if (fromGroupsInput.length) return fromGroupsInput;
-  const primary = normalizeGroupName(primaryInput?.value || '');
-  return primary ? [primary] : [];
-}
-
-function renderEditGroupChipsMarkup(groups) {
-  const normalized = normalizeGroupList(groups);
-  if (!normalized.length) {
-    return '<span class="group-chip-empty small">No groups</span>';
-  }
-  return normalized.map((group, idx) => `
-    <span class="group-chip ${idx === 0 ? 'is-primary' : ''}">
-      <button
-        type="button"
-        class="group-chip-label"
-        data-role="set-primary-group"
-        data-group-index="${idx}"
-      >${escapeHTMLText(group)}${idx === 0 ? ' (Primary)' : ''}</button>
-      <button
-        type="button"
-        class="group-chip-remove"
-        data-role="remove-group"
-        data-group-index="${idx}"
-        aria-label="Remove ${escapeHTMLText(group)}"
-      >&times;</button>
-    </span>
-  `).join('');
-}
-
-function updateEditRowGroupUI(row, nextGroups) {
-  if (!row) return;
-  const normalized = normalizeGroupList(nextGroups);
-  const primary = normalized[0] || '';
-
-  const groupsInput = row.querySelector('.edit-groups');
-  if (groupsInput) groupsInput.value = JSON.stringify(normalized);
-
-  const primaryInput = row.querySelector('.edit-group');
-  if (primaryInput) primaryInput.value = primary;
-
-  const button = row.querySelector('.group-btn');
-  if (button) button.textContent = primary || 'Group';
-
-  const chips = row.querySelector('.group-chips');
-  if (chips) chips.innerHTML = renderEditGroupChipsMarkup(normalized);
-
-  const select = row.querySelector('.group-select');
-  if (select) {
-    select.querySelectorAll('.group-item').forEach((item) => {
-      const val = normalizeGroupName(item.getAttribute('data-value') || '');
-      const idx = normalized.indexOf(val);
-      const isMember = idx !== -1;
-      const isPrimary = idx === 0;
-      item.classList.toggle('is-member', isMember);
-      item.classList.toggle('is-primary', isPrimary);
-      item.textContent = `${val}${isPrimary ? ' (Primary)' : (isMember ? ' (Member)' : '')}`;
-    });
-  }
-}
-
 
 function ensurePlayerIdentityKeys() {
   let changed = false;
@@ -1548,7 +1096,6 @@ function checkOutPlayer(player) {
 const SyncManager = {
   players:      { refreshTimer: null, refreshQueued: false, refreshRunning: false,
                   requestSeq: 0, appliedSeq: 0, liveChannel: null, bootGraceArmed: false },
-  groupCatalog: { timer: null, queued: false, running: false, lastSig: '' },
   tournament:   { refreshTimer: null, liveChannel: null, bootGraceArmed: false },
   poll:         { interval: null },
   rt:           { backoff: { live: 0, tournament: 0 },
@@ -1705,46 +1252,6 @@ async function runQueuedSupabaseRefresh() {
     if (SyncManager.players.refreshQueued) {
       SyncManager.players.refreshTimer = setTimeout(() => {
         void runQueuedSupabaseRefresh();
-      }, 0);
-    }
-  }
-}
-
-function computeGroupCatalogSyncSignature() {
-  const candidates = normalizeGroupList([
-    ...(state.groups || []).filter((groupName) => groupName && groupName !== 'All'),
-    ...getAvailableGroups()
-  ]);
-  return candidates.join('|');
-}
-
-function queueGroupCatalogSync(delay = 280) {
-  if (!canRunAdminSharedBackfill()) return;
-  SyncManager.groupCatalog.queued = true;
-  clearTimeout(SyncManager.groupCatalog.timer);
-  SyncManager.groupCatalog.timer = setTimeout(() => {
-    void runQueuedGroupCatalogSync();
-  }, Math.max(0, Number(delay) || 0));
-}
-
-async function runQueuedGroupCatalogSync() {
-  if (!canRunAdminSharedBackfill() || SyncManager.groupCatalog.running || !SyncManager.groupCatalog.queued) return;
-  SyncManager.groupCatalog.running = true;
-  SyncManager.groupCatalog.queued = false;
-
-  try {
-    const signature = computeGroupCatalogSyncSignature();
-    if (signature && signature === SyncManager.groupCatalog.lastSig) return;
-    const wroteAny = await backfillGroupCatalogToSupabase();
-    if (signature) SyncManager.groupCatalog.lastSig = signature;
-    if (wroteAny) queueSupabaseRefresh();
-  } catch (err) {
-    console.error('Background group catalog sync error:', err);
-  } finally {
-    SyncManager.groupCatalog.running = false;
-    if (SyncManager.groupCatalog.queued) {
-      SyncManager.groupCatalog.timer = setTimeout(() => {
-        void runQueuedGroupCatalogSync();
       }, 0);
     }
   }
@@ -2182,8 +1689,6 @@ const state = {
   loaded: false,      // becomes true after Supabase loads
   searchTerm: '',
   collapsedCards: {}, // map of card id -> true when collapsed
-  groups: ['All', 'Athletic Specimen'],
-  activeGroup: 'All',
   masterAdminAuthenticated: false, // true only for an owner-role server session
   // Identity/Accounts (2026-07-08) — real email+password sign-in on top of the additive DB foundation.
   // authSession = live Supabase session (null when signed out); account = { id, email };
@@ -4858,14 +4363,6 @@ function formatLastSharedSyncLabel() {
   }
 }
 
-
-function getSharedGroupSyncModeLabel() {
-  if (!SUPABASE_AUTHORITATIVE || !supabaseClient || !PLAYERS_SCHEMA_DETECTED) return '';
-  if (HAS_GROUP && HAS_TAG) return ' Group sync mode: multi-group cloud canonical.';
-  if (HAS_GROUP || HAS_TAG) return ' Group sync mode: primary-only cloud canonical.';
-  return ' Group sync mode: none (local-only groups).';
-}
-
 function buildSharedSyncNoticeHTML() {
   if (!SUPABASE_AUTHORITATIVE || !supabaseClient) return '';
 
@@ -4884,12 +4381,6 @@ function buildSharedSyncNoticeHTML() {
     return `<p class="small shared-sync-notice is-live">${at ? `Updated ${escapeHTMLText(at)}` : 'Live'}</p>`;
   }
   return '';
-}
-
-function canRunAdminSharedBackfill() {
-  if (!supabaseClient || !state.isAdmin) return false;
-  if (!SUPABASE_AUTHORITATIVE) return true;
-  return state.sharedSyncState === SHARED_SYNC_LIVE || state.sharedSyncState === SHARED_SYNC_CONFLICT_RESOLVED;
 }
 
 
@@ -4948,11 +4439,6 @@ function normalizeCollapsedCardsState(value) {
     if (value[key]) out[String(key)] = true;
   });
   return out;
-}
-
-function getAvailableGroups() {
-  // Canonical group list for UI selection comes from state.groups.
-  return normalizeGroupList((state.groups || []).filter((groupName) => groupName && groupName !== 'All'));
 }
 
 // Message state used for transient user feedback; messages auto clear
@@ -5281,25 +4767,34 @@ async function flushOutbox() {
         let res = null;
         if (op.kind === 'check_in') res = await supabaseClient.rpc('check_in', { p_id: op.payload.p_id });
         else if (op.kind === 'check_out') res = await supabaseClient.rpc('check_out', { p_id: op.payload.p_id });
-        else if (op.kind === 'register') res = await supabaseClient.rpc('register_player', { p_name: op.payload.name, p_group: op.payload.group || '', p_checked_in: op.payload.checked_in === true }); // Wave 1d: kiosk registrations retry atomically checked-in; admin Add-Player (no flag) stays checked-out
+        // TWO keys, like every other register caller (2026-08-29). This was the last site still sending
+        // the group argument, and migration 0069 drops the three-argument overload outright: a third key
+        // would resolve to no function at all, return PGRST202, and the catch below would swallow it
+        // while the op retried forever. Wave 1d: kiosk registrations retry atomically checked-in; admin
+        // Add-Player (no flag) stays checked-out.
+        else if (op.kind === 'register') res = await supabaseClient.rpc('register_player', { p_name: op.payload.name, p_checked_in: op.payload.checked_in === true });
         else { outboxRemove(op.key); continue; }
         if (res && res.error) throw res.error;
         // A card-added player carries a rating in its payload, and register_player only ever inserts
         // skill 0 (db/migrations/0068_normalize_player_groups.sql:125), so the rating rides here as a
         // follow-up write once the replay returns an id. The row is deleted the moment it lands, so a
         // rating dropped here is dropped for good. It sits AFTER the throw above so a register that
-        // failed never gets a skill write, and BESIDE the register call rather than inside it, because
-        // the groups-removal branch is rewriting that one line and this must not collide with it.
+        // failed never gets a skill write, and BESIDE the register call rather than inside it, which is
+        // what let the groups removal rewrite that one line without touching this block.
         if (op.kind === 'register' && Number(op.payload.skill) > 0) {
           const regRow = res && Array.isArray(res.data) ? res.data[0] : (res && res.data);
-          // Fix round 1 (I1), the same dedup guard mgckAddFromCard runs: register_player returns the
-          // EXISTING row when the name is already taken, so an id this device already knows means the
-          // server matched somebody rather than inserting. This path is the likelier of the two to hit it,
-          // because a row queued offline replays against a roster that has moved on. A rating not applied
-          // to our own player is recoverable by editing them; a rating written over a stranger's is not.
-          // 0069's `is_new` flag replaces this guess.
+          // register_player returns the EXISTING row when the name is already taken, so an insert and a
+          // match look identical from here. A rating not applied to our own player is recoverable by
+          // editing them; a rating written over a stranger's is not.
+          // 0069 answers it outright: `is_new` is true ONLY on the insert path, false on the dedup hit
+          // and false in the unique_violation fallback where a concurrent session won the race. It wins
+          // whenever it is present. The local-id guess stays as the FALLBACK for the first run against a
+          // server still on the three-argument function, which returns no such key - and it is the weaker
+          // read on exactly this path, because a row queued offline replays against a roster that has
+          // moved on, so the id can be one this device has simply never seen.
           const known = !!(regRow && regRow.id && (state.players || []).some((p) => String(p.id) === String(regRow.id)));
-          if (regRow && regRow.id && !known) await updatePlayerFieldsSupabase(regRow.id, { skill: Number(op.payload.skill) });
+          const isOurs = (regRow && typeof regRow.is_new === 'boolean') ? regRow.is_new : !known;
+          if (regRow && regRow.id && isOurs) await updatePlayerFieldsSupabase(regRow.id, { skill: Number(op.payload.skill) });
         }
         outboxRemove(op.key); // landed
       } catch { /* still failing (offline?) — keep queued, retry next flush */ }
@@ -5383,7 +4878,6 @@ function loadLocal() {
         return p;
       });
     }
-    if (normalizePlayerGroupsInState()) shouldPersistMigration = true;
     if (ensurePlayerIdentityKeys()) shouldPersistMigration = true;
 
     const storedChecked = JSON.parse(localStorage.getItem(LS_CHECKIN_KEY) || '[]');
@@ -5412,13 +4906,6 @@ function loadLocal() {
   const storedSubtab = sessionStorage.getItem(LS_SUBTAB_KEY);
   if (storedSubtab) state.skillSubTab = storedSubtab;
 
-  const authoritativeSharedData = SUPABASE_AUTHORITATIVE && !!supabaseClient;
-  if (!authoritativeSharedData) {
-    try {
-      const groups = JSON.parse(localStorage.getItem(LS_GROUPS_KEY) || '[]');
-      if (Array.isArray(groups) && groups.length) state.groups = Array.from(new Set(['All', ...groups.filter(Boolean)]));
-    } catch {}
-  }
   try {
     const storedCollapsedCards = JSON.parse(localStorage.getItem(LS_COLLAPSED_CARDS_KEY) || '{}');
     const normalizedCollapsedCards = normalizeCollapsedCardsState(storedCollapsedCards);
@@ -5430,29 +4917,10 @@ function loadLocal() {
     state.collapsedCards = {};
     if (localStorage.getItem(LS_COLLAPSED_CARDS_KEY)) shouldPersistMigration = true;
   }
-  const ag = localStorage.getItem(LS_ACTIVE_GROUP_KEY);
-  if (ag) {
-    const normalizedActiveGroup = normalizeActiveGroupSelection(ag);
-    state.activeGroup = normalizedActiveGroup;
-    if (normalizedActiveGroup !== ag) shouldPersistMigration = true;
-  }
 
   // C21: no admin-scope restore from storage. Admin state (isAdmin / masterAdminAuthenticated)
   // comes only from a live server session (deriveRole in onAuthStateChange), cleared on sign-out.
   // Start logged-out (defaults already false).
-
-  const beforeCanonicalGroups = JSON.stringify(state.groups || []);
-  const beforeCanonicalActive = normalizeActiveGroupSelection(state.activeGroup || 'All');
-  if (authoritativeSharedData) {
-    enforceCanonicalGroupState({ includeExistingGroupsWhenNoCatalog: false });
-  } else {
-    enforceCanonicalGroupState();
-  }
-  const afterCanonicalGroups = JSON.stringify(state.groups || []);
-  const afterCanonicalActive = normalizeActiveGroupSelection(state.activeGroup || 'All');
-  if (beforeCanonicalGroups !== afterCanonicalGroups || beforeCanonicalActive !== afterCanonicalActive) {
-    shouldPersistMigration = true;
-  }
 
   if (shouldPersistMigration) saveLocal();
 }
@@ -5461,16 +4929,11 @@ function loadLocal() {
 // whenever state.players or state.checkedIn changes.
 function saveLocal() {
   try {
-    normalizePlayerGroupsInState();
-    enforceSharedPlayerModelParity();
-    normalizePlayerGroupsInState();
     ensurePlayerIdentityKeys();
     state.checkedIn = normalizeCheckedInEntries(state.checkedIn);
     state.collapsedCards = normalizeCollapsedCardsState(state.collapsedCards);
     localStorage.setItem(LS_PLAYERS_KEY, JSON.stringify(state.players));
     localStorage.setItem(LS_CHECKIN_KEY, JSON.stringify(state.checkedIn));
-    localStorage.setItem(LS_GROUPS_KEY, JSON.stringify(state.groups.filter(g => g && g !== 'All')));
-    localStorage.setItem(LS_ACTIVE_GROUP_KEY, state.activeGroup || 'All');
     if (Object.keys(state.collapsedCards).length) {
       localStorage.setItem(LS_COLLAPSED_CARDS_KEY, JSON.stringify(state.collapsedCards));
     } else {
@@ -5478,22 +4941,15 @@ function saveLocal() {
     }
     saveGeneratedTeamsToLocal();
     mgSaveTournamentPin();
-    if (canRunAdminSharedBackfill()) {
-      queueGroupCatalogSync();
-    }
   } catch (err) {
     console.error('Error saving to localStorage', err);
   }
 }
 
 function mergePlayersAfterSync(remotePlayers) {
-  const remoteList = Array.isArray(remotePlayers) ? remotePlayers : [];
-  const cleanedRemotePlayers = remoteList.map((remotePlayer) => {
-    if (!remotePlayer || typeof remotePlayer !== 'object') return remotePlayer;
-    const { hasEncodedGroups: _ignoredFlag, ...remoteWithoutFlag } = remotePlayer;
-    const groups = getPlayerGroups(remoteWithoutFlag);
-    return { ...remoteWithoutFlag, group: groups[0] || '', groups };
-  });
+  // Groups left the product (2026-08-29): the rows arrive from syncFromSupabase already shaped, so there
+  // is nothing left to clean off them here.
+  const cleanedRemotePlayers = Array.isArray(remotePlayers) ? remotePlayers : [];
 
   const remoteChecked = new Set(
     cleanedRemotePlayers
@@ -5536,29 +4992,9 @@ function mergePlayersAfterSync(remotePlayers) {
   const prevChecked = new Set(state.checkedIn || []);
   ensurePlayerIdentityKeys();
 
-  const prevById = new Map();
-  prevPlayers.forEach((player) => {
-    if (!player || typeof player !== 'object' || !player.id) return;
-    prevById.set(String(player.id), player);
-  });
-
-  const mergedRemotePlayers = cleanedRemotePlayers.map((remotePlayer) => {
-    if (!remotePlayer || typeof remotePlayer !== 'object' || !remotePlayer.id) return remotePlayer;
-    const prev = prevById.get(String(remotePlayer.id));
-    if (!prev) return remotePlayer;
-
-    const hasEncodedGroups = !!remotePlayer.hasEncodedGroups;
-    const remoteGroups = getPlayerGroups(remotePlayer);
-    const prevGroups = getPlayerGroups(prev);
-    const groups = hasEncodedGroups
-      ? remoteGroups
-      : normalizeGroupList([
-          ...remoteGroups,
-          ...prevGroups
-        ]);
-
-    return { ...remotePlayer, group: groups[0] || '', groups };
-  });
+  // The remote row IS the row now (2026-08-29): this branch used to index the previous copies by id and
+  // merge one field forward off them, the group list, and groups left the product.
+  const mergedRemotePlayers = cleanedRemotePlayers;
 
   const remoteByName = new Map();
   mergedRemotePlayers.forEach((p) => {
@@ -5613,17 +5049,17 @@ async function syncFromSupabase() {
     ) {
       setSharedSyncState(SHARED_SYNC_PENDING);
     }
-    if (!HAS_GROUP && !HAS_TAG) {
+    if (!PLAYERS_SCHEMA_DETECTED) {
       await detectPlayersSchema();
     }
 
     // Explicit columns (not select('*')) to trim payload + avoid pulling unused/future cols.
-    // Schema-aware: only request group/tag when the probe confirmed they exist.
+    // Schema-aware: only request tag when the probe confirmed it exists (the group probe left with
+    // groups on 2026-08-29).
     // C21: skill is ADMIN-ONLY. Only request it when a real admin session exists; anon must
     // never fetch it (the DB also REVOKEs SELECT(skill) from anon, so requesting it as anon errors).
     const playerCols = ['id', 'name', 'checked_in'];
     if (state.isAdmin) playerCols.push('skill');
-    if (HAS_GROUP) playerCols.push('group');
     if (HAS_TAG) playerCols.push('tag');
     const query = supabaseClient.from('players').select(playerCols.join(','));
 
@@ -5650,30 +5086,17 @@ async function syncFromSupabase() {
 
     const data = fetchedData;
 
-    const remoteGroupCatalog = [];
     const remotePlayers = [];
     data.forEach((p) => {
       if (isTournamentStateRow(p)) {
         return; // skip the legacy tournament-state blob row (not a player)
       }
 
-      const catalogGroup = parseGroupCatalogRowName(p && p.name);
-      if (catalogGroup) {
-        remoteGroupCatalog.push(catalogGroup);
-        return;
-      }
-
-      const membershipDetails = parseRemotePlayerGroupDetails(p);
-      const memberships = membershipDetails.groups;
-      const group = memberships[0] || '';
       remotePlayers.push({
         name: p.name,
         skill: Number(p.skill) || 0,
         id: p.id,
-        checked_in: !!p.checked_in,
-        group,
-        groups: memberships,
-        hasEncodedGroups: membershipDetails.hasEncodedGroups
+        checked_in: !!p.checked_in
       });
     });
 
@@ -5682,32 +5105,9 @@ async function syncFromSupabase() {
       return true;
     }
 
-    // C22 item 8: the group catalog now lives in the `groups` table (was `__as_group__:` player rows).
-    // Source remoteGroupCatalog from it; the per-row parseGroupCatalogRowName skip in the loop above
-    // stays as a defensive filter for any straggler sentinel row.
-    try {
-      const catalogTableRows = await listGroupCatalogRowsSupabase();
-      catalogTableRows.forEach((row) => { if (row && row.name) remoteGroupCatalog.push(row.name); });
-    } catch (groupsErr) {
-      console.error('Supabase groups table read error', groupsErr);
-    }
-
     const merged = mergePlayersAfterSync(remotePlayers);
     state.players = merged.players;
-    normalizePlayerGroupsInState();
-    enforceSharedPlayerModelParity();
-    normalizePlayerGroupsInState();
     state.checkedIn = normalizeCheckedInEntries(merged.checkedIn);
-    if (SUPABASE_AUTHORITATIVE) {
-      enforceCanonicalGroupState({
-        catalogGroups: remoteGroupCatalog,
-        includeExistingGroupsWhenNoCatalog: false
-      });
-      persistCanonicalGroupCache();
-    } else {
-      mergeRemoteGroupCatalogIntoState(remoteGroupCatalog);
-      enforceCanonicalGroupState();
-    }
     state.loaded = true;
     SyncManager.players.appliedSeq = Math.max(SyncManager.players.appliedSeq, requestSeq);
     if (SUPABASE_AUTHORITATIVE) {
@@ -5888,64 +5288,28 @@ async function reconcileToSupabaseAuthority(contextLabel = '') {
   return true;
 }
 
-// Detect whether the 'players' table uses 'group' or 'tag'
-
-let HAS_GROUP = false;
+// Detect whether the 'players' table still carries the legacy 'tag' column. The 'group' probe went with
+// the groups removal (2026-08-29): migration 0069 drops that column, so asking for it would only ever log
+// an error. HAS_TAG stays until players.tag is decided (spec section 10).
 let HAS_TAG = false;
 let PLAYERS_SCHEMA_DETECTED = false;
 
 async function detectPlayersSchema() {
   if (!supabaseClient) return;
-  HAS_GROUP = false;
   HAS_TAG = false;
-
-  try {
-    const { error } = await supabaseClient.from('players').select('group').limit(1);
-    HAS_GROUP = !error; // if no error, column exists
-  } catch {}
-
   try {
     const { error } = await supabaseClient.from('players').select('tag').limit(1);
     HAS_TAG = !error;
   } catch {}
-
   PLAYERS_SCHEMA_DETECTED = true;
-
-  if (!HAS_GROUP && !HAS_TAG) {
-    console.warn('[players] No group-like column found (neither "group" nor "tag"). Group changes will be local-only.');
-  }
-
-  if (enforceSharedPlayerModelParity()) {
-    normalizePlayerGroupsInState();
-    state.checkedIn = normalizeCheckedInEntries(state.checkedIn);
-  }
+  state.checkedIn = normalizeCheckedInEntries(state.checkedIn);
 }
 
 async function updatePlayerFieldsSupabase(id, fields) {
   if (!supabaseClient || !id) return false;
-  if (!HAS_GROUP && !HAS_TAG) {
-    await detectPlayersSchema();
-  }
-
-  const { group, groups, ...rest } = fields || {};
-  const payload = { ...rest };
-  const normalizedGroup = normalizeGroupName(typeof group === 'undefined' ? '' : group);
-  const normalizedGroups = normalizeGroupList(Array.isArray(groups) ? groups : []);
-  const canonicalGroups = (HAS_GROUP && HAS_TAG)
-    ? normalizeGroupList([...(normalizedGroup ? [normalizedGroup] : []), ...normalizedGroups])
-    : (normalizedGroup ? [normalizedGroup] : (normalizedGroups[0] ? [normalizedGroups[0]] : []));
-  const canonicalPrimary = canonicalGroups[0] || '';
-
-  if (typeof group !== 'undefined' || typeof groups !== 'undefined') {
-    if (HAS_GROUP) payload.group = canonicalPrimary;
-    else if (HAS_TAG) payload.tag = canonicalPrimary;
-    // else: table has neither group-like column
-  }
-
-  if (HAS_GROUP && HAS_TAG && (typeof group !== 'undefined' || typeof groups !== 'undefined')) {
-    payload.tag = serializePlayerGroupsTag(canonicalGroups, canonicalPrimary);
-  }
-
+  // Groups left the product (2026-08-29), so the only fields any caller passes are name, skill and
+  // claimed_by_profile. No column is derived here any more.
+  const payload = { ...(fields || {}) };
   try {
     const { error } = await supabaseClient.from('players').update(payload).eq('id', id);
     if (error) throw error;
@@ -5956,198 +5320,15 @@ async function updatePlayerFieldsSupabase(id, fields) {
   }
 }
 
-async function listGroupCatalogRowsSupabase() {
-  if (!supabaseClient) return [];
-  // C22 item 8: the group catalog lives in a real `groups` table (was `__as_group__:` player rows).
-  const { data, error } = await supabaseClient
-    .from('groups')
-    .select('id,name');
-  if (error) throw error;
-  return Array.isArray(data) ? data : [];
-}
-
-async function ensureGroupCatalogEntrySupabase(groupName) {
-  if (!supabaseClient) return false;
-  const normalized = normalizeGroupName(groupName);
-  if (!normalized) return false;
-  const targetKey = normalizeGroupKey(normalized);
-
-  try {
-    // C22 item 8: catalog rows are now plain-name rows in the `groups` table.
-    const catalogRows = await listGroupCatalogRowsSupabase();
-    const matchingRows = catalogRows.filter((row) => row && normalizeGroupKey(row.name) === targetKey);
-
-    if (matchingRows.length) {
-      const existingRow = matchingRows[0];
-      // keep the latest-entered casing as the display name (parity with the old behavior)
-      if (existingRow.name !== normalized) {
-        const { error: updateError } = await supabaseClient
-          .from('groups')
-          .update({ name: normalized })
-          .eq('id', existingRow.id);
-        if (updateError) throw updateError;
-      }
-
-      const duplicateIds = matchingRows
-        .slice(1)
-        .map((row) => row && row.id)
-        .filter(Boolean);
-      for (const duplicateId of duplicateIds) {
-        const { error: deleteError } = await supabaseClient
-          .from('groups')
-          .delete()
-          .eq('id', duplicateId);
-        if (deleteError) {
-          console.error('Supabase group catalog duplicate delete error', deleteError);
-        }
-      }
-      return true;
-    }
-
-    const { error: insertError } = await supabaseClient.from('groups').insert([{ name: normalized }]);
-    if (insertError) {
-      if (insertError.code === '23505') return true; // ci-unique race: already exists
-      throw insertError;
-    }
-    return true;
-  } catch (err) {
-    console.error('Supabase group catalog upsert error', err);
-    return false;
-  }
-}
-
-async function renameGroupCatalogEntrySupabase(oldGroupName, newGroupName) {
-  if (!supabaseClient) return false;
-  if (!HAS_GROUP && !HAS_TAG) {
-    await detectPlayersSchema();
-  }
-  const oldNormalized = normalizeGroupName(oldGroupName);
-  const newNormalized = normalizeGroupName(newGroupName);
-  if (!oldNormalized || !newNormalized) return false;
-  const oldKey = normalizeGroupKey(oldNormalized);
-  const newKey = normalizeGroupKey(newNormalized);
-
-  try {
-    if (oldKey !== newKey) {
-      await deleteGroupCatalogEntrySupabase(oldNormalized);
-    }
-    return await ensureGroupCatalogEntrySupabase(newNormalized);
-  } catch (err) {
-    console.error('Supabase group catalog rename error', err);
-    return false;
-  }
-}
-
-async function ensureGroupCatalogEntriesSupabase(groupNames) {
-  if (!supabaseClient) return false;
-  const normalized = normalizeGroupList(groupNames);
-  if (!normalized.length) return false;
-
-  let wroteAny = false;
-  for (const groupName of normalized) {
-    try {
-      const ok = await ensureGroupCatalogEntrySupabase(groupName);
-      if (ok) wroteAny = true;
-    } catch (err) {
-      console.error('Supabase group catalog ensure error', err);
-    }
-  }
-  return wroteAny;
-}
-
-async function deleteGroupCatalogEntrySupabase(groupName) {
-  if (!supabaseClient) return false;
-  const targetKey = normalizeGroupKey(groupName);
-  if (!targetKey) return false;
-
-  try {
-    // C22 item 8: catalog rows are now plain-name rows in the `groups` table.
-    const catalogRows = await listGroupCatalogRowsSupabase();
-    const matchingIds = catalogRows
-      .filter((row) => row && normalizeGroupKey(row.name) === targetKey)
-      .map((row) => row && row.id)
-      .filter(Boolean);
-
-    if (!matchingIds.length) return true;
-
-    let failed = false;
-    for (const id of matchingIds) {
-      const { error } = await supabaseClient
-        .from('groups')
-        .delete()
-        .eq('id', id);
-      if (error) {
-        failed = true;
-        console.error('Supabase group catalog delete error', error);
-      }
-    }
-    if (failed) return false;
-    return true;
-  } catch (err) {
-    console.error('Supabase group catalog delete error', err);
-    return false;
-  }
-}
-
-async function backfillGroupCatalogToSupabase() {
-  if (!supabaseClient || !state.isAdmin) return false;
-
-  const candidates = normalizeGroupList([
-    ...(state.groups || []).filter((groupName) => groupName && groupName !== 'All'),
-    ...getAvailableGroups()
-  ]);
-
-  if (!candidates.length) return false;
-  let wroteAny = false;
-
-  for (const groupName of candidates) {
-    try {
-      const ok = await ensureGroupCatalogEntrySupabase(groupName);
-      if (ok) wroteAny = true;
-    } catch (err) {
-      console.error('Supabase group catalog backfill error', err);
-    }
-  }
-  return wroteAny;
-}
-
-async function backfillPlayerMembershipsToSupabase() {
-  if (!supabaseClient || !state.isAdmin || !HAS_GROUP || !HAS_TAG) return false;
-
-  let wroteAny = false;
-  const updates = (state.players || [])
-    .filter((player) => player && player.id)
-    .map((player) => ({
-      id: player.id,
-      group: getPlayerPrimaryGroup(player),
-      groups: getPlayerGroups(player)
-    }));
-
-  for (const update of updates) {
-    try {
-      const ok = await updatePlayerFieldsSupabase(update.id, {
-        group: update.group,
-        groups: update.groups
-      });
-      if (ok) wroteAny = true;
-    } catch (err) {
-      console.error('Supabase player membership backfill error', err);
-    }
-  }
-
-  return wroteAny;
-}
-
 async function forceSaveAllToSupabase() {
   if (!supabaseClient) {
     throw new Error('Supabase is not configured.');
   }
 
-  if (!HAS_GROUP && !HAS_TAG) {
+  if (!PLAYERS_SCHEMA_DETECTED) {
     await detectPlayersSchema();
   }
 
-  normalizePlayerGroupsInState();
   ensurePlayerIdentityKeys();
   state.checkedIn = normalizeCheckedInEntries(state.checkedIn);
   const checkedSet = new Set(state.checkedIn || []);
@@ -6156,9 +5337,7 @@ async function forceSaveAllToSupabase() {
     updated: 0,
     inserted: 0,
     matchedByName: 0,
-    failed: 0,
-    catalogSynced: false,
-    membershipsBackfilled: false
+    failed: 0
   };
 
   const { data: existingRows, error: existingError } = await supabaseClient
@@ -6168,8 +5347,7 @@ async function forceSaveAllToSupabase() {
 
   const existingByName = new Map();
   (existingRows || []).forEach((row) => {
-    const isCatalogRow = !!parseGroupCatalogRowName(row && row.name);
-    if (isCatalogRow || isTournamentStateRow(row)) return;
+    if (isTournamentStateRow(row)) return;
     const key = normalize(row && row.name);
     if (!key || existingByName.has(key)) return;
     existingByName.set(key, row);
@@ -6180,8 +5358,6 @@ async function forceSaveAllToSupabase() {
     const playerName = String(player.name || '').trim();
     if (!playerName) continue;
 
-    const primaryGroup = getPlayerPrimaryGroup(player);
-    const groups = getPlayerGroups(player);
     const checkedIn = !!checkedSet.has(playerIdentityKey(player));
     const skill = Number(player.skill) || 0;
 
@@ -6203,9 +5379,7 @@ async function forceSaveAllToSupabase() {
       // attendance current, so the force-save only pushes the editable record fields.
       const ok = await updatePlayerFieldsSupabase(remoteId, {
         name: playerName,
-        skill,
-        group: primaryGroup,
-        groups
+        skill
       });
       if (ok) summary.updated += 1;
       else summary.failed += 1;
@@ -6214,13 +5388,9 @@ async function forceSaveAllToSupabase() {
 
     // checked_in intentionally omitted — a new player's attendance is set via the check_in RPC below
     // (which maintains the check_ins history), never a direct column write.
+    // The tag used to carry the group payload on this path too (2026-08-29). Migration 0070 strips what
+    // is stored; nothing writes it any more, so the insert is name and skill.
     const insertPayload = { name: playerName, skill };
-    if (HAS_GROUP) insertPayload.group = primaryGroup;
-    if (HAS_TAG) {
-      insertPayload.tag = HAS_GROUP
-        ? serializePlayerGroupsTag(groups, primaryGroup)
-        : (primaryGroup || '');
-    }
 
     const { data: insertedRows, error: insertError } = await supabaseClient
       .from('players')
@@ -6253,9 +5423,6 @@ async function forceSaveAllToSupabase() {
     }
     summary.inserted += 1;
   }
-
-  summary.catalogSynced = await backfillGroupCatalogToSupabase();
-  summary.membershipsBackfilled = await backfillPlayerMembershipsToSupabase();
 
   const synced = await syncFromSupabase();
   if (synced) saveLocal();
@@ -7658,7 +6825,6 @@ async function onAuthEvent(event, session) {
     if (state.isAdmin) {
       state.isAdmin = false;
       state.masterAdminAuthenticated = false;
-      state.activeGroup = 'All';
       // Reliability fix (2026-06-20): a SILENT session loss (JWT expiry / failed refresh) must purge
       // skill from memory + the localStorage cache the same way explicit logout does — re-fetch as anon
       // (the fetch omits the skill column when !isAdmin) and overwrite the cache before re-rendering.
@@ -8458,8 +7624,9 @@ function renderPublicShell() {
 // C26 item 2: Admin surface shell — hardcodes the admin branch of every former interleaved
 // `state.isAdmin ?` ternary. Returns the full #app-shell string.
 // C26 item 3b's buildDashboardStatHTML lived here until 2026-08-29. It had ZERO callers anywhere in
-// public/ and it emitted a group name per bucket off computeCheckedInByGroup, so it left with the rest of
-// the group surfaces rather than sit here looking load-bearing.
+// public/ and it emitted one line per group bucket, so it left with the rest of the group surfaces
+// rather than sit here looking load-bearing. Its .ad-stat* rules left styles.css with the client group
+// layer a day later, once the zero-emitter read was taken again.
 
 
 // C28 Slice 1: the admin AI co-pilot chat (layout A — chat thread; Mike picked it from 3 §38 options).
@@ -9812,8 +8979,6 @@ const logoutBtn = document.getElementById('btn-logout');
   logoutBtn.addEventListener('click', async () => {
     state.isAdmin = false;
     state.masterAdminAuthenticated = false;
-    state.activeGroup = 'All';                   // reset view
-    try { localStorage.setItem(LS_ACTIVE_GROUP_KEY, 'All'); } catch {}
     // C21: drop the real Supabase session too (local scope), so the JWT does not linger anywhere.
     if (supabaseClient) { try { await supabaseClient.auth.signOut({ scope: 'local' }); } catch {} }
     const synced = await syncFromSupabase();     // load public view dataset
@@ -10204,13 +9369,6 @@ function init() {
       ensureSupabaseLiveSync();
       ensureTournamentLiveSync();
       void flushOutbox(); // C22 item 3: flush writes queued during a prior offline session
-      if (synced && canRunAdminSharedBackfill()) {
-        (async () => {
-          const catalogSynced = await backfillGroupCatalogToSupabase();
-          const membershipsSynced = await backfillPlayerMembershipsToSupabase();
-          if (catalogSynced || membershipsSynced) queueSupabaseRefresh();
-        })();
-      }
       // One clean boot paint (2026-07-12, Mike: "it loads funky… the logo shows first and then the
       // registration — i want the app to load all at once so its clean"). The old flow rendered HERE
       // with players-only state — Home painted its quiet "Nothing on right now" lead, then flipped to

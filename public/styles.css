@@ -680,32 +680,8 @@ select:focus {
 /* legacy — .primary on checkin/checkout was removed but keep compat */
 .card-actions { display: none; }
 
-/* ── Player groups ── */
-.player-groups-inline {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  margin-top: 4px;
-}
-.player-group-badge {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: .72rem;
-  font-weight: 500;
-  background: var(--surface-3);
-  color: var(--text-2);
-  border: 1px solid var(--border);
-  white-space: nowrap;
-  vertical-align: middle;
-}
-.player-group-badge.is-primary {
-  background: var(--accent-soft);
-  color: var(--brand-dark);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-.player-group-none { color: var(--text-4); font-size: .75rem; }
+/* The player group badges stood here until 2026-08-29. Groups left the product and nothing in public/
+   emits any of those three classes any more, so the rules left with their markup. */
 
 /* ── Badges ── */
 .badge {
@@ -752,48 +728,8 @@ select:focus {
 @media (hover: hover) and (pointer: fine) { .btn-save-edit:hover { background: #15803d; } }
 .btn-cancel-edit      { height: 38px; padding: 0 12px; }
 
-/* ── Group select (in edit row) ── */
-.group-select { position: relative; display: inline-block; }
-.group-select .group-btn {
-  height: 38px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border-2);
-  background: var(--surface);
-  cursor: pointer;
-  color: var(--text);
-  font-size: 14px !important;
-}
-.group-select .group-list {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 60;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: 0 6px 18px rgba(0,0,0,.1);
-  border-radius: 8px;
-  display: none;
-  min-width: 160px;
-  padding: 4px;
-}
-.group-select.open .group-list { display: block; }
-.group-list .group-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 8px 10px;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  border-radius: 4px;
-  color: var(--text);
-  font-size: 14px !important;
-  min-height: 0;
-}
-@media (hover: hover) and (pointer: fine) { .group-list .group-item:hover { background: var(--surface-3); } }
-
-.group-chips { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; }
+/* The edit row's group picker (the button, the drop list, its items and the chip strip) stood here
+   until 2026-08-29. It went with the client group layer: nothing emits those nodes any more. */
 
 /* ── Admin player form ── */
 
@@ -876,30 +812,7 @@ select:focus {
   font-size: 15px;
   box-sizing: border-box;
 }
-.popup-edit-row .group-select { width: 100%; margin-top: 2px; }
-.popup-edit-row .group-btn {
-  width: 100%;
-  height: 42px;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--text);
-  text-align: left;
-  padding: 0 12px;
-  font-size: 15px;
-  cursor: pointer;
-}
-.popup-edit-row .group-list {
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  margin-top: 4px;
-  display: none;
-}
-.popup-edit-row .group-select.open .group-list { display: block; }
-.popup-edit-row .group-chips { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+/* The card variant of that same group picker went with it on 2026-08-29. */
 .popup-edit-row .btn-save-edit,
 .popup-edit-row .btn-cancel-edit { flex: 1; min-height: 44px; font-size: 15px !important; }
 .popup-edit-row .edit-actions { display: flex; gap: 8px; }
@@ -1150,23 +1063,9 @@ select:focus {
   align-items: center;
   gap: 9px;
 }
-.ad-statbig {
-  display: flex;
-  align-items: baseline;
-  gap: 9px;
-}
-.ad-statnum {
-  font-family: 'Sora', 'Inter', sans-serif;
-  font-size: 34px;
-  font-weight: 800;
-  line-height: 1;
-  color: var(--ink);
-}
-.ad-statlab {
-  font-size: 13px;
-  color: var(--muted);
-  font-weight: 500;
-}
+/* The dashboard stat block's three rules stood here until 2026-08-29. Their only emitter was
+   buildDashboardStatHTML, which the groups removal deleted a day earlier; a zero-emitter read across
+   public/ was taken again before these went. */
 
 
 .cop-msg {

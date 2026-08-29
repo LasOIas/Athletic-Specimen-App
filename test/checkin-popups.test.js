@@ -108,6 +108,11 @@ function loadApp() {
       swapRepaint: (fn) => { const a = mgckRepaint, b = repaintManage; mgckRepaint = fn; repaintManage = fn; return () => { mgckRepaint = a; repaintManage = b; }; },
       checkinPage: () => { manageView = 'checkin'; return buildManageCheckinHTML(); },
       addFromCard: (n, s, i) => mgckAddFromCard(n, s, i),
+      addAndCheckIn: (n) => mgckAddAndCheckIn(n),
+      // The outbox lives in localStorage, which this harness stubs to a permanent empty. Swapping the
+      // READER is what lets a queued row be replayed through the real flushOutbox, RPC call and all.
+      swapOutboxLoad: (fn) => { const was = outboxLoad; outboxLoad = fn; return () => { outboxLoad = was; }; },
+      flush: () => flushOutbox(),
       swapSupaRpc: (fn) => { const was = supabaseClient.rpc; supabaseClient.rpc = async (...a) => fn(...a); return () => { supabaseClient.rpc = was; }; },
       swapUpdateFields: (fn) => { const was = updatePlayerFieldsSupabase; updatePlayerFieldsSupabase = fn; return () => { updatePlayerFieldsSupabase = was; }; },
       swapOutbox: (fn) => { const was = outboxEnqueue; outboxEnqueue = fn; return () => { outboxEnqueue = was; }; },
@@ -681,7 +686,12 @@ describe('Task 8: adding a player from the console header', () => {
     expect(s).toContain('if (res && res.error) throw res.error;');
     expect(s.indexOf('if (res && res.error) throw res.error;')).toBeLessThan(s.indexOf('op.payload.skill'));
     expect(s).toContain('String(p.id) === String(regRow.id)');
-    expect(s).toContain('if (regRow && regRow.id && !known)');
+    // Retightened in the groups round (2026-08-29, Task 10): migration 0069 gives register_player an
+    // `is_new boolean`, so the local-id guess is no longer the gate - it is the fallback for a server
+    // still on the three-argument function. Both halves are pinned, and the driven cases below prove
+    // which one wins.
+    expect(s).toContain('typeof regRow.is_new === \'boolean\'');
+    expect(s).toContain('if (regRow && regRow.id && isOurs)');
   });
 
   it('the add card has no roster row behind it, so the save finds its row inside the card', () => {
@@ -940,19 +950,16 @@ describe('Task 9: groups leave every surface', () => {
                           'checkin-group-', 'ad-grpline']) {
       expect(clientSrc).not.toContain(needle);
     }
-    // p_group is scoped to a line count rather than a flat absence for ONE reason, named here so nobody
-    // has to guess: the outbox retry's register branch is the card task's site (spec 5.4), it is being
-    // built on a sibling branch, and it merges after this one. Every p_group site this task owns is gone,
-    // and a new one anywhere else turns this red because the count is pinned at exactly one.
-    // MERGE NOTE: this is <= 1, not === 1, on purpose. When the card task's fix to that outbox line
-    // merges in the count becomes 0 and this still passes; a NEW p_group anywhere is still red, because
-    // every surviving line has to be the outbox one.
-    const groupArgLines = clientSrc.split('\n').filter((l) => l.includes('p_group'));
-    expect(groupArgLines.length).toBeLessThanOrEqual(1);
-    groupArgLines.forEach((l) => expect(l).toContain('op.payload.name'));
-    // The two .edit-group READERS (getEditGroupsFromRow, updateEditRowGroupUI) outlive this task by one:
-    // they are the client group layer, which the next task deletes whole. Nothing EMITS the inputs they
-    // read any more, which is what the two class needles above pin.
+    // Tightened in the groups round (2026-08-29, Task 10). This was a line COUNT pinned at <= 1, because
+    // the outbox retry's register branch (spec 5.4) was the card task's site and merged after this one.
+    // That line now sends the same two keys every other caller sends, so the allowance is spent and the
+    // count is ZERO. Migration 0069 drops the three-argument function outright, so a single re-added
+    // p_group is a PGRST202 the catch swallows and an op that retries forever - which is why this is a
+    // flat absence now and never a budget again.
+    expect(clientSrc.split('\n').filter((l) => l.includes('p_group')).length).toBe(0);
+    // The two .edit-group READERS (getEditGroupsFromRow, updateEditRowGroupUI) outlived this task by one:
+    // they were the client group layer, and Task 10 deleted it whole. Nothing EMITS the inputs they read
+    // any more, which is what the two class needles above pin.
   });
 
   it('the standalone kiosk page sends two keys and knows nothing about a club group', () => {
@@ -1016,5 +1023,213 @@ describe('Task 9: groups leave every surface', () => {
     expect(admin).not.toContain('No Groups');
     // the public line was already a bare total and stays one
     expect(bridge.stats(false)).toBe('<div class="cik-count">2 checked in</div>');
+  });
+});
+
+describe('Task 10: the client group layer is gone', () => {
+  // Comments are blanked first: this round rewrites several of them and they name what they removed.
+  const clientSrc = stripComments(appSrc) + '\n' + stripComments(mgSrc);
+  const GONE = [
+    'LS_GROUPS_KEY', 'LS_ACTIVE_GROUP_KEY', 'UNGROUPED_FILTER_VALUE', 'UNGROUPED_FILTER_LABEL',
+    'GROUP_CATALOG_NAME_PREFIX', 'GROUPS_TAG_PREFIX', 'HAS_GROUP',
+    'computeCheckedInByGroup', 'normalizeActiveGroupSelection', 'normalizeGroupName', 'normalizeGroupKey',
+    'toGroupCatalogRowName', 'parseGroupCatalogRowName', 'serializePlayerGroupsTag', 'parsePlayerGroupsTag',
+    'parseRemotePlayerGroupDetails', 'mergeRemoteGroupCatalogIntoState', 'normalizeGroupList',
+    'getPlayerGroups', 'getPlayerPrimaryGroup', 'playerBelongsToGroup', 'isPlayerUngrouped',
+    'sanitizePlayersAgainstAllowedGroups', 'enforceCanonicalGroupState', 'persistCanonicalGroupCache',
+    'normalizePlayerGroupShape', 'normalizePlayerGroupsInState', 'parseEditGroupsValue',
+    'getEditGroupsFromRow', 'renderEditGroupChipsMarkup', 'updateEditRowGroupUI',
+    'computeGroupCatalogSyncSignature', 'queueGroupCatalogSync', 'runQueuedGroupCatalogSync',
+    'getSharedGroupSyncModeLabel', 'getAvailableGroups', 'listGroupCatalogRowsSupabase',
+    'ensureGroupCatalogEntrySupabase', 'renameGroupCatalogEntrySupabase', 'ensureGroupCatalogEntriesSupabase',
+    'deleteGroupCatalogEntrySupabase', 'backfillGroupCatalogToSupabase', 'backfillPlayerMembershipsToSupabase',
+    // Two the spec's Surface G list does not name, added here because this task's deletions strand them.
+    // enforceSharedPlayerModelParity reshaped a player's group and groups fields to whatever the probed
+    // schema could store; canRunAdminSharedBackfill existed only to gate the two backfills above, and
+    // both of its call sites (saveLocal's catalog queue, the boot block) go with them.
+    'enforceSharedPlayerModelParity', 'canRunAdminSharedBackfill',
+  ];
+
+  it('every group helper is gone from both client scripts, declaration and callers', () => {
+    const left = GONE.filter((name) => clientSrc.includes(name));
+    expect(left).toEqual([]);
+  });
+
+  it('state carries no group list and no active group', () => {
+    expect(clientSrc).not.toContain('state.groups');
+    expect(clientSrc).not.toContain('state.activeGroup');
+    // and the initializer keys themselves, which neither of the two reads above would see
+    expect(clientSrc).not.toMatch(/^\s*groups:\s*\[/m);
+    expect(clientSrc).not.toMatch(/^\s*activeGroup:/m);
+  });
+
+  it('the add card seeds a new player with no group key at all', () => {
+    // The card's new-player object carried `groups: []` so the group chips had something to render. The
+    // chips left with Task 9's markup; the seed outlived them until now, writing a key the save path,
+    // the merge and the schema probe would all have had to keep tolerating.
+    expect(appSrc).toContain("{ id: '', name: '', skill: 0 }");
+    expect(appSrc).not.toContain("{ id: '', name: '', skill: 0, groups: [] }");
+  });
+
+  it('the schema probe no longer asks for a column that is about to be dropped', () => {
+    const s = slice(appSrc, 'function detectPlayersSchema()', 'async function updatePlayerFieldsSupabase(');
+    expect(s).not.toContain("select('group')");
+    expect(s).toContain("select('tag')");
+  });
+
+  it('updatePlayerFieldsSupabase writes only the fields a caller passes', () => {
+    const s = slice(appSrc, 'async function updatePlayerFieldsSupabase(', 'async function forceSaveAllToSupabase(');
+    expect(s).not.toContain('canonicalGroups');
+    expect(s).not.toContain('payload.group');
+    expect(s).toContain('const payload = { ...(fields || {}) };');
+  });
+
+  it('no client file encodes or reads a group payload in players.tag', () => {
+    // The last group STORE the database keeps. While the client still wrote it, migration 0070 would be
+    // stripping a payload the very next card save put back.
+    const kiosk = readFileSync(new URL('../public/checkin.html', import.meta.url), 'utf8');
+    const pureSrc = readFileSync(new URL('../public/pure.js', import.meta.url), 'utf8');
+    for (const src of [appSrc, mgSrc, pureSrc, kiosk]) {
+      expect(src).not.toContain('__as_groups__');
+      expect(src).not.toContain('__as_group__');
+    }
+  });
+
+  it('the group card styles and the stat rules Task 9 stranded are gone from the sheet', () => {
+    // Every one of these was verified to have ZERO emitters in public/ before it was cut: the group
+    // badges and the picker died with renderEditGroupChipsMarkup and the edit row's hidden inputs, and
+    // .ad-stat* died with the dashboard stat block Task 9 removed.
+    for (const sel of ['.player-groups-inline', '.player-group-badge', '.player-group-none',
+                       '.group-select', '.group-btn', '.group-list', '.group-item', '.group-chips',
+                       '.ad-statbig', '.ad-statnum', '.ad-statlab']) {
+      expect(cssLF).not.toContain(sel);
+    }
+  });
+
+  it('the outbox register replay sends the same two keys every other caller sends', async () => {
+    bridge.seed([], []);
+    const calls = [];
+    const undoLoad = bridge.swapOutboxLoad(() => ([
+      { key: 'reg:zoe park', kind: 'register', payload: { name: 'Zoe Park', checked_in: true, skill: 6.5 }, ts: 1 },
+    ]));
+    const undoRpc = bridge.swapSupaRpc((n, a) => { calls.push([n, a]); return { data: [{ id: 'p-new', is_new: true }], error: null }; });
+    const undoFields = bridge.swapUpdateFields(async () => true);
+    try {
+      await bridge.flush();
+      expect(calls.length).toBe(1);
+      expect(calls[0][0]).toBe('register_player');
+      expect(calls[0][1]).toEqual({ p_name: 'Zoe Park', p_checked_in: true });
+      expect('p_group' in calls[0][1]).toBe(false);
+    } finally { undoFields(); undoRpc(); undoLoad(); }
+  });
+
+  it('a replay the server MATCHED writes no rating, even onto an id this device has never seen', async () => {
+    // The case the local-id guess could never catch: a row queued offline replays against a roster this
+    // device has not synced, so the returned id is unknown here and the guess reads "ours". is_new says
+    // otherwise, and a rating written over a stranger's is not recoverable by editing them.
+    bridge.seed([], []);
+    const fields = [];
+    const undoLoad = bridge.swapOutboxLoad(() => ([
+      { key: 'reg:robin vale', kind: 'register', payload: { name: 'Robin Vale', checked_in: false, skill: 7 }, ts: 1 },
+    ]));
+    const undoRpc = bridge.swapSupaRpc(() => ({ data: [{ id: 'p-stranger', is_new: false }], error: null }));
+    const undoFields = bridge.swapUpdateFields(async (id, f) => { fields.push([id, f]); return true; });
+    try {
+      await bridge.flush();
+      expect(fields).toEqual([]);
+    } finally { undoFields(); undoRpc(); undoLoad(); }
+  });
+
+  it('a replay that really inserted still gets its rating', async () => {
+    bridge.seed([], []);
+    const fields = [];
+    const undoLoad = bridge.swapOutboxLoad(() => ([
+      { key: 'reg:noa whitfield', kind: 'register', payload: { name: 'Noa Whitfield', checked_in: true, skill: 4.5 }, ts: 1 },
+    ]));
+    const undoRpc = bridge.swapSupaRpc(() => ({ data: [{ id: 'p-fresh', is_new: true }], error: null }));
+    const undoFields = bridge.swapUpdateFields(async (id, f) => { fields.push([id, f]); return true; });
+    try {
+      await bridge.flush();
+      expect(fields).toEqual([['p-fresh', { skill: 4.5 }]]);
+    } finally { undoFields(); undoRpc(); undoLoad(); }
+  });
+
+  it('with no is_new key the replay falls back to the local-id guess, both ways', async () => {
+    // The server may still be on the three-argument function at first run, and that one returns three
+    // columns. The fallback is the guard as it stood before 0069, unchanged.
+    const op = { key: 'reg:ari vance', kind: 'register', payload: { name: 'Ari Vance', checked_in: false, skill: 3 }, ts: 1 };
+    const run = async (seedPlayers, rowId) => {
+      bridge.seed(seedPlayers, []);
+      const fields = [];
+      const undoLoad = bridge.swapOutboxLoad(() => ([op]));
+      const undoRpc = bridge.swapSupaRpc(() => ({ data: [{ id: rowId }], error: null }));
+      const undoFields = bridge.swapUpdateFields(async (id, f) => { fields.push([id, f]); return true; });
+      try { await bridge.flush(); return fields; }
+      finally { undoFields(); undoRpc(); undoLoad(); }
+    };
+    expect(await run([], 'p-unknown')).toEqual([['p-unknown', { skill: 3 }]]);
+    expect(await run([{ id: 'p-known', name: 'Ari Vance', skill: 9 }], 'p-known')).toEqual([]);
+  });
+
+  it('the card add prefers the server flag over the local guess when the roster is stale', async () => {
+    bridge.seed([], []);
+    const fields = [];
+    const undoRepaint = bridge.swapRepaint(() => {});
+    const undoRpc = bridge.swapSupaRpc(() => ({ data: [{ id: 'p-stranger', is_new: false }], error: null }));
+    const undoFields = bridge.swapUpdateFields(async (id, f) => { fields.push([id, f]); return true; });
+    try {
+      await bridge.addFromCard('Robin Vale', 7, true);
+      expect(fields).toEqual([]);                                   // the stranger's rating is untouched
+      expect(bridge.readStrip().notice).toBe('Robin Vale is already on the roster');
+      expect(bridge.getState().players.length).toBe(0);             // the optimistic row rolls back
+      expect(bridge.getState().checkedIn).toEqual([]);
+    } finally { undoFields(); undoRpc(); undoRepaint(); }
+  });
+
+  it('the card add takes the row and the rating when the server says it inserted', async () => {
+    bridge.seed([], []);
+    const fields = [];
+    const undoRepaint = bridge.swapRepaint(() => {});
+    const undoRpc = bridge.swapSupaRpc(() => ({ data: [{ id: 'p-fresh', is_new: true }], error: null }));
+    const undoFields = bridge.swapUpdateFields(async (id, f) => { fields.push([id, f]); return true; });
+    try {
+      await bridge.addFromCard('Zoe Park', 6.5, false);
+      expect(fields).toEqual([['p-fresh', { skill: 6.5 }]]);
+      expect(bridge.readStrip().notice).toBe('Zoe Park added');
+      expect(bridge.getState().players.length).toBe(1);
+      expect(bridge.getState().players[0].id).toBe('p-fresh');
+    } finally { undoFields(); undoRpc(); undoRepaint(); }
+  });
+
+  it('the search-miss add keeps its check-in across the identity key flip', async () => {
+    // The same bug Task 8 fixed in the card's own add, in the OTHER door: the key changes from
+    // local:<k> to id:<uuid> the moment the insert returns, and saveLocal drops any checkedIn entry
+    // whose key no longer matches a roster row. Without the carry-across the player reads OUT again on
+    // the very next repaint - and stays out if the device is offline.
+    bridge.seed([], []);
+    const undoRepaint = bridge.swapRepaint(() => {});
+    const undoRpc = bridge.swapSupaRpc(() => ({ data: [{ id: 'p-added' }], error: null }));
+    try {
+      await bridge.addAndCheckIn('Casey Vance');
+      expect(bridge.getState().checkedIn).toEqual(['id:p-added']);
+    } finally { undoRpc(); undoRepaint(); }
+  });
+
+  it('the search-miss add leaves UNDO pointing at the row that actually landed', async () => {
+    // mgckLast was stamped with the local key before the insert returned, so UNDO on a freshly added
+    // player looked up a key no roster row carries any more and mgckToggleByKey returned at its guard.
+    // A dead UNDO button is worse than no UNDO button.
+    bridge.seed([], []);
+    const undoRepaint = bridge.swapRepaint(() => {});
+    const undoRpc = bridge.swapSupaRpc(() => ({ data: [{ id: 'p-added2' }], error: null }));
+    try {
+      await bridge.addAndCheckIn('Dana Pike');
+      const last = bridge.readStrip().last;
+      expect(last.key).toBe('id:p-added2');
+      expect(last.dir).toBe('in');
+      // and it really reverses: the toggle finds the row and checks them back out
+      bridge.toggleByKey(last.key, 'out', { silent: true });
+      expect(bridge.getState().checkedIn).toEqual([]);
+    } finally { undoRpc(); undoRepaint(); }
   });
 });
