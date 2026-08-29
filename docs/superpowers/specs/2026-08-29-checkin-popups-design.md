@@ -1,18 +1,24 @@
 # Check-in pop-ups: edit a player, add a player, and groups leave the product. Design.
 
-Date: 2026-08-29. Baseline read at HEAD `a0c9f8f`, `APP_VERSION = '2026.08.26.4'` (`public/app.js:34`).
-**The C102 split has landed in the working tree while this spec was written**: `public/manage.js` exists
-(326,860 bytes, 5,139 lines), `public/index.html:125` loads it before `public/app.js:127`, and every `mgck*`
-and `mgp*` builder now lives in `manage.js`. Three C102 tasks are still open at this HEAD and this spec
-depends on all three: `public/sw.js:15` still lists only `/pure.js` (T6), no test harness reads
-`public/manage.js` (T7, so 15 files / 543 tests are red by design right now), and the §38 gate's file
-regex at `C:/Users/OlasM/.claude/hooks/_vault-map.mjs:13` still reads
-`/(^|\/)public\/(app\.js|[^/]+\.(html|css))$/i`, with no `manage.js` term (T10).
+Date: 2026-08-29. **Edit pass applied 2026-08-29** against the review at
+`scratchpad/checkin-popups/spec-review.md` (17 findings, all applied; the Critical split the migration in
+two). Baseline re-measured at HEAD `cef4989`, `APP_VERSION = '2026.08.26.6'` (`public/app.js:34`).
+
+**The C102 split has landed and its harness work with it.** `public/manage.js` exists (5,139 lines),
+`public/index.html:125` loads it before `public/app.js:127`, and every `mgck*` and `mgp*` builder now
+lives in `manage.js`. Three C102 tasks that an earlier draft called open have all shipped: `public/sw.js:15`
+is `'/manage.js',` (T6, `c02cd7b`), every vm harness reads all three sources and runs them `pure.js`,
+`manage.js`, `app.js` (T7, `6330a1c`; for example `test/manage-page.test.js:12-14` and `:126-128`), and the
+whole-client source guards scan both files together (T8, `61ef27e`). The section 38 gate's file regex has
+been re-armed in both maps (T10): `C:/Users/OlasM/.claude/hooks/_vault-map.mjs:13` and the addendum
+frontmatter at `C:/Ai Master/LasOlas/projects/athletic-specimen.md:7` both carry a `manage\.js` term.
+**The suite was run at this HEAD: 40 files, 1252 tests, all green.** That is this round's baseline, and
+every task gate below means the full suite green, not green against a degraded floor.
 
 Source: Mike's zip `Athletic Specimen check in pop ups.zip`, extracted at
-`S/zip/design_handoff_checkin_player_popups/`. Recon digest: `S/DIGEST.md` (3 screens, 22 changes, six
-rounds Mike named in the CSS comments). Mike's four calls are banked in the vault at
-`C:/Ai Master/Projects/Athletic Specimen/01-state/decisions.md:16-19`.
+`S/zip/design_handoff_checkin_player_popups/`. Recon digest: `S/DIGEST.md` (four screens, 22 changes, six
+rounds Mike named in the CSS comments at `_shared.css:875, 921, 1145, 1244, 1255, 1294`). Mike's calls are
+banked in the vault at `C:/Ai Master/Projects/Athletic Specimen/01-state/decisions.md:16-19`.
 
 Every line number below was read from the repo at `a0c9f8f`. **Every edit site is named by FUNCTION NAME
 and file**, because C102 is still moving numbers and the build runs on a branch. `S` =
@@ -39,13 +45,14 @@ What "done" looks like, stated so nothing is graded on a promise: the console st
 through exactly one writer (`mgckToggleByKey`, `public/manage.js:1171`) and never double-writes; a card
 that is cancelled writes nothing at all; UNDO still means the last row tap, never the last card save; no
 emitted string anywhere in the client contains `.ckx-gp`, `.mgp-gp`, `.mgp-mg` or a `p_group` argument;
-and the migration runs only after that client is deployed and driven.
+and the group column is emptied one deploy BEFORE the client stops sending it, then dropped one deploy
+after that client is out and driven.
 
 ## 2. Mike's calls (2026-08-29)
 
 | Fork | Mike's call | Consequence for this spec |
 |---|---|---|
-| Groups | **Delete groups everywhere.** The `groups` table (`db/migrations/0017_c22_groups_table.sql`), `players."group"`, `register_player`'s `p_group` and every caller including `public/checkin.html:539`. Against the recon's recommendation to strip the UI and leave the column dormant | §4 surfaces D, E, F and §5. One migration, `0068`, applied LAST |
+| Groups | **Delete groups everywhere.** The `groups` table (`db/migrations/0017_c22_groups_table.sql`), `players."group"`, `register_player`'s `p_group` and every caller including `public/checkin.html:539`. Against the recon's recommendation to strip the UI and leave the column dormant | §4 surfaces D, E, F and §5. TWO migrations: `0068` empties the column and makes `register_player` group-blind BEFORE the client changes, `0069` drops the column, the table and the parameter one deploy after the client is out (§5.1 is why one file could not do it) |
 | The kiosk's same-name tiebreaker | **KIOSK TIEBREAKER: "thats almost impossible to have the same full name, just leave it"** (Mike, 2026-08-29). No replacement. Two players with the same full name render as identical rows on the public kiosk and that is accepted | `renderCheckinButton` (`public/app.js:6106`) loses `.ckx-gp` and gains nothing. Two shapes were offered and declined: (a) a last-check-in date or "new" on the row, and (b) no tiebreaker with the door-side picking by elimination from the checked-in state. **Nothing in this spec adds a column, a date line, a note field or any other per-row hint for this** |
 | Unrated | **Unrated is skill 0, saved normally.** No nullable migration | The silent save-abort at `public/app.js:446` (`if (!name \|\| Number.isNaN(skill)) return;`) goes away. The card prefills blank when `skill` is not `> 0` and a blank save writes `0`, which `mgpSkillText` (`public/manage.js:956`) already renders as `–` |
 | Add paths | **Keep both.** The header card adds OUT; the in-list "Add {name} to the roster" registers and checks IN | `mgckAddAndCheckIn` is untouched except for its group argument. The card gets its own path, `mgckAddFromCard` |
@@ -97,7 +104,7 @@ them):
   It already has zero callers in the client at this HEAD; it is an orphan that predates this round and
   orphan removal belongs with the CSS round.
 - **`players.tag`.** The client writes group JSON into it (`serializePlayerGroupsTag`, `public/app.js:1009`)
-  and this round stops writing it, but the column is not dropped by migration `0068`. See §10.
+  and this round stops writing it, but neither `0068` nor `0069` drops it. See §10.
 - **`tournaments."group"`** (`db/migrations/0003_c21_tournaments_group.sql`). A different column on a
   different table. Untouched.
 - **The row insert and remove motion helpers** (grow/shrink, `_motion-app.css`). Already ported
@@ -110,9 +117,16 @@ them):
 
 Copy is quoted verbatim from the handoff. No em dash reaches any emitted string; the middot `·` and the
 empty-value en dash `–` are both legal under the copy law (`AS-copy-no-em-dash`: the empty-value dash glyph
-stays). Every colour below is an app token or the literal the token resolves to; §51 passes (accent
-`oklch(0.55 0.07 240)` = `--accent`, the green family sits at chroma 0.04 to 0.11 on hue 150 against the
-app's own `--live` / `--live-soft`; no glow, no electric).
+stays). Every colour below is an app token, a token's resolved literal, or one of the handoff's own oklch
+values in the same warm-stone, muted-blue and muted-green families. Accent `oklch(0.55 0.07 240)` is
+`--accent` exactly (`public/styles.css:8-26` matches the README token table at README:444-451). Eight
+introduced literals match no token and are the handoff's own: `oklch(0.62 0.01 75)` and
+`oklch(0.45 0.01 75)` for the pencil ink (`--faint` is `0.62 0.005 75`, `public/styles.css:13`),
+`oklch(0.92 0.04 250)`, and the greens `0.86 0.06 150`, `0.95 0.04 150`, `0.44 0.11 150`, `0.80 0.10 150`,
+`0.95 0.045 150`, `0.40 0.11 150`, `0.92 0.06 150` (`--live` is `0.55 0.09 150`, `--live-soft`
+`0.96 0.03 150`, `--live-ink` `0.40 0.09 150`, `public/styles.css:16-21`). They sit one step warmer than
+the live tokens, at chroma 0.04 to 0.11 on hue 150; nothing glows and nothing is electric, so §51 passes.
+The only hex introduced is `#fff`.
 
 ### Surface A: the check-in console (`public/manage.js`)
 
@@ -250,9 +264,11 @@ Site: a new function in `public/manage.js` beside `mgckAddAndCheckIn`.
 // write once the insert returns an id.
 async function mgckAddFromCard(name, skill, wantIn) {
   const trimmed = String(name || '').trim();
-  if (!trimmed) return;
-  const exists = (state.players || []).find((p) => normalize(p.name) === normalize(trimmed));
-  if (exists) { openPlayerEditPopup(playerIdentityKey(exists)); return; }
+  // The three gates below already ran in the save branch, WHILE THE CARD WAS STILL OPEN (B6), because a
+  // refusal has to land somewhere the organiser can read it. They are repeated here so the function is
+  // safe to call from anywhere, and so a later caller cannot skip the app's standing rules.
+  if (!trimmed || !state.loaded || !isValidFullName(trimmed)) return;
+  if ((state.players || []).some((p) => normalize(p.name) === normalize(trimmed))) return;
   const n = Number(skill);
   const sk = (Number.isFinite(n) && n > 0) ? Math.max(0, Math.min(10, Math.round(n * 10) / 10)) : 0;
   const inserted = { name: trimmed, skill: sk, pending: true };
@@ -281,6 +297,39 @@ async function mgckAddFromCard(name, skill, wantIn) {
   mgckRepaint();
 }
 ```
+
+**The three gates, and why they are the app's rules and not the handoff's.** README:326 makes name-empty
+the card's only client-side rule, and that is true of the CARD. It is not the app's registration rule.
+Every existing add door refuses a one-word name: the in-app kiosk (`public/app.js:9732`, "Enter your full
+first and last name"), `mgckAddAndCheckIn` (`public/manage.js:1217`, "Enter a first and last name") and
+`mgpAddPlayer` (`public/manage.js:1326`, "Enter a first and last name."), with a whole prior round behind
+it (`docs/superpowers/specs/2026-06-24-checkin-confirm-name-enforcement-design.md`). Mike's call was keep
+both doors, not let the new one create half-named players. `mgckAddAndCheckIn` also refuses before the
+roster has loaded (`public/manage.js:1216`), because a local dedup against an empty `state.players` is
+meaningless and makes the duplicate it was meant to prevent. The card gets both, plus the duplicate check,
+and all three run in the save branch BEFORE `closePlayerEditPopup()`.
+
+**The duplicate ruling, chosen so no reading is left open.** A name already on the roster does NOT close
+the add card and reopen an edit card for someone else. That sequence would discard the rating and the
+status the organizer just set, with no message. The add card stays open and says so instead.
+`mgpAddPlayer` keeps the reopen shape (`public/manage.js:1328`) because it is reached from a list tap
+where nothing was typed.
+
+The card needs somewhere to put those three sentences, so the body gains one status line, mirroring the
+console's own `#mgck-msg` (`public/manage.js:1131`, styled at `public/styles.css:2287-2288`):
+
+```html
+<p class="pe-msg" id="pe-msg" role="status" aria-live="polite"></p>
+```
+
+```css
+.pe-msg { font-size: 12.5px; color: var(--danger); margin: 10px 0 0; }
+.pe-msg:empty { display: none; }
+```
+
+Copy verbatim, reused from the door that already says it: **"Enter a first and last name"**
+(`public/manage.js:1217`) and **"Still loading. One second, then tap again."** (`public/manage.js:1216`).
+One sentence is new and this spec's own: **"{Full name} is already on the roster"**.
 
 Behaviour and data: one `register_player` call, plus one `updatePlayerFieldsSupabase` only when the card
 carried a rating. The row lands under the section head it belongs to for free, because `mgckRepaint`
@@ -318,7 +367,11 @@ sorts and counts on `name` and `checkedIn` only, so the model, its 10 cases in
 
 One element, both surfaces. Every change below lands in `ensurePlayerEditModal` (`public/app.js:116`),
 `openPlayerEditPopup` (`:135`), `closePlayerEditPopup` (`:102`) or the delegated save inside
-`ensureSaveDelegationBound` (`:395-533`), and in the `.pe-*` CSS block (`public/styles.css:3336-3462`).
+`ensureSaveDelegationBound` (`:395-533`), and in the `.pe-*` CSS block (`public/styles.css:3336-3461`),
+plus the 2026-08-23 button block at `public/styles.css:6043-6076` (`#player-edit-modal .pe-save`,
+`.pe-save:active`, `.pe-cancel`, `.pe-cancel:hover`). Nothing in this round changes that second block and
+`test/manage-round.test.js:509-513` pins it, but T3 and T4 must not treat `:3336-3461` as the whole
+surface.
 
 **B1. The close × is pinned right in every pop-up.** RESTYLE, and a real defect fix.
 Handoff: README:367-374; `_shared.css` round (vi).
@@ -356,7 +409,11 @@ Handoff: README:160-196; `_shared.css` rounds (ii) and (iii); `screens/mg-checki
 Site: `openPlayerEditPopup`, the `.popup-header pe-head` block at `public/app.js:164-169`.
 
 ```js
-const eyebrow = peMode === 'new' ? 'Roster \u00b7 new player' : 'Roster \u00b7 check-in';
+// The eyebrow follows BOTH the mode and the surface. peOrigin is set by the opener; without it the card
+// would read "check-in" while sitting over the Players directory.
+const eyebrow = peMode === 'new'
+  ? 'Roster \u00b7 new player'
+  : (peOrigin === 'checkin' ? 'Roster \u00b7 check-in' : 'Roster \u00b7 players');
 const title   = peMode === 'new' ? 'New player' : (whole || 'Edit player');
 const avatar  = peMode === 'new' ? '+' : initial;
 // ...
@@ -406,23 +463,29 @@ const avatar  = peMode === 'new' ? '+' : initial;
 ```
 
 `.pe-av` moves from a 42px accent-tint disc (`public/styles.css:3351-3363`) to a 46px white tile with a
-13px radius. `.pe-in` moves from a bare `flex: none; margin-left: auto` (`:3367`) onto the pill skin the
+13px radius. The radius is 13px from the handoff's round-iii code (`_shared.css:1176`); README:173 and
+README:497 still say 14px, which was round ii (`_shared.css:954`). The later code wins, the same way it
+does at B4. `.pe-in` moves from a bare `flex: none; margin-left: auto` (`:3367`) onto the pill skin the
 roster already uses. `.pe-x`'s 34px box, 999px radius and `min-width`/`min-height` guards
 (`:3368-3385`) are already correct and stay; only its hover ink changes.
 The README's *"There is no black or near-black surface anywhere in this app, do not introduce one"*
 (README:166) is honoured: the strip is `--accent-soft`.
 Copy verbatim: **"Roster · check-in"**, **"Roster · new player"**, **"New player"**, **"IN"**, aria
-**"Close"**.
+**"Close"**. One string here is this spec's own and not the handoff's, because the handoff only ever drew
+the check-in surface: **"Roster · players"**, the eyebrow on the Manage to Players origin.
 
 **B3. Section heads inside the card.** NEW.
 Handoff: README:201-203, 217, 235; `_shared.css` round (iii); `screens/mg-checkin.html:64`.
 Site: `openPlayerEditPopup`'s body block, `public/app.js:170-196`. The pattern is production's own
-`.pl-sect` (`public/styles.css:2177-2178`: accent label plus a rule to the right edge), one weight down.
+`.pl-sect` (`public/styles.css:2177-2178`: an ink label in the display face plus a hairline rule to the
+right edge; README:480 calls it accent, and neither production nor the handoff's own
+`_shared.css:1205-1206` sets a colour, so it stays ink on both surfaces), one weight down.
 
 Two heads only, `Player` and `Status`, both rendered uppercase by `.pl-sect`'s
-`text-transform: uppercase`. **Skill is a field label, not a section head** (README:217-218 says so
-explicitly and `mg-checkin.html:64` emits `<label class="popup-edit-label" for="...">Skill</label>`
-inside `.pe-f`); today's card already emits that label at `public/app.js:183`.
+`text-transform: uppercase`. **Skill is a field label, not a section head.** README:217 calls it a section
+head, but its own CSS makes it a `.popup-edit-label` inside `.pe-f` and `mg-checkin.html:64` emits it that
+way; the code wins, as with the stepper prose. Today's card already emits that label at
+`public/app.js:183`.
 
 ```css
 .pe-sect { margin: 0 0 11px; font-size: 11px; }
@@ -506,8 +569,10 @@ The save, in `ensureSaveDelegationBound` (`public/app.js:435-448`):
     skill = Math.max(0, Math.min(10, Math.round(skill * 10) / 10));
 ```
 
-Name empty is now the ONLY validation rule (README:326), and it focuses First name rather than aborting
-in silence. Data: `players.skill` stays `not null` with a 0 default; no migration.
+Name empty is the only rule the CARD enforces (README:326), and it focuses First name rather than
+aborting in silence. The add path additionally applies the app's standing full-name and roster-loaded
+rules, the same ones `mgckAddAndCheckIn` and `mgpAddPlayer` apply; see A5. Data: `players.skill` stays
+`not null` with a 0 default; no migration.
 
 **B5. Check in / Check out inside the card, as a DRAFT.** NEW.
 Handoff: README:236-253, 316-322, 394-406; `_shared.css` round (iii); `_shared.js:974-980, 1179-1189`.
@@ -562,7 +627,23 @@ if (inBtn) {
 }
 ```
 
-Copy verbatim: **"Check in"**, **"Check out"**. Aria: `aria-pressed`. Data: nothing here.
+B1 stopped emitting the pill for a player who is out, so the toggle has to build a node the opener no
+longer wrote. Its markup is stated once, beside the branch that uses it, so the two shapes cannot drift:
+
+```js
+// the pill B1 stopped emitting for an out player, rebuilt for the live toggle. Same markup as
+// openPlayerEditPopup's `inHTML`, so the two cannot drift.
+function peInPillNode() {
+  const s = document.createElement('span');
+  s.className = 'mgp-in pe-in';
+  s.textContent = 'IN';
+  return s;
+}
+```
+
+Copy verbatim: **"Check in"**, **"Check out"**, **"IN"**. Aria: `aria-pressed`. Data: nothing here. The
+branch touches no `state.`, calls no RPC and calls no `saveLocal`, which is what makes "nothing is written
+until Save" provable by reading it (see §7).
 
 **B6. Save.** RESTYLE of behaviour, and the one place data is written.
 Handoff: README:323-344; changes 9, 13, 14, 15, 16, 20 in `S/DIGEST.md`.
@@ -571,10 +652,19 @@ Site: `ensureSaveDelegationBound`'s `.btn-save-edit` branch, `public/app.js:415-
 Three additions to a handler that otherwise keeps its whole optimistic-then-remote shape:
 
 ```js
-    // 1) ADD MODE. The card in .is-new has no player row to update; it registers one.
+    // 1) ADD MODE. The card in .is-new has no player row to update; it registers one. All three refusals
+    //    run HERE, before the close, because a refusal has to land on a card the organiser is still
+    //    looking at. Two of the three sentences are the ones mgckAddAndCheckIn already says.
     if (peMode === 'new') {
-      const wantIn = !!(document.querySelector('#player-edit-modal [data-pe-in]')
-        && document.querySelector('#player-edit-modal [data-pe-in]').getAttribute('aria-pressed') === 'true');
+      const say = (t) => { const el = document.getElementById('pe-msg'); if (el) el.textContent = t; };
+      if (!state.loaded) { say('Still loading. One second, then tap again.'); return; }
+      if (!isValidFullName(name)) { say('Enter a first and last name'); return; }
+      if ((state.players || []).some((p) => normalize(p.name) === normalize(name))) {
+        say(name + ' is already on the roster');   // the card STAYS OPEN; the typed rating is not thrown away
+        return;
+      }
+      const inEl = document.querySelector('#player-edit-modal [data-pe-in]');
+      const wantIn = !!(inEl && inEl.getAttribute('aria-pressed') === 'true');
       closePlayerEditPopup();
       void mgckAddFromCard(name, skill, wantIn);   // manage.js; see A5
       return;
@@ -612,7 +702,8 @@ Handoff: README:294-313, 357-365; `_shared.js:1005-1012, 1040-1050, 1204-1218`.
 
 - **Open** (`openPlayerEditPopup`): sets `peMode` (`'edit'` or `'new'`), `peOrigin`
   (`manageView === 'checkin' ? 'checkin' : 'players'`) and `peReturnKey` (the identity key, so the pencil
-  can be re-found after a repaint). `document.body.style.overflow = 'hidden'` already locks the background
+  can be re-found after a repaint). `#pe-msg` is rebuilt empty with the rest of the card on every open, so
+  a refusal from one add can never be read as a refusal of the next. `document.body.style.overflow = 'hidden'` already locks the background
   (`public/app.js:207`). **No field is focused.** Focus goes to `.pe-card`, which gains `tabindex="-1"` in
   `ensurePlayerEditModal` (`public/app.js:126`).
 - **A new-mode opener**, `openPlayerAddPopup()`, is a thin sibling: it sets `peMode = 'new'`, skips the
@@ -736,13 +827,21 @@ surface, is rewritten the same way (the rule it cites, §AS-1 admin-only skill r
 still forbids skill here).
 
 **E2. The kiosk registration.** `public/app.js:9760-9765` (`activeGroupForRegister`, `group`, `groups`),
-`:9786` (the RPC's `p_group`), `:9790` (`ensureGroupCatalogEntriesSupabase`), `:9798` (the outbox key and
-payload). `state.activeGroup` and `LS_ACTIVE_GROUP_KEY` retire with the helper layer.
+**`:9768`** (the optimistic row `{ name, skill, group, groups, pending: true }`, whose two group keys go
+with the rest), `:9786` (the RPC's `p_group`), `:9790` (`ensureGroupCatalogEntriesSupabase`), `:9798` (the
+outbox key `'reg:' + normalize(name) + ':' + (group || '')` and its payload). `state.activeGroup` and
+`LS_ACTIVE_GROUP_KEY` retire with the helper layer.
+E2 is scheduled at **T9** with the rest of the UI layer, NOT left to the data layer: `:9760-9764` calls
+`normalizeActiveGroupSelection` and reads `UNGROUPED_FILTER_VALUE`, both of which surface G (T10) deletes,
+so deleting the helpers first would throw a `ReferenceError` on the first walk-up registration. T9 is also
+the last client push before `0069`, so E2's RPC line moves to the two-key call there.
 
 **E3. The kiosk row shape.** `disambiguatePlayersByName` (`public/pure.js:613-638`) drops `group` from the
 row it returns (`:632`) and from its doc comment (`:607-608`). `buildKioskResultsHTML`
-(`public/app.js:6132`) drops it from the row it forwards. `test/pure.test.js:426-430` asserts the exact
-row shape and is edited with it (§7).
+(`public/app.js:6132`) drops it from the row it forwards, and its own doc comment (`public/app.js:6128-6131`,
+whose last line reads "disambiguation is name + group only") is rewritten in the same edit rather than
+left stating something false. `test/pure.test.js:426-430` asserts the exact row shape and is edited with
+it (§7).
 
 ### Surface F: the standalone kiosk page (`public/checkin.html`)
 
@@ -753,8 +852,8 @@ becomes:
       const { error } = await sb.rpc('register_player', { p_name: fullName, p_checked_in: true });
 ```
 
-The two comment blocks at `:429-432` that explain the NF-9 full-roster load keep their history and lose
-their forward-looking clause about tagging new registrants into `CLUB_GROUP`.
+The one four-line comment block at `:429-432` that explains the NF-9 full-roster load keeps its history
+and loses its forward-looking clause about tagging new registrants into `CLUB_GROUP`.
 `CLUB_GROUP` itself (`public/supabase-config.js:12`) is then unreferenced and is deleted in the same
 commit.
 
@@ -790,53 +889,218 @@ Deleted whole, in one commit, after every emitter above is gone: `LS_GROUPS_KEY`
   `group` / `groups` / `canonicalGroups` / `tag` block (`:5744-5761`); with the column gone the only fields
   any caller passes are `name`, `skill` and `claimed_by_profile`.
 
-## 5. The data change: migration `0068`
+## 5. The data change: two migrations, `0068` then `0069`
 
-Highest migration present is `0067_move_noop_and_clear_live_guard.sql`, so this is **`0068`**. House style
-read from `0066` and `0067`: a header comment that says WHY in prose, a `ROLLBACK:` line, an `APPLIED`
-marker left for the controller to stamp, then the DDL, then the `revoke` / `grant` pair on every function.
+Highest migration present is `0067_move_noop_and_clear_live_guard.sql`, so this round takes **`0068` and
+`0069`**. House style read from `0066` and `0067`: a header comment that says WHY in prose, a `ROLLBACK:`
+line, an `APPLIED` marker left for the controller to stamp, then the DDL, then the `revoke` / `grant` pair
+on every function. Neither file carries an explicit `begin;` / `commit;`: only 4 of the 68 files present
+use one (`0053` to `0056`), and the Supabase MCP's `apply_migration` already wraps the statement batch, so
+an explicit `begin` only logs a nested-transaction notice while adding nothing.
 
-File: `db/migrations/0068_drop_player_groups.sql`.
+Numbering note for anyone reading the folder: `0008`, `0015` and `0020` are each used twice
+(`0020_copilot_actions.sql` and `0020_group_null_normalize.sql`), so "the group work in 0020" below always
+means `0020_group_null_normalize.sql`.
+
+### 5.1 Why this is two files and not one
+
+An earlier draft of this spec said the client could simply stop sending `p_group` because the parameter has
+a default, and that this made the deploy window safe. **Signature resolution is fine. The dedup key is
+not.** The live function (`db/migrations/0020_group_null_normalize.sql:39-44`) finds an existing player
+with:
 
 ```sql
--- 0068_drop_player_groups.sql: groups leave the product.
+where lower(btrim(pl.name)) = lower(v_name)
+  and coalesce(pl."group",'') = coalesce(v_group,'')
+```
+
+Both anon doors send a group today: `public/checkin.html:539` and `public/app.js:9786`, sharing
+`const CLUB_GROUP = 'Athletic Specimen'` (`public/supabase-config.js:12`), whose own comment at `:8-11`
+records exactly the failure that constant exists to prevent, that the same person checking in at the two
+doors becomes two rows because the dedup keys on name plus group, invisible in the other door's roster,
+splitting attendance and inflating headcount.
+
+A client that stops sending `p_group` sends `''`. For a returning player whose row carries
+`group = 'Athletic Specimen'`, `coalesce('Athletic Specimen','') = coalesce('','')` is FALSE, the dedup
+misses, and the insert is permitted, because `players_real_name_group_uidx` keys on
+`(lower(btrim(name)), coalesce("group",''))` (`db/migrations/0012_c22_dedup_index_fix.sql:12-14`) and the
+groups differ. Result: a second row for the same person, split attendance, on a live tournament with
+registration open, and then those very rows are what the name-only unique index in `0069` would refuse to
+build over.
+
+The mirror hazard is just as real and closes the same way: if the column were emptied while the OLD client
+still sent `'Athletic Specimen'`, the comparison would fail in the other direction and make the same
+duplicate. So `0068` does two things, and neither of them drops anything:
+
+1. it empties `players."group"`, and
+2. it replaces `register_player`'s body **at its existing three-argument signature**, so the function still
+   accepts `p_group` from any client, ignores it for both the dedup and the insert, and matches on name
+   alone.
+
+After `0068` the old client and the new client behave identically, no ordering between them matters, and no
+window exists in either direction. `0069` then drops the column, the table and the parameter with nothing
+depending on them.
+
+### 5.2 `0068_normalize_player_groups.sql`, the prep, ships FIRST
+
+File: `db/migrations/0068_normalize_player_groups.sql`. Applied at task T1, before any client change is
+deployed.
+
+```sql
+-- 0068_normalize_player_groups.sql: empty the group column and make register_player group-blind, one
+-- deploy BEFORE the client stops sending p_group.
 --
--- Mike (2026-08-29): "remove the groups from the app, we dont even use it." Groups were a second, unused
--- way to organize ONE roster. They cost every list a subline, the players list a "N groups" counter, the
--- edit card a hidden field it had to carry so a name fix would not wipe membership, and register_player a
--- parameter every caller had to pass. The client stopped emitting and stopped sending them one deploy
--- before this file runs (the 0017 -> 0018 expand/contract precedent: 0018's own header records that it
--- waited for a deployed, verified app so the live app never lost a group mid-deploy).
+-- Mike (2026-08-29): "remove the groups from the app, we dont even use it." The removal is two files and
+-- this is the first. It drops NOTHING: no column, no table, no signature. It exists so the window between
+-- the client change and the drop cannot create a duplicate person on a live roster.
 --
--- What goes: the `groups` catalog table (0017), players."group" with its normalize trigger and trigger
--- function (0020), the group term in the dedup unique index (0011/0012), and register_player's p_group
--- parameter plus the "group" column it returned (last defined in 0020).
--- The 3-arg overload is DROPPED, not left standing beside the new one: PostgREST resolves an overload by
--- the argument names the caller sends, so two live signatures would let a stale cached client keep
--- registering into a column that no longer exists.
--- What stays: tournaments."group" (0003) is a different column on a different table. players.tag is not
--- touched here (the client stops writing group JSON into it in the same release; the column's fate is an
--- open item on the round's spec).
+-- WHY. The live register_player (0020_group_null_normalize.sql:39-44) dedups on
+--   lower(btrim(pl.name)) = lower(v_name) and coalesce(pl."group",'') = coalesce(v_group,'')
+-- Both anon doors send 'Athletic Specimen' today (public/checkin.html:539, public/app.js:9786, sharing
+-- CLUB_GROUP at public/supabase-config.js:12, whose comment at :8-11 records the exact bug it prevents).
+-- Change only one side of that comparison, in either direction, and the dedup misses: the insert is
+-- permitted because players_real_name_group_uidx keys on (lower(btrim(name)), coalesce("group",'')) (0012),
+-- and the same person becomes two rows with split attendance. Emptying the column AND making the function
+-- ignore the parameter changes both sides at once, so old and new clients behave identically.
 --
--- Dedup narrows from (name, group) to name. Mike, same day, on the kiosk's same-name rows: "thats almost
--- impossible to have the same full name, just leave it." The PRE-FLIGHT read-back below must return zero
--- rows before this file is applied, or the unique index will not build.
+-- STEP 1 is a GATE ON THE ROUND OPENING, not a formality at the end: if two real rows already share a name,
+-- the round STOPS here and Mike decides which row survives, before the tournament rather than after.
+-- STEP 2 is the ONLY record of the group values that will exist once 0069 commits. It is pasted verbatim
+-- into the round's history file. Nothing else preserves them.
 --
--- ROLLBACK: re-run 0017's create table + index + policies + grants (skip its backfill, the source rows
---   are gone), then `alter table public.players add column "group" text;`, then re-apply 0020 verbatim
---   (the trigger function, the trigger, and the 3-arg register_player), then
---   `drop index if exists public.players_real_name_uidx;` and recreate players_real_name_group_uidx from
---   0012. Group VALUES are not recoverable after this runs.
+-- ROLLBACK: re-apply the register_player body in 0020_group_null_normalize.sql verbatim (same signature,
+--   so a plain create or replace), then restore the values from the STEP 2 capture:
+--   update public.players set "group" = <captured> where id = <captured id>;
+--   Nothing is dropped by this file, so the rollback is a function body plus a data restore.
 --
 -- APPLIED <yyyy-mm-dd> via the Supabase MCP (apply_migration), the check-in pop-ups round.
 
--- PRE-FLIGHT (run alone, read the result, and only then apply the rest). Must return zero rows:
+-- STEP 1. Run alone. READ the result. Zero rows required, or the round stops.
 --   select lower(btrim(name)) as nm, count(*) as c
 --     from public.players
 --    where left(name, 5) <> '__as_'
 --    group by 1 having count(*) > 1;
 
-begin;
+-- STEP 2. Run alone. Save the output VERBATIM into 12-history before running STEP 3.
+--   select id, name, "group" from public.players where "group" is not null order by name;
+
+-- STEP 3. Every real row moves into the one slot a group-blind call will use. 0020's normalize trigger
+-- already turns '' into NULL on write, so NULL is the canonical empty and coalesce("group",'') = '' holds
+-- for every row afterwards.
+update public.players set "group" = null where "group" is not null;
+
+-- STEP 4. register_player, SAME three-argument signature, group-blind. p_group is still accepted so every
+-- deployed client keeps working unchanged; it is ignored for the dedup and never written. The return
+-- columns are unchanged too (the "group" column now always reads NULL), so no client's response parsing
+-- moves. Body is 0020's with the group terms removed from the lookup and the insert.
+create or replace function public.register_player(p_name text, p_group text default ''::text, p_checked_in boolean default false)
+returns table(id uuid, name text, checked_in boolean, "group" text)
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_name text := btrim(coalesce(p_name, ''));
+  v_id   uuid;
+  v_actor text; v_role text; v_grp text;
+begin
+  if v_name = '' then raise exception 'name required'; end if;
+  if length(v_name) > 80 then raise exception 'name too long (max 80)'; end if;
+
+  select pl.id into v_id from public.players pl
+    where lower(btrim(pl.name)) = lower(v_name)
+      and left(pl.name, 5) <> '__as_'
+    limit 1;
+
+  if v_id is null then
+    begin
+      insert into public.players(name, skill, checked_in)
+        values (v_name, 0, coalesce(p_checked_in, false))
+        returning players.id into v_id;
+      select a.actor, a.role, a.grp into v_actor, v_role, v_grp from public._audit_actor() a;
+      insert into public.action_log(actor, role, grp, action, entity_type, entity_id, detail)
+        values (v_actor, v_role, v_grp, 'register', 'players', v_id::text, v_name);
+    exception when unique_violation then
+      select pl.id into v_id from public.players pl
+        where lower(btrim(pl.name)) = lower(v_name)
+          and left(pl.name, 5) <> '__as_'
+        limit 1;
+    end;
+  end if;
+
+  if coalesce(p_checked_in, false) then
+    update public.players set checked_in = true where players.id = v_id;
+    insert into public.check_ins(session_id, player_id)
+      values (public.current_session_id(), v_id)
+      on conflict (session_id, player_id) do nothing;
+  end if;
+
+  return query
+    select pl.id, pl.name, pl.checked_in, pl."group" from public.players pl where pl.id = v_id;
+end $$;
+revoke all on function public.register_player(text, text, boolean) from public;
+grant execute on function public.register_player(text, text, boolean) to anon, authenticated;
+```
+
+**Read-backs for `0068`**, all recorded in the round's history file:
+
+1. `select count(*) from public.players where "group" is not null;` returns `0`.
+2. `select count(*) from public.players where left(name,5) <> '__as_';` is unchanged from before STEP 3.
+3. `select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname='public' and p.proname='register_player';` still returns exactly one row, still `register_player(text,text,boolean)`.
+4. A live smoke on a throwaway name through the anon door, run TWICE with the old three-key argument list
+   and once with the new two-key list: all three calls return the SAME id, and
+   `select count(*) from public.players where lower(btrim(name)) = lower('Zz Smoketest');` is 1. Then the
+   row is deleted by id. This is the whole point of the file, so it is proved rather than assumed.
+
+### 5.3 `0069_drop_player_groups.sql`, the drop
+
+File: `db/migrations/0069_drop_player_groups.sql`. Applied at task T12, after the whole client is deployed
+and driven. Its pre-flight already ran at `0068` STEP 1 and is not repeated.
+
+```sql
+-- 0069_drop_player_groups.sql: groups leave the product.
+--
+-- Mike (2026-08-29): "remove the groups from the app, we dont even use it." Groups were a second, unused
+-- way to organize ONE roster. They cost every list a subline, the players list a "N groups" counter, the
+-- edit card a hidden field it had to carry so a name fix would not wipe membership, and register_player a
+-- parameter every caller had to pass. 0068 already emptied the column and made the function group-blind,
+-- and the client that emits and sends nothing group-shaped has been deployed and driven since. This file
+-- removes the structures with nothing left depending on them. Same expand then contract shape 0017 and
+-- 0018 used for the catalog, whose own header records that 0018 waited for a deployed, verified app.
+--
+-- WHAT GOES:
+--   1. the `groups` catalog table (0017), with its unique index, its two RLS policies and its grants,
+--      which DROP TABLE sweeps. No inbound FK exists; 0035 only added community_id to it (outbound).
+--   2. players."group", and with it the anon COLUMN-level select grant that names it
+--      (0010_c21_skill_anon_revoke.sql:9, `grant select (id, name, checked_in, tag, "group")`). Postgres
+--      removes a column's ACL with the column, so this will not error, but it is a real object and the
+--      rollback has to re-issue it.
+--   3. the normalize trigger and its trigger function (0020).
+--   4. the group term in the dedup unique index (0011/0012): it narrows to name only.
+--   5. register_player's p_group parameter and the "group" column it returned. The three-argument overload
+--      is DROPPED, not left standing beside the new one: PostgREST resolves an overload by the argument
+--      names the caller sends, so two live signatures would let a stale cached client keep registering
+--      into a column that no longer exists. The older two-argument (text,text) form was already dropped at
+--      0007:19, for the same reason.
+--
+-- WHAT STAYS: tournaments."group" (0003) and attendance_sessions."group" (0015), two different columns on
+-- two different tables. players.tag is not touched here; the client stops writing group JSON into it in the
+-- same release, and the column's fate is an open item on this round's spec.
+--
+-- Dedup narrows from (name, group) to name. Mike, same day, on the kiosk's same-name rows: "thats almost
+-- impossible to have the same full name, just leave it." 0068 STEP 1 already proved zero duplicate names.
+--
+-- **Before this file runs, `select id, name, "group" from public.players where "group" is not null;` has
+-- already been captured verbatim into the round's history file at 0068 STEP 2. That capture is the ONLY
+-- record of the group values that exists after this commit; the rollback below restores empty structures
+-- and needs that file to put values back.**
+--
+-- ROLLBACK: re-run 0017's create table, unique index, policies and grants (skip its backfill, the source
+--   rows are gone); `alter table public.players add column "group" text;`; re-issue
+--   `grant select (id, name, checked_in, tag, "group") on public.players to anon;` (0010:9), without which
+--   a rolled-back anon door 403s on any query naming the column; re-apply
+--   0020_group_null_normalize.sql verbatim (the trigger function, the trigger and the three-argument
+--   register_player); `drop index if exists public.players_real_name_uidx;` and recreate
+--   players_real_name_group_uidx from 0012:12-14; then restore the VALUES from the 0068 STEP 2 capture.
+--
+-- APPLIED <yyyy-mm-dd> via the Supabase MCP (apply_migration), the check-in pop-ups round.
 
 -- the dedup index carries the column, so it goes first
 drop index if exists public.players_real_name_group_uidx;
@@ -848,8 +1112,10 @@ create unique index if not exists players_real_name_uidx
 drop trigger if exists players_normalize_group on public.players;
 drop function if exists public.tg_players_normalize_group();
 
--- register_player without p_group. Body is 0020's minus every group term; the insert still writes skill 0,
--- so a rated new player takes a second write from the client (updatePlayerFieldsSupabase).
+-- register_player without p_group. Body is 0068's minus the ignored parameter and the "group" return
+-- column; the insert still writes skill 0, so a rated new player takes a second write from the client
+-- (updatePlayerFieldsSupabase). create or replace on a NEW signature creates a NEW function with no
+-- inherited ACL, hence the revoke/grant pair below.
 create or replace function public.register_player(p_name text, p_checked_in boolean default false)
 returns table(id uuid, name text, checked_in boolean)
 language plpgsql security definer set search_path to 'public' as $$
@@ -895,207 +1161,287 @@ end $$;
 revoke all on function public.register_player(text, boolean) from public;
 grant execute on function public.register_player(text, boolean) to anon, authenticated;
 
--- the old signature, gone in the same transaction as the column it wrote
+-- the old signature, gone in the same batch as the column it wrote
 drop function if exists public.register_player(text, text, boolean);
 
 alter table public.players drop column if exists "group";
 
 drop table if exists public.groups;
-
-commit;
 ```
 
-**Why the client can ship first with zero downtime.** The live `register_player` is
-`(p_name text, p_group text default ''::text, p_checked_in boolean default false)`
-(`db/migrations/0020_group_null_normalize.sql`). `p_group` **has a default**, so the new client's two-key
-call `rpc('register_player', { p_name, p_checked_in })` resolves against the OLD function and registers
-into an empty group, which `0020`'s trigger already normalizes to NULL. The client can therefore ship,
-be driven and be proven before any SQL runs, and the September 12th 2026 tournament with registration open
-is never mid-state.
+No RLS policy on `public.players` names `"group"` (the read policy at
+`db/migrations/0006_c21_authenticated_players_parity.sql:12` is `using (true)`), and no function body
+outside `register_player` reads it, so `drop column` has nothing to fight. `link_roster_to_tournament`
+(`db/migrations/0054_register_resolves_identity.sql`) inserts `(community_id, real_name)` on a different
+table and never touches the dedup index, so narrowing it changes nothing there.
 
-**Every caller, by function name and file** (all four move to the two-key call in the same client
-release, task T9):
+### 5.4 Every `register_player` caller, by function name, file and task
 
-| Caller | File | Site |
-|---|---|---|
-| `mgckAddFromCard` (new, A5) | `public/manage.js` | its only RPC call |
-| `mgckAddAndCheckIn` | `public/manage.js:1231` | `p_group: CLUB_GROUP` goes |
-| the kiosk tap handler inside `attachHandlers` | `public/app.js:9786` | `p_group: group` goes |
-| the `register` branch of `flushOutbox` | `public/app.js:5115` | `p_group: op.payload.group \|\| ''` goes |
-| the standalone kiosk page | `public/checkin.html:539` | `p_group: GROUP_NAME` goes |
+Five callers, not four. Two of them are edited in the card work and the console work rather than in the
+data task, so each row names the task that owns it. All five carry the two-key call by the end of T9, one
+deploy before `0069`.
 
-**Read-back checks, run after the transaction commits and recorded in the round's history file:**
+| Caller | File | Site | Task |
+|---|---|---|---|
+| `mgckAddFromCard` (new, A5) | `public/manage.js` | its only RPC call, written two-key from the start | T8 |
+| the `register` branch of `flushOutbox` | `public/app.js:5115` | `p_group: op.payload.group \|\| ''` goes; the skill follow-up is added in the same edit (A5) | T8 |
+| `mgckAddAndCheckIn` | `public/manage.js:1231` | `p_group: CLUB_GROUP` goes | T9 |
+| the kiosk tap handler inside `attachHandlers` (surface E2) | `public/app.js:9786` | `p_group: group` goes, with the rest of E2 | T9 |
+| the standalone kiosk page (surface F) | `public/checkin.html:539` | `p_group: GROUP_NAME` goes | T9 |
+
+### 5.5 Read-backs for `0069`
+
+Run after the batch commits, and recorded in the round's history file:
 
 1. `select count(*) from information_schema.columns where table_schema='public' and table_name='players' and column_name='group';` returns `0`.
 2. `select to_regclass('public.groups');` returns NULL.
-3. `select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname='public' and p.proname='register_player';` returns exactly one row, `register_player(text,boolean)`.
+3. `select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname='public' and p.proname='register_player';` returns exactly one row, `register_player(text,boolean)`. This is the guard that catches a stranded overload.
 4. `select indexdef from pg_indexes where schemaname='public' and indexname='players_real_name_uidx';` exists and names `lower(btrim(name))` with no `group` term; `players_real_name_group_uidx` is gone.
-5. Player count identical before and after: `select count(*) from public.players where left(name,5) <> '__as_';` on both sides of the transaction.
-6. A live smoke through the anon door: `select * from public.register_player('Zz Smoketest', false);` returns one row, then the row is deleted by id. Run it on the kiosk path, not on a real name.
+5. Player count identical before and after: `select count(*) from public.players where left(name,5) <> '__as_';`.
+6. A live smoke through the anon door: `select * from public.register_player('Zz Smoketest', false);` returns one row, a second identical call returns the SAME id, then the row is deleted by id. Run on a throwaway name, never on a real one.
 7. `get_advisors` (security and performance) shows no class that was not there before.
+8. `select privilege_type, column_name from information_schema.column_privileges where table_name='players' and grantee='anon';` returns exactly `id`, `name`, `checked_in`, `tag`, and no `group`. This is the `0010:9` grant, which the column drop removed silently.
 
 ## 6. What must not reopen
 
 | Must not reopen | How it could | The guard |
 |---|---|---|
-| A row tap checking a player in when the organizer meant to edit | the pencil is inside the row `<button>`, so the row's own handler fires on the same tap | the `[data-mgck-edit]` branch sits ABOVE `[data-mgck-id]` in `attachHandlers` and calls `stopPropagation`. Test: a synthetic click on the pencil opens the card and leaves `state.checkedIn` unchanged |
-| A double attendance write | the card's Save applying the status unconditionally, on top of a row that was already in that state | compare the draft flag against `new Set(state.checkedIn).has(key)` and call `mgckToggleByKey` only on a real difference. Test: Save with no status change fires zero `check_in` and zero `check_out` |
-| A cancelled card writing anything | the status button writing straight through, the way a row tap does | the toggle only mutates DOM attributes and classes. Test: toggle, then Cancel, then assert `state.checkedIn` unchanged and the RPC spy empty |
-| UNDO undoing the wrong thing | `mgckLast` left pointing at a stale toggle while the strip shows a card message | the card's toggle is `{ silent: true }` (so `mgckLast` is nulled) and `mgckCardNotice` sets `mgckNotice` and clears `mgckLast`; `mgckToggleByKey` clears `mgckNotice` on entry. Test: card save shows "{name} updated" with no UNDO button; a following row tap shows "{name} checked in" WITH one |
-| The console losing its place mid-check-in | the save calling `render()` (`public/app.js:475`) | `mgckCardNotice` -> `mgckRepaint`, which saves and restores `#tab-manage`'s scrollTop (`public/manage.js:1159-1167`). Test: no `render` call from a check-in-origin save |
-| The silent save | the `Number.isNaN(skill)` half of the abort at `public/app.js:446` coming back | one validation rule, name-empty, and it focuses First name. Test: save a blank rating, assert the player row now reads `skill === 0` and the card closed |
-| The Bug A autofocus (2026-06-21, `12-history/task-#10-edit-autofocus-name.md`) | porting `_shared.js:1010-1011` verbatim | a source guard: `openPlayerEditPopup` and the add opener contain no `.select()` and no `focus()` on `#pe-first` / `#pe-last` / `#pe-skill` |
-| The Rules sheet's close button | change B1 edits `.popup-header`, which two dialogs share (`public/app.js:164` the card, `:4248` the rules sheet) | the new rules name `.hmv-rtitles` and `.hmv-rx` explicitly; the drive opens the Home rules sheet as well as the card. Precedent: the `.hmv-copy:focus` defect a prior handoff carried (`NOW.md`, 2026-08-24) |
-| The pencil invisible on a checked-in row | `.ckx-row.is-in { opacity: .55 }` (`public/styles.css:1491`) caps every child, and a child cannot raise it | `.ckx-row.is-in .mgck-edit` gets a darker rest ink. Verified by eye at 390 and 1280, both row states |
-| A public surface showing skill (§AS-1) | the stepper is in a card that also opens from Manage; the kiosk row builder is a different function | the card is admin-only on both its surfaces; `renderCheckinButton` and `disambiguatePlayersByName` gain nothing in this round. A source guard asserts `renderCheckinButton`'s output contains no digit-bearing skill span |
-| A duplicate top-level name across `app.js` and `manage.js` | a new helper declared in both files; a duplicate `function` is LEGAL and the second silently wins (C102 §5.3 / hazard 5) | the new names are disjoint by construction (`app.js`: `peMode`, `peOrigin`, `peReturnKey`, `peSkillStep`, `peInPillNode`, `openPlayerAddPopup`; `manage.js`: `mgckNotice`, `mgckCardNotice`, `mgckAddFromCard`) and C102's name-intersection guard test runs on the branch |
-| The C102 equivalence proof | this round changes five Manage builders on purpose | the branch never merges before C102 Task 9's `diff before.json after.json` has run clean on main. §8 |
-| A stale client calling a dropped RPC | the migration landing before the deploy, or before the service worker has refreshed | `p_group` has a default, so the two-key call works against BOTH signatures. The client ships and is driven first; `APP_VERSION` bumps, which mints a new SW cache and re-fetches network-first |
-| Groups coming back through a hide | porting the handoff's `.ckx-gp, .mgp-gp, .mgp-mg { display: none !important }` | not ported. A whole-file guard asserts no emitted string in `app.js` or `manage.js` contains those class names |
+| **One person becoming two rows on a live roster** | the client stops sending `p_group` while the column still holds `'Athletic Specimen'`, so `register_player`'s dedup (`0020_group_null_normalize.sql:39-44`) misses and inserts a second row. This is the bug `public/supabase-config.js:8-11` was written to prevent | `0068` empties the column AND makes the function group-blind at its existing signature, so both sides of the comparison change in one statement batch and old and new clients behave identically. Proved by the twice-called smoke in §5.2 read-back 4 |
+| A row tap checking a player in when the organizer meant to edit | the pencil is inside the row `<button>`, so the row's own handler fires on the same tap | the `[data-mgck-edit]` branch sits ABOVE `[data-mgck-id]` in `attachHandlers` and calls `stopPropagation`. Test: a `withDelegate` tap on `data-mgck-edit` calls the swapped `openPlayerEditPopup` with that key and never calls the swapped `mgckToggleRow` |
+| A double attendance write | the card's Save applying the status unconditionally, on top of a row that was already in that state | compare the draft flag against `new Set(state.checkedIn).has(key)` and call `mgckToggleByKey` only on a real difference. Source guard on the branch, plus a drive fact for the single RPC |
+| A cancelled card writing anything | the status button writing straight through, the way a row tap does | the toggle branch mutates DOM attributes and classes only. Source guard: its slice contains no `state.`, no `mgckToggleByKey`, no `supabaseClient` and no `saveLocal` |
+| UNDO undoing the wrong thing | `mgckLast` left pointing at a stale toggle while the strip shows a card message | the card's toggle is `{ silent: true }` (`public/manage.js:1201` already honours it) and `mgckCardNotice` sets `mgckNotice` and clears `mgckLast`; `mgckToggleByKey` clears `mgckNotice` on entry. Test: with `mgckNotice` set, `mgckStripHTML()` carries the message and no `data-mgck-undo`; with only `mgckLast` set it carries both |
+| The console losing its place mid-check-in | the save calling `render()` (`public/app.js:475`) | `mgckCardNotice` calls `mgckRepaint`, which saves and restores `#tab-manage`'s scrollTop (`public/manage.js:1159-1167`). Source guard: no `render();` in the `.btn-save-edit` branch |
+| The silent save | the `Number.isNaN(skill)` half of the abort at `public/app.js:446` coming back | one validation rule on the card, name-empty, and it focuses First name. Source guard on the two new lines, plus a drive fact for the round trip |
+| **A half-named player from the new door** | the card enforcing only README:326's name-empty rule while every other add door enforces `isValidFullName` (`public/app.js:9732`, `public/manage.js:1217`, `public/manage.js:1326`) | the three gates in B6, run before the close. Source guard: the add branch contains `isValidFullName` and `state.loaded` |
+| **The add card throwing away what was typed** | a duplicate name closing the add card and reopening an edit card for someone else, losing the rating and the status with no message | the duplicate check runs in the save branch before `closePlayerEditPopup()`; the card stays open and says "{Full name} is already on the roster". Source guard: the add branch's duplicate check appears before the `closePlayerEditPopup()` call |
+| The Bug A autofocus (2026-06-21, `12-history/task-#10-edit-autofocus-name.md`) | porting `_shared.js:1010-1011` verbatim | a source guard: the `openPlayerEditPopup` slice contains no `.select()` and no `focus()` on `#pe-first` / `#pe-last` / `#pe-skill`. Proven by mutation |
+| **The card reading "check-in" on the Players directory** | deriving the eyebrow from `peMode` alone | the eyebrow reads `peOrigin` too (B2). Source guard: the slice contains `Roster \u00b7 players` |
+| The Rules sheet's close button | B1 edits `.popup-header`, which two dialogs share (`public/app.js:164` the card, `:4248` the rules sheet) | the new rules name `.hmv-rtitles` and `.hmv-rx` explicitly, and `#hm-rules-modal .hmv-rtitles` (`public/styles.css:4214`, specificity 1,1,0) sets only `display`, `gap` and `min-width`, so there is no conflict. The drive opens the rules sheet as well as the card. Precedent: the `.hmv-copy:focus` defect a prior handoff shipped (`NOW.md`, 2026-08-24) |
+| The pencil invisible on a checked-in row | `.ckx-row.is-in { opacity: .55 }` (`public/styles.css:1491`) caps every child, and a child cannot raise it | `.ckx-row.is-in .mgck-edit` gets a darker rest ink. Drive fact at 390 and 1280, both row states |
+| A public surface showing skill (§AS-1) | the stepper is in a card that also opens from Manage; the kiosk row builder is a different function | the card is admin-only on both surfaces; `renderCheckinButton` and `disambiguatePlayersByName` gain nothing. Test: `renderCheckinButton`'s output carries no `mgck-sk` and no `mgck-edit` |
+| A duplicate top-level name across `app.js` and `manage.js` | a new helper declared in both files; a duplicate `function` is LEGAL and the second silently wins (C102 §5.3) | the new names are disjoint by construction (`app.js`: `peMode`, `peOrigin`, `peReturnKey`, `peSkillStep`, `peInPillNode`, `openPlayerAddPopup`; `manage.js`: `mgckNotice`, `mgckCardNotice`, `mgckAddFromCard`), and C102's disjoint-names guard test (shipped at `c02cd7b`) runs on the branch |
+| The C102 equivalence proof | this round changes five Manage builders on purpose | the branch never merges before C102's `diff before.json after.json` has run clean on main. §8 |
+| **The anon kiosk losing its read** | the column drop silently removes the `0010:9` column-level grant, and a rollback that forgets to re-issue it leaves anon 403ing on any query naming the column | read-back 8 in §5.5 asserts anon holds exactly `id`, `name`, `checked_in`, `tag`; the `0069` ROLLBACK line re-issues the grant explicitly |
+| A stale client calling a dropped RPC | `0069` landing before the last client push is deployed, or before the service worker has refreshed | every caller is two-key by T10 and works against `0068`'s three-argument function unchanged; `APP_VERSION` bumps, which mints a new SW cache and re-fetches network-first; T11's drive confirms the served version before T12 runs |
+| Groups coming back through a hide | porting the handoff's `.ckx-gp, .mgp-gp, .mgp-mg { display: none !important }` | not ported. The source scan in §7 covers the class names, over `stripComments`-blanked sources so a rewritten comment cannot trip it |
 
 ## 7. Tests
 
-**Facts about the harness as it stands at `a0c9f8f`, read rather than assumed:**
+### 7.1 What the harness is, measured
 
-- **No test file references `mgck` at all.** `grep -rn mgck test/` returns zero matches. The digest's
-  pointer to check-in tests in `manage-round.test.js` and `manage-page.test.js` does not hold: those files
-  test `buildManagePageHTML`, `manageNeedsYouModel` and the CSS, not the console.
-- **No harness loads `public/manage.js` yet** (C102 Task 7). Every vm harness reads `pure.js` then
-  `app.js` (for example `test/manage-page.test.js:11-13`). Until T7 lands, 15 files / 543 tests are red by
-  design and this round cannot be green.
-- `test/manage-round.test.js:507` is the only existing assertion that names the card:
-  `expect(count(css, '#player-edit-modal .pe-save')).toBeGreaterThanOrEqual(1);`
-- All four client files are CRLF in the working tree (`core.autocrlf = true`, no `.gitattributes`) while
-  git stores LF. Any new source-scan assertion must be newline-agnostic.
+- **The suite is green at this HEAD: 40 files, 1252 tests** (`cd test && npx vitest run`).
+- **Every vm harness already loads `public/manage.js`** between `pure.js` and `app.js`
+  (`test/manage-page.test.js:12-14` reads all three, `:126-128` runs them in that order with the comment
+  "C102: the Manage block loads before app.js, as in index.html"). C102 T7 shipped at `6330a1c`.
+- **There is no DOM anywhere in the suite.** No `jsdom`, no `happy-dom`, no `@vitest-environment` pragma in
+  any of the 40 files, and `test/package.json` lists exactly one devDependency, `vitest`.
+  `documentStub.getElementById` and `documentStub.querySelector` return `null` unconditionally
+  (`test/manage-page.test.js:28-29`); `makeEl()` returns an object whose `classList` methods are no-ops and
+  whose `getAttribute` always returns `null` (`:16-25`); `supaStub.rpc` resolves `{ data: null, error: null }`
+  (`:41`).
+- **Consequence, stated so nobody writes a test that cannot run:** `openPlayerEditPopup` cannot execute at
+  all in this harness. It returns at `public/app.js:137-138`, because `modal.querySelector('.pe-card')` is
+  `null`. Nothing in this round adds a DOM environment. Every card-markup claim is pinned by a source-slice
+  scan of the template literal that builds it, and every claim that genuinely needs a live element is a
+  drive fact in §7.3.
+- **No test file references `mgck`** (`grep -rn mgck test/` returns zero matches), so the console has no
+  existing coverage to extend. `test/manage-round.test.js:509-513` is the only existing case that names the
+  card, asserting `count(css, '#player-edit-modal .pe-save') >= 1` at `:511`.
+- All four client files are CRLF in the working tree (`core.autocrlf = true`, no `.gitattributes`) while git
+  stores LF, so every source scan must be newline-agnostic.
 
-**New file: `test/checkin-popups.test.js`.** The vm harness is copied from `test/manage-page.test.js:11-60`
-with `manage.js` loaded between `pure.js` and `app.js`, matching the C102 §5.6 shape. New cases go here,
-never into the ten files C102 Task 8 edits.
+### 7.2 The three shapes this round is allowed to use
 
-| Change | File | The assertion |
+1. **Builder string.** A pure string builder called through the new file's bridge, asserted with
+   `toContain` / `not.toContain` / document order.
+2. **Delegate tap.** `withDelegate`, copied from `test/manage-round.test.js:1622-1653`: it captures the
+   `#app-content` click handler that `attachHandlers` binds and fires a synthetic tap whose target's
+   `closest()` matches named attribute hooks. Collaborators are swapped by bare assignment, the way the
+   C102 contract allows (`repaintManage = ...`), and `supabaseClient.rpc` is swapped with `swapSupaRpc`,
+   copied from `test/manage-round.test.js:289`.
+3. **Source guard.** A positive `toContain` over a named function's source slice (the shape
+   `test/register-auto-attach.test.js:140` already uses), or a negative scan over
+   `stripComments(appSrc) + '\n' + stripComments(mgSrc)`, reusing the helper at
+   `test/supabase-writes.test.js:20-27` that blanks block and line comments while preserving length and
+   newlines.
+
+Anything none of the three can reach is a drive fact in §7.3. No assertion in this spec requires a DOM.
+
+### 7.3 New file: `test/checkin-popups.test.js`
+
+Harness copied from `test/manage-page.test.js:11-60`, which already loads the three sources in the right
+order. New cases go here, never into the ten files C102 T8 touched. Its epilogue exposes: the builders
+(`mgckListHTML`, `mgckMetaHTML`, `mgckStripHTML`, `buildManageCheckinHTML`, `mgckRows`, `buildMgpListHTML`,
+`buildManagePlayersHTML`, `renderCheckinButton`), the module bindings a tap would set (`mgckNotice`,
+`mgckLast`, `mgckFilter`, `mgckQ`, `manageView`), the pure helper `peSkillStep`, the callers
+`mgckAddFromCard` and `mgckToggleByKey`, `attachHandlers` for `withDelegate`, `swapSupaRpc`, bare-assignment
+swaps for `mgckRepaint`, `repaintManage`, `openPlayerEditPopup`, `openPlayerAddPopup`, `mgckToggleRow`,
+`updatePlayerFieldsSupabase` and `outboxEnqueue`, and the raw `appSrc`, `mgSrc` and `css` strings.
+
+| Change | Shape | The assertion |
 |---|---|---|
-| A1 pencil | `test/checkin-popups.test.js` | `mgckListHTML` output carries one `data-mgck-edit="{key}"` per row, `role="button"`, `tabindex="0"` and `aria-label="Edit {name}"`; the pencil sits between `.ckx-nm` and `.mgck-sk` in document order |
-| A2 add pill | `test/checkin-popups.test.js` | `buildManageCheckinHTML` contains `class="mgck-add"`, `data-mgck-new` and the literal `Add player`, inside `.pd-pagehdr` |
-| A3 strip | `test/checkin-popups.test.js` | with `mgckNotice` set, `mgckStripHTML()` contains the message and NOT `data-mgck-undo`; with only `mgckLast` set it contains both; `mgckToggleByKey` clears `mgckNotice` |
-| A4 recount | `test/checkin-popups.test.js` | after `mgckCardNotice`, the meta strip counts and both section-head counts match `state.checkedIn` (the model already does the work; this pins the wiring) |
-| A5 add path | `test/checkin-popups.test.js` | `mgckAddFromCard('Zoe Park', 6.5, false)` calls `register_player` exactly once with `{ p_name, p_checked_in: false }` and NO `p_group` key, then `updatePlayerFieldsSupabase` once with `{ skill: 6.5 }`; with skill 0 the second call never fires; a duplicate name opens the card instead of registering |
-| A5 outbox | `test/checkin-popups.test.js` | with the RPC throwing, exactly one outbox row is enqueued with `kind: 'register'` and a payload carrying `checked_in` and `skill` and no `group` |
-| A6 / D1 / D2 / E1 groups off every list | `test/checkin-popups.test.js` | a whole-file scan of `appSrc + '\n' + mgSrc` contains none of `ckx-gp`, `mgp-gp`, `mgp-mg`, `data-mgp-groups`, `data-mgp-movegrp`, `data-mgp-gadd`, `data-mgp-gdelete`, `edit-group`, `edit-groups`, `p_group`. This is a POSITIVE-shaped guard on a concatenation, so it cannot go vacuous when a symbol moves file |
-| B1 pinned × | `test/manage-round.test.js` (beside `:507`) | the CSS contains `.popup-header .pe-x` with `margin-left: auto` and `.popup-header .pe-in` with `margin-left: 0`; the source no longer contains the `<span class="pe-in" aria-hidden="true"></span>` spacer literal |
-| B2 header | `test/checkin-popups.test.js` | `openPlayerEditPopup` output carries `.pe-mark`, `.pe-eyebrow` reading `Roster · check-in`, a 46px `.pe-av` with the first initial, and the pill only when the player is in `state.checkedIn` |
-| B3 heads | `test/checkin-popups.test.js` | the body contains `<div class="pl-sect pe-sect">Player</div>` and `...>Status</div>` in that order, and `Skill` remains a `.popup-edit-label` |
-| B4 stepper maths | `test/checkin-popups.test.js` | `peSkillStep('', 0.5) === '0.5'`; `peSkillStep('', -0.5) === '0.0'`; `peSkillStep('10', 0.5) === '10.0'`; `peSkillStep('0', -0.5) === '0.0'`; `peSkillStep('6', 0.5) === '6.5'`; every return has exactly one decimal |
-| B4 unrated | `test/checkin-popups.test.js` | a player at `skill: 0` opens with an empty `#pe-skill` value and the `–` placeholder; saving that card leaves `state.players[i].skill === 0` and the row still renders `–`; the card closed (the old silent abort would have left it open with nothing written) |
-| B5 draft | `test/checkin-popups.test.js` | a click on `[data-pe-in]` flips `aria-pressed`, the `is-in` class and the label, adds or removes the header pill, and leaves `state.checkedIn` untouched |
-| B6 save | `test/checkin-popups.test.js` | with the card opened from Check-in: exactly one `check_in` when the draft differs, zero when it does not, `renderCount` unchanged, `mgckRepaint` called, and the strip reads `{name} updated`. With it opened from Players: `repaintManage` called, not `render` |
-| B7 keyboard | `test/checkin-popups.test.js` | Escape with the modal open closes it and writes nothing; Enter on `.popup-edit-input` saves; Enter and Space on the pencil open the card; after close, focus is on the pencil carrying that key |
-| B7 no autofocus | `test/checkin-popups.test.js` | a source guard: the slice from `function openPlayerEditPopup` to `function closeInlineEditRow` contains no `.select()` and no `focus()` on a `#pe-` field. The mirror proof: adding the line makes it red |
-| C1 delegate order | `test/checkin-popups.test.js` | the `manageView === 'checkin'` slice of `attachHandlers` has `data-mgck-edit` at a lower index than `data-mgck-id` |
-| E1 kiosk | `test/checkin-page.test.js:118-121` | the case *"keeps the group differentiator for same-name disambiguation"* is **rewritten**, not deleted, to assert the opposite and to carry Mike's ruling in its title: two same-name rows render identically and neither contains `ckx-gp`. This is the one existing case this round inverts |
-| E3 kiosk row shape | `test/pure.test.js:426-430` | `toEqual({ id, name, initials, checkedIn })`, with `group` gone from the expected object and from the fixtures at `:392-397` that feed it |
-| F register callers | `test/supabase-writes.test.js` | `MUTATING_RPCS` at `:30` still lists `register_player` (unchanged); the file-scan `it`s gain a scan of `public/manage.js` and of `public/checkin.html` for a `p_group` literal, which must be zero |
+| A1 pencil | builder string | `mgckListHTML` output carries one `data-mgck-edit="{key}"` per row with `role="button"`, `tabindex="0"` and `aria-label="Edit {name}"`, and the pencil's index sits between `.ckx-nm` and `.mgck-sk` |
+| A2 add pill | builder string | `buildManageCheckinHTML` contains `class="mgck-add"`, `data-mgck-new` and the literal `Add player`, at an index inside the `.pd-pagehdr` block |
+| A3 strip | builder string | with `mgckNotice` set, `mgckStripHTML()` contains the message and NOT `data-mgck-undo`; with only `mgckLast` set it contains both; both set means the notice wins |
+| A3 strip is cleared by a row tap | delegate tap | with `mgckRepaint` swapped to a recorder, `mgckToggleByKey(key, 'in')` leaves `mgckNotice` null and `mgckLast` set |
+| A4 recount | builder string | after a check-in, `mgckMetaHTML(checkinConsoleModel(mgckRows(), 'all', ''))` and the two `.mgck-sect` counts in `mgckListHTML` match `state.checkedIn`. The model is unchanged by this round, which its 12 cases in `test/checkin-console.test.js:17-68` keep proving |
+| A5 the RPC shape | builder-free call plus swaps | `swapSupaRpc` returns `{ data: [{ id: 'p-new' }], error: null }` and `mgckRepaint` is a recorder. `mgckAddFromCard('Zoe Park', 6.5, false)` calls the RPC exactly once with `['register_player', { p_name: 'Zoe Park', p_checked_in: false }]`, with no `p_group` key in the object, and the swapped `updatePlayerFieldsSupabase` is called once with `{ skill: 6.5 }`. With skill `0` the second call never fires. The stub MUST return an id, or the follow-up is unreachable rather than merely unwritten |
+| A5 the three gates | source guard | the `peMode === 'new'` branch of the save contains `state.loaded`, `isValidFullName` and the duplicate check, all at a lower index than its `closePlayerEditPopup()` |
+| A5 outbox | call plus swaps | with `swapSupaRpc` throwing and `outboxEnqueue` swapped to a recorder, exactly one row is enqueued, `kind` is `register`, and its payload has `name`, `checked_in` and `skill` and no `group` |
+| A6, D1, D2, E1, E2, F: groups off every surface | source guard | a negative scan over `stripComments(appSrc) + '\n' + stripComments(mgSrc)` finds none of `ckx-gp`, `mgp-gp`, `mgp-mg`, `data-mgp-groups`, `data-mgp-movegrp`, `data-mgp-gadd`, `data-mgp-gdelete`, `edit-group`, `edit-groups`, `p_group`. The concatenation is what stops it going vacuous when a symbol moves file; it is still a negative assertion, so it needs the mutation proof below. A second scan covers `public/checkin.html` for `p_group` and `GROUP_NAME` |
+| B1 pinned × | CSS plus source guard | the CSS contains `.popup-header .pe-x` with `margin-left: auto` and `.popup-header .pe-in` with `margin-left: 0`; `appSrc` no longer contains the `<span class="pe-in" aria-hidden="true"></span>` spacer literal. Extend the existing case at `test/manage-round.test.js:509-513` rather than writing a second CSS reader |
+| B2 header markup | source guard | the `openPlayerEditPopup` slice contains `class="pe-mark"`, `class="pe-eyebrow"`, `Roster \u00b7 check-in`, `Roster \u00b7 new player`, `Roster \u00b7 players`, and the `isIn ?` ternary that emits the pill only when true |
+| B3 heads | source guard | the same slice contains `<div class="pl-sect pe-sect">Player</div>` at a lower index than `>Status</div>`, and `Skill` still appears inside a `popup-edit-label` |
+| B4 stepper maths | builder-free call | `peSkillStep('', 0.5) === '0.5'`; `peSkillStep('', -0.5) === '0.0'`; `peSkillStep('10', 0.5) === '10.0'`; `peSkillStep('0', -0.5) === '0.0'`; `peSkillStep('6', 0.5) === '6.5'`; every return matches `/^\d+\.\d$/` |
+| B4 unrated prefill and the abort | source guard | the `openPlayerEditPopup` slice contains the `> 0 ? Number(player.skill).toFixed(1) : ''` prefill and `placeholder="&#8211;"`; the save branch no longer contains `if (!name || Number.isNaN(skill)) return;` and does contain `if (Number.isNaN(skill)) skill = 0;` |
+| B5 the toggle writes nothing | source guard | the `[data-pe-in]` branch's slice contains no `state.`, no `mgckToggleByKey`, no `supabaseClient` and no `saveLocal`, and does contain `aria-pressed` and `peInPillNode` |
+| B6 the save routes in place | source guard | the `.btn-save-edit` branch contains no `render();`, contains `mgckCardNotice` and `repaintManage`, and contains the `wantIn !== isInNow` comparison at a lower index than its `mgckToggleByKey` call |
+| B6 the silent toggle contract | delegate-free call | with `mgckRepaint` swapped, `mgckToggleByKey(key, 'in', { silent: true })` leaves `mgckLast` null and puts the key into `state.checkedIn`; without `silent` it sets `mgckLast`. This pins the contract the save depends on (`public/manage.js:1201`) |
+| B7 keyboard and focus | source guard | the once-bound keydown contains `Escape`, `closePlayerEditPopup`, `Enter` and `popup-edit-input`; `closePlayerEditPopup` contains the `peReturnKey` re-query on `.mgck-edit[data-mgck-edit=` |
+| C1 the pencil does not check anyone in | delegate tap | with `openPlayerEditPopup` and `mgckToggleRow` swapped to recorders and `manageView = 'checkin'`, `tap('data-mgck-edit', 'k1')` calls the opener once with `'k1'` and the toggle zero times; `tap('data-mgck-id', 'k1')` still calls the toggle |
+| C1 the add pill | delegate tap | `tap('data-mgck-new')` calls the swapped `openPlayerAddPopup` once |
+| D1, D2 the Players list | builder string | `buildMgpListHTML` output has no `mgp-gp`; `buildManagePlayersHTML` output has no `mgp-mg`, no `data-mgp-groups` and no `data-mgp-bulk="move"` |
+| E1 the kiosk row | builder string | `renderCheckinButton({ id, name: 'John Smith', checkedIn: false }, 'john')` twice with the same name produces two identical strings, neither containing `ckx-gp`. The case at `test/checkin-page.test.js:120-123`, "keeps the group differentiator for same-name disambiguation", is **rewritten** to assert exactly this and to carry Mike's ruling in its title. It is the one existing case this round inverts |
+| E3 the kiosk row shape | existing file | `test/pure.test.js:426-430` becomes `toEqual({ id, name, initials, checkedIn })`, with `group` gone from the expected object and from the fixture array at `:391-397` |
+| F the RPC name is still guarded | existing file | `MUTATING_RPCS` at `test/supabase-writes.test.js:29` still lists `register_player` at `:30`; the file's per-file scans, which C102 T8 widened to `manage.js` at `61ef27e`, need no change |
 
-**Mutation proof required on three guards** (each written, watched red, then restored): the groups
-whole-file scan, the no-autofocus source guard, and the delegate-order guard. A negative assertion that
-was never seen red is not a guard.
+### 7.4 Drive facts, verified in Mike's Chrome at T11, not in the suite
+
+Each of these needs a live element, a real event or a real network call, and none of the three shapes can
+reach it. They are named here so nobody writes a test that cannot run and nobody assumes they were covered.
+
+| Fact | Where |
+|---|---|
+| Tapping the pencil opens the card and does not toggle the row; tapping the row still toggles | console, 390 and 1280 |
+| The status button flips label, icon and header pill, and Cancel leaves the roster untouched | card, both states |
+| Save with a status change fires exactly one `check_in` or `check_out`; save with no status change fires none | Network panel |
+| Save holds the list's scroll position and flashes the saved row once | console, list scrolled halfway |
+| An unrated player opens with a blank field and the `–` placeholder, saves, and the row still reads `–` | card plus row |
+| Escape closes without saving; Enter in a field saves; Tab, Enter and Space work the pencil; focus returns to the pencil after close | keyboard |
+| The add card refuses a one-word name, refuses a duplicate without closing, and keeps the typed rating | card |
+| The pencil is legible on a checked-in row (`.ckx-row.is-in` sits at `opacity: .55`) | console at 390 |
+| The close × sits in the same pixel column with and without the IN pill, and the Home rules sheet's × is still hard right with its eyebrow and title intact | card, rules sheet |
+| Two same-name players render as identical rows on the public kiosk | kiosk |
+| A true 390 capture, which the handoff still owes (`screenshots/08` is a ~462px viewport at 2x) | console |
+
+### 7.5 Mutation proof
+
+Three guards are written, watched red, then restored, because a negative assertion that was never seen red
+is not a guard: the groups source scan, the no-autofocus guard, and the no-`render();` guard in the save
+branch.
 
 ## 8. Build order
 
-Branch `checkin-popups` in the worktree `scratchpad/wt-checkin`, based at `a0c9f8f` (the controller's
-ruling, recorded in the C102 ledger). Every task: bump `APP_VERSION` (`public/app.js:34`), run
-`node --check public/app.js` **and** `node --check public/manage.js`, run the suite, commit. The
-controller pushes (§21). The branch merges onto main only after C102 Task 11 ships the split and Task 9's
-equivalence diff has run clean, because this round changes five Manage builders on purpose.
+Branch `checkin-popups` in the worktree `scratchpad/wt-checkin`, based at the C102 split (the controller's
+ruling in the C102 ledger). Every task: bump `APP_VERSION` (`public/app.js:34`), run `node --check
+public/app.js` **and** `node --check public/manage.js`, run the suite, commit. The controller pushes (§21).
+The gate at each task is **the full suite green**, 40 files and rising, never green against a degraded
+floor. The branch merges onto main only after C102's equivalence diff has run clean, because this round
+changes five Manage builders on purpose.
 
-**The migration is task T11, after the client is deployed and driven.** That order exists for one reason:
-a live tournament on September 12th 2026 with registration open must never see a half-state. The client
-stops sending `p_group` first; because `p_group` has a default, that client works against the old function
-unchanged; only then does the column go.
+**The two migrations bracket the client work.** `0068` ships FIRST, before any client that stops sending
+`p_group`, because it is what makes that client safe (§5.1). `0069` ships LAST, one deploy after the whole
+client is out and driven, so the live tournament on September 12th 2026 with registration open never sees a
+half-state.
 
 | # | Task | Files | Verification gate |
 |---|---|---|---|
-| T0 | Worktree, branch, archive, §38 marker. Archive the handoff as text under `docs/design-handoffs/2026-08-29/` (the 2026-08-24 precedent: five zips archived as text plus a 12-history file each). Mint the marker from a cwd under the mapped project root: `node "C:/Users/OlasM/.claude/hooks/ui38-mark.mjs" --decision=3-options-shown --reason="Mike's own handoff" public/app.js public/manage.js public/styles.css public/checkin.html` | `docs/`, gate CLI | The worktree is at `a0c9f8f` on branch `checkin-popups`; `<root>/.claude/markers/ui-options.json` names all four files; the archive holds the README plus the six round comments from `_shared.css` |
-| T1 | **B1, the pinned ×.** Title block takes the slack, `.pe-in` loses its auto margin, `.pe-x` and `.hmv-rx` gain it, the empty `.pe-in` spacer literal is deleted | `public/styles.css` (near `:860` and `:3367`), `public/app.js:161` | The card on a checked-in player and on an out player puts × in the same pixel column. The Home rules sheet still has × hard right with its eyebrow and title intact. Test: the spacer literal is gone |
-| T2 | **B2 + B3, the card header and the section heads.** Accent strip, `.pe-mark`, 46px tile, `.pe-eyebrow`, PLAYER and STATUS. Re-run the `.pe-*` emitter grep first | `public/app.js` (`openPlayerEditPopup`, `ensurePlayerEditModal`), `public/styles.css` near `:3336-3462` | Screenshots 01 and 02 beside the app at 390 and 1280. Every value is an app token or resolves to one. No em dash in any emitted string. The grep still returns one emitter |
-| T3 | **B4, the stepper and unrated is 0.** `.pe-stepper`, `.pe-sb`, `.pe-skillin`, `peSkillStep`, and the abort at `public/app.js:446` | `public/app.js`, `public/styles.css:3426-3427` | The five step cases green. Save an unrated player, reopen: the field is blank, the row reads `–`, `state.players[i].skill === 0`, the card closed |
-| T4 | **B5, the draft toggle.** `.pe-inbtn`, `aria-pressed`, live pill, nothing written | `public/app.js` (`openPlayerEditPopup`, the click delegate), `public/styles.css` | Toggle then Cancel: `state.checkedIn` unchanged, RPC spy empty. Toggle then Save: exactly one `check_in` or `check_out`. Save with no change: zero attendance calls. Offline: one outbox row |
-| T5 | **A1 + C1, the pencil and its delegate.** Pencil in the row, the branch above the row toggle, Enter and Space, and the `.is-in` legibility rule | `public/manage.js` (`mgckListHTML`), `public/app.js` (`attachHandlers`), `public/styles.css` `.mgck-*` block | Tap the pencil: the card opens and the player is NOT toggled. Tap the row: still toggles. Tab to the pencil, Enter opens, Escape closes, focus returns to that pencil. The pencil is legible on a checked-in row at 390 |
-| T6 | **A3 + A4 + B6 + B7, save writes back in place.** `mgckNotice`, `mgckCardNotice`, the origin-aware repaint, the flash, Escape and Enter | `public/app.js` (the delegated save, `closePlayerEditPopup`, the keydown), `public/manage.js` (`mgckStripHTML`, `mgckRepaint`, `buildManageCheckinHTML`, `mgckToggleByKey`) | Scroll the list halfway, edit a row, save: the scroll holds, the row flashes once, the strip reads "{name} updated" with no UNDO, counts are right. A plain row tap still shows UNDO and it still works |
-| T7 | **A2 + A5 + the add card, changes 3, 12, 13.** The header pill, `openPlayerAddPopup`, `.is-new`, `mgckAddFromCard`, the outbox replay | `public/manage.js`, `public/app.js`, `public/styles.css` | Add an unrated player out: one row under "Still out", counts up by one, strip "{name} added". Add a rated player checked in: strip "{name} added · checked in", row under "Checked in", the rating survives a `queueSupabaseRefresh`. Screenshots 04, 05, 06, 07 |
-| T8 | **Groups removal, the UI layer** (A6, D1, D2, D3, C2, E1, E3, B8, F) | `public/manage.js`, `public/app.js`, `public/checkin.html`, `public/pure.js`, `public/supabase-config.js` | The whole-file guard is green and was watched red. Manage to Players saves a name without wiping anything. The kiosk shows two same-name rows as identical rows. `node --check` on both JS files |
-| T9 | **Groups removal, the client data layer** (surface G) plus the two-key `register_player` at all five call sites | `public/app.js` | `p_group` appears nowhere in `public/`. `detectPlayersSchema` no longer probes `group`. Suite green, zero tests weakened. The app still boots with the OLD function live (the default-argument proof) |
-| T10 | **Deploy and drive.** Bump, push (controller), then the facts-only drive in Mike's Chrome at 390 and 1280 | none | Zero console errors. Both card states, the add card, the rules sheet, the kiosk, `checkin.html`. One real registration through the kiosk against the OLD 3-arg function, confirming the default-argument path. A true 390 capture, which the handoff still owes (`screenshots/08` is a ~462px viewport at 2x) |
-| T11 | **Migration `0068`.** Pre-flight duplicate-name read-back first; then the transaction; then the seven read-backs | `db/migrations/0068_drop_player_groups.sql` | Pre-flight returns zero rows. All seven read-backs pass and are pasted into the history file. A second short drive: kiosk register, Manage add, card save, all green, and the `APPLIED` line is stamped |
-| T12 | **Write-back.** `12-history/task-#<id>-checkin-popups-handoff.md` BEFORE any completion mark (§30), with `S/DIGEST.md` and this spec archived under `12-history/assets/`; then `01-state/log.md`, `current.md`, `decisions.md` (the two-step deploy ordering, the stepper-prose correction, the focus call), `debugging.md` (anything that bit), `NOW.md` | vault | The history file exists and `require-task-history.mjs` lets the completion through |
+| T0 | Worktree, branch, archive, §38 marker, baseline. Archive the handoff as text under `docs/design-handoffs/2026-08-29/` (the 2026-08-24 precedent: five zips archived as text plus a 12-history file each). Mint the marker from a cwd under the mapped project root: `node "C:/Users/OlasM/.claude/hooks/ui38-mark.mjs" --decision=3-options-shown --reason="Mike's own handoff" public/app.js public/manage.js public/styles.css public/checkin.html` | `docs/`, gate CLI | The worktree is on branch `checkin-popups`; `<root>/.claude/markers/ui-options.json` names all four files; the archive holds the README plus the six round comments from `_shared.css`; the suite baseline is recorded at 40 files / 1252 tests |
+| T1 | **Migration `0068`, the prep.** STEP 1 run alone with its result read before anything else executes; STEP 2 captured into `12-history`; STEP 3 the update; STEP 4 the group-blind `register_player` at its existing signature | `db/migrations/0068_normalize_player_groups.sql` | STEP 1 returns zero rows or the round STOPS here. All four `0068` read-backs pass, including the twice-called smoke that proves an old three-key call and a new two-key call return the same id |
+| T2 | **B1, the pinned ×.** Title block takes the slack, `.pe-in` loses its auto margin, `.pe-x` and `.hmv-rx` gain it, the empty `.pe-in` spacer literal is deleted | `public/styles.css` (near `:860` and `:3367`), `public/app.js:161` | The spacer literal is gone (test). The × in both card states and the rules sheet are drive facts at T11 |
+| T3 | **B2 and B3, the card header and the section heads.** Accent strip, `.pe-mark`, 46px tile at a 13px radius, `.pe-eyebrow` reading its origin, PLAYER and STATUS. Re-run the `.pe-*` emitter grep first | `public/app.js` (`openPlayerEditPopup`, `ensurePlayerEditModal`), `public/styles.css` near `:3336-3461` and `:6043-6076` | The emitter grep still returns one emitter. The source guards for B2 and B3 are green. Every value is an app token, a token's literal, or one of the handoff's own. No em dash in any emitted string |
+| T4 | **B4, the stepper and unrated is 0.** `.pe-stepper`, `.pe-sb`, `.pe-skillin`, `peSkillStep`, and the abort at `public/app.js:446` | `public/app.js`, `public/styles.css:3426-3427` and `:6043-6076` untouched | The five step cases green; the prefill and abort source guards green |
+| T5 | **B5, the draft toggle.** `.pe-inbtn`, `peInPillNode`, `aria-pressed`, live pill, nothing written | `public/app.js` (`openPlayerEditPopup`, the click delegate), `public/styles.css` | The "writes nothing" source guard green (no `state.`, no `mgckToggleByKey`, no `supabaseClient`, no `saveLocal` in the branch) |
+| T6 | **A1 and C1, the pencil and its delegate.** Pencil in the row, the branch above the row toggle, Enter and Space, and the `.is-in` legibility rule | `public/manage.js` (`mgckListHTML`), `public/app.js` (`attachHandlers`), `public/styles.css` `.mgck-*` block | The two `withDelegate` cases green: the pencil tap opens and never toggles, the row tap still toggles |
+| T7 | **A3, A4, B6 and B7, save writes back in place.** `mgckNotice`, `mgckCardNotice`, the origin-aware repaint, the flash, Escape and Enter, the focus return | `public/app.js` (the delegated save, `closePlayerEditPopup`, the keydown), `public/manage.js` (`mgckStripHTML`, `mgckRepaint`, `buildManageCheckinHTML`, `mgckToggleByKey`) | The strip cases, the silent-toggle contract case and the no-`render();` guard green, the last one proven by mutation |
+| T8 | **A2, A5 and the add card.** The header pill, `openPlayerAddPopup`, `.is-new`, the three gates in the save branch, `#pe-msg`, `mgckAddFromCard`, and the `flushOutbox` register branch moving to the two-key call with its skill follow-up | `public/manage.js`, `public/app.js`, `public/styles.css` | The A5 RPC case green with the id-returning stub; the outbox case green with the throwing stub; the three-gates source guard green |
+| T9 | **Groups removal, the UI layer** (A6, D1, D2, D3, C2, E1, **E2**, E3, B8, F). This is the LAST client push before `0069`, so it carries the remaining three `p_group` call sites: `mgckAddAndCheckIn`, the in-app kiosk, and `public/checkin.html:539` | `public/manage.js`, `public/app.js`, `public/checkin.html`, `public/pure.js`, `public/supabase-config.js` | The groups source scan green and proven by mutation. `p_group` appears nowhere in `public/`. E2's own gate: the in-app kiosk registers a walk-up with the console open and no `ReferenceError` (drive at T11) |
+| T10 | **Groups removal, the client data layer** (surface G). The 39 helpers, `state.groups`, `state.activeGroup`, `HAS_GROUP`, and `updatePlayerFieldsSupabase`'s group block | `public/app.js` | A scan for every deleted symbol across `public/` returns zero hits. `detectPlayersSchema` no longer probes `group`. Suite green, zero tests weakened |
+| T11 | **Deploy and drive.** Bump, push (controller), then the facts-only drive in Mike's Chrome at 390 and 1280 | none | Every row of §7.4 walked and recorded. Zero console errors. The served `APP_VERSION` is the new one, confirmed before T12 is allowed to run |
+| T12 | **Migration `0069`, the drop.** The batch, then the eight read-backs, then a short second drive | `db/migrations/0069_drop_player_groups.sql` | All eight read-backs pass and are pasted into the history file, including read-back 8 on anon's column grant. The second drive: kiosk register, Manage add, card save, all green. The `APPLIED` line is stamped |
+| T13 | **Write-back.** `12-history/task-#<id>-checkin-popups-handoff.md` BEFORE any completion mark (§30), carrying the `0068` STEP 2 group capture, with `S/DIGEST.md`, `S/spec-review.md` and this spec archived under `12-history/assets/`; then `01-state/log.md`, `current.md`, `decisions.md` (the two-migration ordering and why one file was not enough, the stepper-prose correction, the focus call, the duplicate ruling), `debugging.md` (anything that bit), `NOW.md` | vault | The history file exists and holds the group capture; `require-task-history.mjs` lets the completion through |
 
-Thirteen tasks. T1 to T7 are the card and console and could ship on their own if the groups half stalls;
-T8 to T11 are the removal and are the only tasks that touch the database.
+Fourteen tasks. T2 to T8 are the card and the console and could ship on their own if the groups half stalls.
+T1, T9, T10 and T12 are the removal, and T1 and T12 are the only tasks that touch the database.
 
 ## 9. Hazards, ranked, with the guard that closes each
 
-1. **The migration lands before the client is deployed.** Every kiosk tap and every Manage add would call
-   a function that no longer exists, on a live tournament with registration open. Guard: T11 is last, the
-   client-first order is proved safe by `p_group`'s default, and the whole ordering is the 0017 to 0018
-   expand/contract precedent this repo already ran once.
-2. **A stale cached client after the drop.** A phone at the door holding an old service worker would still
-   send three arguments. Guard: `APP_VERSION` bumps, which mints a new SW cache and re-fetches
-   network-first; T10's drive confirms the new version is being served BEFORE T11 runs. Residual risk: a
-   device that never reloads. Accepted, and the failure is a visible error, not a silent wrong write.
-3. **The pre-flight finds duplicate names.** The narrowed unique index would not build and the transaction
-   would roll back mid-migration. Guard: the pre-flight query runs alone and is read before anything is
-   applied. If it returns rows, the round stops and Mike decides which row survives; do not merge
-   automatically.
-4. **A double attendance write from the card.** Guard: the draft is compared against `state.checkedIn`
-   and `mgckToggleByKey` is called only on a real difference, with the RPC-spy test in §7.
-5. **UNDO stranded on a stale toggle.** `mgckLast` drives both the strip and the UNDO handler
+1. **One person becomes two rows during the deploy window.** The single worst outcome in this round, on a
+   live roster with registration open, and it is caused by ordering rather than by code. Guard: `0068`
+   changes both sides of the dedup comparison at once (empties the column, makes the function group-blind at
+   its existing signature), so no client version can miss a returning player. Proved by §5.2 read-back 4,
+   which calls the function three times, twice the old way and once the new, and asserts one id.
+2. **The pre-flight finds duplicate names.** The name-only unique index in `0069` would refuse to build.
+   Guard: STEP 1 is a **gate on the round opening**, at T1, not a check at the end. It runs alone, its
+   result is read before anything else executes, and if it returns rows the round stops and Mike decides
+   which row survives, before the tournament rather than after.
+3. **The rollback restores empty structures.** `alter table drop column` and `drop table` destroy every
+   group value and every catalog row irrecoverably. Guard: `0068` STEP 2 captures
+   `select id, name, "group" from public.players where "group" is not null` verbatim into the round's
+   history file, both migration headers say it is the only surviving copy, and the `0069` ROLLBACK line
+   points at it. Residual: the `groups` table's own catalog-only rows (groups with no players) are not
+   captured. Accepted, and named here rather than discovered later.
+4. **`0069` lands before the last client push is out.** Every client still sending three keys would break
+   the instant the overload is dropped. Guard: T12 runs after T11's drive, and T11's gate includes
+   confirming the served `APP_VERSION`. A device that never reloads still fails visibly, not silently.
+5. **The anon column grant vanishes with the column.** Postgres removes it silently, so nothing errors and
+   a rollback that forgets it leaves the kiosk 403ing. Guard: read-back 8 and the explicit re-grant in the
+   `0069` ROLLBACK line.
+6. **A double attendance write from the card.** Guard: the draft is compared against `state.checkedIn` and
+   `mgckToggleByKey` runs only on a real difference; source guard plus a drive fact.
+7. **UNDO stranded on a stale toggle.** `mgckLast` drives both the strip and the UNDO handler
    (`public/app.js:9220-9224`). Guard: `{ silent: true }` on the card's toggle, `mgckNotice` as a separate
-   binding, and `mgckToggleByKey` clearing it on entry.
-6. **A shared class carries a defect into a second dialog.** `.popup-header` serves the card and the Home
-   rules sheet; `.pe-*` is claimed by a stale CSS comment to serve a third. Guard: the emitter grep before
-   T2, both dialogs named in the CSS comment, and both driven at T10. This is the exact class of defect
-   the 2026-08-24 handoff shipped.
-7. **A duplicate top-level declaration across `app.js` and `manage.js`.** A duplicate `function` is legal,
-   the second silently wins, and `node --check` passes on the concatenation (C102 §5.3). Guard: names
-   chosen disjoint, plus C102's name-intersection guard test run on the branch.
-8. **The §38 gate is blind to `public/manage.js` right now.** `_vault-map.mjs:13` has no `manage.js` term
-   until C102 Task 10 re-arms it. Guard: the marker is minted anyway at T0 naming all four files, because
-   the rule binds, not the hook. If T10 lands mid-round the gate simply starts enforcing what is already
-   true.
-9. **The branch merges before C102's equivalence proof.** Five Manage builders change here by design, so a
-   merge before Task 9 would make the "pure move" diff dirty and unprovable. Guard: the merge waits for
-   Task 11; stated in §8 and in the C102 ledger.
-10. **The suite cannot be green until C102 Task 7 rewires the harnesses.** Nothing loads `manage.js` today.
-    Guard: the new test file loads all three sources itself, so this round's own cases are provable from
-    T1; the full-suite gate at each task means "green relative to the branch's own baseline", recorded at
-    T0.
-11. **`players.tag` still holds group JSON after the column goes.** Nothing reads it once surface G is
-    deleted, but it is a second carrier left standing. Guard: §10 open item, with the count read at T11.
-12. **`node --check` passes a half-deleted group layer.** Deleting 39 helpers by hand can leave a caller
-    behind, and a `ReferenceError` inside a swallowing `try/catch` (the shape banked from C102's load-order
-    ruling) would be silent. Guard: after T9, a scan for every deleted name across `public/` returning zero
-    hits, plus the suite, plus the drive with the console open.
+   binding, `mgckToggleByKey` clearing it on entry, and the strip cases in §7.3.
+8. **A shared class carries a defect into a second dialog.** `.popup-header` serves the card and the Home
+   rules sheet. Guard: the emitter grep before T3, both dialogs named in the CSS comment, both driven at
+   T11. This is the exact class of defect the 2026-08-24 handoff shipped.
+9. **A duplicate top-level declaration across `app.js` and `manage.js`.** A duplicate `function` is legal,
+   the second silently wins, and `node --check` passes on the concatenation (C102 §5.3). Guard: names chosen
+   disjoint, plus C102's disjoint-names guard test (`c02cd7b`) run on the branch.
+10. **A half-deleted group layer passes `node --check`.** Deleting 39 helpers by hand can leave a caller
+    behind, and a `ReferenceError` inside a swallowing `try/catch` is silent. This is exactly the shape E2
+    would take if T10 ran before T9. Guard: E2 is scheduled at T9, T10's gate is a zero-hit scan for every
+    deleted symbol, and the drive runs with the console open.
+11. **The §38 gate now covers `manage.js`, in both maps.** `_vault-map.mjs:13` and the addendum frontmatter
+    at `C:/Ai Master/LasOlas/projects/athletic-specimen.md:7` both carry a `manage\.js` term, so a large
+    markup edit to `manage.js` without a fresh marker is BLOCKED mid-round. Guard: the marker is minted at
+    T0 naming all four files, and it is session-scoped rather than HEAD-scoped, so a mid-task commit does
+    not void it.
+12. **The worktree falls outside the mapped project root.** `ui38-mark.mjs:32` resolves the project from
+    `process.cwd()` through `projectFor`, and `_vault-map.mjs:13` matches on the base path
+    `c:/users/olasm/onedrive/athletic specimen app`. A worktree outside that prefix cannot mint a marker at
+    all. Guard: `scratchpad/wt-checkin` sits under the mapped root, so `proj.root` resolves to the main repo
+    and the marker lands where the gate reads it.
+13. **A test the harness cannot run.** There is no DOM in this suite and this round does not add one.
+    Guard: §7.2's three shapes, and §7.4's explicit drive-fact list for everything they cannot reach.
+14. **The branch merges before C102's equivalence proof.** Five Manage builders change here by design.
+    Guard: the merge waits for the diff to run clean on main; stated in §8 and in the C102 ledger.
 
 ## 10. Open, and how each closes
 
 - **`players.tag`.** The client writes group JSON into it (`serializePlayerGroupsTag`, `public/app.js:1009`)
   and reads it back (`parsePlayerGroupsTag`, `parseRemotePlayerGroupDetails`). After surface G nothing in
   the client touches it, but `detectPlayersSchema` still probes it and `HAS_TAG` still gates two insert
-  shapes. `0068` does not drop it. Closes at T11 with one read
-  (`select count(*) from public.players where tag is not null;`) and one question to Mike: drop it in a
-  follow-up `0069`, or leave it as a dormant free-text column. Recommendation: drop it, since every value
-  in it is a group artifact.
+  shapes. Neither `0068` nor `0069` drops it, and it stays in anon's column grant (read-back 8). Closes at
+  T12 with one read (`select count(*) from public.players where tag is not null;`) and one question to Mike:
+  drop it in a follow-up `0070`, or leave it as a dormant free-text column. Recommendation: drop it, because
+  every value in it is a group artifact.
+- **The `groups` table's catalog-only rows.** `0068` STEP 2 captures per-player values from
+  `players."group"`, not the catalog. A group that exists only in `public.groups` with no players (`0017`'s
+  backfill deliberately preserved that case) is not captured anywhere. Closes at T12 with
+  `select id, name from public.groups order by name;` saved beside the STEP 2 capture, which costs one query
+  and makes hazard 3's residual zero.
 - **The watermark mark.** README:523-524 says to use the real brand mark if the codebase has one; the app
-  ships `logo-mark.png`. This spec keeps the handoff's inline shield-and-check SVG, because it is Mike's
-  own drawn artwork in this round and a raster at 9% is heavier than a 1.4px stroke. One look at T10
-  settles it.
-- **Focus on open.** §2 sets it to the card container. If Mike wants literally no focus move, delete the
-  one `.pe-card.focus()` line; Escape still works (the key handler is bound on `document`) and the
-  focus-return on close is unaffected.
+  ships `logo-mark.png`. This spec keeps the handoff's inline shield-and-check SVG, because it is the drawn
+  artwork of this round and a raster at 9% is heavier than a 1.4px stroke. One look at T11 settles it.
+- **Focus on open.** §2 sets it to the card container, never a field. If Mike wants literally no focus move,
+  delete the one `.pe-card.focus()` line; Escape still works, because the key handler is bound on the
+  document, and the focus return on close is unaffected.
 - **A focus trap inside the dialog.** README:364-365 asks for one using "the codebase's dialog primitive".
   The app has no dialog primitive: `#player-edit-modal` is a hand-built overlay. Not built this round.
   Named here so nobody assumes it shipped.
-- **The true 390 capture.** `screenshots/08-console-at-390px.png` is labelled 390 and rendered at about
-  462 CSS px. Owed at T10, on Mike's phone width, on the console with the pencils and the pill visible.
 - **Whether the Manage CSS round should sweep the three orphaned rules** (`public/styles.css:1489`,
-  `:2233-2235`, `:2240`) plus `.pe-hint` (`:3428`) and `groupRosterPlayersBySection` (`public/pure.js:652`).
-  Deliberately left out of scope here; recorded in the C102 CSS round's ledger at T12.
+  `:2233-2235`, `:2240`) plus `.pe-hint` (`:3428`) and `groupRosterPlayersBySection` (`public/pure.js:652`,
+  already caller-free at this HEAD, with five cases at `test/pure.test.js:441-492`). Deliberately out of
+  scope here; recorded in the C102 CSS round's ledger at T13.
