@@ -189,6 +189,8 @@ describe('Task 4: the stepper, and unrated is skill 0', () => {
   // explicit zero Mike's 2026-08-29 call made meaningful.
   it('steps in halves, clamps 0 to 10, and always returns one decimal', () => {
     expect(bridge.step('', 0.5)).toBe('0.5');
+    // Review M1: the plus case is the ONLY discriminator against README:404's transposed rule. The minus
+    // case returns '0.0' under BOTH readings, because the clamp swallows 0 - 0.5. It is a pin, not a guard.
     expect(bridge.step('', -0.5)).toBe('0.0');
     expect(bridge.step('10', 0.5)).toBe('10.0');
     expect(bridge.step('0', -0.5)).toBe('0.0');
@@ -222,5 +224,14 @@ describe('Task 4: the stepper, and unrated is skill 0', () => {
     expect(cssLF).toContain('.pe-stepper {');
     expect(cssLF).toContain('.pe-sb {');
     expect(cssLF).toContain('#player-edit-modal .pe-skillin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }');
+    // The value box is SLICED, not scanned. Production's global input[type="number"] rule
+    // (styles.css:264) sets flex: 1 at :276. That was inert while .pe-skillrow was a grid; inside the
+    // flex .pe-stepper it is live, and without the reset the 74px is a flex BASIS the browser grows
+    // past. [^}] spans newlines in JS, so the match runs to the block's first closing brace, and the m
+    // flag keeps the ::-webkit- and :focus rules out: they are separate blocks, hence the length of 1.
+    const skillin = cssLF.match(/^#player-edit-modal \.pe-skillin\s*\{[^}]*\}/gm) || [];
+    expect(skillin).toHaveLength(1);
+    expect(skillin[0]).toContain('flex: none;');
+    expect(skillin[0]).toContain('width: 74px;');
   });
 });

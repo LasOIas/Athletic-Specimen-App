@@ -3500,6 +3500,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 }
 .pe-sb:hover { color: var(--accent); border-color: var(--accent-bd); background: var(--accent-soft); }
 #player-edit-modal .pe-skillin {
+  flex: none;   /* the global input[type="number"] rule (styles.css:264) sets flex: 1 at :276; .pe-stepper is a flex row */
   width: 74px;
   height: 38px;
   text-align: center;
