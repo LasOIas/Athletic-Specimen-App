@@ -2289,6 +2289,36 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgck-sk { flex: none; font: 800 13px var(--font-display); color: var(--accent); min-width: 26px; text-align: right; }
 .mgck-sk.n { color: var(--faint); }
 
+/* Round 2026-08-29 (i) - "on the check in page i need to be able to edit the players". The pencil sits
+   between the name and the skill, quiet until it is wanted. .ckx-row.is-in runs at opacity .55 and opacity
+   on the parent caps every child, so a checked-in row's pencil cannot opt out of it: it gets a darker rest
+   ink instead of an override that would not work. */
+.mgck-edit {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-left: auto;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  color: oklch(0.62 0.01 75);
+  cursor: pointer;
+  transition: color 140ms cubic-bezier(.2,.7,.3,1),
+              background 140ms cubic-bezier(.2,.7,.3,1),
+              border-color 140ms cubic-bezier(.2,.7,.3,1);
+}
+.mgck-edit svg { width: 15px; height: 15px; }
+.mgck-edit:hover,
+.mgck-edit:focus-visible {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-bd);
+  outline: none;
+}
+.mgck-edit + .mgck-sk { margin-left: 10px; }
+.ckx-row.is-in .mgck-edit { color: oklch(0.45 0.01 75); }
+
 /* ── Manage → Teams (Task 4, session-10 pick R5 TRIMMED) — chips + generate + stacked teams. mgt-* kit from
    the r10-manage k-h1 mockup. Size chips reuse the pl-tab grammar; the casual courts board is CUT (no net
    cards, no report/clear). Team label Barlow 800 muted; names STACKED one per line with faint hairlines. ── */

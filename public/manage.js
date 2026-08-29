@@ -1110,8 +1110,17 @@ function mgckListHTML(model) {
     const tag = r.checkedIn ? 'IN' : 'CHECK IN';
     const n = Number(r && r.skill);
     const skPos = Number.isFinite(n) && n > 0;
+    // Round 2026-08-29: the pencil sits between the name and the rating and opens the app's own player
+    // card over the list. It is a span with role="button" because the row itself is a <button> and nested
+    // buttons are invalid HTML (README:120-123). It carries the identity key so the delegate and the
+    // focus-return never have to walk the DOM.
+    const pencil = `<span class="mgck-edit" role="button" tabindex="0" data-mgck-edit="${escapeHTMLText(r.key)}"`
+      + ` aria-label="Edit ${escapeHTMLText(r.name)}">`
+      + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`
+      + `<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></span>`;
     return `<button class="ckx-row${r.checkedIn ? ' is-in' : ''}" type="button" data-mgck-id="${escapeHTMLText(r.key)}">`
       + `<span class="ckx-nm">${highlightMatch(r.name, mgckQ)}${gp}</span>`
+      + pencil
       + `<span class="mgck-sk${skPos ? '' : ' n'}">${mgpSkillText(r.skill)}</span>`
       + `<span class="ckx-go">${tag}</span></button>`;
   };

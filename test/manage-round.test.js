@@ -3255,7 +3255,11 @@ describe('Task 9 keyboard reach', () => {
     let twiceDoc = null;
     const twice = withKeys(({ onDoc, onEl }) => {
       twiceDoc = onDoc;
-      expect(onEl.length).toBe(4);   // the ELEMENT listeners do re-bind: they ride on the new node
+      // The ELEMENT listeners do re-bind: they ride on the new node. THREE of them per call as of the
+      // check-in pop-ups round (2026-08-29) - the team-add Escape, the bracket row's Enter/Space and the
+      // check-in pencil's Enter/Space - so two calls bind six. The exact count is the point: it is what
+      // makes the twice - once difference below a statement about the DOCUMENT pair alone.
+      expect(onEl.length).toBe(6);
       expect(bridge.docKeysBound()).toBe(true);
       return onDoc.length;
     }, 2);

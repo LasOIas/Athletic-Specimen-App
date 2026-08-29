@@ -89,6 +89,14 @@ function loadApp() {
       setView: (v) => { manageView = v; },
       mode: () => ({ mode: peMode, origin: peOrigin, key: peReturnKey }),
       step: (v, d) => peSkillStep(v, d),
+      attachHandlers: () => attachHandlers(),
+      list: (opts) => { opts = opts || {}; manageView = 'checkin'; mgckFilter = opts.filter || 'all'; mgckQ = opts.q || ''; return mgckListHTML(checkinConsoleModel(mgckRows(), mgckFilter, mgckQ)); },
+      seed: (players, checkedIn) => { state.players = players.slice(); state.checkedIn = (checkedIn || []).slice(); state.loaded = true; },
+      swapOpeners: (openEdit, toggleRow) => {
+        const a = openPlayerEditPopup, b = mgckToggleRow;
+        openPlayerEditPopup = openEdit; mgckToggleRow = toggleRow;
+        return () => { openPlayerEditPopup = a; mgckToggleRow = b; };
+      },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -98,6 +106,49 @@ function loadApp() {
 }
 
 const bridge = loadApp();
+
+// One synthetic tap (or key press) through the REAL #app-content delegates attachHandlers binds. Copied
+// from test/manage-round.test.js:1623-1658 and widened to collect the keydown listeners too, because the
+// pencil ships role="button" tabindex="0" and its Enter/Space path is a second binding, not the click one.
+// Driving the real delegate is what proves the hooks are checked in the right ORDER; a grep proves nothing
+// about order. `attrs` is every hook the tapped node sits under, so a control nested inside another hook's
+// block (the pencil inside the row button) can be reproduced exactly.
+function withDelegate(fn) {
+  const doc = bridge.doc;
+  const realGet = doc.getElementById;
+  const noop = () => {};
+  let click = null;
+  const keys = [];
+  const appContent = {
+    dataset: {}, style: {},
+    classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+    addEventListener: (type, cb) => { if (type === 'click') click = cb; if (type === 'keydown') keys.push(cb); },
+    removeEventListener: noop,
+    querySelector: () => null, querySelectorAll: () => ({ forEach: noop, length: 0 }),
+  };
+  doc.getElementById = (id) => (id === 'app-content' ? appContent : null);
+  // the later bindings in attachHandlers want DOM this harness does not have; the delegates are bound
+  // first, so they are already captured by the time any of them complain
+  try { bridge.attachHandlers(); } catch (_) { /* nothing after the delegates matters here */ }
+  finally { doc.getElementById = realGet; }
+  if (!click) throw new Error('the #app-content click delegate was never bound');
+  const target = (list, value) => ({
+    tagName: 'BUTTON', dataset: {},
+    classList: { contains: () => false },
+    closest: (sel) => (list.some((a) => sel === '[' + a + ']')
+      ? { getAttribute: (name) => (list.includes(name) ? (value == null ? '' : value) : null), dataset: {} }
+      : null),
+  });
+  const tap = (attrs, value) => click({
+    target: target(Array.isArray(attrs) ? attrs : [attrs], value),
+    preventDefault: noop, stopPropagation: noop,
+  });
+  const press = (key, attrs, value) => {
+    const ev = { key, target: target(Array.isArray(attrs) ? attrs : [attrs], value), preventDefault: noop, stopPropagation: noop };
+    for (const cb of keys) cb(ev);
+  };
+  return fn(tap, press);
+}
 
 describe('Task 2: the close button is pinned right in every pop-up', () => {
   it('the title block takes the slack and the close button carries the auto margin', () => {
@@ -292,5 +343,65 @@ describe('Task 5: the status button is a draft, not a write', () => {
     expect(cssLF).toContain('.pe-inbtn .pe-ico-out,\n.pe-inbtn.is-in .pe-ico-in { display: none; }');
     expect(cssLF).toContain('.pe-inbtn.is-in .pe-ico-out { display: block; }');
     expect(cssLF).toContain('.pe-inbtn.is-in { border-color: var(--border); background: #fff; color: var(--ink); }');
+  });
+});
+
+describe('Task 6: the pencil, and the tap that must not check anyone in', () => {
+  // playerIdentityKey (pure.js:11) returns `id:<id>` for a saved player, so `id:p1` is the key the row
+  // builder really emits and the key the delegate really carries. The tap harness passes the value through
+  // untouched, so using the real shape here keeps the case honest about the console's identity grammar.
+  const roster = [{ id: 'p1', name: 'Blake Harmon', skill: 6 }, { id: 'p2', name: 'Riley Chen', skill: 0 }];
+
+  it('every row carries a pencil between the name and the rating', () => {
+    bridge.seed(roster, []);
+    const html = bridge.list();
+    expect(html).toContain('class="mgck-edit" role="button" tabindex="0" data-mgck-edit="id:p1"');
+    expect(html).toContain('aria-label="Edit Blake Harmon"');
+    const nm = html.indexOf('class="ckx-nm"');
+    const pen = html.indexOf('class="mgck-edit"');
+    const sk = html.indexOf('class="mgck-sk');
+    expect(pen).toBeGreaterThan(nm);
+    expect(sk).toBeGreaterThan(pen);
+  });
+
+  it('a tap on the pencil opens the card and never toggles the row', () => {
+    bridge.seed(roster, []);
+    bridge.setView('checkin');
+    const opened = []; const toggled = [];
+    const undo = bridge.swapOpeners((k) => opened.push(k), (k) => toggled.push(k));
+    try {
+      withDelegate((tap) => { tap('data-mgck-edit', 'id:p1'); });
+      expect(opened).toEqual(['id:p1']);
+      expect(toggled).toEqual([]);
+    } finally { undo(); }
+  });
+
+  it('a tap on the row itself still toggles, so the console did not lose its one-tap check-in', () => {
+    bridge.seed(roster, []);
+    bridge.setView('checkin');
+    const opened = []; const toggled = [];
+    const undo = bridge.swapOpeners((k) => opened.push(k), (k) => toggled.push(k));
+    try {
+      withDelegate((tap) => { tap('data-mgck-id', 'id:p1'); });
+      expect(toggled).toEqual(['id:p1']);
+      expect(opened).toEqual([]);
+    } finally { undo(); }
+  });
+
+  it('Enter and Space on the pencil open the same card the tap opens', () => {
+    bridge.seed(roster, []);
+    bridge.setView('checkin');
+    const opened = [];
+    const undo = bridge.swapOpeners((k) => opened.push(k), () => {});
+    try {
+      withDelegate((tap, press) => { press('Enter', 'data-mgck-edit', 'id:p2'); press(' ', 'data-mgck-edit', 'id:p2'); });
+      expect(opened).toEqual(['id:p2', 'id:p2']);
+    } finally { undo(); }
+  });
+
+  it('the pencil is quiet at rest and legible on a checked-in row', () => {
+    expect(cssLF).toContain('.mgck-edit {');
+    expect(cssLF).toContain('.mgck-edit + .mgck-sk { margin-left: 10px; }');
+    expect(cssLF).toContain('.ckx-row.is-in .mgck-edit { color: oklch(0.45 0.01 75); }');
   });
 });

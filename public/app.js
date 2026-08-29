@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.29.5'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.29.6'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -9138,6 +9138,17 @@ function attachHandlers() {
       if (e.preventDefault) e.preventDefault();
       openMgScoreSheet(row.getAttribute('data-mgbk-score'));
     });
+    // Check-in (round 2026-08-29): the row pencil ships role="button" tabindex="0", so Enter and Space
+    // have to open the SAME card the tap opens. One opener, never a second path. Space is prevented so a
+    // keyboard organiser does not scroll the roster out from under the card.
+    appContent.addEventListener('keydown', (e) => {
+      if (!e || (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar')) return;
+      if (manageView !== 'checkin') return;
+      const pen = (e.target && e.target.closest) ? e.target.closest('[data-mgck-edit]') : null;
+      if (!pen) return;
+      if (e.preventDefault) e.preventDefault();
+      openPlayerEditPopup(pen.getAttribute('data-mgck-edit') || '');
+    });
     appContent.addEventListener('click', (e) => {
       // Slice 3b: "claim your team" — signed-in → the claim page; signed-out → sign in first
       // (claimIntent re-opens the claim page automatically once SIGNED_IN lands).
@@ -9310,6 +9321,15 @@ function attachHandlers() {
       // tap anyway); row toggles / UNDO / add are targeted mgckRepaint swaps. Checked BEFORE the generic
       // data-mg-area so a row tap never falls through; the page's back button carries data-mg-area="lead".
       if (manageView === 'checkin') {
+        // ABOVE the row toggle on purpose. The pencil sits inside the row <button>, so without this the
+        // same tap would also fire the check-in at the [data-mgck-id] branch below.
+        const pen = e.target.closest('[data-mgck-edit]');
+        if (pen) {
+          e.preventDefault();
+          e.stopPropagation();
+          openPlayerEditPopup(pen.getAttribute('data-mgck-edit') || '');
+          return;
+        }
         const chip = e.target.closest('[data-mgck-filter]');
         if (chip) { mgckFilter = chip.getAttribute('data-mgck-filter') || 'all'; repaintManage(); return; }
         if (e.target.closest('[data-mgck-undo]')) {
