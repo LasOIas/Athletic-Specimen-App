@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.29.2'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.29.3'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -99,6 +99,14 @@ function normalizeActiveGroupSelection(value) {
 // C21: loadAdminCodes() removed — there are no client-side admin codes anymore (server-only).
 
 
+// Round 2026-08-29: the card is ONE element serving Manage to Check-in and Manage to Players. Three
+// bindings carry what the markup and the save need to know about the opening: which state the card is in,
+// which surface opened it (the eyebrow and the repaint both follow it), and which row to hand focus back
+// to on close. They are read across the file boundary by nothing in manage.js, so the names stay here.
+let peMode = 'edit';       // 'edit' | 'new'
+let peOrigin = 'checkin';  // 'checkin' | 'players'
+let peReturnKey = '';      // identity key of the row whose pencil opened the card
+
 function closePlayerEditPopup() {
   const modal = document.getElementById('player-edit-modal');
   if (!modal) return;
@@ -123,7 +131,7 @@ function ensurePlayerEditModal() {
   el.setAttribute('aria-hidden', 'true');
   // Round 2026-08-03 (README §5): the card is a flex COLUMN — header, a scrolling body, then an action bar
   // that stays reachable. openPlayerEditPopup writes all three, because the header carries the player.
-  el.innerHTML = '<div class="popup-card card pe-card" role="dialog" aria-modal="true" aria-labelledby="player-edit-modal-title"></div>';
+  el.innerHTML = '<div class="popup-card card pe-card" role="dialog" aria-modal="true" tabindex="-1" aria-labelledby="player-edit-modal-title"></div>';
   document.body.appendChild(el);
   // Close on an overlay-backdrop tap or the header Cancel (the body's own Cancel/Save are delegated).
   el.addEventListener('click', (e) => {
@@ -136,6 +144,10 @@ function openPlayerEditPopup(playerKey) {
   const modal = ensurePlayerEditModal();
   const card  = modal ? modal.querySelector('.pe-card') : null;
   if (!modal || !card) return;
+
+  peMode = 'edit';   // Task 8 replaces this line with the mode parameter when the add card arrives
+  peOrigin = (typeof manageView === 'string' && manageView === 'checkin') ? 'checkin' : 'players';
+  peReturnKey = String(playerKey || '');
 
   const player = state.players.find(p => playerIdentityKey(p) === playerKey);
   if (!player) return;
@@ -159,15 +171,25 @@ function openPlayerEditPopup(playerKey) {
   const isIn = new Set(state.checkedIn || []).has(playerKey);
   const inHTML = isIn ? `<span class="mgp-in pe-in">IN</span>` : '';
 
+  // The eyebrow follows BOTH the state and the surface. Without peOrigin the card would read "check-in"
+  // while sitting over the Players directory, which is not where the organiser is.
+  const eyebrow = peMode === 'new'
+    ? 'Roster · new player'
+    : (peOrigin === 'checkin' ? 'Roster · check-in' : 'Roster · players');
+  const title  = peMode === 'new' ? 'New player' : (whole || 'Edit player');
+  const avatar = peMode === 'new' ? '+' : initial;
+
   card.innerHTML = `
     <div class="popup-header pe-head">
-      <span class="pe-av" aria-hidden="true">${escapeHTML(initial)}</span>
-      <span class="pe-who"><h3 id="player-edit-modal-title">${escapeHTML(whole || 'Edit player')}</h3></span>
+      <span class="pe-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 3.5 6v6.2c0 4.6 3.5 7.9 8.5 9.3 5-1.4 8.5-4.7 8.5-9.3V6Z"/><path d="M9 12.4l2.3 2.3L15.6 10"/></svg></span>
+      <span class="pe-av${peMode === 'new' ? ' is-new' : ''}" aria-hidden="true">${escapeHTML(avatar)}</span>
+      <span class="pe-who"><span class="pe-eyebrow">${eyebrow}</span><h3 id="player-edit-modal-title">${escapeHTML(title)}</h3></span>
       ${inHTML}
       <button type="button" class="pe-x secondary" data-role="close-popup" data-target="player-edit-modal" aria-label="Close">&times;</button>
     </div>
     <div class="popup-body pe-body" id="player-edit-modal-body">
     <div class="edit-row show popup-edit-row" data-player-key="${keyAttr}">
+      <div class="pl-sect pe-sect">Player</div>
       <div class="pe-f pe-2col">
         <span class="pe-cell">
           <label class="popup-edit-label" for="pe-first">First name</label>
@@ -184,6 +206,7 @@ function openPlayerEditPopup(playerKey) {
           <input id="pe-skill" type="number" class="edit-skill popup-edit-input pe-skillin" placeholder="Skill" step="0.5" min="0" max="10" value="${escapeHTMLText(String(player.skill))}" />
         </div>
       </div>
+      <div class="pl-sect pe-sect">Status</div>
       <!-- The Groups control and the Account row came OUT of this dialog in the 2026-08-03 round, so group
            membership has no editor here (README open question 2, unanswered). These two hidden inputs stay:
            the delegated Save reads them, and dropping them would silently WIPE a player's groups every time
@@ -205,9 +228,10 @@ function openPlayerEditPopup(playerKey) {
   modal.setAttribute('aria-hidden', 'false');
   document.body.style.overflow = 'hidden'; // lock background scroll on iOS so the page doesn't scroll under the modal
 
-  // Bug A fix (2026-06-21): do NOT auto-focus/select the Name field on open. Editing the name is
-  // usually NOT what the admin wants (skill/group is), and auto-focus pops the keyboard onto the
-  // wrong field. Leave focus to the admin — they tap the field they want to edit.
+  // Bug A fix (2026-06-21) STANDS: no field is focused and nothing is selected, so the phone keyboard
+  // never pops onto the wrong box. Focus goes to the dialog itself, which is what makes Escape and a
+  // focus trap conventional. Record: 12-history/task-#10-edit-autofocus-name.md.
+  try { card.focus(); } catch (_) {}
 
   // Slice 3b: Account row — this player's claim status via a one-shot read (the players sync doesn't
   // carry claimed_by_profile). Unlink = the admin exception path for a wrong claim (Mike: "all i want

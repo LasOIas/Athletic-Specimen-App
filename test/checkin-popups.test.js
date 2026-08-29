@@ -86,7 +86,8 @@ function loadApp() {
     ;globalThis.__bridge = {
       getState: () => state,
       doc: document,
-      // Task 2 seeds nothing yet; later tasks add their own hooks here.
+      setView: (v) => { manageView = v; },
+      mode: () => ({ mode: peMode, origin: peOrigin, key: peReturnKey }),
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -106,12 +107,58 @@ describe('Task 2: the close button is pinned right in every pop-up', () => {
   });
 
   it('the base .pe-in rule no longer carries the auto margin it used to push the close button with', () => {
-    expect(cssLF).toContain('.pe-in { flex: none; }');
+    // Task 3 gave the pill its skin, so the base rule is a block now and not the one-liner Task 2 left
+    // behind. This is the same guard, stricter: the block still opens on flex: none, and NO base .pe-in
+    // rule in the file carries margin-left: auto, which the literal-only check could never say.
+    expect(cssLF).toContain('.pe-in {\n  position: relative;\n  flex: none;\n');
     expect(cssLF).not.toContain('.pe-in { flex: none; margin-left: auto; }');
+    expect(cssLF).not.toMatch(/^\.pe-in \{[^}]*margin-left:\s*auto/m);
   });
 
   it('the empty .pe-in spacer is gone from the card, so an out player has no phantom child', () => {
     expect(appSrc).not.toContain('<span class="pe-in" aria-hidden="true"></span>');
     expect(appSrc).toContain('const inHTML = isIn ? `<span class="mgp-in pe-in">IN</span>` : \'\';');
+  });
+});
+
+describe('Task 3: the card header and its section heads', () => {
+  // openPlayerEditPopup cannot run without a DOM (app.js:137-138), so its markup is pinned by its source.
+  const card = () => slice(appSrc, 'function openPlayerEditPopup(', 'function closeInlineEditRow(');
+
+  it('the header carries the watermark, the eyebrow and the tile, and the pill only when it is true', () => {
+    const s = card();
+    expect(s).toContain('class="pe-mark" aria-hidden="true"');
+    expect(s).toContain('class="pe-eyebrow"');
+    expect(s).toContain('const inHTML = isIn ? `<span class="mgp-in pe-in">IN</span>` : \'\';');
+  });
+
+  it('the eyebrow follows the surface, not only the mode', () => {
+    const s = card();
+    expect(s).toContain("'Roster · new player'");
+    expect(s).toContain("'Roster · check-in'");
+    expect(s).toContain("'Roster · players'");   // this spec's own string: the handoff only drew check-in
+  });
+
+  it('PLAYER comes before STATUS, and Skill stays a field label', () => {
+    const s = card();
+    const player = s.indexOf('<div class="pl-sect pe-sect">Player</div>');
+    const status = s.indexOf('<div class="pl-sect pe-sect">Status</div>');
+    expect(player).toBeGreaterThan(-1);
+    expect(status).toBeGreaterThan(player);
+    expect(s).toContain('<label class="popup-edit-label" for="pe-skill">Skill</label>');
+  });
+
+  it('the card takes focus on the dialog, never on a field (Bug A, 2026-06-21, stands)', () => {
+    const s = card();
+    expect(s).not.toContain('.select()');
+    expect(s).not.toMatch(/getElementById\('pe-(first|last|skill)'\)\.focus\(\)/);
+    expect(appSrc).toContain('class="popup-card card pe-card" role="dialog" aria-modal="true" tabindex="-1"');
+  });
+
+  it('the header treatment is in styles.css once, on tokens', () => {
+    expect(cssLF).toContain('background: var(--accent-soft);');
+    expect(cssLF).toContain('.pe-mark {');
+    expect(cssLF).toContain('.pe-eyebrow {');
+    expect(cssLF).toContain('.pe-sect:not(:first-child) { margin-top: 20px; }');
   });
 });

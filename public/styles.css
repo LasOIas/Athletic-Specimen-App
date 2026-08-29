@@ -3341,29 +3341,72 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   border-radius: 18px;
   overflow: hidden;
 }
+/* Round 2026-08-29 (ii, iii) - "it very bland, fix that" and "the pop up is still bland". A card that
+   edits a PLAYER on game day reads as the app's own register, not a settings form: an accent-tint strip
+   with the mark ghosted behind it at 9%, the initial set as a white tile, and a display-font eyebrow over
+   the name. There is no black or near-black surface anywhere in this app and none is introduced. */
 .pe-head {
+  position: relative;
+  overflow: hidden;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 15px 16px;
-  border-bottom: 1px solid var(--border);
+  padding: 16px 14px 15px 16px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--accent-bd);
 }
+.pe-mark {
+  position: absolute;
+  right: -34px;
+  bottom: -46px;
+  width: 128px;
+  height: 128px;
+  color: var(--accent);
+  opacity: .09;
+  pointer-events: none;
+}
+.pe-mark svg { width: 100%; height: 100%; }
+/* the avatar radius is 13px from the handoff's round-iii code (_shared.css:1176). README:173 and 497 still
+   say 14px, which was round ii (_shared.css:954); the later code wins, the same way it does on the stepper. */
 .pe-av {
+  position: relative;
   flex: none;
-  width: 42px;
-  height: 42px;
+  width: 46px;
+  height: 46px;
   display: grid;
   place-items: center;
-  border-radius: 999px;
-  background: var(--accent-soft);
+  border-radius: 13px;
+  background: #fff;
   border: 1px solid var(--accent-bd);
   color: var(--accent);
-  font-size: 16px;
-  font-weight: 700;
+  font: 800 19px/1 var(--font-display);
+  letter-spacing: .02em;
 }
-.pe-who { display: grid; gap: 2px; min-width: 0; }
-.pe-who h3 { margin: 0; font-size: 17px; line-height: 1.2; }
-.pe-in { flex: none; }
+.pe-av.is-new { background: transparent; border-style: dashed; font-weight: 700; font-size: 22px; }
+.pe-who { position: relative; display: grid; gap: 3px; min-width: 0; }
+.pe-eyebrow {
+  font: 700 10px var(--font-display);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+/* section heads inside the card, one weight down from a page's (.pl-sect at :2177 is ink plus a rule) */
+.pe-sect { margin: 0 0 11px; font-size: 11px; }
+.pe-sect:not(:first-child) { margin-top: 20px; }
+.pe-who h3 { margin: 0; font: 700 21px/1.15 var(--font-display); letter-spacing: .01em; color: var(--ink); }
+.pe-in {
+  position: relative;
+  flex: none;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid oklch(0.86 0.06 150);
+  background: oklch(0.95 0.04 150);
+  color: oklch(0.44 0.11 150);
+  font: 700 10px/1 var(--font-display);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
 .pe-x {
   flex: none;
   display: grid;
@@ -3381,8 +3424,8 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   line-height: 1;
   cursor: pointer;
 }
-.pe-x:hover { color: var(--ink); border-color: oklch(0.82 0.008 75); }
-.pe-head { flex: none; }
+.pe-x { position: relative; }   /* above the watermark */
+.pe-x:hover { color: var(--accent); border-color: var(--accent); background: #fff; }
 .pe-body {
   flex: 1 1 auto;
   min-height: 0;             /* flex items default to min-height:auto and won't shrink */
