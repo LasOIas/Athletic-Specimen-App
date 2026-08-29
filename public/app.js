@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.26.2'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.26.3'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7297,6 +7297,9 @@ async function onNameFillSave(e) {
 // deadlocks supabase-js's auth lock.
 async function runPostSignInWork() {
   try {
+    // C102 (2026-08-26): captured BEFORE deriveRole and compared after, so the paint below reacts to the
+    // flip this function caused and never to a flag some other path set.
+    const wasAdmin = state.isAdmin;
     for (let i = 0; i < 3; i++) {
       await deriveRole();
       if (state.role || !state.authSession) break;
@@ -7323,7 +7326,16 @@ async function runPostSignInWork() {
     void promptNameFillIfNeeded();
     // bootPaintDone gate (2026-07-12): mid-boot the role/admin state just set above is carried
     // by the single boot render(); painting here would swap the splash for half-loaded content.
-    if (state.loaded && bootPaintDone) { try { render(); } catch {} }
+    // C102 (2026-08-26): the shell gains or loses #tab-manage and the Manage nav button only when the flag
+    // flips, and only render() builds the shell. Otherwise the nav is byte-identical (its two inputs,
+    // checkinNavVisible() and isAdmin, are untouched here), so an in-place repaint carries the refreshed
+    // tournaments and teamMembers onto the Home hero and My Team without resetting anyone's scroll.
+    if (state.loaded && bootPaintDone) {
+      try {
+        if (wasAdmin !== state.isAdmin) render();
+        else { partialRender(); repaintSignedInPanels(); }   // teamMembers land on the My Team page too, which may be hidden
+      } catch {}
+    }
   } catch (err) { console.error('Role derive error', err); }
 }
 

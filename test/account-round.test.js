@@ -333,6 +333,14 @@ function loadApp() {
       // Fix round 1: the OTHER panel body that branches on the session, so a case can prove the hidden
       // My Team panel is not left holding "Sign in and claim your name on Home to see your team here."
       myTeamPage: () => buildMyTeamPageHTML(),
+      // C102 Task 3: the post-sign-in work called on its own, plus the two pieces of state it reads that
+      // nothing else here can set. runPostSignInWork is the SPIED binding by the time this arrow runs, so
+      // a case that drives it still moves __postRuns. asCommunityId is a module cache with no reset, and
+      // seeding it is what lets deriveRole skip the communities read and answer straight from the scripted
+      // rpc; state.isAdmin is the flag the whole task compares against.
+      postWork: () => runPostSignInWork(),
+      setCommunityId: (v) => { asCommunityId = v; },
+      setAdmin: (v) => { state.isAdmin = !!v; },
       // Task 5: the account overlay's own repaint, and the module var the pending screen names and
       // resends to. Repainting the same view is how a case proves a bind cannot stack.
       renderAcct: () => renderAcctPageInner(),
@@ -2873,6 +2881,122 @@ describe('C102 Task 2: a sign-in repaints in place', () => {
     const renders = bridge.renderCount();
     const partials = bridge.partialCount();
     await bridge.authEvent('TOKEN_REFRESHED', session);
+    expect(bridge.renderCount()).toBe(renders);
+    expect(bridge.partialCount()).toBe(partials);
+  });
+});
+
+// runPostSignInWork is the OTHER half of a sign-in: it derives the community role, promotes an
+// owner/organizer to state.isAdmin, refreshes state.tournaments and state.teamMembers, and then painted
+// with a full render() every time. Only the admin flag can change the SHELL (#tab-manage and its nav
+// button), so the render stays for the flip and every other outcome repaints in place.
+describe('C102 Task 3: the role result renders only when the admin flag flips', () => {
+  beforeEach(() => bridge.reset());
+  afterAll(() => { bridge.getState().tournaments = []; bridge.setAdmin(false); bridge.setCommunityId(null); });
+
+  // The Task 2 shell staging (renderPublicShell mounts every tab panel at once, and partialRender falls
+  // back to a full render when #root reports no children), plus the one live tournament without which
+  // partialRender's Tournament branch and buildMyTeamPageHTML both bail before they build anything.
+  // activeMainTab is pinned to 'home' up front on purpose: loadMyClaimedPlayer, fired void from the
+  // function under test (public/app.js:3009), calls partialRender() of its own when the viewer is on the
+  // Check In tab - which is this module var's initial value - and every case here counts paints.
+  function stageHome() {
+    const root = bridge.node('div'); root.id = 'root'; bridge.registry.root = root;
+    root.appendChild(bridge.node('div'));
+    const homePanel = bridge.node('div'); homePanel.id = 'tab-home'; bridge.registry['tab-home'] = homePanel;
+    const c = bridge.node('div'); bridge.hook('.container', c);
+    const panel = bridge.node('div'); panel.id = 'tab-tournament'; bridge.registry['tab-tournament'] = panel;
+    const tourn = bridge.node('div'); bridge.hook('#tab-tournament .container', tourn);
+    const mtPanel = bridge.node('div'); mtPanel.id = 'tab-myteam'; bridge.registry['tab-myteam'] = mtPanel;
+    const myteam = bridge.node('div'); bridge.hook('#tab-myteam .container', myteam);
+    const grp = bridge.node('div'); bridge.hook('#app-header .pd-hgrp', grp);
+    bridge.setActiveTab('home');
+    bridge.getState().tournaments = [{ id: 't1', name: 'Summer Open', status: 'pools', registration_open: false }];
+    return { root, c, tourn, myteam };
+  }
+  const session = { user: { id: 'u9', email: 'kai@email.com' } };
+
+  it('an owner gets exactly one full render (the shell gains the Manage tab)', async () => {
+    const { root } = stageHome();
+    bridge.setSignedIn(session.user, null);
+    bridge.setAdmin(false);
+    bridge.setCommunityId('c1');
+    bridge.setPainted(true);
+    bridge.tab('home');
+    bridge.supaNext('rpc', { data: 'owner', error: null });
+    const renders = bridge.renderCount();
+    await bridge.postWork();
+    expect(bridge.getState().role).toBe('owner');
+    expect(bridge.getState().isAdmin).toBe(true);
+    expect(bridge.renderCount()).toBe(renders + 1);
+    // render() writes the shell into #root before it binds anything, so the Manage tab the owner just
+    // earned is provably on screen and not merely implied by a count.
+    expect(root.innerHTML).toContain('id="tab-manage"');
+  });
+
+  it('a player gets no full render: the Home tab repaints in place', async () => {
+    const { c } = stageHome();
+    bridge.setSignedIn(session.user, null);
+    bridge.setAdmin(false);
+    bridge.setCommunityId('c1');
+    bridge.setPainted(true);
+    bridge.tab('home');
+    bridge.supaNext('rpc', { data: 'player', error: null });
+    const renders = bridge.renderCount();
+    const partials = bridge.partialCount();
+    await bridge.postWork();
+    expect(bridge.getState().isAdmin).toBe(false);
+    expect(bridge.renderCount()).toBe(renders);
+    expect(bridge.partialCount()).toBe(partials + 1);
+    expect(c.innerHTML.length).toBeGreaterThan(0);              // the Home container was rebuilt
+  });
+
+  // The refreshed state.teamMembers lands on the My Team page too, and the public shell keeps that panel
+  // mounted while Home is the active tab - so partialRender alone would leave it holding the body it was
+  // built with. This is the case that pins repaintSignedInPanels() into the non-admin branch.
+  it('a player on Home also gets the hidden My Team panel rebuilt, still with no full render', async () => {
+    const { myteam } = stageHome();
+    bridge.setSignedOut();
+    const signedOutBody = bridge.myTeamPage();   // what the shell painted into the hidden panel
+    myteam.innerHTML = signedOutBody;
+    bridge.setSignedIn(session.user, null);
+    bridge.setAdmin(false);
+    bridge.setCommunityId('c1');
+    bridge.setPainted(true);
+    bridge.tab('home');
+    bridge.supaNext('rpc', { data: 'player', error: null });
+    const renders = bridge.renderCount();
+    await bridge.postWork();
+    expect(bridge.renderCount()).toBe(renders);
+    expect(myteam.innerHTML).toBe(bridge.myTeamPage());
+    expect(myteam.innerHTML).not.toBe(signedOutBody);
+    expect(myteam.innerHTML.length).toBeGreaterThan(0);
+  });
+
+  it('an owner who is already admin (a re-derive) does not render again', async () => {
+    stageHome();
+    bridge.setSignedIn(session.user, null);
+    bridge.setAdmin(true);
+    bridge.setCommunityId('c1');
+    bridge.setPainted(true);
+    bridge.tab('home');
+    bridge.supaNext('rpc', { data: 'owner', error: null });
+    const renders = bridge.renderCount();
+    await bridge.postWork();
+    expect(bridge.renderCount()).toBe(renders);
+  });
+
+  it('before the boot paint the role result paints nothing', async () => {
+    stageHome();
+    bridge.setSignedIn(session.user, null);
+    bridge.setAdmin(false);
+    bridge.setCommunityId('c1');
+    bridge.setPainted(false);
+    bridge.supaNext('rpc', { data: 'owner', error: null });
+    const renders = bridge.renderCount();
+    const partials = bridge.partialCount();
+    await bridge.postWork();
+    expect(bridge.getState().isAdmin).toBe(true);
     expect(bridge.renderCount()).toBe(renders);
     expect(bridge.partialCount()).toBe(partials);
   });
