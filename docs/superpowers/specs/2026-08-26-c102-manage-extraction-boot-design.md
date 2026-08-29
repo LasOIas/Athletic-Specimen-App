@@ -150,6 +150,10 @@ if (state.loaded && bootPaintDone) {
   idempotent, already called from three sites, and for a signed-in user it closes, never opens.
 - No nav swap: the nav's only auth dependency is the `isAdmin` branch (`app.js:7899`), and R2 never
   changes `isAdmin`.
+- `repaintSignedInPanels()` rebuilds the two auth-branching panels that are not the active tab
+  (Tournament unless its form is dirty, My Team), because the shell keeps every panel mounted and
+  `partialRender()` repaints only the active one; without it a sign-in from Home leaves the Tournament
+  gate body under a closed wall.
 
 **R3 (`app.js:7322`).** Capture the flag around `deriveRole()`, never read one set elsewhere:
 
@@ -180,6 +184,7 @@ then R3 last, because R3's failure costs Mike his Manage tab.
 |---|---|---|
 | The Manage tab missing for an owner | a mis-scoped `isAdmin` comparison; the bounce guards at `app.js:13855` and `13879` would keep kicking a saved `manage` tab Home, so the symptom is confusing, not obvious | compare before and after AROUND `deriveRole()`; test: role resolves to `owner`, `renderCount` +1 exactly, shell contains `id="tab-manage"` |
 | The wall | `closeGatePage()` runs before R2 today and `render()` would re-run `syncGatePage()` through `activateMainTab`; a targeted repaint inherits neither decision | call `syncGatePage()` explicitly in R2; test: `#gate-page` absent after a sign-in from the Tournament tab |
+| The signed-out body on a hidden panel | `partialRender` repaints the active tab only | `repaintSignedInPanels()` in R2 and in R3's non-admin branch; test: sign in on Home, the Tournament container is the hub |
 | The sync notice and the PUBLIC badge | a repaint of `#app-header`'s innerHTML would delete `#js-sync-notice` (then `partialRender`'s lookup at `app.js:736` is null until the next full render) and the `.app-header-mode` badge | repaint `.pd-hgrp` only; test: after the repaint `#js-sync-notice` still exists and `.app-header-mode` still reads `PUBLIC` |
 | The name chip | three R4 sites, one obligation | change all three in one commit; assert the header markup carries the new letter, not merely that no render happened |
 | The flash (v.34) | not reopened by anything here; fewer paints cannot flash more | leave `activateMainTab`'s gate (`app.js:13948-13949`) untouched |

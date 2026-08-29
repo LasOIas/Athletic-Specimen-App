@@ -7381,10 +7381,14 @@ async function onAuthEvent(event, session) {
     // the hub) and the wall itself. Each has an in-place repaint; a full render() rebuilt every panel and
     // reset the viewer's scroll for it. Three separate trys so one failure never blocks the others.
     // partialRender has no in-place branch for the Check In tab and falls through to render() there.
+    // Fix round 1: partialRender repaints the ACTIVE tab only and activateMainTab never rebuilds a
+    // container, so the hidden auth-branching panels get their own pass or a sign-in from Home leaves the
+    // Tournament gate body on screen under a wall syncGatePage has already dropped.
     if (state.loaded && bootPaintDone) {
       try { repaintAccountChip(); } catch (_) {}
       try { syncGatePage(); } catch (_) {}      // closeGatePage ran above; this states the decision explicitly
       try { partialRender(); } catch (_) {}
+      try { repaintSignedInPanels(); } catch (_) {}
     }
     // Slice 3b: a signed-out "claim your team" tap routed through sign-in — finish the journey.
     // Deferred: openClaimPage does a .from() read, and supabase calls inline in this callback deadlock.
@@ -7953,6 +7957,25 @@ function accountChipHTML() {
 function repaintAccountChip() {
   const g = document.querySelector('#app-header .pd-hgrp');
   if (g) g.innerHTML = accountChipHTML();
+}
+
+// C102 (2026-08-26): the public shell keeps every tab panel mounted and partialRender repaints only the
+// active one, so after a sign-in the two panels whose body branches on the session are rebuilt here when
+// they are NOT the active tab (the active tab is partialRender's). Tournament is skipped while a form on
+// it is being filled, the same rule partialRenderTournament follows.
+// Tournament and My Team are the ONLY two: publicHomeHTML, publicCheckinHTML / buildCheckinStatsHTML and
+// buildHistoryPageHTML read neither state.authSession nor state.account, directly or through a builder
+// they call. No layoutBracketTree() here on purpose - it bails on a pan with no offsetParent, which is
+// every node inside a hidden panel, and activateMainTab already fits the tree when the tab is opened.
+function repaintSignedInPanels() {
+  if (activeMainTab !== 'tournament' && !tournamentTabIsDirty()) {
+    const c = document.querySelector('#tab-tournament .container');
+    if (c) c.innerHTML = buildPublicTournamentRootHTML();
+  }
+  if (activeMainTab !== 'myteam') {
+    const c = document.querySelector('#tab-myteam .container');
+    if (c) c.innerHTML = buildMyTeamPageHTML();
+  }
 }
 
 // The single glyph shown in the signed-in account chip and on the account card. Account round

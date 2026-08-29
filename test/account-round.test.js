@@ -330,6 +330,9 @@ function loadApp() {
       // C102 Task 2: the string the Tournament tab body IS, so a case can prove the panel behind the wall
       // was rebuilt from the signed-in state rather than left showing the gate.
       tournamentRoot: () => buildPublicTournamentRootHTML(),
+      // Fix round 1: the OTHER panel body that branches on the session, so a case can prove the hidden
+      // My Team panel is not left holding "Sign in and claim your name on Home to see your team here."
+      myTeamPage: () => buildMyTeamPageHTML(),
       // Task 5: the account overlay's own repaint, and the module var the pending screen names and
       // resends to. Repainting the same view is how a case proves a bind cannot stack.
       renderAcct: () => renderAcctPageInner(),
@@ -2741,14 +2744,22 @@ describe('C102 Task 2: a sign-in repaints in place', () => {
   // which is the same condition that puts the Bracket nav button on screen in the first place, so a
   // viewer can only BE on this tab when it holds. Both are staged so the case exercises the real
   // in-place path instead of measuring the fallback.
+  // Fix round 1: renderPublicShell (public/app.js:13313) mounts EVERY tab panel at once, so all three
+  // panels a sign-in can change are staged, each behind the selector its own repaint path queries -
+  // partialRender's Home branch reads panel.querySelector('.container') (public/app.js:777), and the two
+  // auth-branching panels are reached by the compound '#tab-<id> .container'.
   function stageShell() {
     const root = bridge.node('div'); root.id = 'root'; bridge.registry.root = root;
     root.appendChild(bridge.node('div'));
+    const homePanel = bridge.node('div'); homePanel.id = 'tab-home'; bridge.registry['tab-home'] = homePanel;
+    const home = bridge.node('div'); bridge.hook('.container', home);
     const panel = bridge.node('div'); panel.id = 'tab-tournament'; bridge.registry['tab-tournament'] = panel;
     const c = bridge.node('div'); bridge.hook('#tab-tournament .container', c);
+    const mtPanel = bridge.node('div'); mtPanel.id = 'tab-myteam'; bridge.registry['tab-myteam'] = mtPanel;
+    const myteam = bridge.node('div'); bridge.hook('#tab-myteam .container', myteam);
     const grp = bridge.node('div'); bridge.hook('#app-header .pd-hgrp', grp);
     bridge.getState().tournaments = [{ id: 't1', name: 'Summer Open', status: 'pools', registration_open: false }];
-    return { c, grp };
+    return { c, grp, home, myteam };
   }
   const session = { user: { id: 'u9', email: 'kai@email.com', email_confirmed_at: '2026-08-01T00:00:00Z' } };
 
@@ -2780,6 +2791,51 @@ describe('C102 Task 2: a sign-in repaints in place', () => {
     expect(bridge.getState().authSession).toBeTruthy();
     expect(bridge.renderCount()).toBe(renders);
     expect(bridge.partialCount()).toBe(partials);
+  });
+
+  // Fix round 1 (review I-1): partialRender repaints the ACTIVE tab and activateMainTab never rebuilds a
+  // container, so signing in from Home used to leave #tab-tournament .container holding the GATE BODY
+  // ("Sign in to see the tournament") under a wall that syncGatePage had already dropped - a broken app,
+  // not stale data. R3's full render hid it; Task 3 removes that render for non-admins.
+  it('signing in from Home leaves no signed-out body on the hidden Tournament and My Team panels', async () => {
+    const { c, home, myteam } = stageShell();
+    bridge.setSignedOut();
+    bridge.setPainted(true);
+    bridge.tab('home');
+    const gateBody = bridge.tournamentRoot();        // what the shell painted into the hidden Tournament panel
+    const myTeamBefore = bridge.myTeamPage();        // and into the hidden My Team panel
+    c.innerHTML = gateBody;
+    myteam.innerHTML = myTeamBefore;
+    const renders = bridge.renderCount();
+    await bridge.authEvent('SIGNED_IN', session);
+    expect(bridge.renderCount()).toBe(renders);
+    expect(home.innerHTML).not.toBe('');             // the active tab is still partialRender's own
+    expect(c.innerHTML).toBe(bridge.tournamentRoot());
+    expect(c.innerHTML).not.toBe(gateBody);
+    expect(myteam.innerHTML).toBe(bridge.myTeamPage());
+    expect(myteam.innerHTML).not.toBe(myTeamBefore);
+    expect(myteam.innerHTML).not.toBe('');
+  });
+
+  it('a dirty form on the Tournament tab is never clobbered, and My Team repaints behind it', async () => {
+    const { c, myteam } = stageShell();
+    // tournamentTabIsDirty (public/app.js:3018) reads #tab-tournament's own inputs, and the stub answers
+    // 'input, textarea' from the hooks map, so a half-typed team name is staged exactly where it looks.
+    const typed = bridge.node('input'); typed.value = 'Sharks';
+    bridge.hook('input, textarea', typed);
+    bridge.setSignedOut();
+    bridge.setPainted(true);
+    bridge.tab('tournament');
+    const gateBody = bridge.tournamentRoot();
+    const myTeamBefore = bridge.myTeamPage();
+    c.innerHTML = gateBody;
+    myteam.innerHTML = myTeamBefore;
+    const renders = bridge.renderCount();
+    await bridge.authEvent('SIGNED_IN', session);
+    expect(bridge.renderCount()).toBe(renders);
+    expect(c.innerHTML).toBe(gateBody);              // the half-typed registration survives the sign-in
+    expect(myteam.innerHTML).toBe(bridge.myTeamPage());
+    expect(myteam.innerHTML).not.toBe(myTeamBefore);
   });
 
   it('a repeat auth event for the same account paints nothing at all', async () => {
