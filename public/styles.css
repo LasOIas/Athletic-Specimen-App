@@ -3469,8 +3469,49 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
-.pe-skillrow { display: grid; gap: 6px; }
-.pe-skillin { width: 108px; font-variant-numeric: tabular-nums; }
+/* Round 2026-08-29 (ii): the rating is a stepper, like every other number the organizer sets. The value
+   sits in the frame with no focus ring of its own, because the frame IS the visual container. */
+.pe-skillrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pe-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: oklch(0.985 0.003 75);
+}
+.pe-sb {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: color .15s ease, background-color .15s ease, border-color .15s ease;
+}
+.pe-sb:hover { color: var(--accent); border-color: var(--accent-bd); background: var(--accent-soft); }
+#player-edit-modal .pe-skillin {
+  width: 74px;
+  height: 38px;
+  text-align: center;
+  font: 700 17px var(--font-display);
+  font-variant-numeric: tabular-nums;
+  border-color: transparent;
+  background: transparent;
+  -moz-appearance: textfield;
+}
+#player-edit-modal .pe-skillin::-webkit-outer-spin-button,
+#player-edit-modal .pe-skillin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+#player-edit-modal .pe-skillin:focus { box-shadow: none; border-color: transparent; }
 .pe-hint { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
 .pe-2col { grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
 .pe-cell { display: grid; gap: 7px; min-width: 0; }

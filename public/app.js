@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.29.3'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.29.4'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -117,6 +117,16 @@ function closePlayerEditPopup() {
   if (body) body.innerHTML = '';
 }
 
+// The rating stepper's maths. Clamp 0 to 10 in 0.5 steps, one decimal. An empty field is unrated: the
+// first tap UP is the smallest real rating (0.5) and the first tap DOWN is the explicit 0, because Mike's
+// 2026-08-29 call made unrated and 0 the same thing. This follows the handoff's code (_shared.js:1197-1199);
+// its README:404 states the two directions transposed.
+function peSkillStep(rawValue, delta) {
+  let now = parseFloat(rawValue);
+  if (Number.isNaN(now)) now = delta < 0 ? 0.5 : 0;
+  return Math.min(10, Math.max(0, now + delta)).toFixed(1);
+}
+
 // Task 3: the player edit sheet is a body-level modal (the old in-panel admin players markup is gone).
 // Ensure the modal container exists (create + append to <body> once, mirroring ensureKioskConfirmModal)
 // before openPlayerEditPopup populates it. The Save/Cancel buttons inside the body are document-delegated
@@ -179,6 +189,11 @@ function openPlayerEditPopup(playerKey) {
   const title  = peMode === 'new' ? 'New player' : (whole || 'Edit player');
   const avatar = peMode === 'new' ? '+' : initial;
 
+  // Unrated opens BLANK so the en dash placeholder shows, matching mgpSkillText's grammar (manage.js:956):
+  // a positive rating renders one decimal, everything else renders the dash.
+  const skillValue = (Number.isFinite(Number(player.skill)) && Number(player.skill) > 0)
+    ? Number(player.skill).toFixed(1) : '';
+
   card.innerHTML = `
     <div class="popup-header pe-head">
       <span class="pe-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 3.5 6v6.2c0 4.6 3.5 7.9 8.5 9.3 5-1.4 8.5-4.7 8.5-9.3V6Z"/><path d="M9 12.4l2.3 2.3L15.6 10"/></svg></span>
@@ -203,7 +218,11 @@ function openPlayerEditPopup(playerKey) {
       <div class="pe-f">
         <label class="popup-edit-label" for="pe-skill">Skill</label>
         <div class="pe-skillrow">
-          <input id="pe-skill" type="number" class="edit-skill popup-edit-input pe-skillin" placeholder="Skill" step="0.5" min="0" max="10" value="${escapeHTMLText(String(player.skill))}" />
+          <div class="pe-stepper">
+            <button type="button" class="pe-sb" data-pe-skill="-0.5" aria-label="Lower skill">&#8722;</button>
+            <input id="pe-skill" type="number" class="edit-skill popup-edit-input pe-skillin" placeholder="&#8211;" step="0.5" min="0" max="10" value="${escapeHTMLText(skillValue)}" />
+            <button type="button" class="pe-sb" data-pe-skill="0.5" aria-label="Raise skill">+</button>
+          </div>
         </div>
       </div>
       <div class="pl-sect pe-sect">Status</div>
@@ -435,6 +454,17 @@ function findInlineEditRowByPlayerKey(playerKey) {
       return;
     }
 
+    // The stepper. It edits one input's value and nothing else, so it never reaches state, an RPC or a
+    // save. Delegated like the rest of the card, so it survives every rebuild of the modal body.
+    const stepBtn = e.target.closest('[data-pe-skill]');
+    if (stepBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const fld = document.getElementById('pe-skill');
+      if (fld) fld.value = peSkillStep(fld.value, parseFloat(stepBtn.getAttribute('data-pe-skill')));
+      return;
+    }
+
     const btn = e.target.closest('.btn-save-edit');
     if (!btn) return;
 
@@ -466,7 +496,12 @@ function findInlineEditRowByPlayerKey(playerKey) {
       : (fallbackGroup ? [fallbackGroup] : []);
     const group = groups[0] || '';
 
-    if (!name || Number.isNaN(skill)) return;
+    // 2026-08-29 (Mike): unrated IS skill 0, saved normally. This used to be
+    // `if (!name || Number.isNaN(skill)) return;`. A blank rating aborted the save in SILENCE, so an
+    // organiser fixing a typo on an unrated player watched the card close and nothing change. Name empty
+    // is the only rule the card enforces, and it says so by focusing the field it wants.
+    if (!name) { if (nameInput) nameInput.focus(); return; }
+    if (Number.isNaN(skill)) skill = 0;
     // Clamp and keep one decimal place
     skill = Math.max(0, Math.min(10, Math.round(skill * 10) / 10));
 

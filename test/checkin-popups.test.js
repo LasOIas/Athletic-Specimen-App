@@ -88,6 +88,7 @@ function loadApp() {
       doc: document,
       setView: (v) => { manageView = v; },
       mode: () => ({ mode: peMode, origin: peOrigin, key: peReturnKey }),
+      step: (v, d) => peSkillStep(v, d),
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -179,5 +180,47 @@ describe('Task 3: the card header and its section heads', () => {
     expect(cssLF).toContain('.pe-mark {');
     expect(cssLF).toContain('.pe-eyebrow {');
     expect(cssLF).toContain('.pe-sect:not(:first-child) { margin-top: 20px; }');
+  });
+});
+
+describe('Task 4: the stepper, and unrated is skill 0', () => {
+  // README:404 states the empty-field behaviour transposed; the handoff's own code (_shared.js:1197-1199)
+  // is authoritative: the first tap UP from unrated is the smallest real rating, the first tap DOWN is the
+  // explicit zero Mike's 2026-08-29 call made meaningful.
+  it('steps in halves, clamps 0 to 10, and always returns one decimal', () => {
+    expect(bridge.step('', 0.5)).toBe('0.5');
+    expect(bridge.step('', -0.5)).toBe('0.0');
+    expect(bridge.step('10', 0.5)).toBe('10.0');
+    expect(bridge.step('0', -0.5)).toBe('0.0');
+    expect(bridge.step('6', 0.5)).toBe('6.5');
+    for (const v of ['', '0', '3.5', '10']) {
+      for (const d of [0.5, -0.5]) expect(bridge.step(v, d)).toMatch(/^\d+\.\d$/);
+    }
+  });
+
+  it('the card prefills blank for an unrated player and shows the en dash placeholder', () => {
+    const s = slice(appSrc, 'function openPlayerEditPopup(', 'function closeInlineEditRow(');
+    expect(s).toContain("? Number(player.skill).toFixed(1) : ''");
+    expect(s).toContain('placeholder="&#8211;"');
+    expect(s).toContain('data-pe-skill="-0.5"');
+    expect(s).toContain('data-pe-skill="0.5"');
+    expect(s).toContain('aria-label="Lower skill"');
+    expect(s).toContain('aria-label="Raise skill"');
+  });
+
+  it('a blank rating saves as 0 instead of aborting in silence', () => {
+    // stripComments, because the replacement's OWN comment quotes the abort it removed, verbatim and on
+    // purpose - that quote is the record of what changed. A raw slice would read the prose and fail the
+    // very guard the prose documents, so this one scan reads code only.
+    const save = slice(stripComments(appSrc), 'function ensureSaveDelegationBound()', 'function ensureHeaderTapToTop()');
+    expect(save).not.toContain('if (!name || Number.isNaN(skill)) return;');
+    expect(save).toContain('if (Number.isNaN(skill)) skill = 0;');
+    expect(save).toContain('if (!name) { if (nameInput) nameInput.focus(); return; }');
+  });
+
+  it('the stepper frame and its buttons are in styles.css, with the native spinners suppressed', () => {
+    expect(cssLF).toContain('.pe-stepper {');
+    expect(cssLF).toContain('.pe-sb {');
+    expect(cssLF).toContain('#player-edit-modal .pe-skillin::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }');
   });
 });
