@@ -3461,12 +3461,18 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 }
 
 /* Round 2026-08-29 (vi) - "why does this move after checking in, have it always be on the far right for
-   all pop ups". The close button used to be pushed right only by the IN pill's auto margin, so on a player
-   who was still out it sat tucked against the name and jumped to the corner the moment they checked in.
-   The TITLE takes the slack instead. Two dialogs emit .popup-header and BOTH were read against these
-   rules: the player card (app.js openPlayerEditPopup) and the Home rules sheet (app.js hmRulesModalHTML).
-   #hm-rules-modal .hmv-rtitles (styles.css:4227) sets only display, gap and min-width, so nothing here
-   fights it, and with justify-content: space-between and two children the auto margin is inert there. */
+   all pop ups". The pin used to belong to the IN pill: .pe-in carried margin-left: auto, which is why
+   openPlayerEditPopup had to emit an empty aria-hidden .pe-in spacer for a player who was still out. An
+   empty flex item still absorbs the free space, so the button did land at the right edge in BOTH states,
+   but only for as long as that phantom child was kept in sync with the pill. The spacer is gone and the
+   TITLE takes the slack instead: .pe-who is the only growable item, so it eats the free space and the
+   button ends at the right content edge. The auto margin below is the fallback for a header whose title
+   cannot grow, and .pe-in + .pe-x overrides it with plain separation when the pill IS there, so the pill
+   no longer has any say in which column the button lands in.
+   Two dialogs emit .popup-header and BOTH were read against these rules: the player card (app.js
+   openPlayerEditPopup) and the Home rules sheet (app.js hmRulesModalHTML). #hm-rules-modal .hmv-rtitles
+   (styles.css:4233) sets only display, gap and min-width, so nothing here fights it, and with
+   justify-content: space-between and two children the auto margin is inert there. */
 .popup-header .pe-who,
 .popup-header .hmv-rtitles { flex: 1 1 auto; min-width: 0; }
 .popup-header .pe-in { margin-left: 0; }

@@ -506,7 +506,7 @@ describe('Task 1 foundations', () => {
     expect(bridge.buildScoreSheet({ ...base, score_a: 21, score_b: 15 }, 'a')).toContain('class="mgv-scfinal" data-mgss="edit">');
   });
 
-  it('the 08-05b field style and the 08-23 button restyle are in styles.css once', () => {
+  it('the 08-05b field style, the 08-23 button restyle and the 08-29 header pin are in styles.css once', () => {
     expect(count(css, '#app-shell input.pk-fv:not(.mgv-sv)')).toBe(1);
     expect(count(css, '#player-edit-modal .pe-save')).toBeGreaterThanOrEqual(1);
     expect(css).toContain('@keyframes m-menu');

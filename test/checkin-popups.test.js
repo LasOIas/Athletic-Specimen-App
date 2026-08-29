@@ -5,7 +5,8 @@
 // the next word as an environment and fail the file, so it is spelled out here in words instead), so
 // every case here is one of three shapes: a builder string, a delegate tap through withDelegate, or a
 // source guard. openPlayerEditPopup cannot execute here at all, because modal.querySelector('.pe-card')
-// is null and it returns at app.js:137-138, so its markup is pinned by a slice of its source. Anything needing a live element is a drive fact in the spec's 7.4.
+// is null and it returns at app.js:137-138, so its markup is pinned by a slice of its source. Anything
+// needing a live element is a drive fact in the spec's 7.4.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
