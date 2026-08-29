@@ -604,8 +604,8 @@ function generateDoubleElim(N, resetEnabled) {
 
 // C36 T1: kiosk "tap your name" search. PURE (no DOM / no app state) so the kiosk handler can
 // feed it state.players + the live search text and render the result buttons. Returns a NO-SKILL
-// row shape {id,name,group,initials,checkedIn} — skill is admin-only and must never reach this
-// public surface (rulebook §AS-1). Disambiguation is by group + full name, never skill.
+// row shape {id,name,initials,checkedIn}; skill is admin-only and must never reach this public
+// surface (rulebook §AS-1). Rows are disambiguated by full name alone (Mike, 2026-08-29).
 //   - case-insensitive name SUBSTRING match
 //   - drops __as_* sentinel rows (the "All Players" pseudo-row etc.)
 //   - prefix matches sort before mid-string matches (typing your first name surfaces you first)
@@ -629,7 +629,7 @@ function disambiguatePlayersByName(players, query) {
     scored.push({
       _prefix: pos === 0 ? 0 : 1,
       _name: lower,
-      row: { id: p.id, name, group: p.group || '', initials, checkedIn: !!p.checked_in }
+      row: { id: p.id, name, initials, checkedIn: !!p.checked_in }
     });
   }
   // prefix matches first, then alphabetical by name for a stable, predictable order
@@ -758,18 +758,15 @@ function buildCopilotContext(input) {
   const liveData = inp.liveData || {};
   const tour = inp.tournament || null;
 
-  // attendance (redacted: name + group only)
+  // attendance (redacted: name only). The byGroup bucket and the per-attendee group key left on
+  // 2026-08-29 with groups themselves: after the column drop every attendee would have landed in a
+  // single 'Ungrouped' bucket, telling the model about a dimension that no longer exists.
   const here = [];
-  const byGroup = {};
   players.forEach((p) => {
     if (!p || !p.checked_in) return;
-    const name = String(p.name || '').trim();
-    const group = String(p.group || '').trim();
-    here.push({ name, group });
-    const key = group || 'Ungrouped';
-    byGroup[key] = (byGroup[key] || 0) + 1;
+    here.push({ name: String(p.name || '').trim() });
   });
-  const attendance = { total: here.length, byGroup, here };
+  const attendance = { total: here.length, here };
 
   // casual courts (redacted rosters; null when no teams)
   let casualCourts = null;
@@ -809,17 +806,19 @@ function buildCopilotContext(input) {
 }
 
 // C28 Slice 2 — co-pilot acting helpers (pure; no DOM/state/skill).
-// resolvePlayerByName: name -> a single player {id,name,group} (no skill), or a typed failure the
-// co-pilot can act on (ask which one / not found). Reuses the skill-free disambiguator.
+// resolvePlayerByName: name -> a single player {id,name} (no skill), or a typed failure the co-pilot can
+// act on (ask which one / not found). Reuses the skill-free disambiguator. The group that used to ride
+// along here went with groups themselves on 2026-08-29: its source row no longer has one, so keeping the
+// key would have shipped a permanent empty string to the co-pilot.
 function resolvePlayerByName(players, name) {
   const q = String(name == null ? '' : name).trim().toLowerCase();
   if (!q) return { ok: false, reason: 'none', matches: [] };
-  const rows = disambiguatePlayersByName(players, q); // [{id,name,group,...}] — already skill-free
+  const rows = disambiguatePlayersByName(players, q); // [{id,name,initials,checkedIn}], already skill-free
   const exact = rows.filter((r) => String(r.name || '').trim().toLowerCase() === q);
   const pick = exact.length === 1 ? exact[0] : (rows.length === 1 ? rows[0] : null);
-  if (pick) return { ok: true, player: { id: pick.id, name: pick.name, group: pick.group || '' } };
+  if (pick) return { ok: true, player: { id: pick.id, name: pick.name } };
   if (rows.length === 0) return { ok: false, reason: 'none', matches: [] };
-  return { ok: false, reason: 'ambiguous', matches: rows.map((r) => ({ name: r.name, group: r.group || '' })) };
+  return { ok: false, reason: 'ambiguous', matches: rows.map((r) => ({ name: r.name })) };
 }
 
 // Per-tool safety policy (Mike's hybrid): instant+undo for the cleanly-reversible, confirm-first for

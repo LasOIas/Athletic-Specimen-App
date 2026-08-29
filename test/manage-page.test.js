@@ -69,13 +69,12 @@ function loadApp() {
       buildPickup: () => buildPickupDaysHTML(),
       buildPickupForm: (id) => { pickupEditId = (id == null ? null : id); manageView = 'pickup-form'; return buildPickupDayFormHTML(); },
       checkinNav: () => checkinNavVisible(),
+      // Groups round (2026-08-29): the mgGroupsOpen / mgMoveOpen assignments left with the bindings.
       buildPlayers: (opts) => {
         opts = opts || {};
         mgPlayerQuery = opts.query || '';
         mgSelectMode = !!opts.select;
         mgSelected = new Set(opts.selected || []);
-        mgGroupsOpen = !!opts.groups;
-        mgMoveOpen = !!opts.move;
         return buildManagePlayersHTML();
       },
       buildTeams: (opts) => {
@@ -442,7 +441,7 @@ function setPlayersNamed(extra = {}) {
       { id: 'p4', name: 'Mikey Olas',  skill: 4.5, groups: ['Club'] },
     ],
     checkedIn: ['id:p4'],           // playerIdentityKey({id:'p4'}) === 'id:p4' → Mikey shows IN
-    groups: ['All', 'Club'],        // getAvailableGroups() drops 'All' → 1 group
+    groups: ['All', 'Club'],        // state.groups still exists (the client group layer is the next task); nothing renders it
     isAdmin: true,
     ...extra,
   });
@@ -466,7 +465,9 @@ describe('buildManagePlayersHTML — the A–Z directory (mockup l-b)', () => {
     expect(html).toContain('Search or add a player');
     expect(html).toContain('<b>233</b>');            // roster count from the fixture
     expect(html).toContain('<b>19</b> checked in');  // state.checkedIn.length
-    expect(html).toContain('<b>1</b> group');        // catalog count (Club); singular grammar
+    // Inverted in the groups round (2026-08-29): the meta is two counts now, and the word "group" does
+    // not appear on this page at all.
+    expect(html).not.toMatch(/group/i);
     expect(html).not.toContain('pd-card');
     expect(html).not.toContain('ckx-');
     expect(html).not.toMatch(/avatar|initial/i);     // NO initials bubbles anywhere
@@ -499,14 +500,18 @@ describe('buildManagePlayersHTML — the A–Z directory (mockup l-b)', () => {
     expect(html).toContain('>4.5<');
   });
 
-  it('exposes the group count as a tappable group-manager trigger', () => {
+  it('has no group count, no group-manager trigger and no inline group section', () => {
+    // Inverted in the groups round (2026-08-29): groups left every surface, so the meta count that opened
+    // the inline manager, the manager itself and its add field are all gone. The fixture still carries
+    // state.groups (['All','Club']) and a per-player groups array, so a re-added reader would render
+    // "Club" here and turn this red.
     setPlayersNamed();
     const html = bridge.buildPlayers({});
-    expect(html).toContain('data-mgp-groups');
-    // opening it renders the inline group section with the existing group + an add field
-    const open = bridge.buildPlayers({ groups: true });
-    expect(open).toContain('Club');
-    expect(open).toContain('data-mgp-gadd');
+    expect(html).not.toContain('data-mgp-groups');
+    expect(html).not.toContain('data-mgp-gadd');
+    expect(html).not.toContain('mgp-mg');
+    expect(html).not.toContain('mgp-grp');
+    expect(html).not.toContain('Club');
   });
 });
 
@@ -530,18 +535,21 @@ describe('buildManagePlayersHTML — live search + add-a-player', () => {
 });
 
 describe('buildManagePlayersHTML — Select (bulk) mode', () => {
-  it('reveals per-row checkboxes and the four-action bottom bar', () => {
+  it('reveals per-row checkboxes and the three-action bottom bar', () => {
+    // Inverted in the groups round (2026-08-29): the bar was four actions; "Move to group" and its chip
+    // row left with groups, so in / out / cancel is the whole bar.
     setPlayersNamed();
     const html = bridge.buildPlayers({ select: true });
     expect(html).toContain('class="mgp-cb"');
     expect(html).toContain('class="mgp-bar"');
     expect(html).toContain('data-mgp-bulk="in"');
     expect(html).toContain('data-mgp-bulk="out"');
-    expect(html).toContain('data-mgp-bulk="move"');
     expect(html).toContain('data-mgp-bulk="cancel"');
+    expect(html).not.toContain('data-mgp-bulk="move"');
+    expect(html).not.toContain('Move to group');
+    expect(html).not.toContain('mgp-movebar');
     expect(html).toContain('Check in');
     expect(html).toContain('Check out');
-    expect(html).toContain('Move to group');
     expect(html).toContain('>Cancel<');              // the header Select button flips to Cancel
   });
 

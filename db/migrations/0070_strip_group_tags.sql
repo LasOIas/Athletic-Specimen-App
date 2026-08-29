@@ -1,0 +1,93 @@
+-- 0070_strip_group_tags.sql: the last group store leaves players.tag.
+--
+-- Mike (2026-08-29): "remove the groups from the app, we dont even use it." 0069 dropped players."group",
+-- the groups table, the normalize trigger and register_player's p_group. It deliberately left players.tag
+-- standing, because tag is the OTHER place the app kept group membership and the client was still the only
+-- thing that knew what was in it. This file empties the part of that column that is group data. It drops
+-- no structure: no column, no table, no function, no grant. One UPDATE.
+--
+-- WHAT players.tag ACTUALLY HOLDS. tag is older than db/migrations: no migration in this folder creates
+-- it or writes it, and the only one that even names it is the anon column grant at 0010:9. Every reader
+-- and writer lives in the client, and every one of them is group code:
+--   written  serializePlayerGroupsTag (public/app.js:1069) returns GROUPS_TAG_PREFIX (public/app.js:48,
+--            the literal '__as_groups__:') followed by encodeURIComponent(JSON.stringify(<array of group
+--            names>)). That is the WHOLE value. It is never appended to existing content, and the
+--            function returns '' rather than a bare prefix when the list is empty. It reaches the
+--            database through updatePlayerFieldsSupabase (public/app.js:5820) and the insert path
+--            (public/app.js:6094).
+--   written  public/app.js:5815, the OTHER shape: when the group column is missing, the same function
+--            writes the BARE primary group name into tag, with no prefix. See WHAT THIS FILE LEAVES.
+--   read     parsePlayerGroupsTag (public/app.js:1084, called at :1099), parseRemotePlayerGroupDetails
+--            (:1111), and getPlayerPrimaryGroup's fallback `player.group || player.tag || ''` (:1149).
+--   fetched  only under the group flag: `if (HAS_TAG) playerCols.push('tag')` (public/app.js:5501).
+-- There is no non-group reader or writer of players.tag anywhere in public/. Every other `tag` in the
+-- client is a UI label or a local variable (public/manage.js:1076, public/app.js:6171, :7593).
+--
+-- WHAT THIS FILE DOES: nulls tag on exactly the rows whose tag STARTS WITH the literal '__as_groups__:'.
+-- Because the client only ever writes that prefix as the entire value, the whole tag on such a row is the
+-- group payload and there is nothing inside it to preserve. No other row is touched, and no row is
+-- created or deleted.
+--
+-- THE FILTER IS A LITERAL PREFIX TEST, NEVER LIKE. '__as_groups__:' is full of underscores, and `_` is a
+-- WILDCARD in SQL LIKE. That exact mistake is already in this folder's history: 0011:15 wrote
+-- `name not like '__as_%'` meaning the sentinel rows, and it silently matched real names like "Chase
+-- Travers" (positions 3 and 4 are 'a' and 's'), which cost those players their dedup protection until
+-- 0012 fixed it with the literal `left(name,5) <> '__as_'`. This file uses left(tag, 14), the same shape,
+-- for the same reason. 14 is the length of '__as_groups__:'.
+--
+-- The prefix test also means no row needs excluding by name. The sentinel rows the app still keeps
+-- (`__as_tournament_state__`, public/app.js:49, excluded from every roster at :5530 and :6046) are
+-- matched only if their tag actually carries the group payload, in which case it is group data and goes
+-- with the rest. 0018 already deleted the `__as_group__:` catalog rows.
+--
+-- WHAT THIS FILE LEAVES, ON PURPOSE: a tag that does NOT carry the prefix. public/app.js:5815 writes a
+-- bare group name into tag when the group column is absent, so some of those values are group data too.
+-- But a bare string cannot be told apart from non-group content by inspection, and this column predates
+-- every migration in this folder, so nulling it would be a guess on a live roster. PRE-FLIGHT below
+-- captures every one of them and the READ-BACKS list them again afterwards. The decision goes to Mike
+-- with the list in hand: either a 0071 that nulls the residue, or spec section 10's recommendation, which
+-- is dropping the column outright. This file does not make that call, and it does not pretend to.
+--
+-- ORDER. One statement, and it runs AFTER 0069. It must not run while the client group layer is still
+-- deployed (0069's APPLY PRECONDITION P2): with the group column gone, detectPlayersSchema
+-- (public/app.js:5778) sets HAS_GROUP false and public/app.js:5815 and :6094 write group names straight
+-- back into tag, so an early apply cleans a column the running app immediately refills.
+--
+-- ALSO STILL OPEN, and not this file's call: attendance_sessions."group" (0015:16, "which group's night")
+-- survived 0069 by design as a different column on a different table. No client code reads or writes it
+-- (`grep -rn "attendance_sessions" public/` returns nothing). It is the same product concept Mike
+-- deleted, so it belongs in the same question to Mike as the tag residue above.
+--
+-- PRE-FLIGHT. A COMMENT: apply_migration does NOT run this. The controller runs it alone with execute_sql
+-- BEFORE the update and saves the output VERBATIM into the round's 12-history file. It is the ONLY record
+-- of these values afterwards and the only thing the ROLLBACK can read. 0069's PRE-FLIGHT 2 is the same
+-- query; if that capture was taken and nothing has been driven since, it stands and this is a re-read:
+--   select id, name, tag from public.players where tag is not null order by name;
+--
+-- ROLLBACK: from that capture alone, `update public.players set tag = <captured tag> where id =
+--   <captured id>;` row by row. There is no structure to rebuild, because this file changes none: the
+--   column, its type, and the 0010:9 anon column grant that names it are all untouched. Without the
+--   capture the values are gone, and nothing in the database brings them back.
+--
+-- NOT YET APPLIED (the controller applies it after 0069, on Mike's tap) via the Supabase MCP
+-- (apply_migration), the check-in pop-ups round.
+
+update public.players
+   set tag = null
+ where tag is not null
+   and left(tag, 14) = '__as_groups__:';
+
+-- READ-BACKS. Comments: apply_migration does NOT run these. The controller runs them with execute_sql
+-- AFTER the update commits, and records every result in the round's history file.
+--   select count(*) from public.players where left(tag, 14) = '__as_groups__:';    -- 0
+--   select count(*) from public.players where tag is not null;
+--     -- the residue this file deliberately left: the bare-name shape from public/app.js:5815. Subtract
+--     -- it from the PRE-FLIGHT capture's row count and the difference is exactly what this file nulled.
+--   select id, name, tag from public.players where tag is not null order by name;
+--     -- the list that goes to Mike with the question: a 0071 that nulls these, or drop the column.
+--   select count(*) from public.players where left(name, 5) <> '__as_';
+--     -- unchanged. This file updates one column and creates or deletes no row.
+--   select privilege_type, column_name from information_schema.column_privileges
+--    where table_schema = 'public' and table_name = 'players' and grantee = 'anon';
+--     -- still id, name, checked_in, tag. This file drops nothing, so the 0010:9 grant is intact and
+--     -- the anon doors keep reading the same columns they read before it.
