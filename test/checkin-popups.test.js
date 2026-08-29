@@ -235,3 +235,45 @@ describe('Task 4: the stepper, and unrated is skill 0', () => {
     expect(skillin[0]).toContain('width: 74px;');
   });
 });
+
+describe('Task 5: the status button is a draft, not a write', () => {
+  // There is no DOM here, so "nothing is written" is proved by READING the branch: a toggle that touches
+  // no state, no RPC and no saveLocal cannot write. The live behaviour is a drive fact (spec 7.4).
+  const branch = () => {
+    const s = slice(appSrc, 'function ensureSaveDelegationBound()', 'function ensureHeaderTapToTop()');
+    const a = s.indexOf("const inBtn = e.target.closest('[data-pe-in]');");
+    const b = s.indexOf("const btn = e.target.closest('.btn-save-edit');", a + 1);
+    if (a < 0 || b < 0) throw new Error('the [data-pe-in] branch is not above the save branch');
+    return s.slice(a, b);
+  };
+
+  it('the toggle writes nothing: no state, no RPC, no saveLocal, no attendance writer', () => {
+    const b = branch();
+    expect(b).not.toContain('state.');
+    expect(b).not.toContain('mgckToggleByKey');
+    expect(b).not.toContain('supabaseClient');
+    expect(b).not.toContain('saveLocal');
+    expect(b).toContain("inBtn.setAttribute('aria-pressed'");
+    expect(b).toContain('peInPillNode()');
+  });
+
+  it('the card emits the button with both icons, the label and the pressed state', () => {
+    const s = slice(appSrc, 'function openPlayerEditPopup(', 'function closeInlineEditRow(');
+    expect(s).toContain('class="pe-inbtn${isIn ? \' is-in\' : \'\'}" data-pe-in aria-pressed="${isIn ? \'true\' : \'false\'}"');
+    expect(s).toContain('class="pe-ico pe-ico-in"');
+    expect(s).toContain('class="pe-ico pe-ico-out"');
+    expect(s).toContain('<span data-pe-inlabel>${isIn ? \'Check out\' : \'Check in\'}</span>');
+  });
+
+  it('peInPillNode rebuilds exactly the markup the opener emits, so the two cannot drift', () => {
+    const fn = slice(appSrc, 'function peInPillNode()', 'function openPlayerEditPopup(');
+    expect(fn).toContain("s.className = 'mgp-in pe-in';");
+    expect(fn).toContain("s.textContent = 'IN';");
+  });
+
+  it('the button is green while the player is out and quiet once they are in', () => {
+    expect(cssLF).toContain('.pe-inbtn {');
+    expect(cssLF).toContain('.pe-inbtn.is-in { border-color: var(--border); background: #fff; color: var(--ink); }');
+    expect(cssLF).toContain('.pe-inbtn .pe-ico-out,\n.pe-inbtn.is-in .pe-ico-in { display: none; }');
+  });
+});

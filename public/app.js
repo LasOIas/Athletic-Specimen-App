@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.29.4'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.29.5'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -125,6 +125,15 @@ function peSkillStep(rawValue, delta) {
   let now = parseFloat(rawValue);
   if (Number.isNaN(now)) now = delta < 0 ? 0.5 : 0;
   return Math.min(10, Math.max(0, now + delta)).toFixed(1);
+}
+
+// The IN pill the opener emits only when the player is checked in, rebuilt for the live toggle. Same
+// markup as openPlayerEditPopup's `inHTML`, stated beside the branch that uses it so the two cannot drift.
+function peInPillNode() {
+  const s = document.createElement('span');
+  s.className = 'mgp-in pe-in';
+  s.textContent = 'IN';
+  return s;
 }
 
 // Task 3: the player edit sheet is a body-level modal (the old in-panel admin players markup is gone).
@@ -226,6 +235,11 @@ function openPlayerEditPopup(playerKey) {
         </div>
       </div>
       <div class="pl-sect pe-sect">Status</div>
+      <button type="button" class="pe-inbtn${isIn ? ' is-in' : ''}" data-pe-in aria-pressed="${isIn ? 'true' : 'false'}">
+        <svg class="pe-ico pe-ico-in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 12.5l2.5 2.5L15.5 9"/><circle cx="12" cy="12" r="9"/></svg>
+        <svg class="pe-ico pe-ico-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 4.5H18a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-2.5"/><path d="M9.5 8.5 6 12l3.5 3.5"/><path d="M6 12h9"/></svg>
+        <span data-pe-inlabel>${isIn ? 'Check out' : 'Check in'}</span>
+      </button>
       <!-- The Groups control and the Account row came OUT of this dialog in the 2026-08-03 round, so group
            membership has no editor here (README open question 2, unanswered). These two hidden inputs stay:
            the delegated Save reads them, and dropping them would silently WIPE a player's groups every time
@@ -451,6 +465,26 @@ function findInlineEditRowByPlayerKey(playerKey) {
         row.querySelectorAll('.group-select.open').forEach((select) => select.classList.remove('open'));
       }
       render();
+      return;
+    }
+
+    // The check-in state inside the card is a DRAFT. This branch flips a pressed flag, a class, a label
+    // and the header pill, and nothing else: no state, no RPC, no saveLocal. The roster is written by the
+    // save, and only through mgckToggleByKey, and only when the flag actually differs (README:321).
+    const inBtn = e.target.closest('[data-pe-in]');
+    if (inBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const on = inBtn.getAttribute('aria-pressed') !== 'true';
+      inBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      inBtn.classList.toggle('is-in', on);
+      const lbl = inBtn.querySelector('[data-pe-inlabel]');
+      if (lbl) lbl.textContent = on ? 'Check out' : 'Check in';
+      const head = document.querySelector('#player-edit-modal .pe-head');
+      const pill = head ? head.querySelector('.pe-in') : null;
+      const x = head ? head.querySelector('.pe-x') : null;
+      if (on && !pill && head && x) head.insertBefore(peInPillNode(), x);
+      else if (!on && pill) pill.remove();
       return;
     }
 
