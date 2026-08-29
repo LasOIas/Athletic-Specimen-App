@@ -106,6 +106,11 @@ function normalizeActiveGroupSelection(value) {
 let peMode = 'edit';       // 'edit' | 'new'
 let peOrigin = 'checkin';  // 'checkin' | 'players'
 let peReturnKey = '';      // identity key of the row whose pencil opened the card
+// Fix round 1: the key the focus return is OWED, parked by close and spent by peRestoreFocus. close cannot
+// focus the pencil itself, because the save repaints right after it and mgckRepaint replaces the innerHTML
+// of #mgck-list, which is where every .mgck-edit lives (manage.js). Focusing before that lands on an
+// element removed a moment later, and the browser drops focus to document.body.
+let pePendingFocusKey = '';
 
 function closePlayerEditPopup() {
   const modal = document.getElementById('player-edit-modal');
@@ -116,11 +121,19 @@ function closePlayerEditPopup() {
   const body = document.getElementById('player-edit-modal-body');
   if (body) body.innerHTML = '';
   peMode = 'edit';
-  // Focus returns to the pencil that opened the card. It is re-QUERIED rather than remembered, because a
-  // save repaints #mgck-list and the original element is gone by the time we get here. peOrigin is NOT
-  // cleared here: the save reads it AFTER this call to pick its repaint, and every open sets it fresh.
-  const key = peReturnKey;
+  // The focus return is OWED here, not paid here: every caller that repaints must spend it AFTER the
+  // repaint, or it lands on a pencil the repaint is about to delete. peOrigin is NOT cleared: the save
+  // reads it AFTER this call to pick its repaint, and every open sets it fresh.
+  pePendingFocusKey = peReturnKey;
   peReturnKey = '';
+}
+
+// The focus return, spent by whoever closed the card once its repaint is done. The pencil is re-QUERIED
+// rather than remembered, because the one the card opened from is a different element by then. The key is
+// spent on the first call, so a second call is a no-op and no stale key can steal focus later.
+function peRestoreFocus() {
+  const key = pePendingFocusKey;
+  pePendingFocusKey = '';
   if (!key) return;
   const sel = (typeof CSS !== 'undefined' && CSS && CSS.escape) ? CSS.escape(key) : String(key).replace(/"/g, '\\"');
   const back = document.querySelector(`.mgck-edit[data-mgck-edit="${sel}"]`);
@@ -164,7 +177,8 @@ function ensurePlayerEditModal() {
   document.body.appendChild(el);
   // Close on an overlay-backdrop tap or the header Cancel (the body's own Cancel/Save are delegated).
   el.addEventListener('click', (e) => {
-    if (e.target === el || (e.target.closest && e.target.closest('[data-role="close-popup"]'))) closePlayerEditPopup();
+    // Nothing repaints on a scrim tap or an X, so the focus return is spent immediately.
+    if (e.target === el || (e.target.closest && e.target.closest('[data-role="close-popup"]'))) { closePlayerEditPopup(); peRestoreFocus(); }
   });
   return el;
 }
@@ -480,7 +494,7 @@ function findInlineEditRowByPlayerKey(playerKey) {
   document.addEventListener('keydown', (e) => {
     const modal = document.getElementById('player-edit-modal');
     if (!modal || modal.style.display !== 'flex') return;
-    if (e.key === 'Escape') { e.preventDefault(); closePlayerEditPopup(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); closePlayerEditPopup(); peRestoreFocus(); return; }
     if (e.key === 'Enter' && e.target && e.target.classList && e.target.classList.contains('popup-edit-input')) {
       e.preventDefault();
       const save = modal.querySelector('.btn-save-edit');
@@ -507,6 +521,7 @@ function findInlineEditRowByPlayerKey(playerKey) {
         row.querySelectorAll('.group-select.open').forEach((select) => select.classList.remove('open'));
       }
       render();
+      peRestoreFocus();   // AFTER the render, which rebuilds the list the pencil lives in
       return;
     }
 
@@ -636,7 +651,7 @@ function findInlineEditRowByPlayerKey(playerKey) {
     // maintained attendance writer: optimistic locally, then check_in / check_out, with the outbox on
     // failure. `silent` keeps mgckLast null so UNDO never points at a card save; the card sets its own
     // strip message below.
-    const inBtnEl = document.querySelector('#player-edit-modal [data-pe-in]');
+    const inBtnEl = row.querySelector('[data-pe-in]');
     if (inBtnEl) {
       const wantIn = inBtnEl.getAttribute('aria-pressed') === 'true';
       const isInNow = new Set(state.checkedIn || []).has(rowPlayerKey);
@@ -653,6 +668,7 @@ function findInlineEditRowByPlayerKey(playerKey) {
     if (peOrigin === 'checkin' && typeof mgckCardNotice === 'function') mgckCardNotice(name + ' updated', rowPlayerKey);
     else if (typeof repaintManage === 'function') repaintManage();
     else render();
+    peRestoreFocus();   // LAST: the repaint above replaced the pencil this focuses, so it must run after it
 
     // Honest save status: neutral "Saving…" now, settled to Saved / failed after the
     // write resolves (offline = saved locally). See reliability check 2026-06-18.
@@ -9690,8 +9706,10 @@ function attachHandlers() {
       if (mgArea) {
         const nextArea = mgArea.getAttribute('data-mg-area') || 'lead';
         mgSyncActiveTournament(); // keep the loaded tournament data glued to the resolved tournament
-        // Entering the Check-in page fresh: All filter, empty query, no stale UNDO strip.
-        if (nextArea === 'checkin') { mgckFilter = 'all'; mgckQ = ''; mgckLast = null; }
+        // Entering the Check-in page fresh: All filter, empty query, no stale UNDO strip and no stale card
+        // message. mgckNotice was missing here until fix round 1, so an organiser who saved a card, left
+        // and came back was met by "{name} updated" with no UNDO and no way to dismiss it.
+        if (nextArea === 'checkin') { mgckFilter = 'all'; mgckQ = ''; mgckLast = null; mgckNotice = null; }
         // Entering the Players directory fresh: reset the search + Select state so a re-open starts clean.
         if (nextArea === 'players' && manageView !== 'players') {
           mgPlayerQuery = ''; mgSelectMode = false; mgSelected = new Set(); mgGroupsOpen = false; mgMoveOpen = false; mgRenameGroup = null;

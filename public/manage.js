@@ -13,7 +13,8 @@
 // it survives partialRender so a background sync repaints the current Manage surface, never a full render().
 let manageView = 'lead';  // 'lead' = the needs-you lead; 'pickup'/'pickup-form' (Task 2); 'players' (Task 3); else an area id (placeholder)
 // Manage -> Check-in (2026-07-19 spec): chip filter, live search text, last toggle for UNDO.
-// mgckLast survives background container repaints (module scope); all three reset on page entry.
+// mgckLast survives background container repaints (module scope); all FOUR of these (the card's own
+// message below included) reset on page entry, at app.js's data-mg-area handler.
 let mgckFilter = 'all';
 let mgckQ = '';
 let mgckLast = null; // { key, name, dir: 'in'|'out' }
@@ -1200,9 +1201,12 @@ function mgckRepaint() {
 
 // The kiosk's optimistic + RPC + outbox contract, addressed by identity key (C21 single-source).
 function mgckToggleByKey(key, dir, opts) {
-  mgckNotice = null;   // a row tap is undoable, so the card's message steps aside and UNDO returns
   const player = (state.players || []).find((p) => playerIdentityKey(p) === key);
   if (!player) return;
+  // BELOW the guard (fix round 1): a toggle against a key that is not on the roster returns without
+  // repainting, so wiping the message up there left the DOM and the module var out of step. A row tap that
+  // really happens is undoable, so the card's message steps aside and UNDO returns.
+  mgckNotice = null;
   if (dir === 'in') {
     if (checkInPlayer(player) && supabaseClient && player.id) {
       (async () => {
@@ -1242,7 +1246,7 @@ function mgckToggleRow(key) {
 
 // The card's write-back: set the message, drop the UNDO pointer, repaint the list in place, then flash the
 // row. The flash runs AFTER the repaint because mgckRepaint replaces #mgck-list's innerHTML and would
-// throw the class away. mPlay is the app's own helper at the app's own 440ms (app.js:5243,
+// throw the class away. mPlay is the app's own helper at the app's own 440ms (app.js:5357,
 // styles.css:4693), and it is already suppressed under body.no-motion and prefers-reduced-motion.
 function mgckCardNotice(text, key) {
   mgckNotice = String(text || '');

@@ -108,6 +108,10 @@ function loadApp() {
       swapUpdateFields: (fn) => { const was = updatePlayerFieldsSupabase; updatePlayerFieldsSupabase = fn; return () => { updatePlayerFieldsSupabase = was; }; },
       swapOutbox: (fn) => { const was = outboxEnqueue; outboxEnqueue = fn; return () => { outboxEnqueue = was; }; },
       swapAddOpener: (fn) => { const was = openPlayerAddPopup; openPlayerAddPopup = fn; return () => { openPlayerAddPopup = was; }; },
+      close: () => closePlayerEditPopup(),
+      restoreFocus: () => peRestoreFocus(),
+      setReturnKey: (k) => { peReturnKey = String(k || ''); },
+      cardNotice: (t, k) => mgckCardNotice(t, k),
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -539,7 +543,10 @@ describe('Task 7: the save writes back in place and the strip stays honest', () 
   });
 
   it('close hands focus back to the pencil that opened the card, by key', () => {
-    const s = slice(appSrc, 'function closePlayerEditPopup()', 'function peSkillStep(');
+    // stripComments, per the fix-round review: the sibling guard below already does it, and a future
+    // comment naming the selector would otherwise hollow this out in silence. The slice spans BOTH halves
+    // of the focus return, closePlayerEditPopup and peRestoreFocus, because fix round 1 split it in two.
+    const s = slice(stripComments(appSrc), 'function closePlayerEditPopup()', 'function peSkillStep(');
     expect(s).toContain('.mgck-edit[data-mgck-edit=');
     expect(s).toContain('peReturnKey');
   });
@@ -680,5 +687,187 @@ describe('Task 8: adding a player from the console header', () => {
     expect(cssLF).toContain('.mgck-add svg { width: 14px; height: 14px; }');
     expect(cssLF).toContain('.pe-msg { font-size: 12.5px; color: var(--danger); margin: 10px 0 0; }');
     expect(cssLF).toContain('.pe-msg:empty { display: none; }');
+  });
+});
+
+// A DOM stub just big enough for closePlayerEditPopup and peRestoreFocus to run: a modal to find, a body
+// to blank, and a pencil that RECORDS the selector it was focused through. Same monkey-patch-and-restore
+// shape withDelegate uses above. Nothing here fakes the repaint: that is the point of the pair of cases
+// below, which prove close no longer focuses and peRestoreFocus is the only thing that does.
+function withCloseDOM(fn) {
+  const doc = bridge.doc;
+  const realGet = doc.getElementById;
+  const realQS = doc.querySelector;
+  const order = [];
+  const modal = { style: { display: 'flex' }, setAttribute: () => {}, querySelector: () => null };
+  doc.getElementById = (id) => {
+    if (id === 'player-edit-modal') return modal;
+    if (id === 'player-edit-modal-body') return { innerHTML: 'the open card' };
+    return null;
+  };
+  doc.querySelector = (sel) => {
+    const m = /^\.mgck-edit\[data-mgck-edit="(.*)"\]$/.exec(String(sel));
+    if (!m) return null;
+    return { focus: () => order.push('focus:' + m[1]) };
+  };
+  try { return fn(order); } finally { doc.getElementById = realGet; doc.querySelector = realQS; }
+}
+
+describe('Task 7 fix round 1: the focus return lands after the repaint, and no message outlives the page', () => {
+  // -- Important 1: the focus return was a no-op, because the repaint ran after it --
+
+  it('close PARKS the focus return instead of spending it, because the repaint that follows destroys the pencil', () => {
+    bridge.setReturnKey('id:p1');
+    const seen = withCloseDOM((order) => { bridge.close(); return order.slice(); });
+    // Nothing was focused. mgckRepaint replaces #mgck-list's innerHTML, which is where every .mgck-edit
+    // lives, so a focus set here would land on an element removed a moment later and drop to document.body.
+    expect(seen).toEqual([]);
+  });
+
+  it('peRestoreFocus focuses the pencil the parked key names, and spends the key exactly once', () => {
+    bridge.setReturnKey('id:p1');
+    const seen = withCloseDOM((order) => {
+      bridge.close();
+      bridge.restoreFocus();
+      bridge.restoreFocus();   // the key is spent: a second call must not focus anything again
+      return order.slice();
+    });
+    expect(seen).toEqual(['focus:id:p1']);
+  });
+
+  it('a close with no origin key focuses nothing at all, which is the add card', () => {
+    bridge.setReturnKey('');
+    const seen = withCloseDOM((order) => { bridge.close(); bridge.restoreFocus(); return order.slice(); });
+    expect(seen).toEqual([]);
+  });
+
+  it('the save calls the focus return AFTER the repaint, never before it', () => {
+    // The save delegate binds on `document`, which this harness stubs as a noop, so no case in this file
+    // can execute the save branch. The ORDER of the three calls is therefore pinned in the source, which
+    // is exactly the order the review found inverted.
+    const save = slice(stripComments(appSrc), 'function ensureSaveDelegationBound()', 'function ensureHeaderTapToTop()');
+    const branch = save.slice(save.indexOf("const btn = e.target.closest('.btn-save-edit');"));
+    const close = branch.indexOf('closePlayerEditPopup()');
+    const notice = branch.indexOf('mgckCardNotice');
+    const repaint = branch.indexOf('repaintManage');
+    const restore = branch.indexOf('peRestoreFocus()');
+    expect(close).toBeGreaterThan(-1);
+    expect(notice).toBeGreaterThan(close);
+    expect(restore).toBeGreaterThan(notice);
+    expect(restore).toBeGreaterThan(repaint);
+    // ONCE, so a stray earlier call cannot satisfy the ordering above while still firing too soon.
+    expect(branch.split('peRestoreFocus()').length - 1).toBe(1);
+  });
+
+  it('close itself no longer focuses anything, it only parks the key', () => {
+    const c = slice(stripComments(appSrc), 'function closePlayerEditPopup()', 'function peRestoreFocus()');
+    expect(c).toContain('pePendingFocusKey = peReturnKey;');
+    expect(c).not.toContain('.focus()');
+    expect(c).not.toContain('querySelector');
+  });
+
+  it('the Escape arm closes and restores focus without ever reaching Save', () => {
+    const keys = slice(stripComments(appSrc), 'function ensurePlayerEditKeysBound()', 'function ensureSaveDelegationBound()');
+    const arm = keys.slice(keys.indexOf("if (e.key === 'Escape')"), keys.indexOf("if (e.key === 'Enter'"));
+    expect(arm).toContain('closePlayerEditPopup()');
+    // Escape repaints nothing, so the return can be spent immediately.
+    expect(arm).toContain('peRestoreFocus()');
+    expect(arm).not.toContain('btn-save-edit');
+    expect(arm).not.toContain('.click()');
+  });
+
+  // -- Important 2: the card message outlived the page --
+
+  it('re-entering Check-in clears the card message, so a saved card cannot greet the next visit', () => {
+    bridge.seed([{ id: 'p1', name: 'Riley Chen', skill: 6 }], []);
+    bridge.setStrip({ last: { key: 'id:p1', name: 'Riley Chen', dir: 'in' }, notice: 'Riley Chen updated' });
+    const undo = bridge.swapRepaint(() => {});
+    try {
+      withDelegate((tap) => { tap(['data-mg-area'], 'checkin'); });
+      // All four strip inputs, not three: the filter and the query are already pinned by the Manage round.
+      expect(bridge.readStrip()).toEqual({ last: null, notice: null });
+      expect(bridge.strip()).toBe('');
+    } finally { undo(); }
+  });
+
+  // -- Important 3: the two hidden toggles decided whether the notice was ever SEEN --
+
+  it('the strip renders hidden with nothing to say, and visible for a card message', () => {
+    bridge.seed([{ id: 'p1', name: 'Riley Chen', skill: 6 }], []);
+    bridge.setStrip({ last: null, notice: null });
+    expect(bridge.checkinPage()).toContain('<div class="mgck-strip" id="mgck-strip" hidden>');
+    bridge.setStrip({ notice: 'Riley Chen updated' });
+    const shown = bridge.checkinPage();
+    expect(shown).toContain('<div class="mgck-strip" id="mgck-strip">');
+    expect(shown).not.toContain('id="mgck-strip" hidden');
+    expect(shown).toContain('Riley Chen updated');
+  });
+
+  it('the repaint hides the strip on the SAME test the builder uses, so a notice is never painted into a hidden div', () => {
+    // mgckRepaint swaps #mgck-strip's innerHTML in place and needs no DOM here, so its one deciding line
+    // is pinned by value. Revert it to !mgckLast and every card notice renders invisible.
+    const r = slice(stripComments(mgSrc), 'function mgckRepaint()', 'function mgckToggleByKey(');
+    expect(r).toContain('stripEl.hidden = !(mgckLast || mgckNotice);');
+  });
+
+  // -- Important 4: mgckCardNotice's body, the interface this task PRODUCES --
+
+  it('mgckCardNotice sets the message, drops the UNDO pointer and repaints exactly once', () => {
+    bridge.seed([{ id: 'p1', name: 'Riley Chen', skill: 6 }], []);
+    bridge.setStrip({ last: { key: 'id:p1', name: 'Riley Chen', dir: 'in' }, notice: null });
+    let paints = 0;
+    const undo = bridge.swapRepaint(() => { paints += 1; });
+    try {
+      bridge.cardNotice('Riley Chen updated', 'id:p1');
+      expect(paints).toBe(1);
+      const after = bridge.readStrip();
+      expect(after.notice).toBe('Riley Chen updated');
+      expect(after.last).toBe(null);
+      expect(bridge.strip()).toContain('Riley Chen updated');
+      expect(bridge.strip()).not.toContain('data-mgck-undo');
+    } finally { undo(); }
+  });
+
+  it('the flash row is queried AFTER the repaint, because the repaint replaces the row it targets', () => {
+    bridge.seed([{ id: 'p1', name: 'Riley Chen', skill: 6 }], []);
+    const doc = bridge.doc;
+    const realQS = doc.querySelector;
+    const order = [];
+    const undo = bridge.swapRepaint(() => { order.push('repaint'); });
+    doc.querySelector = (sel) => {
+      if (String(sel).indexOf('.ckx-row[data-mgck-id=') === 0) order.push('query:' + sel);
+      return null;   // off screen: the flash is skipped and nothing throws
+    };
+    try {
+      bridge.cardNotice('Riley Chen updated', 'id:p1');
+      expect(order).toEqual(['repaint', 'query:.ckx-row[data-mgck-id="id:p1"]']);
+    } finally { undo(); doc.querySelector = realQS; }
+  });
+
+  it('a notice with no key repaints and never looks for a row to flash', () => {
+    const doc = bridge.doc;
+    const realQS = doc.querySelector;
+    let queries = 0;
+    const undo = bridge.swapRepaint(() => {});
+    doc.querySelector = () => { queries += 1; return null; };
+    try {
+      bridge.cardNotice('Riley Chen updated', '');
+      expect(queries).toBe(0);
+      expect(bridge.readStrip().notice).toBe('Riley Chen updated');
+    } finally { undo(); doc.querySelector = realQS; }
+  });
+
+  // -- Minor 7: the clear sat above the guard, so a miss wiped the strip and then returned --
+
+  it('a toggle against a key that is not on the roster leaves the card message alone', () => {
+    bridge.seed([{ id: 'p1', name: 'Riley Chen', skill: 6 }], []);
+    bridge.setStrip({ notice: 'Riley Chen updated' });
+    const undo = bridge.swapRepaint(() => {});
+    try {
+      bridge.toggleByKey('id:nobody', 'in');
+      // The function returned without repainting, so wiping the module var would have left the DOM and
+      // the state out of step until something else happened to repaint.
+      expect(bridge.readStrip().notice).toBe('Riley Chen updated');
+    } finally { undo(); }
   });
 });
