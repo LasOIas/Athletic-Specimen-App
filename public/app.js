@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.29.7'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.29.9'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -169,16 +169,21 @@ function ensurePlayerEditModal() {
   return el;
 }
 
-function openPlayerEditPopup(playerKey) {
+// `mode` is 'new' only from openPlayerAddPopup. Every other caller passes one argument and gets 'edit',
+// which is what attachHandlers' players row and mgpAddPlayer's duplicate branch (manage.js) both do.
+function openPlayerEditPopup(playerKey, mode) {
   const modal = ensurePlayerEditModal();
   const card  = modal ? modal.querySelector('.pe-card') : null;
   if (!modal || !card) return;
 
-  peMode = 'edit';   // Task 8 replaces this line with the mode parameter when the add card arrives
+  peMode = (mode === 'new') ? 'new' : 'edit';
   peOrigin = (typeof manageView === 'string' && manageView === 'checkin') ? 'checkin' : 'players';
-  peReturnKey = String(playerKey || '');
+  peReturnKey = (peMode === 'new') ? '' : String(playerKey || '');
 
-  const player = state.players.find(p => playerIdentityKey(p) === playerKey);
+  // The add card is the same element with no roster row behind it: empty fields, no pill, status OUT.
+  const player = (peMode === 'new')
+    ? { id: '', name: '', skill: 0, groups: [] }
+    : state.players.find(p => playerIdentityKey(p) === playerKey);
   if (!player) return;
 
   const playerGroup  = (player.groups && player.groups[0]) || player.group || '';
@@ -250,6 +255,7 @@ function openPlayerEditPopup(playerKey) {
         <svg class="pe-ico pe-ico-out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 4.5H18a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-2.5"/><path d="M9.5 8.5 6 12l3.5 3.5"/><path d="M6 12h9"/></svg>
         <span data-pe-inlabel>${isIn ? 'Check out' : 'Check in'}</span>
       </button>
+      <p class="pe-msg" id="pe-msg" role="status" aria-live="polite"></p>
       <!-- The Groups control and the Account row came OUT of this dialog in the 2026-08-03 round, so group
            membership has no editor here (README open question 2, unanswered). These two hidden inputs stay:
            the delegated Save reads them, and dropping them would silently WIPE a player's groups every time
@@ -260,7 +266,7 @@ function openPlayerEditPopup(playerKey) {
     </div>
     </div>
     <div class="edit-actions pe-actions">
-      <button type="button" class="btn-save-edit success pe-save" data-player-key="${keyAttr}" data-id="${playerId}">Save changes</button>
+      <button type="button" class="btn-save-edit success pe-save" data-player-key="${keyAttr}" data-id="${playerId}">${peMode === 'new' ? 'Add player' : 'Save changes'}</button>
       <button type="button" class="btn-cancel-edit secondary pe-cancel" data-player-key="${keyAttr}">Cancel</button>
     </div>
   `;
@@ -313,6 +319,13 @@ function openPlayerEditPopup(playerKey) {
       }
     });
   }
+}
+
+// The header pill's opener. Same element, same styles, same save path: only the state differs. A new
+// player starts OUT, because being added to the roster is not the same as standing at the table, and the
+// row's own tap is how they check in.
+function openPlayerAddPopup() {
+  openPlayerEditPopup('', 'new');
 }
 
 function closeInlineEditRow(row) {
@@ -536,7 +549,15 @@ function findInlineEditRowByPlayerKey(playerKey) {
 
     const idAttr = String(btn.getAttribute('data-id') || '').trim();
     const buttonPlayerKey = String(btn.getAttribute('data-player-key') || '').trim();
-    const row = btn.closest('.edit-row') || findInlineEditRowByPlayerKey(buttonPlayerKey);
+    // The third fallback is what the ADD card needs. The Save button lives in .edit-actions, a SIBLING of
+    // .popup-body, so btn.closest('.edit-row') is null in BOTH modes; the edit card is only ever found by
+    // its key, and the add card has no key to be found by. Without this the add card's Save would return
+    // here and the button would do nothing at all. Scoped to the clicked button's own card, so it can
+    // never reach into some other row.
+    const card = btn.closest('.pe-card');
+    const row = btn.closest('.edit-row')
+      || findInlineEditRowByPlayerKey(buttonPlayerKey)
+      || (card ? card.querySelector('.edit-row') : null);
     if (!row) return;
     const rowPlayerKey = String(row.getAttribute('data-player-key') || buttonPlayerKey).trim();
 
@@ -567,6 +588,28 @@ function findInlineEditRowByPlayerKey(playerKey) {
     if (Number.isNaN(skill)) skill = 0;
     // Clamp and keep one decimal place
     skill = Math.max(0, Math.min(10, Math.round(skill * 10) / 10));
+
+    // ADD MODE. The card in its new state has no player row to update; it registers one. All three
+    // refusals run HERE, before the close, because a refusal has to land on a card the organiser is still
+    // looking at. Two of the three sentences are the ones mgckAddAndCheckIn already says
+    // (manage.js:1262-1263), so the two doors refuse in the same words.
+    if (peMode === 'new') {
+      const say = (t) => { const el = document.getElementById('pe-msg'); if (el) el.textContent = t; };
+      if (!state.loaded) { say('Still loading. One second, then tap again.'); return; }
+      if (!isValidFullName(name)) { say('Enter a first and last name'); return; }
+      if ((state.players || []).some((p) => normalize(p.name) === normalize(name))) {
+        // The card STAYS OPEN. Reopening an edit card for someone else would throw away the rating and the
+        // status just set, with no message. mgpAddPlayer keeps that reopen shape because it is reached
+        // from a list tap where nothing was typed.
+        say(name + ' is already on the roster');
+        return;
+      }
+      const inEl = document.querySelector('#player-edit-modal [data-pe-in]');
+      const wantIn = !!(inEl && inEl.getAttribute('aria-pressed') === 'true');
+      closePlayerEditPopup();
+      void mgckAddFromCard(name, skill, wantIn);
+      return;
+    }
 
     // Prefer stable identity key targeting, then persistent id targeting.
     let idx = -1;
@@ -5252,6 +5295,16 @@ async function flushOutbox() {
         else if (op.kind === 'register') res = await supabaseClient.rpc('register_player', { p_name: op.payload.name, p_group: op.payload.group || '', p_checked_in: op.payload.checked_in === true }); // Wave 1d: kiosk registrations retry atomically checked-in; admin Add-Player (no flag) stays checked-out
         else { outboxRemove(op.key); continue; }
         if (res && res.error) throw res.error;
+        // A card-added player carries a rating in its payload, and register_player only ever inserts
+        // skill 0 (db/migrations/0068_normalize_player_groups.sql:125), so the rating rides here as a
+        // follow-up write once the replay returns an id. The row is deleted the moment it lands, so a
+        // rating dropped here is dropped for good. It sits AFTER the throw above so a register that
+        // failed never gets a skill write, and BESIDE the register call rather than inside it, because
+        // the groups-removal branch is rewriting that one line and this must not collide with it.
+        if (op.kind === 'register' && Number(op.payload.skill) > 0) {
+          const regRow = res && Array.isArray(res.data) ? res.data[0] : (res && res.data);
+          if (regRow && regRow.id) await updatePlayerFieldsSupabase(regRow.id, { skill: Number(op.payload.skill) });
+        }
         outboxRemove(op.key); // landed
       } catch { /* still failing (offline?) — keep queued, retry next flush */ }
     }
@@ -9375,6 +9428,7 @@ function attachHandlers() {
           openPlayerEditPopup(pen.getAttribute('data-mgck-edit') || '');
           return;
         }
+        if (e.target.closest('[data-mgck-new]')) { e.preventDefault(); openPlayerAddPopup(); return; }
         const chip = e.target.closest('[data-mgck-filter]');
         if (chip) { mgckFilter = chip.getAttribute('data-mgck-filter') || 'all'; repaintManage(); return; }
         if (e.target.closest('[data-mgck-undo]')) {

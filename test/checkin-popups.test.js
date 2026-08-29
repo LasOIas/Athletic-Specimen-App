@@ -102,6 +102,12 @@ function loadApp() {
       readStrip: () => ({ last: mgckLast, notice: mgckNotice }),
       toggleByKey: (k, d, o) => mgckToggleByKey(k, d, o),
       swapRepaint: (fn) => { const a = mgckRepaint, b = repaintManage; mgckRepaint = fn; repaintManage = fn; return () => { mgckRepaint = a; repaintManage = b; }; },
+      checkinPage: () => { manageView = 'checkin'; return buildManageCheckinHTML(); },
+      addFromCard: (n, s, i) => mgckAddFromCard(n, s, i),
+      swapSupaRpc: (fn) => { const was = supabaseClient.rpc; supabaseClient.rpc = async (...a) => fn(...a); return () => { supabaseClient.rpc = was; }; },
+      swapUpdateFields: (fn) => { const was = updatePlayerFieldsSupabase; updatePlayerFieldsSupabase = fn; return () => { updatePlayerFieldsSupabase = was; }; },
+      swapOutbox: (fn) => { const was = outboxEnqueue; outboxEnqueue = fn; return () => { outboxEnqueue = was; }; },
+      swapAddOpener: (fn) => { const was = openPlayerAddPopup; openPlayerAddPopup = fn; return () => { openPlayerAddPopup = was; }; },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -544,5 +550,135 @@ describe('Task 7: the save writes back in place and the strip stays honest', () 
     expect(s).toContain('closePlayerEditPopup()');
     expect(s).toContain("e.key === 'Enter'");
     expect(s).toContain("classList.contains('popup-edit-input')");
+  });
+});
+
+describe('Task 8: adding a player from the console header', () => {
+  it('the page header carries the Add player pill', () => {
+    bridge.seed([{ id: 'p1', name: 'Blake Harmon', skill: 6 }], []);
+    const html = bridge.checkinPage();
+    expect(html).toContain('class="mgck-add" data-mgck-new');
+    expect(html).toContain('<span>Add player</span>');
+    const hdr = html.indexOf('class="pd-pagehdr"');
+    const pill = html.indexOf('class="mgck-add"');
+    const hdrEnd = html.indexOf('class="mgck-meta"');
+    expect(pill).toBeGreaterThan(hdr);
+    expect(pill).toBeLessThan(hdrEnd);
+  });
+
+  it('a tap on the pill opens the card in its new-player state', () => {
+    bridge.setView('checkin');
+    const opened = [];
+    const undo = bridge.swapAddOpener(() => opened.push('new'));
+    try {
+      // the pill sits in the page header, not in a row, so this is the whole attribute set a real tap
+      // hands the delegate: no [data-mgck-id] under it, and no [data-mg-area] either (the back button
+      // carries that one and is a SIBLING, not an ancestor).
+      withDelegate((tap) => { tap('data-mgck-new'); });
+      expect(opened).toEqual(['new']);
+    } finally { undo(); }
+  });
+
+  it('a rated new player registers once with two keys and gets one follow-up write for the rating', async () => {
+    bridge.seed([], []);
+    const calls = []; const fields = [];
+    const undoRepaint = bridge.swapRepaint(() => {});
+    const undoRpc = bridge.swapSupaRpc((name, args) => { calls.push([name, args]); return { data: [{ id: 'p-new' }], error: null }; });
+    const undoFields = bridge.swapUpdateFields(async (id, f) => { fields.push([id, f]); return true; });
+    try {
+      await bridge.addFromCard('Zoe Park', 6.5, false);
+      expect(calls.length).toBe(1);
+      expect(calls[0][0]).toBe('register_player');
+      expect(calls[0][1]).toEqual({ p_name: 'Zoe Park', p_checked_in: false });
+      expect('p_group' in calls[0][1]).toBe(false);
+      expect(fields).toEqual([['p-new', { skill: 6.5 }]]);
+      // OUT is the card's default, and the card's own door is the only one that honours it.
+      expect(bridge.getState().checkedIn).toEqual([]);
+    } finally { undoFields(); undoRpc(); undoRepaint(); }
+  });
+
+  it('an unrated new player takes no follow-up write at all', async () => {
+    bridge.seed([], []);
+    const fields = [];
+    const undoRepaint = bridge.swapRepaint(() => {});
+    const undoRpc = bridge.swapSupaRpc(() => ({ data: [{ id: 'p-new2' }], error: null }));
+    const undoFields = bridge.swapUpdateFields(async (id, f) => { fields.push([id, f]); return true; });
+    try {
+      await bridge.addFromCard('Ari Vance', 0, true);
+      expect(fields).toEqual([]);
+      expect(bridge.getState().checkedIn.length).toBe(1);
+      // and it is the ID key, not the local one the optimistic check-in wrote. The key changes under the
+      // entry when the insert returns, and saveLocal deletes any entry whose key no longer matches a
+      // roster row - so without the carry-across this list is EMPTY and the player reads OUT.
+      expect(bridge.getState().checkedIn).toEqual(['id:p-new2']);
+    } finally { undoFields(); undoRpc(); undoRepaint(); }
+  });
+
+  it('a failed register enqueues exactly one outbox row, carrying the rating and no group', async () => {
+    bridge.seed([], []);
+    const rows = [];
+    const undoRepaint = bridge.swapRepaint(() => {});
+    const undoRpc = bridge.swapSupaRpc(() => { throw new Error('offline'); });
+    const undoOut = bridge.swapOutbox((op) => rows.push(op));
+    try {
+      await bridge.addFromCard('Noa Whitfield', 4.5, true);
+      expect(rows.length).toBe(1);
+      expect(rows[0].kind).toBe('register');
+      expect(rows[0].payload).toEqual({ name: 'Noa Whitfield', checked_in: true, skill: 4.5 });
+      expect('group' in rows[0].payload).toBe(false);
+    } finally { undoOut(); undoRpc(); undoRepaint(); }
+  });
+
+  it('a queued register replays its rating too, because register_player only ever inserts skill 0', () => {
+    // The outbox row above is worthless if the replay drops the rating: the row is deleted the moment it
+    // lands, so a rating lost here is lost for good. Ordering matters as much as presence - the follow-up
+    // write has to sit AFTER the error throw, or a register that failed would still get a skill write.
+    const s = slice(stripComments(appSrc), 'async function flushOutbox()', 'function makeSaveToast(');
+    expect(s).toContain("op.kind === 'register' && Number(op.payload.skill) > 0");
+    expect(s).toContain('updatePlayerFieldsSupabase(regRow.id, { skill: Number(op.payload.skill) })');
+    expect(s.indexOf('if (res && res.error) throw res.error;')).toBeLessThan(s.indexOf('op.payload.skill'));
+  });
+
+  it('the add card has no roster row behind it, so the save finds its row inside the card', () => {
+    // The Save button sits in .edit-actions, a SIBLING of .popup-body, so btn.closest('.edit-row') is null
+    // in BOTH modes: the edit card is only ever found by findInlineEditRowByPlayerKey, and the add card
+    // has no key to be found by. Without the card-scoped fallback the add card's Save returns at
+    // `if (!row) return;` and the button is dead - it reads no name, no rating and no status.
+    const save = slice(appSrc, 'function ensureSaveDelegationBound()', 'function ensureHeaderTapToTop()');
+    const branch = save.slice(save.indexOf("const btn = e.target.closest('.btn-save-edit');"));
+    expect(branch).toContain("card.querySelector('.edit-row')");
+    expect(branch.indexOf("card.querySelector('.edit-row')")).toBeLessThan(branch.indexOf('if (!row) return;'));
+  });
+
+  it('the three refusals run while the card is still open, before it closes', () => {
+    const save = slice(appSrc, 'function ensureSaveDelegationBound()', 'function ensureHeaderTapToTop()');
+    const add = save.slice(save.indexOf("if (peMode === 'new') {"), save.indexOf("const inBtnEl ="));
+    expect(add).toContain('state.loaded');
+    expect(add).toContain('isValidFullName');
+    expect(add).toContain('is already on the roster');
+    expect(add.indexOf('is already on the roster')).toBeLessThan(add.indexOf('closePlayerEditPopup()'));
+    expect(add).toContain("say('Enter a first and last name')");
+    expect(add).toContain("say('Still loading. One second, then tap again.')");
+  });
+
+  it('the card carries a status line for those refusals, and the add card says Add player', () => {
+    const s = slice(appSrc, 'function openPlayerEditPopup(', 'function closeInlineEditRow(');
+    expect(s).toContain('<p class="pe-msg" id="pe-msg" role="status" aria-live="polite"></p>');
+    // The mode is a PARAMETER with an edit default, so every existing one-argument caller keeps the card
+    // it had and nothing but openPlayerAddPopup can put it in its new state.
+    expect(s).toContain('function openPlayerEditPopup(playerKey, mode) {');
+    expect(s).toContain("peMode = (mode === 'new') ? 'new' : 'edit';");
+    expect(s).toContain("openPlayerEditPopup('', 'new');");
+    // the handoff's action-bar copy: the add card's primary is not "Save changes"
+    expect(s).toContain("peMode === 'new' ? 'Add player' : 'Save changes'");
+    // The blocks are SLICED, not scanned, the way Task 6's pencil case is: a bare toContain('.mgck-add {')
+    // proves the selector exists and nothing else - the right-hand pin could be deleted and stay green.
+    const pill = cssLF.match(/^\.mgck-add\s*\{[^}]*\}/gm) || [];
+    expect(pill).toHaveLength(1);
+    expect(pill[0]).toContain('margin-left: auto;');
+    expect(pill[0]).toContain('border-radius: 999px;');
+    expect(cssLF).toContain('.mgck-add svg { width: 14px; height: 14px; }');
+    expect(cssLF).toContain('.pe-msg { font-size: 12.5px; color: var(--danger); margin: 10px 0 0; }');
+    expect(cssLF).toContain('.pe-msg:empty { display: none; }');
   });
 });

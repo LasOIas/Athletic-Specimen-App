@@ -2319,6 +2319,31 @@ input.auth-input::placeholder { color: oklch(0.62 0.005 75); }
 .mgck-edit + .mgck-sk { margin-left: 10px; }
 .ckx-row.is-in .mgck-edit { color: oklch(0.45 0.01 75); }
 
+/* Round 2026-08-29 (v) - "i need a way to add a new player with a similar pop up". The pill sits in the
+   page header next to the title, pinned right the way .mgp-selbtn is on the Players page (styles.css:2224),
+   and opens the SAME card the pencil opens, in its new-player state. */
+.mgck-add {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  height: 32px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--accent-bd);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .01em;
+  cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease, transform .09s ease;
+}
+.mgck-add svg { width: 14px; height: 14px; }
+.mgck-add:hover { background: oklch(0.92 0.04 250); }
+.mgck-add:active { transform: scale(.97); }
+
 /* ── Manage → Teams (Task 4, session-10 pick R5 TRIMMED) — chips + generate + stacked teams. mgt-* kit from
    the r10-manage k-h1 mockup. Size chips reuse the pl-tab grammar; the casual courts board is CUT (no net
    cards, no report/clear). Team label Barlow 800 muted; names STACKED one per line with faint hairlines. ── */
@@ -3577,6 +3602,11 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 /* already in: the action left is undoing it, so it stops shouting */
 .pe-inbtn.is-in { border-color: var(--border); background: #fff; color: var(--ink); }
 .pe-inbtn.is-in:hover { background: oklch(0.97 0.003 75); border-color: oklch(0.82 0.008 75); }
+/* the card's own status line, for the three refusals the add path can hand back. Same shape as the
+   console's #mgck-msg (manage.js:1160, styles.css:2287), with the card's own gutter instead of the
+   list's. */
+.pe-msg { font-size: 12.5px; color: var(--danger); margin: 10px 0 0; }
+.pe-msg:empty { display: none; }
 .pe-hint { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
 .pe-2col { grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
 .pe-cell { display: grid; gap: 7px; min-width: 0; }

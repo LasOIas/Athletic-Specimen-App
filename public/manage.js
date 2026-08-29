@@ -1169,6 +1169,8 @@ function buildManageCheckinHTML() {
   return `<div class="pd-pagehdr">
       <button type="button" class="pd-back" data-mg-area="lead" aria-label="Back to Manage">${PK_BACK_SVG}</button>
       <div class="pd-htitle">Check-in</div>
+      <button type="button" class="mgck-add" data-mgck-new aria-label="Add a player to the roster">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Add player</span></button>
     </div>
     <div class="mgck-meta" id="mgck-meta">${mgckMetaHTML(model)}</div>
     <div class="pl-tabs">${chip('all', 'All')}${chip('in', 'In')}${chip('out', 'Out')}</div>
@@ -1286,6 +1288,56 @@ async function mgckAddAndCheckIn(name) {
     saveLocal();
     mgckRepaint();
   }
+}
+
+// The header card's add. Mike (2026-08-29) kept BOTH doors: mgckAddAndCheckIn is the in-list search miss
+// and always checks in; this one honours the card's own status toggle and defaults OUT. register_player
+// inserts with skill 0 (db/migrations/0068_normalize_player_groups.sql:125), so a rated new player needs a
+// second write once the insert returns an id. The row lands under the right section head for free, because
+// mgckRepaint rebuilds the list from checkinConsoleModel, which sections by checkedIn (pure.js:1582-1589).
+async function mgckAddFromCard(name, skill, wantIn) {
+  const trimmed = String(name || '').trim();
+  // The three gates below already ran in the save branch, WHILE THE CARD WAS STILL OPEN, because a refusal
+  // has to land somewhere the organiser can read it. They are repeated here so the function is safe to
+  // call from anywhere, and so a later caller cannot skip the app's standing rules.
+  if (!trimmed || !state.loaded || !isValidFullName(trimmed)) return;
+  if ((state.players || []).some((p) => normalize(p.name) === normalize(trimmed))) return;
+  const n = Number(skill);
+  const sk = (Number.isFinite(n) && n > 0) ? Math.max(0, Math.min(10, Math.round(n * 10) / 10)) : 0;
+  const inserted = { name: trimmed, skill: sk, pending: true };
+  state.players = [...(state.players || []), inserted];
+  if (wantIn) checkInPlayer(inserted);
+  saveLocal();
+  mgckCardNotice(trimmed + ' added' + (wantIn ? ' · checked in' : ''), playerIdentityKey(inserted));
+  if (!supabaseClient) { inserted.pending = false; return; }
+  try {
+    const { data, error } = await supabaseClient.rpc('register_player', { p_name: trimmed, p_checked_in: !!wantIn });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    if (row && row.id) {
+      // The identity key CHANGES the moment the id lands: local:<k> becomes id:<uuid> (pure.js:11-18).
+      // saveLocal drops any checkedIn entry whose key no longer matches a roster row
+      // (normalizeCheckedInEntries, app.js:1521), so the entry is carried across here. Without this a
+      // player added checked-in reads OUT again on the very next repaint, until a refresh heals it from
+      // the server - and never, if the device is offline.
+      const wasKey = playerIdentityKey(inserted);
+      inserted.id = row.id;
+      const nowKey = playerIdentityKey(inserted);
+      if (nowKey !== wasKey) state.checkedIn = (state.checkedIn || []).map((k) => (k === wasKey ? nowKey : k));
+    }
+    if (inserted.id) {
+      inserted.pending = false;
+      if (sk > 0) await updatePlayerFieldsSupabase(inserted.id, { skill: sk });
+    }
+    queueSupabaseRefresh();
+  } catch (err) {
+    console.error('mgck card register error', err);
+    inserted.pending = true;
+    outboxEnqueue({ key: 'reg:' + normalize(trimmed), kind: 'register',
+                    payload: { name: trimmed, checked_in: !!wantIn, skill: sk }, ts: Date.now() });
+  }
+  saveLocal();
+  mgckRepaint();
 }
 
 // Bulk check-in / check-out over the Select-mode selection. Optimistic locally, then the per-id
