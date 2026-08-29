@@ -111,7 +111,7 @@
 
   <!-- Perf (2026-07-11): these three were SYNCHRONOUS — they blocked HTML parsing on two CDN round-trips
        before the (deferred) app could even be parsed. All scripts below are now `defer`: defer scripts
-       execute in DOCUMENT ORDER after parse, so the dependency chain (supabase UMD -> config -> pure -> app)
+       execute in DOCUMENT ORDER after parse, so the dependency chain (supabase UMD -> config -> pure -> manage -> app)
        is preserved exactly. QRCode is only used by the on-demand QR modal. -->
   <!-- QR Code -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
@@ -121,6 +121,8 @@
   <script src="/supabase-config.js" defer></script>
   <!-- Pure logic (tournament/balancing/scoring) — shared with the vitest suite; MUST load before app.js -->
   <script src="/pure.js" defer></script>
+  <!-- Manage surfaces (the admin tab): declarations only, shares app.js's globals; MUST load before app.js (C102) -->
+  <script src="/manage.js" defer></script>
   <!-- Main App (tournament UI: buildTournamentTabHTML + bindTournamentTabV2) -->
   <script src="/app.js" defer></script>
 </body>
