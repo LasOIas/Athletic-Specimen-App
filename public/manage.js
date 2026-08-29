@@ -1111,9 +1111,22 @@ function mgckListHTML(model) {
     const n = Number(r && r.skill);
     const skPos = Number.isFinite(n) && n > 0;
     // Round 2026-08-29: the pencil sits between the name and the rating and opens the app's own player
-    // card over the list. It is a span with role="button" because the row itself is a <button> and nested
-    // buttons are invalid HTML (README:120-123). It carries the identity key so the delegate and the
-    // focus-return never have to walk the DOM.
+    // card over the list. It carries the identity key so the delegate and the focus-return never have to
+    // walk the DOM.
+    //
+    // KNOWN LIMITATION, ledgered rather than solved (review round 1). A span is used because the row is a
+    // <button> and a nested button is invalid HTML (README:120-123), but the span does NOT settle the
+    // question, it only avoids the parse error:
+    //   - button's content model forbids a descendant with tabindex just as it forbids a nested button,
+    //     so tabindex="0" in here is non-conforming too. Nothing breaks in the parser.
+    //   - role="button" is "children presentational", so a screen reader flattens everything inside
+    //     .ckx-row: the pencil is not reachable as its own control and its aria-label folds into the ROW
+    //     button's accessible name ("Blake Harmon Edit Blake Harmon 6.0 CHECK IN").
+    // Sighted keyboard reach is unaffected: tabindex is honoured inside a button, Tab lands on the pencil,
+    // and a span has no activation behaviour so Enter/Space fire only the delegate in app.js, once.
+    // The real fix is the handoff's own (README:120-122): make the row a container with two SIBLING
+    // buttons, the row body and the edit, keeping the 34x34 hit box. That is a row-shape change across
+    // every .ckx-row surface, so it belongs to the Manage CSS/row round, not to this string builder.
     const pencil = `<span class="mgck-edit" role="button" tabindex="0" data-mgck-edit="${escapeHTMLText(r.key)}"`
       + ` aria-label="Edit ${escapeHTMLText(r.name)}">`
       + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">`

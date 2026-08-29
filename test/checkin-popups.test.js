@@ -143,9 +143,16 @@ function withDelegate(fn) {
     target: target(Array.isArray(attrs) ? attrs : [attrs], value),
     preventDefault: noop, stopPropagation: noop,
   });
+  // press RETURNS whether preventDefault ran, the way test/manage-round.test.js:3007-3022 does it, because
+  // "Space never scrolls the roster out from under the card" is a promise a noop stub can never keep.
   const press = (key, attrs, value) => {
-    const ev = { key, target: target(Array.isArray(attrs) ? attrs : [attrs], value), preventDefault: noop, stopPropagation: noop };
+    let prevented = false;
+    const ev = {
+      key, target: target(Array.isArray(attrs) ? attrs : [attrs], value),
+      preventDefault: () => { prevented = true; }, stopPropagation: noop,
+    };
     for (const cb of keys) cb(ev);
+    return prevented;
   };
   return fn(tap, press);
 }
@@ -370,7 +377,12 @@ describe('Task 6: the pencil, and the tap that must not check anyone in', () => 
     const opened = []; const toggled = [];
     const undo = bridge.swapOpeners((k) => opened.push(k), (k) => toggled.push(k));
     try {
-      withDelegate((tap) => { tap('data-mgck-edit', 'id:p1'); });
+      // BOTH hooks, because that is what the DOM really hands the delegate: the pencil is a child of the
+      // row <button>, so a real tap on it answers closest('[data-mgck-id]') as well. Claim only the pencil
+      // hook and the row toggle finds nothing to toggle, and the case passes with the two branches in
+      // EITHER order - which is the one thing it exists to rule out. Mutation-proved in fix round 1: move
+      // the [data-mgck-edit] branch below the row toggle in app.js and this line goes red.
+      withDelegate((tap) => { tap(['data-mgck-edit', 'data-mgck-id'], 'id:p1'); });
       expect(opened).toEqual(['id:p1']);
       expect(toggled).toEqual([]);
     } finally { undo(); }
@@ -388,20 +400,62 @@ describe('Task 6: the pencil, and the tap that must not check anyone in', () => 
     } finally { undo(); }
   });
 
-  it('Enter and Space on the pencil open the same card the tap opens', () => {
+  it('Enter and Space on the pencil open the same card the tap opens, and Space never scrolls', () => {
     bridge.seed(roster, []);
     bridge.setView('checkin');
     const opened = [];
     const undo = bridge.swapOpeners((k) => opened.push(k), () => {});
     try {
-      withDelegate((tap, press) => { press('Enter', 'data-mgck-edit', 'id:p2'); press(' ', 'data-mgck-edit', 'id:p2'); });
+      withDelegate((tap, press) => {
+        // the focused pencil sits inside the row here too, for the same reason the tap case does
+        expect(press('Enter', ['data-mgck-edit', 'data-mgck-id'], 'id:p2')).toBe(true);
+        expect(press(' ', ['data-mgck-edit', 'data-mgck-id'], 'id:p2')).toBe(true);
+        press('a', ['data-mgck-edit', 'data-mgck-id'], 'id:p2');   // any other key is left alone
+        press('Enter', 'data-mgck-id', 'id:p1');                   // and the row itself is not a pencil
+      });
       expect(opened).toEqual(['id:p2', 'id:p2']);
     } finally { undo(); }
   });
 
+  it('the pencil keydown is gated to the check-in console, so it cannot fire on another Manage view', () => {
+    bridge.seed(roster, []);
+    bridge.setView('players');
+    const opened = [];
+    const undo = bridge.swapOpeners((k) => opened.push(k), () => {});
+    try {
+      // Without the manageView gate this listener would answer an Enter anywhere in Manage. The Players
+      // list has its own opener and its own hooks; two openers racing one key is the bug this rules out.
+      withDelegate((tap, press) => { press('Enter', 'data-mgck-edit', 'id:p2'); });
+      expect(opened).toEqual([]);
+    } finally { undo(); bridge.setView('checkin'); }
+  });
+
+  it('the public kiosk row stays pencil-free and rating-free (spec 7.3, AS-1)', () => {
+    // The kiosk builds its rows in a DIFFERENT function, and the skill rating plus the edit affordance are
+    // admin-only. Nothing stops a later task from reusing the console's builder on the kiosk except this.
+    const kiosk = slice(appSrc, 'function renderCheckinButton(', 'function highlightMatch(');
+    expect(kiosk).toContain('data-checkin-id=');
+    expect(kiosk).not.toContain('mgck-edit');
+    expect(kiosk).not.toContain('mgck-sk');
+  });
+
   it('the pencil is quiet at rest and legible on a checked-in row', () => {
-    expect(cssLF).toContain('.mgck-edit {');
+    // The block is SLICED, not scanned, the way the .pe-head and .pe-inbtn cases above do it. A bare
+    // toContain('.mgck-edit {') proves the selector exists and nothing else: the rest ink, the 34x34 hit
+    // box and the whole focus chip could all be deleted and stay green. [^}] spans newlines in JS, so the
+    // match runs to the block's first closing brace, and the m flag keeps the descendant, :hover and
+    // .is-in rules out, which is why the length is 1.
+    const pen = cssLF.match(/^\.mgck-edit\s*\{[^}]*\}/gm) || [];
+    expect(pen).toHaveLength(1);
+    expect(pen[0]).toContain('width: 34px;');
+    expect(pen[0]).toContain('height: 34px;');
+    expect(pen[0]).toContain('color: oklch(0.62 0.01 75);');
+    expect(cssLF).toContain('.mgck-edit svg { width: 15px; height: 15px; }');
+    // The focus chip is what makes the keyboard path visible at all, so it is pinned by value too.
+    expect(cssLF).toContain('.mgck-edit:hover,\n.mgck-edit:focus-visible {');
     expect(cssLF).toContain('.mgck-edit + .mgck-sk { margin-left: 10px; }');
+    // .ckx-row.is-in is opacity .55 and opacity on the parent caps every child, so this is a DARKER ink
+    // and not an override. Delete it and the pencil goes invisible on every checked-in row.
     expect(cssLF).toContain('.ckx-row.is-in .mgck-edit { color: oklch(0.45 0.01 75); }');
   });
 });
