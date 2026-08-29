@@ -599,7 +599,10 @@ function findInlineEditRowByPlayerKey(playerKey) {
     // `if (!name || Number.isNaN(skill)) return;`. A blank rating aborted the save in SILENCE, so an
     // organiser fixing a typo on an unrated player watched the card close and nothing change. Name empty
     // is the only rule the card enforces, and it says so by focusing the field it wants.
-    if (!name) { if (nameInput) nameInput.focus(); return; }
+    // Fix round 1 (M1): add mode FALLS THROUGH this guard so its own isValidFullName refusal can speak.
+    // A blank name was the one add-card refusal that said nothing, and the card owns a status line now.
+    // Edit mode keeps the focus-only rule (the handoff's README:326), which is what it has always had.
+    if (!name && peMode !== 'new') { if (nameInput) nameInput.focus(); return; }
     if (Number.isNaN(skill)) skill = 0;
     // Clamp and keep one decimal place
     skill = Math.max(0, Math.min(10, Math.round(skill * 10) / 10));
@@ -610,8 +613,9 @@ function findInlineEditRowByPlayerKey(playerKey) {
     // (manage.js:1262-1263), so the two doors refuse in the same words.
     if (peMode === 'new') {
       const say = (t) => { const el = document.getElementById('pe-msg'); if (el) el.textContent = t; };
+      say('');   // fix round 1 (M2): no refusal outlives the input that caused it
       if (!state.loaded) { say('Still loading. One second, then tap again.'); return; }
-      if (!isValidFullName(name)) { say('Enter a first and last name'); return; }
+      if (!isValidFullName(name)) { say('Enter a first and last name'); if (nameInput) nameInput.focus(); return; }
       if ((state.players || []).some((p) => normalize(p.name) === normalize(name))) {
         // The card STAYS OPEN. Reopening an edit card for someone else would throw away the rating and the
         // status just set, with no message. mgpAddPlayer keeps that reopen shape because it is reached
@@ -619,10 +623,18 @@ function findInlineEditRowByPlayerKey(playerKey) {
         say(name + ' is already on the roster');
         return;
       }
-      const inEl = document.querySelector('#player-edit-modal [data-pe-in]');
+      // Read from the ROW, the way the edit path's status draft does since fix round 1: the button is the
+      // card's own, and a document-wide id lookup is a wider net than this needs.
+      const inEl = row.querySelector('[data-pe-in]');
       const wantIn = !!(inEl && inEl.getAttribute('aria-pressed') === 'true');
       closePlayerEditPopup();
       void mgckAddFromCard(name, skill, wantIn);
+      // Fix round 1 (M7): the add card has no pencil to hand focus back to (peReturnKey is empty in add
+      // mode, so peRestoreFocus is a no-op), and focus would fall to <body>. It goes to the control that
+      // opened the card. The pill lives in .pd-pagehdr, which mgckRepaint never replaces, so the repaint
+      // the line above already ran cannot have removed it.
+      const addPill = document.querySelector('.mgck-add');
+      if (addPill) { try { addPill.focus(); } catch (_) {} }
       return;
     }
 
@@ -5319,7 +5331,14 @@ async function flushOutbox() {
         // the groups-removal branch is rewriting that one line and this must not collide with it.
         if (op.kind === 'register' && Number(op.payload.skill) > 0) {
           const regRow = res && Array.isArray(res.data) ? res.data[0] : (res && res.data);
-          if (regRow && regRow.id) await updatePlayerFieldsSupabase(regRow.id, { skill: Number(op.payload.skill) });
+          // Fix round 1 (I1), the same dedup guard mgckAddFromCard runs: register_player returns the
+          // EXISTING row when the name is already taken, so an id this device already knows means the
+          // server matched somebody rather than inserting. This path is the likelier of the two to hit it,
+          // because a row queued offline replays against a roster that has moved on. A rating not applied
+          // to our own player is recoverable by editing them; a rating written over a stranger's is not.
+          // 0069's `is_new` flag replaces this guess.
+          const known = !!(regRow && regRow.id && (state.players || []).some((p) => String(p.id) === String(regRow.id)));
+          if (regRow && regRow.id && !known) await updatePlayerFieldsSupabase(regRow.id, { skill: Number(op.payload.skill) });
         }
         outboxRemove(op.key); // landed
       } catch { /* still failing (offline?) — keep queued, retry next flush */ }

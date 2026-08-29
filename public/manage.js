@@ -1313,8 +1313,15 @@ async function mgckAddFromCard(name, skill, wantIn) {
   if (wantIn) checkInPlayer(inserted);
   saveLocal();
   mgckCardNotice(trimmed + ' added' + (wantIn ? ' · checked in' : ''), playerIdentityKey(inserted));
-  if (!supabaseClient) { inserted.pending = false; return; }
+  // Fix round 1 (M5): persist the settled flag. Without the saveLocal the row is written to storage as
+  // pending: true and never corrected, because the trailing saveLocal is below this return.
+  if (!supabaseClient) { inserted.pending = false; saveLocal(); return; }
   try {
+    // TWO keys, no p_group. Safe ONLY against a database where 0068 has already been applied. The
+    // pre-0068 function dedups on (lower(btrim(name)), coalesce("group",'')), so omitting p_group there
+    // would miss every grouped player and insert a SECOND row that the unique index does not block. 0068
+    // ships before any client push (spec:944, :1343). The signature keeps p_group with a default in both
+    // versions, so this call always binds - the ordering is about the DEDUP, not the arity.
     const { data, error } = await supabaseClient.rpc('register_player', { p_name: trimmed, p_checked_in: !!wantIn });
     if (error) throw error;
     const row = Array.isArray(data) ? data[0] : data;
@@ -1325,6 +1332,23 @@ async function mgckAddFromCard(name, skill, wantIn) {
       // player added checked-in reads OUT again on the very next repaint, until a refresh heals it from
       // the server - and never, if the device is offline.
       const wasKey = playerIdentityKey(inserted);
+      // Fix round 1 (I1): register_player NEVER errors on a name that is already taken - it selects the
+      // existing row and returns it (0068_normalize_player_groups.sql:118-124), so an insert and a match
+      // look identical from here. If the returned id is one THIS DEVICE already has, the server matched
+      // somebody. Taking that id as our own would run the card's rating over a real player's while the
+      // strip said "added". Roll the optimistic row back and say what actually happened.
+      // Residual, and it needs the server to close: an add from a roster this device has not synced yet
+      // returns an id we have never seen, so this guess cannot tell it from an insert. 0069 gives
+      // register_player an `is_new boolean`; when it lands, gate the skill write and the copy on THAT
+      // here and in flushOutbox, and this local guess becomes a fallback.
+      const clash = (state.players || []).some((p) => p !== inserted && String(p.id) === String(row.id));
+      if (clash) {
+        state.players = (state.players || []).filter((p) => p !== inserted);
+        state.checkedIn = (state.checkedIn || []).filter((k) => k !== wasKey);
+        saveLocal();
+        mgckCardNotice(trimmed + ' is already on the roster', 'id:' + row.id);
+        return;
+      }
       inserted.id = row.id;
       const nowKey = playerIdentityKey(inserted);
       if (nowKey !== wasKey) state.checkedIn = (state.checkedIn || []).map((k) => (k === wasKey ? nowKey : k));

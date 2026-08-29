@@ -290,7 +290,10 @@ describe('Task 4: the stepper, and unrated is skill 0', () => {
     const save = slice(stripComments(appSrc), 'function ensureSaveDelegationBound()', 'function ensureHeaderTapToTop()');
     expect(save).not.toContain('if (!name || Number.isNaN(skill)) return;');
     expect(save).toContain('if (Number.isNaN(skill)) skill = 0;');
-    expect(save).toContain('if (!name) { if (nameInput) nameInput.focus(); return; }');
+    // Fix round 1: the empty-name guard gained a mode gate, so add mode can refuse OUT LOUD through the
+    // card's own status line. Edit mode keeps the focus-only rule this case was written to protect, and
+    // the guard is still here - which is the whole point of pinning it beside the abort that left.
+    expect(save).toContain("if (!name && peMode !== 'new') { if (nameInput) nameInput.focus(); return; }");
   });
 
   it('the stepper frame and its buttons are in styles.css, with the native spinners suppressed', () => {
@@ -636,14 +639,45 @@ describe('Task 8: adding a player from the console header', () => {
     } finally { undoOut(); undoRpc(); undoRepaint(); }
   });
 
-  it('a queued register replays its rating too, because register_player only ever inserts skill 0', () => {
-    // The outbox row above is worthless if the replay drops the rating: the row is deleted the moment it
-    // lands, so a rating lost here is lost for good. Ordering matters as much as presence - the follow-up
-    // write has to sit AFTER the error throw, or a register that failed would still get a skill write.
+  it('a name the SERVER already has does not overwrite that player, and the strip says so', async () => {
+    // register_player never errors on a taken name: it selects the EXISTING row and returns it, so an
+    // insert and a match look identical from the client. The local dedup can miss (a roster this device
+    // has not synced, or a spelling it normalises differently), and then the tell is that the returned id
+    // is one we already hold. Writing the card's rating onto it replaces a real player's.
+    bridge.seed([{ id: 'p-existing', name: 'Robin Vale', skill: 8 }], []);
+    const calls = []; const fields = [];
+    const undoRepaint = bridge.swapRepaint(() => {});
+    const undoRpc = bridge.swapSupaRpc((n, a) => { calls.push([n, a]); return { data: [{ id: 'p-existing' }], error: null }; });
+    const undoFields = bridge.swapUpdateFields(async (id, f) => { fields.push([id, f]); return true; });
+    try {
+      await bridge.addFromCard('Robin Vayle', 7, true);
+      expect(calls.length).toBe(1);
+      expect(fields).toEqual([]);                        // the existing 8 is NOT replaced by the card's 7
+      expect(bridge.readStrip().notice).toBe('Robin Vayle is already on the roster');
+      expect(bridge.readStrip().notice).not.toContain('added');
+      // the optimistic row AND its check-in are rolled back, so the roster keeps one Robin and nobody is
+      // standing at the table who is not really there
+      expect(bridge.getState().players.length).toBe(1);
+      expect(bridge.getState().players[0].id).toBe('p-existing');
+      expect(bridge.getState().checkedIn).toEqual([]);
+    } finally { undoFields(); undoRpc(); undoRepaint(); }
+  });
+
+  it('a queued register replays its rating too, but never onto a player the server matched', () => {
+    // The outbox row is worthless if the replay drops the rating: the row is deleted the moment it lands,
+    // so a rating lost here is lost for good. Ordering matters as much as presence - the follow-up write
+    // has to sit AFTER the error throw, or a register that failed would still get a skill write. And this
+    // path is the likelier of the two to meet the server's dedup, because a row queued offline replays
+    // against a roster that has moved on, so it carries the same known-id guard the card path does.
     const s = slice(stripComments(appSrc), 'async function flushOutbox()', 'function makeSaveToast(');
     expect(s).toContain("op.kind === 'register' && Number(op.payload.skill) > 0");
     expect(s).toContain('updatePlayerFieldsSupabase(regRow.id, { skill: Number(op.payload.skill) })');
+    // toContain FIRST: indexOf returns -1 when the needle is gone and -1 is less than every real index, so
+    // the ordering line below would stay green if the throw were deleted outright rather than moved.
+    expect(s).toContain('if (res && res.error) throw res.error;');
     expect(s.indexOf('if (res && res.error) throw res.error;')).toBeLessThan(s.indexOf('op.payload.skill'));
+    expect(s).toContain('String(p.id) === String(regRow.id)');
+    expect(s).toContain('if (regRow && regRow.id && !known)');
   });
 
   it('the add card has no roster row behind it, so the save finds its row inside the card', () => {
@@ -666,6 +700,24 @@ describe('Task 8: adding a player from the console header', () => {
     expect(add.indexOf('is already on the roster')).toBeLessThan(add.indexOf('closePlayerEditPopup()'));
     expect(add).toContain("say('Enter a first and last name')");
     expect(add).toContain("say('Still loading. One second, then tap again.')");
+    // and the line is WIPED before every attempt, or a refusal outlives the input that caused it: read
+    // "Zoe Park is already on the roster", blank the name, tap again, and that sentence still stands.
+    expect(add).toContain("say('')");
+    expect(add.indexOf("say('')")).toBeLessThan(add.indexOf("say('Still loading"));
+  });
+
+  it('a blank name in add mode speaks too, and the add card hands focus back to the pill', () => {
+    const save = slice(stripComments(appSrc), 'function ensureSaveDelegationBound()', 'function ensureHeaderTapToTop()');
+    // The shared empty-name guard used to swallow add mode in silence: it returned before the add branch
+    // could say anything, so three of the four refusals spoke and the fourth only moved the cursor. Add
+    // mode now falls through it and is refused by its own isValidFullName line, which says so out loud.
+    expect(save).toContain("if (!name && peMode !== 'new') { if (nameInput) nameInput.focus(); return; }");
+    const add = save.slice(save.indexOf("if (peMode === 'new') {"), save.indexOf('const inBtnEl ='));
+    expect(add).toContain("say('Enter a first and last name'); if (nameInput) nameInput.focus();");
+    // The add card has no pencil to return focus to (peReturnKey is empty in add mode), so without this
+    // focus falls to <body> and a keyboard organiser is dropped out of the page they were working in.
+    expect(add).toContain("document.querySelector('.mgck-add')");
+    expect(add.indexOf('closePlayerEditPopup()')).toBeLessThan(add.indexOf("document.querySelector('.mgck-add')"));
   });
 
   it('the card carries a status line for those refusals, and the add card says Add player', () => {
