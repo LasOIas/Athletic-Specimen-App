@@ -511,6 +511,10 @@ describe('Task 1 foundations', () => {
     expect(count(css, '#player-edit-modal .pe-save')).toBeGreaterThanOrEqual(1);
     expect(css).toContain('@keyframes m-menu');
     expect(css).not.toMatch(/\.popup-edit-input\s*\{[^}]*!important/);
+    // Round 2026-08-29 (vi): the pin lives on the header, not on the pill, so the close button does not
+    // move when a player checks in. The 08-23 button block above is untouched by that round.
+    expect(css).toMatch(/\.popup-header \.pe-x,\s*\.popup-header \.hmv-rx \{ margin-left: auto; \}/);
+    expect(count(css, '#player-edit-modal .pe-cancel')).toBeGreaterThanOrEqual(1);
   });
 });
 

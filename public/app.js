@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.26.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.29.1'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -153,12 +153,11 @@ function openPlayerEditPopup(playerKey) {
   const firstName = parts[0] || '';
   const lastName  = parts.slice(1).join(' ');
   const initial   = (firstName.charAt(0) || whole.charAt(0) || '?').toUpperCase();
-  // The players-list green IN pill for check-in state. When the player is NOT checked in the pill is replaced
-  // by an empty .pe-in spacer — .pe-in carries the margin-left:auto that pushes the close button to the edge.
+  // The players-list green IN pill, emitted ONLY when it is true. The empty spacer that used to stand in
+  // for it is gone: the title block now takes the slack and .pe-x carries the auto margin (styles.css,
+  // round 2026-08-29 vi), so the close button is pinned right whether or not the pill is there.
   const isIn = new Set(state.checkedIn || []).has(playerKey);
-  const inHTML = isIn
-    ? `<span class="mgp-in pe-in">IN</span>`
-    : `<span class="pe-in" aria-hidden="true"></span>`;
+  const inHTML = isIn ? `<span class="mgp-in pe-in">IN</span>` : '';
 
   card.innerHTML = `
     <div class="popup-header pe-head">

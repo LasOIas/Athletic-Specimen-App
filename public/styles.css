@@ -3363,8 +3363,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
 }
 .pe-who { display: grid; gap: 2px; min-width: 0; }
 .pe-who h3 { margin: 0; font-size: 17px; line-height: 1.2; }
-/* check-in state reuses the players-list IN pill, sat left of the close button */
-.pe-in { flex: none; margin-left: auto; }
+.pe-in { flex: none; }
 .pe-x {
   flex: none;
   display: grid;
@@ -3460,6 +3459,20 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   font-weight: 600;
   cursor: pointer;
 }
+
+/* Round 2026-08-29 (vi) - "why does this move after checking in, have it always be on the far right for
+   all pop ups". The close button used to be pushed right only by the IN pill's auto margin, so on a player
+   who was still out it sat tucked against the name and jumped to the corner the moment they checked in.
+   The TITLE takes the slack instead. Two dialogs emit .popup-header and BOTH were read against these
+   rules: the player card (app.js openPlayerEditPopup) and the Home rules sheet (app.js hmRulesModalHTML).
+   #hm-rules-modal .hmv-rtitles (styles.css:4227) sets only display, gap and min-width, so nothing here
+   fights it, and with justify-content: space-between and two children the auto margin is inert there. */
+.popup-header .pe-who,
+.popup-header .hmv-rtitles { flex: 1 1 auto; min-width: 0; }
+.popup-header .pe-in { margin-left: 0; }
+.popup-header .pe-x,
+.popup-header .hmv-rx { margin-left: auto; }
+.popup-header .pe-in + .pe-x { margin-left: 10px; }
 
 /* Round 2026-08-03 — "add more to each part already in the Tournament sub-hub"
    + "somewhere the reset and a delete tournament are".
