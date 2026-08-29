@@ -12,6 +12,7 @@ const ASSETS = [
   '/styles.css',
   '/manifest.json',
   '/app.js',
+  '/manage.js',
   '/pure.js',
   '/supabase-config.js',
   '/icon-192.png',
