@@ -758,18 +758,15 @@ function buildCopilotContext(input) {
   const liveData = inp.liveData || {};
   const tour = inp.tournament || null;
 
-  // attendance (redacted: name + group only)
+  // attendance (redacted: name only). The byGroup bucket and the per-attendee group key left on
+  // 2026-08-29 with groups themselves: after the column drop every attendee would have landed in a
+  // single 'Ungrouped' bucket, telling the model about a dimension that no longer exists.
   const here = [];
-  const byGroup = {};
   players.forEach((p) => {
     if (!p || !p.checked_in) return;
-    const name = String(p.name || '').trim();
-    const group = String(p.group || '').trim();
-    here.push({ name, group });
-    const key = group || 'Ungrouped';
-    byGroup[key] = (byGroup[key] || 0) + 1;
+    here.push({ name: String(p.name || '').trim() });
   });
-  const attendance = { total: here.length, byGroup, here };
+  const attendance = { total: here.length, here };
 
   // casual courts (redacted rosters; null when no teams)
   let casualCourts = null;

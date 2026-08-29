@@ -122,7 +122,7 @@ describe('client files', () => {
     }
     expect(bad, 'top-level statements in manage.js (it must stay declarations-only):\n' + bad.join('\n')).toEqual([]);
     // and no initializer reaches into app.js: every top-level let/const initializer, multi-line ones
-    // included, has to be frozen literal data. 63 of them today, none rejected.
+    // included, has to be frozen literal data. 60 of them today, none rejected.
     const inits = [...manage.matchAll(/^(?:let|const)\s+[A-Za-z_$][\w$]*\s*=/gm)]
       .map((m) => readInit(manage, m.index + m[0].length).trim());
     expect(inits.length).toBeGreaterThan(57);   // the census must not go quiet: 63 at the cut, 60 after the

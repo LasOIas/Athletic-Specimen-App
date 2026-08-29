@@ -946,8 +946,8 @@ async function removePickupDay(id) {
 // kit carries the search box, meta line, A–Z rows, IN tag, admin-only skill and the Select(bulk) bar. The
 // inline group manager that used to hang off the meta left on 2026-08-29 with groups themselves (Mike:
 // DELETE GROUPS EVERYWHERE). Tap a row → the EXISTING openPlayerEditPopup (body-level modal,
-// poll-clobber-immune). Skill is
-// ADMIN-ONLY data (never on a public surface). NO initials bubbles anywhere.
+// poll-clobber-immune). Skill is ADMIN-ONLY data (never on a public surface). NO initials bubbles
+// anywhere.
 const MGP_SEARCH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>';
 const MGP_CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 

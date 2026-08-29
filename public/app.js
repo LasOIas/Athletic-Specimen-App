@@ -759,24 +759,17 @@ function escapeHTMLText(value) {
 }
 
 function buildCheckinStatsHTML() {
-  // Round 2 §12.3: the PUBLIC check-in surface shows only a quiet "N checked in" line (the admin
-  // dashboard keeps the full stat hero + per-group breakdown below).
+  // Round 2 §12.3: the PUBLIC check-in surface shows only a quiet "N checked in" line; the admin gets the
+  // stat hero. The per-group breakdown that used to sit under the hero left on 2026-08-29 (Mike: DELETE
+  // GROUPS EVERYWHERE) - it printed a group name and a per-group fraction on the Check In tab, and after
+  // the column drop it would have printed one "Ungrouped (No Groups)" row holding the whole roster.
   if (!state.isAdmin) return `<div class="cik-count">${state.checkedIn.length} checked in</div>`;
-  const groups = state.isAdmin ? computeCheckedInByGroup() : [];
   return `
 <div class="checkin-stats-card">
   <div class="checkin-stat-hero">
     <span class="checkin-stat-num">${state.checkedIn.length}</span>
     <span class="checkin-stat-label">Checked In</span>
   </div>
-  ${groups.length ? `
-  <div class="checkin-group-breakdown">
-    ${groups.map((row) => `
-    <div class="checkin-group-row">
-      <span class="checkin-group-name">${escapeHTMLText(row.groupLabel)}</span>
-      <span class="checkin-group-fraction">${row.in}<span class="checkin-group-sep">/</span>${row.total}</span>
-    </div>`).join('')}
-  </div>` : ''}
 </div>`;
 }
 
@@ -8331,18 +8324,9 @@ function renderPublicShell() {
 
 // C26 item 2: Admin surface shell — hardcodes the admin branch of every former interleaved
 // `state.isAdmin ?` ternary. Returns the full #app-shell string.
-// C26 item 3b: admin Dashboard ("run the night"), layout A — statcard + 2x2 quick-actions + Co-pilot teaser.
-// Count + per-group reuse the SAME source as the Players stats card (state.checkedIn.length + computeCheckedInByGroup)
-// so the Dashboard matches Supabase. NO skill, NO emoji, SVG icons only, Direction-A tokens only.
-// Reliability fix (2026-06-20): the dashboard checked-in stat is refreshed by partialRender (like the
-// Players-tab #js-checkin-stats) so it stays TRUE after a check-in instead of going stale at its login value.
-function buildDashboardStatHTML() {
-  const group = state.isAdmin ? computeCheckedInByGroup() : [];
-  const grpLine = group.length
-    ? `<div class="ad-grpline">${group.map((r) => `<span><b>${r.in}</b> ${escapeHTML(r.groupLabel)}</span>`).join('')}</div>`
-    : '';
-  return `<div class="ad-statbig"><span class="ad-statnum">${state.checkedIn.length}</span><span class="ad-statlab">checked in</span></div>${grpLine}`;
-}
+// C26 item 3b's buildDashboardStatHTML lived here until 2026-08-29. It had ZERO callers anywhere in
+// public/ and it emitted a group name per bucket off computeCheckedInByGroup, so it left with the rest of
+// the group surfaces rather than sit here looking load-bearing.
 
 
 // C28 Slice 1: the admin AI co-pilot chat (layout A — chat thread; Mike picked it from 3 §38 options).

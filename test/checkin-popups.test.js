@@ -95,6 +95,7 @@ function loadApp() {
       mgpList: () => buildMgpListHTML(),
       mgpPage: () => { manageView = 'players'; mgPlayerQuery = ''; mgSelectMode = false; mgSelected = new Set(); return buildManagePlayersHTML(); },
       kioskRow: (row, q) => renderCheckinButton(row, q),
+      stats: (admin) => { const prev = state.isAdmin; state.isAdmin = (admin !== false); try { return buildCheckinStatsHTML(); } finally { state.isAdmin = prev; } },
       swapOpeners: (openEdit, toggleRow) => {
         const a = openPlayerEditPopup, b = mgckToggleRow;
         openPlayerEditPopup = openEdit; mgckToggleRow = toggleRow;
@@ -471,16 +472,20 @@ describe('Task 9: groups leave every surface', () => {
   it('nothing in app.js or manage.js emits a group surface or sends a group argument', () => {
     for (const needle of ['ckx-gp', 'mgp-gp', 'mgp-mg', 'data-mgp-groups', 'data-mgp-movegrp',
                           'data-mgp-gadd', 'data-mgp-gdelete', 'data-mgp-grename',
-                          'class="edit-group"', 'class="edit-groups"']) {
+                          'class="edit-group"', 'class="edit-groups"',
+                          'checkin-group-', 'ad-grpline']) {
       expect(clientSrc).not.toContain(needle);
     }
     // p_group is scoped to a line count rather than a flat absence for ONE reason, named here so nobody
     // has to guess: the outbox retry's register branch is the card task's site (spec 5.4), it is being
     // built on a sibling branch, and it merges after this one. Every p_group site this task owns is gone,
     // and a new one anywhere else turns this red because the count is pinned at exactly one.
+    // MERGE NOTE: this is <= 1, not === 1, on purpose. When the card task's fix to that outbox line
+    // merges in the count becomes 0 and this still passes; a NEW p_group anywhere is still red, because
+    // every surviving line has to be the outbox one.
     const groupArgLines = clientSrc.split('\n').filter((l) => l.includes('p_group'));
-    expect(groupArgLines).toHaveLength(1);
-    expect(groupArgLines[0]).toContain('op.payload.name');
+    expect(groupArgLines.length).toBeLessThanOrEqual(1);
+    groupArgLines.forEach((l) => expect(l).toContain('op.payload.name'));
     // The two .edit-group READERS (getEditGroupsFromRow, updateEditRowGroupUI) outlive this task by one:
     // they are the client group layer, which the next task deletes whole. Nothing EMITS the inputs they
     // read any more, which is what the two class needles above pin.
@@ -526,5 +531,26 @@ describe('Task 9: groups leave every surface', () => {
     expect(a.replace('p4', 'ID')).toBe(b.replace('p9', 'ID'));
     expect(a).not.toContain('ckx-gp');
     expect(a).not.toContain('mgck-sk');
+  });
+
+  it('the Check In tab stat card is a total and nothing else, admin or not (fix round 1)', () => {
+    // computeCheckedInByGroup buckets on getPlayerPrimaryGroup, so these three seeded players would have
+    // produced two NAMED rows plus the ungrouped one in the admin card's breakdown. Both group values and
+    // both ungrouped labels are asserted absent, so re-adding the breakdown cannot pass by renaming it.
+    bridge.seed([
+      { id: 'p1', name: 'Blake Harmon', skill: 6, group: 'Sunday Ballers', groups: ['Sunday Ballers'] },
+      { id: 'p2', name: 'Casey Vance', skill: 4, group: 'Tuesday Crew', groups: ['Tuesday Crew'] },
+      { id: 'p3', name: 'Dana Pike', skill: 3 },
+    ], ['id:p1', 'id:p3']);
+    const admin = bridge.stats(true);
+    expect(admin).toContain('class="checkin-stat-num">2<');
+    expect(admin).toContain('Checked In');
+    expect(admin).not.toContain('checkin-group-');
+    expect(admin).not.toContain('Sunday Ballers');
+    expect(admin).not.toContain('Tuesday Crew');
+    expect(admin).not.toContain('Ungrouped');
+    expect(admin).not.toContain('No Groups');
+    // the public line was already a bare total and stays one
+    expect(bridge.stats(false)).toBe('<div class="cik-count">2 checked in</div>');
   });
 });

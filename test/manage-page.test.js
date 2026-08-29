@@ -69,6 +69,7 @@ function loadApp() {
       buildPickup: () => buildPickupDaysHTML(),
       buildPickupForm: (id) => { pickupEditId = (id == null ? null : id); manageView = 'pickup-form'; return buildPickupDayFormHTML(); },
       checkinNav: () => checkinNavVisible(),
+      // Groups round (2026-08-29): the mgGroupsOpen / mgMoveOpen assignments left with the bindings.
       buildPlayers: (opts) => {
         opts = opts || {};
         mgPlayerQuery = opts.query || '';

@@ -499,7 +499,11 @@ describe('groupRosterPlayersBySection', () => {
 });
 
 describe('buildCopilotContext (C28 — co-pilot read context)', () => {
-  it('attendance: counts checked-in players, groups them, excludes not-checked-in', () => {
+  // Inverted in the groups round (2026-08-29, fix round 1): the attendance snapshot carried a byGroup
+  // bucket and a per-attendee group key, both of which would have dead-ended into a permanent
+  // { Ungrouped: N } once the column drops. The fixtures below KEEP their group values, so a re-added
+  // dimension turns the whole-object toEqual and the JSON scan red.
+  it('attendance: counts checked-in players, excludes not-checked-in, and carries no group dimension', () => {
     const ctx = buildCopilotContext({
       players: [
         { name: 'Mikey Olas', group: 'KC Volleyball', checked_in: true, skill: 9 },
@@ -508,13 +512,13 @@ describe('buildCopilotContext (C28 — co-pilot read context)', () => {
         { name: 'Jaakan Mullet', group: 'KC Volleyball', checked_in: false, skill: 8 },
       ],
     });
-    expect(ctx.attendance.total).toBe(3);
-    expect(ctx.attendance.byGroup).toEqual({ 'KC Volleyball': 2, 'Ungrouped': 1 });
-    expect(ctx.attendance.here).toEqual([
-      { name: 'Mikey Olas', group: 'KC Volleyball' },
-      { name: 'Allie Hotz', group: 'KC Volleyball' },
-      { name: 'Rich Wells', group: '' },
-    ]);
+    expect(ctx.attendance).toEqual({
+      total: 3,
+      here: [{ name: 'Mikey Olas' }, { name: 'Allie Hotz' }, { name: 'Rich Wells' }],
+    });
+    expect('byGroup' in ctx.attendance).toBe(false);
+    expect(JSON.stringify(ctx)).not.toContain('KC Volleyball');
+    expect(JSON.stringify(ctx)).not.toContain('Ungrouped');
   });
 
   it('REDACTION: no skill key and no skill value leaks (players + generatedTeams)', () => {
@@ -562,7 +566,7 @@ describe('buildCopilotContext (C28 — co-pilot read context)', () => {
 
   it('empty: nothing going on -> nulls + zero attendance', () => {
     expect(buildCopilotContext({})).toEqual({
-      attendance: { total: 0, byGroup: {}, here: [] },
+      attendance: { total: 0, here: [] },   // no byGroup since the 2026-08-29 groups round
       casualCourts: null,
       tournament: null,
     });
