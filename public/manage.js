@@ -17,6 +17,10 @@ let manageView = 'lead';  // 'lead' = the needs-you lead; 'pickup'/'pickup-form'
 let mgckFilter = 'all';
 let mgckQ = '';
 let mgckLast = null; // { key, name, dir: 'in'|'out' }
+// Round 2026-08-29: the card's own one-shot message ("{name} updated" / "{name} added"), which carries NO
+// UNDO. A card save writes a name, a rating and possibly an attendance flip, and one button cannot undo
+// three things. mgckLast stays exactly what it was: the last ROW TAP, which UNDO can and does reverse.
+let mgckNotice = null;
 let pickupEditId = null;  // Task 2: the pickup_days row id being edited in 'pickup-form' (null = adding a new day)
 // Task 3 (Players directory, pick R4): the live-search value + Select(bulk) state. All survive the container-
 // swap repaint AND guard the poll-clobber (a background sync must never wipe a half-typed query or a selection).
@@ -1094,6 +1098,9 @@ function mgckMetaHTML(model) {
 }
 
 function mgckStripHTML() {
+  // The card's message wins while it is set and carries no UNDO. A row tap clears it (mgckToggleByKey),
+  // and the UNDO strip comes straight back.
+  if (mgckNotice) return `<span class="mgck-st">${escapeHTML(mgckNotice)}</span>`;
   if (!mgckLast) return '';
   const verb = mgckLast.dir === 'in' ? 'checked in' : 'checked out';
   return `<span class="mgck-st">${escapeHTML(mgckLast.name)} ${verb}</span>`
@@ -1169,7 +1176,7 @@ function buildManageCheckinHTML() {
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input id="mgck-search" type="text" placeholder="Search the roster" autocapitalize="words" autocomplete="off" spellcheck="false" aria-label="Search the roster" value="${escapeHTMLText(mgckQ)}" />
     </div>
-    <div class="mgck-strip" id="mgck-strip"${mgckLast ? '' : ' hidden'}>${mgckStripHTML()}</div>
+    <div class="mgck-strip" id="mgck-strip"${(mgckLast || mgckNotice) ? '' : ' hidden'}>${mgckStripHTML()}</div>
     <div id="mgck-list">${mgckListHTML(model)}</div>`;
 }
 
@@ -1185,12 +1192,13 @@ function mgckRepaint() {
   const metaEl = document.getElementById('mgck-meta');
   if (metaEl) metaEl.innerHTML = mgckMetaHTML(model);
   const stripEl = document.getElementById('mgck-strip');
-  if (stripEl) { stripEl.innerHTML = mgckStripHTML(); stripEl.hidden = !mgckLast; }
+  if (stripEl) { stripEl.innerHTML = mgckStripHTML(); stripEl.hidden = !(mgckLast || mgckNotice); }
   if (panel) panel.scrollTop = saved;
 }
 
 // The kiosk's optimistic + RPC + outbox contract, addressed by identity key (C21 single-source).
 function mgckToggleByKey(key, dir, opts) {
+  mgckNotice = null;   // a row tap is undoable, so the card's message steps aside and UNDO returns
   const player = (state.players || []).find((p) => playerIdentityKey(p) === key);
   if (!player) return;
   if (dir === 'in') {
@@ -1228,6 +1236,20 @@ function mgckToggleByKey(key, dir, opts) {
 function mgckToggleRow(key) {
   const inSet = new Set(state.checkedIn || []);
   mgckToggleByKey(key, inSet.has(key) ? 'out' : 'in');
+}
+
+// The card's write-back: set the message, drop the UNDO pointer, repaint the list in place, then flash the
+// row. The flash runs AFTER the repaint because mgckRepaint replaces #mgck-list's innerHTML and would
+// throw the class away. mPlay is the app's own helper at the app's own 440ms (app.js:5243,
+// styles.css:4693), and it is already suppressed under body.no-motion and prefers-reduced-motion.
+function mgckCardNotice(text, key) {
+  mgckNotice = String(text || '');
+  mgckLast = null;
+  mgckRepaint();
+  if (!key) return;
+  const sel = (typeof CSS !== 'undefined' && CSS && CSS.escape) ? CSS.escape(key) : String(key).replace(/"/g, '\\"');
+  const row = document.querySelector(`.ckx-row[data-mgck-id="${sel}"]`);
+  if (row) mPlay(row, 'm-flash', 440);
 }
 
 // Add-and-check-in: the kiosk Wave-1d atomic register path, admin voice. Mirrors app.js:10424-10503.

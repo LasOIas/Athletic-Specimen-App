@@ -97,6 +97,11 @@ function loadApp() {
         openPlayerEditPopup = openEdit; mgckToggleRow = toggleRow;
         return () => { openPlayerEditPopup = a; mgckToggleRow = b; };
       },
+      strip: () => mgckStripHTML(),
+      setStrip: (o) => { o = o || {}; mgckLast = (o.last === undefined ? null : o.last); mgckNotice = (o.notice === undefined ? null : o.notice); },
+      readStrip: () => ({ last: mgckLast, notice: mgckNotice }),
+      toggleByKey: (k, d, o) => mgckToggleByKey(k, d, o),
+      swapRepaint: (fn) => { const a = mgckRepaint, b = repaintManage; mgckRepaint = fn; repaintManage = fn; return () => { mgckRepaint = a; repaintManage = b; }; },
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
@@ -457,5 +462,87 @@ describe('Task 6: the pencil, and the tap that must not check anyone in', () => 
     // .ckx-row.is-in is opacity .55 and opacity on the parent caps every child, so this is a DARKER ink
     // and not an override. Delete it and the pencil goes invisible on every checked-in row.
     expect(cssLF).toContain('.ckx-row.is-in .mgck-edit { color: oklch(0.45 0.01 75); }');
+  });
+});
+
+describe('Task 7: the save writes back in place and the strip stays honest', () => {
+  it('the card message carries no UNDO, because one button cannot undo a multi-field write', () => {
+    bridge.setStrip({ notice: 'Riley Chen updated' });
+    const s = bridge.strip();
+    expect(s).toContain('Riley Chen updated');
+    expect(s).not.toContain('data-mgck-undo');
+  });
+
+  it('a plain row tap still gets its UNDO', () => {
+    bridge.setStrip({ last: { key: 'id:p1', name: 'Riley Chen', dir: 'in' } });
+    const s = bridge.strip();
+    expect(s).toContain('Riley Chen checked in');
+    expect(s).toContain('data-mgck-undo');
+  });
+
+  it('the card message wins while it is set', () => {
+    bridge.setStrip({ last: { key: 'id:p1', name: 'Riley Chen', dir: 'in' }, notice: 'Riley Chen updated' });
+    expect(bridge.strip()).not.toContain('data-mgck-undo');
+  });
+
+  it('a row toggle clears the card message, so UNDO comes straight back', () => {
+    bridge.seed([{ id: 'p1', name: 'Riley Chen', skill: 6 }], []);
+    bridge.setStrip({ notice: 'Riley Chen updated' });
+    const undo = bridge.swapRepaint(() => {});
+    try {
+      bridge.toggleByKey('id:p1', 'in');
+      const after = bridge.readStrip();
+      expect(after.notice).toBe(null);
+      expect(after.last).toBeTruthy();
+      expect(bridge.getState().checkedIn).toContain('id:p1');
+    } finally { undo(); }
+  });
+
+  it('a silent toggle writes the roster and leaves mgckLast alone, which is what the card needs', () => {
+    bridge.seed([{ id: 'p2', name: 'Blake Harmon', skill: 6 }], []);
+    bridge.setStrip({ last: null, notice: null });
+    const undo = bridge.swapRepaint(() => {});
+    try {
+      bridge.toggleByKey('id:p2', 'in', { silent: true });
+      expect(bridge.getState().checkedIn).toContain('id:p2');
+      expect(bridge.readStrip().last).toBe(null);
+    } finally { undo(); }
+  });
+
+  it('the save repaints in place, never with a full render, and only toggles on a real difference', () => {
+    // stripComments, the way the blank-rating case above does it: the replacement's OWN comment names the
+    // render() it removed, and that sentence is the record of what changed. A raw slice would read the
+    // prose and fail the very guard the prose documents. The slice then starts at the save branch's own
+    // marker, so the CANCEL branch's render() (app.js:469, not this task's) is out of scope.
+    const save = slice(stripComments(appSrc), 'function ensureSaveDelegationBound()', 'function ensureHeaderTapToTop()');
+    const branch = save.slice(save.indexOf("const btn = e.target.closest('.btn-save-edit');"));
+    // A bare not.toContain('render();') could never pass here, because the GUARDED `else render();`
+    // fallback is deliberate - the file seam must not throw if manage.js ever fails to load. What went is
+    // the UNCONDITIONAL statement, render() alone on its own line, so that is what is pinned.
+    expect(branch.split('\n').filter((l) => l.trim() === 'render();')).toEqual([]);
+    expect(branch).toContain('else render();');
+    expect(branch).toContain('mgckCardNotice');
+    expect(branch).toContain('repaintManage');
+    const cmp = branch.indexOf('wantIn !== isInNow');
+    const call = branch.indexOf('mgckToggleByKey(');
+    expect(cmp).toBeGreaterThan(-1);
+    expect(call).toBeGreaterThan(cmp);
+    // ONCE. The attendance writer is reached from exactly one place in this branch, so a second call
+    // cannot creep in behind the comparison and flip the player straight back.
+    expect(branch.split('mgckToggleByKey(').length - 1).toBe(1);
+  });
+
+  it('close hands focus back to the pencil that opened the card, by key', () => {
+    const s = slice(appSrc, 'function closePlayerEditPopup()', 'function peSkillStep(');
+    expect(s).toContain('.mgck-edit[data-mgck-edit=');
+    expect(s).toContain('peReturnKey');
+  });
+
+  it('Escape closes without saving and Enter in a field saves', () => {
+    const s = slice(appSrc, 'function ensurePlayerEditKeysBound()', 'function ensureSaveDelegationBound()');
+    expect(s).toContain("if (e.key === 'Escape')");
+    expect(s).toContain('closePlayerEditPopup()');
+    expect(s).toContain("e.key === 'Enter'");
+    expect(s).toContain("classList.contains('popup-edit-input')");
   });
 });

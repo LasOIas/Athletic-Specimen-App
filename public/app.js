@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.29.6'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.29.7'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -115,6 +115,16 @@ function closePlayerEditPopup() {
   document.body.style.overflow = '';
   const body = document.getElementById('player-edit-modal-body');
   if (body) body.innerHTML = '';
+  peMode = 'edit';
+  // Focus returns to the pencil that opened the card. It is re-QUERIED rather than remembered, because a
+  // save repaints #mgck-list and the original element is gone by the time we get here. peOrigin is NOT
+  // cleared here: the save reads it AFTER this call to pick its repaint, and every open sets it fresh.
+  const key = peReturnKey;
+  peReturnKey = '';
+  if (!key) return;
+  const sel = (typeof CSS !== 'undefined' && CSS && CSS.escape) ? CSS.escape(key) : String(key).replace(/"/g, '\\"');
+  const back = document.querySelector(`.mgck-edit[data-mgck-edit="${sel}"]`);
+  if (back) { try { back.focus(); } catch (_) {} }
 }
 
 // The rating stepper's maths. Clamp 0 to 10 in 0.5 steps, one decimal. An empty field is unrated: the
@@ -447,6 +457,25 @@ function findInlineEditRowByPlayerKey(playerKey) {
   }, true); // capture phase so we always see the click
 })();
 
+// -- Escape closes the player card, Enter in one of its fields saves it --
+// Bound once on the document, guarded on the modal actually being open, so it costs nothing on every other
+// screen. The card has no dialog primitive to trap focus with (README:364-365 asks for one; the app has
+// none), so Escape is the exit and it works with focus anywhere.
+(function ensurePlayerEditKeysBound() {
+  if (window.__peKeysBound) return;
+  window.__peKeysBound = true;
+  document.addEventListener('keydown', (e) => {
+    const modal = document.getElementById('player-edit-modal');
+    if (!modal || modal.style.display !== 'flex') return;
+    if (e.key === 'Escape') { e.preventDefault(); closePlayerEditPopup(); return; }
+    if (e.key === 'Enter' && e.target && e.target.classList && e.target.classList.contains('popup-edit-input')) {
+      e.preventDefault();
+      const save = modal.querySelector('.btn-save-edit');
+      if (save) save.click();
+    }
+  });
+})();
+
 // -- One delegated Save handler for inline edit rows (capture phase) --
 (function ensureSaveDelegationBound() {
   if (window.__saveDelegated) return;
@@ -560,11 +589,27 @@ function findInlineEditRowByPlayerKey(playerKey) {
     copy[idx] = next;
     state.players = copy;
 
-    // Persist local and render immediately for responsive inline edits.
+    // The status draft, applied ONCE and only on a real difference. mgckToggleByKey (manage.js) is the only
+    // maintained attendance writer: optimistic locally, then check_in / check_out, with the outbox on
+    // failure. `silent` keeps mgckLast null so UNDO never points at a card save; the card sets its own
+    // strip message below.
+    const inBtnEl = document.querySelector('#player-edit-modal [data-pe-in]');
+    if (inBtnEl) {
+      const wantIn = inBtnEl.getAttribute('aria-pressed') === 'true';
+      const isInNow = new Set(state.checkedIn || []).has(rowPlayerKey);
+      if (wantIn !== isInNow) mgckToggleByKey(rowPlayerKey, wantIn ? 'in' : 'out', { silent: true });
+    }
+
+    // Persist locally, then repaint IN PLACE. render() rebuilt the whole shell and threw the console's
+    // scroll position away mid-check-in. mgckCardNotice repaints the list, sets the strip and flashes the
+    // row; on the Players surface repaintManage does the same job for that list. The render() fallback is
+    // unreachable in practice (the card only opens from Manage) and exists so the file seam is never a throw.
     saveLocal();
     closePlayerEditPopup();
     closeInlineEditRow(row);
-    render();
+    if (peOrigin === 'checkin' && typeof mgckCardNotice === 'function') mgckCardNotice(name + ' updated', rowPlayerKey);
+    else if (typeof repaintManage === 'function') repaintManage();
+    else render();
 
     // Honest save status: neutral "Saving…" now, settled to Saved / failed after the
     // write resolves (offline = saved locally). See reliability check 2026-06-18.
