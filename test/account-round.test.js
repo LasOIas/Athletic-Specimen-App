@@ -2817,7 +2817,7 @@ describe('C102 Task 2: a sign-in repaints in place', () => {
     expect(myteam.innerHTML).not.toBe('');
   });
 
-  it('a dirty form on the Tournament tab is never clobbered, and My Team repaints behind it', async () => {
+  it('a dirty form on the active Tournament tab is never clobbered, and My Team repaints behind it', async () => {
     const { c, myteam } = stageShell();
     // tournamentTabIsDirty (public/app.js:3018) reads #tab-tournament's own inputs, and the stub answers
     // 'input, textarea' from the hooks map, so a half-typed team name is staged exactly where it looks.
@@ -2835,6 +2835,34 @@ describe('C102 Task 2: a sign-in repaints in place', () => {
     expect(bridge.renderCount()).toBe(renders);
     expect(c.innerHTML).toBe(gateBody);              // the half-typed registration survives the sign-in
     expect(myteam.innerHTML).toBe(bridge.myTeamPage());
+    expect(myteam.innerHTML).not.toBe(myTeamBefore);
+  });
+
+  // Fix round 2 (re-review): the case above never reaches repaintSignedInPanels' OWN dirty guard. The tab
+  // is ACTIVE there, so `activeMainTab !== 'tournament'` short-circuits before tournamentTabIsDirty() is
+  // called, and what protects the container is partialRenderTournament's check (public/app.js:3038), which
+  // shipped long before this round: delete `&& !tournamentTabIsDirty()` from the helper and that case stays
+  // green. This one reaches the guard. The viewer sits on HOME with a half-typed registration on the HIDDEN
+  // Tournament panel, so the helper is the only thing between a sign-in and the "nothing saved" clobber
+  // class the codebase treats as top severity (public/app.js:3013-3017, audit wf_a020d635-d72). Task 3
+  // calls this helper from R3's non-admin branch too, so the guard has to stay pinned.
+  it('a dirty form on the hidden Tournament tab is never clobbered either, and the helper guard is what stops it', async () => {
+    const { c, myteam } = stageShell();
+    const typed = bridge.node('input'); typed.value = 'Sharks';
+    bridge.hook('input, textarea', typed);
+    bridge.setSignedOut();
+    bridge.setPainted(true);
+    bridge.tab('home');                              // Tournament is HIDDEN, so the helper owns it, not partialRender
+    const before = bridge.tournamentRoot();
+    const myTeamBefore = bridge.myTeamPage();
+    c.innerHTML = before;
+    myteam.innerHTML = myTeamBefore;
+    const renders = bridge.renderCount();
+    await bridge.authEvent('SIGNED_IN', session);
+    expect(bridge.renderCount()).toBe(renders);
+    expect(c.innerHTML).toBe(before);                // the half-typed team name survives the sign-in
+    expect(c.innerHTML).not.toBe(bridge.tournamentRoot());   // and the hub really was the alternative
+    expect(myteam.innerHTML).toBe(bridge.myTeamPage());      // the panel with nothing to lose still repaints
     expect(myteam.innerHTML).not.toBe(myTeamBefore);
   });
 
