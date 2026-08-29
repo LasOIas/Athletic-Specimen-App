@@ -197,9 +197,11 @@ function loadApp(opts) {
 
   const pureSrc = readFileSync(new URL('../public/pure.js', import.meta.url), 'utf8');
   const appSrc = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const mgSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
   const context = vm.createContext(sandbox);
   sandbox.__server = server;
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
+  vm.runInContext(mgSrc, context, { filename: 'manage.js' });   // C102: the Manage block loads before app.js, as in index.html
   vm.runInContext(appSrc + epilogue, context, { filename: 'app.js' });
 
   const bridge = sandbox.__bridge;

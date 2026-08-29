@@ -42,6 +42,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const APP_SRC = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+const mgSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
 
 const JUNE = { id: 'j-1', name: 'June 2026 tournament', status: 'completed', created_at: '2026-06-01T10:00:00Z' };
 const JULY = { id: 'j-2', name: 'July 2026 tournament', status: 'pools', created_at: '2026-07-01T10:00:00Z' };
@@ -186,6 +187,7 @@ function loadApp(opts0) {
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
+  vm.runInContext(mgSrc, context, { filename: 'manage.js' });   // C102: the Manage block loads before app.js, as in index.html
   vm.runInContext(APP_SRC + epilogue, context, { filename: 'app.js' });
   const bridge = sandbox.__bridge;
   bridge.bind();

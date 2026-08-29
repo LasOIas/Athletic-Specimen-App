@@ -33,6 +33,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const APP_SRC = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+const mgSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
 const CSS_SRC = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8');
 
 function loadApp() {
@@ -123,6 +124,7 @@ function loadApp() {
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
+  vm.runInContext(mgSrc, context, { filename: 'manage.js' });   // C102: the Manage block loads before app.js, as in index.html
   vm.runInContext(APP_SRC + epilogue, context, { filename: 'app.js' });
   return { bridge: sandbox.__bridge };
 }

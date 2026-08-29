@@ -28,6 +28,7 @@ import vm from 'node:vm';
 function loadApp({ linked = 1, rpcThrows = false, signedIn = true, named = true } = {}) {
   const pureSrc = readFileSync(new URL('../public/pure.js', import.meta.url), 'utf8');
   const appSrc = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const mgSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
   const noop = () => {};
   const emptyList = { forEach: noop, length: 0, item: () => null };
   const makeEl = () => ({
@@ -122,7 +123,7 @@ function loadApp({ linked = 1, rpcThrows = false, signedIn = true, named = true 
     };
   `;
   vm.createContext(sandbox);
-  vm.runInContext(pureSrc + '\n' + appSrc + epilogue, sandbox, { filename: 'app.js' });
+  vm.runInContext(pureSrc + '\n' + mgSrc + '\n' + appSrc + epilogue, sandbox, { filename: 'app.js' });
   return { bridge: sandbox.__bridge, rpcCalls };
 }
 

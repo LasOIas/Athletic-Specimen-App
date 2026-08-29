@@ -17,6 +17,7 @@ import vm from 'node:vm';
 function loadApp() {
   const pureSrc = readFileSync(new URL('../public/pure.js', import.meta.url), 'utf8');
   const appSrc = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const mgSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
   const noop = () => {};
   const emptyList = { forEach: noop, length: 0, item: () => null };
   const makeEl = () => ({
@@ -337,6 +338,7 @@ function loadApp() {
     };`;
   const context = vm.createContext(sandbox);
   vm.runInContext(pureSrc, context, { filename: 'pure.js' });
+  vm.runInContext(mgSrc, context, { filename: 'manage.js' });   // C102: the Manage block loads before app.js, as in index.html
   vm.runInContext(appSrc + epilogue, context, { filename: 'app.js' });
   // Task 5: the Add-a-team submit path and its dirty guard read REAL elements (#mgta-name, the
   // .rf-pinput rows, the paid switch, #tab-manage, the status line), so their tests install their own
