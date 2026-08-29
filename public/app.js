@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.26.6'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.08.26.7'; // NF-18: the SINGLE version source — sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -7354,12 +7354,16 @@ async function runPostSignInWork() {
     // C102 (2026-08-26): the shell gains or loses #tab-manage and the Manage nav button only when the flag
     // flips, and only render() builds the shell. Otherwise the nav is byte-identical (its two inputs,
     // checkinNavVisible() and isAdmin, are untouched here), so an in-place repaint carries the refreshed
-    // tournaments and teamMembers onto the Home hero and My Team without resetting anyone's scroll.
+    // tournaments and teamMembers onto the active tab and My Team without resetting anyone's scroll.
+    // Final review fix: separate trys, the same shape the signed-in block in onAuthEvent uses. partialRender()
+    // runs a large amount of builder code, and wrapping both calls in one try meant a throw there skipped the
+    // panel repaint and left the signed-out body on the hidden Tournament and My Team panels.
     if (state.loaded && bootPaintDone) {
-      try {
-        if (wasAdmin !== state.isAdmin) render();
-        else { partialRender(); repaintSignedInPanels(); }   // teamMembers land on the My Team page too, which may be hidden
-      } catch {}
+      if (wasAdmin !== state.isAdmin) { try { render(); } catch (_) {} }
+      else {
+        try { partialRender(); } catch (_) {}
+        try { repaintSignedInPanels(); } catch (_) {}   // teamMembers land on the My Team page too, which may be hidden
+      }
     }
   } catch (err) { console.error('Role derive error', err); }
 }
@@ -7416,7 +7420,7 @@ async function onAuthEvent(event, session) {
     // splash is still up — state is set above, and the single boot render() paints it.
     // C102 (2026-08-26): a sign-in changes the chip, the Tournament tab body (the wall's gate body becomes
     // the hub) and the wall itself. Each has an in-place repaint; a full render() rebuilt every panel and
-    // reset the viewer's scroll for it. Three separate trys so one failure never blocks the others.
+    // reset the viewer's scroll for it. Four separate trys so one failure never blocks the others.
     // partialRender has no in-place branch for the Check In tab and falls through to render() there.
     // Fix round 1: partialRender repaints the ACTIVE tab only and activateMainTab never rebuilds a
     // container, so the hidden auth-branching panels get their own pass or a sign-in from Home leaves the
@@ -8212,7 +8216,6 @@ function buildHistoryPageHTML() {
 
   return `${header}${body}`;
 }
-
 
 
 function renderPublicShell() {

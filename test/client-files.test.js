@@ -1,6 +1,6 @@
 // C102 (2026-08-26): the client is three classic scripts sharing one global record. These guards pin the
 // three facts that keep that safe and that nothing else in the suite would notice breaking:
-// 1. every script index.html loads is precached by the service worker (an unlisted file is served
+// 1. every script a precached HTML entry point loads is itself precached by the service worker (an unlisted file is served
 //    cache-first by sw.js and never enters the cache, so the app half-boots offline and never self-heals);
 // 2. manage.js is declarations-only (it loads before app.js, whose init() reaches into it synchronously);
 // 3. no top-level name is declared in both files (a let/const twin is a load-time SyntaxError that kills the
@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 
 const read = (p) => readFileSync(new URL('../public/' + p, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const html = read('index.html');
+const checkin = read('checkin.html');   // the OTHER precached entry point (final review M6-1)
 const sw = read('sw.js');
 const app = read('app.js');
 const manage = read('manage.js');
@@ -83,18 +84,27 @@ const isLiteral = (v) => {
 };
 
 describe('client files', () => {
-  it('every local script index.html loads is in the service worker precache list', () => {
+  it('every local script the precached HTML entry points load is in the service worker precache list', () => {
     // src may sit anywhere in the tag and use either quote; the captured path stops at any `?`, so a
     // versioned src is still checked against ASSETS by its plain path. A protocol-relative `//host/x.js` is
     // NOT ours and is excluded, alongside the absolute CDN tags.
-    const scripts = [...html.matchAll(/<script\b[^>]*\bsrc=["'](\/(?!\/)[^"'>?]*)[^"'>]*["']/g)].map((m) => m[1]);
+    const localScripts = (src) => [...src.matchAll(/<script\b[^>]*\bsrc=["'](\/(?!\/)[^"'>?]*)[^"'>]*["']/g)].map((m) => m[1]);
+    const scripts = localScripts(html);
     expect(scripts).toContain('/manage.js');
     expect(scripts.indexOf('/manage.js')).toBeLessThan(scripts.indexOf('/app.js'));   // the load order
     expect(scripts.indexOf('/pure.js')).toBeLessThan(scripts.indexOf('/manage.js'));
     // ASSETS is read as TEXT, from `const ASSETS = [` to the next `];`. A second array introduced before
     // that closer would widen the slice; acceptable for a 24-line file, noted so an editor of sw.js knows.
     const assets = sw.slice(sw.indexOf('const ASSETS = ['), sw.indexOf('];', sw.indexOf('const ASSETS = [')));
-    for (const s of scripts) expect(assets, s + ' is loaded by index.html but not precached').toContain("'" + s + "'");
+    // Final review M6-1: checkin.html is a precached entry point of its own, so it gets the same check.
+    // No live gap today (it loads only /supabase-config.js and /pure.js, both already in ASSETS, and it
+    // loads neither manage.js nor app.js) - but a script added to it later reproduces exactly the bug
+    // this guard was written to prevent. The three ordering assertions above stay index.html's alone.
+    for (const [name, src] of [['index.html', html], ['checkin.html', checkin]]) {
+      for (const s of localScripts(src)) {
+        expect(assets, s + ' is loaded by ' + name + ' but not precached').toContain("'" + s + "'");
+      }
+    }
   });
 
   it('manage.js is declarations only at depth 0', () => {

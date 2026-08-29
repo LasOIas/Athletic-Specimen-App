@@ -4050,12 +4050,6 @@ function mgScoreFinalLabel(aName, bName, a, b, isFinal, pick) {
   return (isFinal ? 'Save · ' : 'Final · ') + leader + ' wins ' + Math.max(a, b) + '–' + Math.min(a, b);
 }
 
-// Match-generic: handles phase 'pool' | 'main'. Content builder is pure (like buildMgTeamSheetHTML); the
-// interactive steppers, the winner radio + the writes live in openMgScoreSheet. Writes: pool final →
-// tdbSubmitResult, bracket final → tdbSubmitBracketResult, edit-final → tdbEditMatchScore, live →
-// tdbSetLiveScore. Round 2026-08-03: a CENTRED popup on the shared dialog kit, one framed box, a row per
-// team doing both jobs (winner radio + pill stepper), the consequence line, then one primary action.
-
 // The rule line in plain words from the TOURNAMENT'S OWN settings (Mike 2026-08-25: "always just say what the
 // tournament settings have") — never a literal. scoringRulesFor drops the cap on the championship.
 function mgScoreHint(match, rules) {
@@ -4065,6 +4059,11 @@ function mgScoreHint(match, rules) {
   return who + ' to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ', cap ' + rules.cap + '.' : ', no cap.');
 }
 
+// Match-generic: handles phase 'pool' | 'main'. Content builder is pure (like buildMgTeamSheetHTML); the
+// interactive steppers, the winner radio + the writes live in openMgScoreSheet. Writes: pool final →
+// tdbSubmitResult, bracket final → tdbSubmitBracketResult, edit-final → tdbEditMatchScore, live →
+// tdbSetLiveScore. Round 2026-08-03: a CENTRED popup on the shared dialog kit, one framed box, a row per
+// team doing both jobs (winner radio + pill stepper), the consequence line, then one primary action.
 function buildMgScoreSheetHTML(match, winner) {
   if (!match) return '';
   const teams = Array.isArray(state.tournamentTeams) ? state.tournamentTeams : [];

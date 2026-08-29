@@ -115,8 +115,10 @@ function repaintAccountChip() {
 ```
 
 `buildPublicHeaderHTML` then interpolates `${accountChipHTML()}` inside `.pd-hgrp` in place of the
-ternary, with the whitespace kept exactly so the shell string does not change by a byte (5.8's diff pins
-it).
+ternary, with the whitespace kept exactly so the shell string does not change by a byte. What pins it is
+the guard in `test/account-round.test.js` (`headerHTML()` vs `chipHTML()`, plus the signed-out header
+literal captured at `f470795`), not 5.8's diff: 5.8's matrix is `manageContainerHTML()` and the score-sheet
+and team-sheet builders, and the public header is not in it.
 
 **R4, three sites, one obligation each.** `promptNameFillIfNeeded` (`app.js:7213`) and `onAcctNameSave`
 (`app.js:7716`) replace `render()` with `repaintAccountChip()` inside the same guard:
@@ -167,14 +169,18 @@ panels.
 const wasAdmin = state.isAdmin;          // BEFORE the deriveRole() loop at app.js:7296
 ...
 if (state.loaded && bootPaintDone) {
-  try {
-    // The shell gains or loses #tab-manage and the Manage nav button only when the flag flips, and only
-    // render() builds the shell. Otherwise the nav is byte-identical (its two inputs, checkinNavVisible()
-    // and isAdmin, are untouched by this function), so an in-place repaint carries the refreshed
-    // tournaments and teamMembers onto the Home hero and My Team.
-    if (wasAdmin !== state.isAdmin) render();
-    else { partialRender(); repaintSignedInPanels(); }   // teamMembers land on the My Team page too, which may be hidden
-  } catch {}
+  // The shell gains or loses #tab-manage and the Manage nav button only when the flag flips, and only
+  // render() builds the shell. Otherwise the nav is byte-identical (its two inputs, checkinNavVisible()
+  // and isAdmin, are untouched by this function), so an in-place repaint carries the refreshed
+  // tournaments and teamMembers onto the active tab and My Team.
+  if (wasAdmin !== state.isAdmin) { try { render(); } catch (_) {} }
+  else {
+    // SEPARATE trys, the same shape R2 uses, and for the same reason: partialRender() runs a large amount
+    // of builder code, and one try around both means a throw there skips the panel repaint and leaves the
+    // signed-out body on the hidden Tournament and My Team panels.
+    try { partialRender(); } catch (_) {}
+    try { repaintSignedInPanels(); } catch (_) {}   // teamMembers land on the My Team page too, which may be hidden
+  }
 }
 ```
 

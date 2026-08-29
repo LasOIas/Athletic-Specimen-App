@@ -271,8 +271,17 @@ function loadApp() {
     // state.identityCollision, which the Tournament hub renders, so the chip repaint is not the whole
     // paint that site owes. Same shape as the render spy; Task 2 reuses it.
     ;let __partials = 0;
+    // Final review I-1: R3's else branch has to call partialRender() and repaintSignedInPanels() in
+    // SEPARATE trys, and the only way to prove that from outside the function is to make the first call
+    // throw and then look for the second one's paint. The flag is off unless a case arms it, and
+    // reset() disarms it, so no other case can inherit a throwing partialRender.
+    ;let __partialThrows = false;
     const __partial = partialRender;
-    partialRender = function () { __partials += 1; return __partial(); };
+    partialRender = function () {
+      __partials += 1;                    // the call is counted BEFORE the throw: it really was reached
+      if (__partialThrows) throw new Error('scripted partialRender failure');
+      return __partial();
+    };
     ;let __connects = 0;
     const __connect = connectProfileByName;
     connectProfileByName = async function (...a) { __connects += 1; return __connect(...a); };
@@ -328,6 +337,7 @@ function loadApp() {
       headerHTML: () => buildPublicHeaderHTML(),
       nameFillSave: () => onNameFillSave({ preventDefault() {} }),
       partialCount: () => __partials,
+      setPartialThrows: (v) => { __partialThrows = !!v; },
       // C102 Task 2: the string the Tournament tab body IS, so a case can prove the panel behind the wall
       // was rebuilt from the signed-in state rather than left showing the gate.
       tournamentRoot: () => buildPublicTournamentRootHTML(),
@@ -412,6 +422,7 @@ function loadApp() {
     assigns.length = 0;
     bridge.resetConnects();
     bridge.setConnectAttempted(false);
+    bridge.setPartialThrows(false);   // the I-1 case arms it; nothing after it may inherit a throwing partialRender
     errorLog.length = 0;
     documentStub.body.children = [];
     bridge.resetAuthVars();
@@ -2764,7 +2775,9 @@ describe('C102 Task 1: the header chip repaints on its own', () => {
 // was reset for that. Each of the three has its own in-place paint now.
 describe('C102 Task 2: a sign-in repaints in place', () => {
   beforeEach(() => bridge.reset());
-  afterAll(() => { bridge.getState().tournaments = []; });
+  // activeMainTab is a module var that bridge.reset() does not touch, so the last case's tab would
+  // otherwise be the tab every describe after this one starts on. Put it back to the app's own initial.
+  afterAll(() => { bridge.getState().tournaments = []; bridge.setActiveTab('players'); });
 
   // partialRender falls back to a FULL render() when #root has no children (public/app.js:736), and its
   // Tournament branch only rebuilds '#tab-tournament .container' when tournamentNavVisible() is true -
@@ -2908,10 +2921,18 @@ describe('C102 Task 2: a sign-in repaints in place', () => {
 // runPostSignInWork is the OTHER half of a sign-in: it derives the community role, promotes an
 // owner/organizer to state.isAdmin, refreshes state.tournaments and state.teamMembers, and then painted
 // with a full render() every time. Only the admin flag can change the SHELL (#tab-manage and its nav
-// button), so the render stays for the flip and every other outcome repaints in place.
+// button), so the render stays for the flip and every other outcome repaints in place. ONE acknowledged
+// exception, spec 4.2: with activeMainTab === 'players' and the kiosk search idle, partialRender has no
+// in-place branch for the Check In tab and falls through to its unconditional render(), so a non-admin
+// standing on Check In still gets a full paint. Closing that is a new partialRender branch, out of scope.
 describe('C102 Task 3: the role result renders only when the admin flag flips', () => {
   beforeEach(() => bridge.reset());
-  afterAll(() => { bridge.getState().tournaments = []; bridge.setAdmin(false); bridge.setCommunityId(null); });
+  // Same activeMainTab restore as the Task 2 describe: stageHome pins it to 'home' and nothing else
+  // puts it back, so the next describe would inherit this one's tab.
+  afterAll(() => {
+    bridge.getState().tournaments = []; bridge.setAdmin(false); bridge.setCommunityId(null);
+    bridge.setActiveTab('players');
+  });
 
   // The Task 2 shell staging (renderPublicShell mounts every tab panel at once, and partialRender falls
   // back to a full render when #root reports no children), plus the one live tournament without which
@@ -2944,10 +2965,15 @@ describe('C102 Task 3: the role result renders only when the admin flag flips', 
     bridge.tab('home');
     bridge.supaNext('rpc', { data: 'owner', error: null });
     const renders = bridge.renderCount();
+    // Final review M3-2: without a partial baseline an implementation written as
+    // `if (flip) { render(); partialRender(); }` passes every case in this describe. Stable because
+    // the tab is pinned to 'home', so nothing else here reaches partialRender.
+    const partials = bridge.partialCount();
     await bridge.postWork();
     expect(bridge.getState().role).toBe('owner');
     expect(bridge.getState().isAdmin).toBe(true);
     expect(bridge.renderCount()).toBe(renders + 1);
+    expect(bridge.partialCount()).toBe(partials);
     // render() writes the shell into #root before it binds anything, so the Manage tab the owner just
     // earned is provably on screen and not merely implied by a count.
     expect(root.innerHTML).toContain('id="tab-manage"');
@@ -2988,6 +3014,36 @@ describe('C102 Task 3: the role result renders only when the admin flag flips', 
     await bridge.postWork();
     expect(bridge.renderCount()).toBe(renders);
     expect(myteam.innerHTML).toBe(bridge.myTeamPage());
+    expect(myteam.innerHTML).not.toBe(signedOutBody);
+    expect(myteam.innerHTML.length).toBeGreaterThan(0);
+  });
+
+  // Final review I-1: the two calls in the non-admin branch sit in SEPARATE trys, the same shape the
+  // signed-in block in onAuthEvent uses. Wrapped in ONE try, a throw out of partialRender (a large amount
+  // of builder code) skipped repaintSignedInPanels entirely and left the signed-out body on the hidden
+  // Tournament and My Team panels, under a wall syncGatePage had already dropped - the exact defect Task 2's
+  // I-1 was raised for, re-armed on the branch every non-admin sign-in takes. Arming the harness spy to
+  // throw is what tells the two shapes apart from outside the function: both swallow the throw, only the
+  // separate-try shape still paints.
+  it('a partialRender that throws still leaves the hidden My Team panel repainted', async () => {
+    const { myteam } = stageHome();
+    bridge.setSignedOut();
+    const signedOutBody = bridge.myTeamPage();
+    myteam.innerHTML = signedOutBody;
+    bridge.setSignedIn(session.user, null);
+    bridge.setAdmin(false);
+    bridge.setCommunityId('c1');
+    bridge.setPainted(true);
+    bridge.tab('home');
+    bridge.supaNext('rpc', { data: 'player', error: null });
+    const renders = bridge.renderCount();
+    const partials = bridge.partialCount();
+    bridge.setPartialThrows(true);
+    await bridge.postWork();
+    bridge.setPartialThrows(false);
+    expect(bridge.partialCount()).toBe(partials + 1);      // it was reached, and it threw
+    expect(bridge.renderCount()).toBe(renders);            // and the throw was not answered with a full render
+    expect(myteam.innerHTML).toBe(bridge.myTeamPage());    // the second try ran anyway
     expect(myteam.innerHTML).not.toBe(signedOutBody);
     expect(myteam.innerHTML.length).toBeGreaterThan(0);
   });
