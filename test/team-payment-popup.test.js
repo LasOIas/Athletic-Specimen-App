@@ -199,7 +199,9 @@ describe('Mark as paid', () => {
   });
 
   it('the direct paid door is gone from the source entirely', () => {
-    const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+    const mgGuardSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
+    const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
+      + '\n' + mgGuardSrc;   // C102: the client is two files; a guard over one would pass vacuously
     // Comments come out first: tdbSetTeamPaid's own header NAMES the door it replaced, which is exactly
     // what a header should do, and a guard that reads comments bans the explanation along with the code
     // (the 2026-08-24 §41 lesson).

@@ -827,7 +827,9 @@ describe('wiring, copy, and what was deliberately NOT built', () => {
   it('ships NO column-dependent public-visibility code', () => {
     // There is no featured / is_public / public_active column on `tournaments`; publicLiveTournament
     // resolves by STATUS alone. Comments may discuss it; code may not.
-    const code = APP_SRC.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    // C102: the client is two files; a guard over one would pass vacuously. (APP_SRC itself stays app.js
+    // only, because loadApp runs it in the vm alongside mgSrc.)
+    const code = (APP_SRC + '\n' + mgSrc).split(/\r?\n/).filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
     expect(code).not.toMatch(/is_public|public_active|featured/);
     const { bridge } = loadApp();
     bridge.seed([JUNE, JULY, AUG], { active: AUG.id });

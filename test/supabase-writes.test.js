@@ -93,6 +93,13 @@ describe('NF-2 — every Supabase write captures its { error } (no silent corrup
     expect(offenders, `Unguarded Supabase write(s):\n${offenders.join('\n')}`).toEqual([]);
   });
 
+  it('public/manage.js has no bare/unguarded Supabase write', () => {
+    // C102: seven write sites moved here with the Manage block (pickup_days update/insert/delete, check_in,
+    // check_out, register_player, the players insert). Without this scan they leave NF-2's coverage silently.
+    const offenders = unguardedWrites(new URL('../public/manage.js', import.meta.url), 'manage.js');
+    expect(offenders, `Unguarded Supabase write(s), capture { error } (or route through a guarded tdb* helper):\n${offenders.join('\n')}`).toEqual([]);
+  });
+
   it('detects a bare write (heuristic self-check — proves the guard can actually fail)', () => {
     const sample = "async function x(){ await supabaseClient.from('t').update({a:1}).eq('id', 9); }";
     const offenders = [];

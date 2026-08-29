@@ -451,7 +451,9 @@ const bridge = loadApp();
 const count = (hay, needle) => hay.split(needle).length - 1;
 
 const css = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-const appSrc = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const mgGuardSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
+const appSrc = (readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
+  + '\n' + mgGuardSrc).replace(/\r\n/g, '\n');   // C102: the client is two files; a guard over one would pass vacuously
 // The words a control ships with, read out of the markup that declared it. The document stub keeps
 // innerHTML as a STRING and never parses it, so a control's textContent is only ever what code assigned;
 // a case that needs the label a real paint would have given it seeds it from here (Task 5 review).

@@ -351,7 +351,9 @@ const bridge = loadApp();
 const count = (hay, needle) => hay.split(needle).length - 1;
 
 const css = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
-const appSrc = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const mgGuardSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
+const appSrc = (readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
+  + '\n' + mgGuardSrc).replace(/\r\n/g, '\n');   // C102: the client is two files; a guard over one would pass vacuously
 const indexSrc = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 // An 8-team double elimination main bracket, mid-play, seeded the way the bracket tests in
@@ -2553,7 +2555,7 @@ describe('C101 Task 5 Clear this result', () => {
     expect(names).toContain('move_team_to_pool');
     expect(names.length).toBeGreaterThanOrEqual(11);
     for (const name of names.concat(['read_action_log'])) {
-      expect(appSrc, name + ' is in MUTATING_RPCS but never called from app.js').toContain("rpc('" + name + "'");
+      expect(appSrc, name + ' is in MUTATING_RPCS but never called from the client').toContain("rpc('" + name + "'");
     }
   });
 

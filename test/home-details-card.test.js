@@ -163,7 +163,9 @@ describe('the Home rules sheet builder', () => {
 });
 
 describe('wiring (source-level — the suite has no DOM)', () => {
-  const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const mgGuardSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
+    + '\n' + mgGuardSrc;   // C102: the client is two files; a guard over one would pass vacuously
   it('the sheet is body-appended on the popup overlay, with backdrop + Escape closers', () => {
     const fn = src.slice(src.indexOf('function openHomeRules('), src.indexOf('function hmCopyAddress('));
     expect(fn).toContain("scrim.id = 'hm-rules-modal'");

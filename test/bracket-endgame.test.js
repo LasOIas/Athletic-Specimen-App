@@ -117,7 +117,9 @@ describe('C80 — the champion the bracket already knows is recoverable after au
 // only reachable through the vm harness in manage-page.test.js, so these assert the wiring is present rather
 // than re-standing up a second sandbox.
 describe('C80 — the close-out screen offers to record the champion', () => {
-  const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const mgGuardSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
+    + '\n' + mgGuardSrc;   // C102: the client is two files; a guard over one would pass vacuously
 
   it('has a record-champion control and its handler', () => {
     expect(src).toContain('data-mgco-record');

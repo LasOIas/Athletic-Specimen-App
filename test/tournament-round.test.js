@@ -11,7 +11,9 @@ import vm from 'node:vm';
 const require = createRequire(import.meta.url);
 const pure = require('../public/pure.js');
 const strip = (s) => s.replace(/\r\n/g, '\n');
-const appSrcText = strip(readFileSync(new URL('../public/app.js', import.meta.url), 'utf8'));
+const mgGuardSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
+const appSrcText = strip(readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
+  + '\n' + mgGuardSrc);   // C102: the client is two files; a guard over one would pass vacuously
 const cssText = strip(readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '');
 
 function loadApp() {

@@ -8,7 +8,9 @@ import { readFileSync } from 'node:fs';
 // classes these guards ban, and a note is not a rule.
 const stripCss = (s) => s.replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '');
 const css = stripCss(readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8'));
-const js = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+const mgGuardSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
+const js = (readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
+  + '\n' + mgGuardSrc).replace(/\r\n/g, '\n');   // C102: the client is two files; a guard over one would pass vacuously
 
 describe('motion CSS', () => {
   it('defines the five durations and four curves', () => {

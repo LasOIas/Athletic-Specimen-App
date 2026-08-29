@@ -183,7 +183,9 @@ describe('relayoutPoolGamesOnNets — repairing nets mid-event stays collision-f
 
 // The pure function is only worth anything if the shipped schedule path actually calls it.
 describe('app.js wires the fixed slotting into the real schedule path', () => {
-  const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+  const mgGuardSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
+    + '\n' + mgGuardSrc;   // C102: the client is two files; a guard over one would pass vacuously
 
   it('tdbStartPoolPlayAtomic uses assignPoolGameSlots', () => {
     expect(src).toContain('assignPoolGameSlots');
