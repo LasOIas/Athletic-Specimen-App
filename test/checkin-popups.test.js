@@ -112,7 +112,7 @@ describe('Task 2: the close button is pinned right in every pop-up', () => {
     // rule in the file carries margin-left: auto, which the literal-only check could never say.
     expect(cssLF).toContain('.pe-in {\n  position: relative;\n  flex: none;\n');
     expect(cssLF).not.toContain('.pe-in { flex: none; margin-left: auto; }');
-    expect(cssLF).not.toMatch(/^\.pe-in \{[^}]*margin-left:\s*auto/m);
+    expect(cssLF).not.toMatch(/^\.pe-in\s*\{[^}]*margin-left:\s*auto/m);
   });
 
   it('the empty .pe-in spacer is gone from the card, so an out player has no phantom child', () => {
@@ -137,6 +137,12 @@ describe('Task 3: the card header and its section heads', () => {
     expect(s).toContain("'Roster · new player'");
     expect(s).toContain("'Roster · check-in'");
     expect(s).toContain("'Roster · players'");   // this spec's own string: the handoff only drew check-in
+    // The three strings alone would still pass with the ternary inverted, which IS the failure this case
+    // is named after, so the wiring is pinned too. And the bindings it reads are pinned at their load
+    // state, because an arrow body in the bridge is never evaluated: without this, deleting `let peOrigin`
+    // (app.js:105) would fail nothing until Task 7 consumed it.
+    expect(s).toContain("peOrigin === 'checkin' ? 'Roster · check-in' : 'Roster · players'");
+    expect(bridge.mode()).toEqual({ mode: 'edit', origin: 'checkin', key: '' });
   });
 
   it('PLAYER comes before STATUS, and Skill stays a field label', () => {
@@ -156,7 +162,20 @@ describe('Task 3: the card header and its section heads', () => {
   });
 
   it('the header treatment is in styles.css once, on tokens', () => {
-    expect(cssLF).toContain('background: var(--accent-soft);');
+    // The block is SLICED, not scanned. A bare toContain on 'background: var(--accent-soft);' proves
+    // nothing about this header: the literal occurs 65 times in styles.css and was already true at the
+    // parent commit, where the old .pe-av carried it. [^}] spans newlines in JS, so the match runs from
+    // the selector to the block's first closing brace, and the m flag keeps the descendant rules out.
+    const heads = cssLF.match(/^\.pe-head\s*\{[^}]*\}/gm) || [];
+    expect(heads).toHaveLength(1);   // the "once" the title has always claimed, now actually asserted
+    const head = heads[0];
+    expect(head).toContain('background: var(--accent-soft);');
+    expect(head).toContain('border-bottom: 1px solid var(--accent-bd);');
+    expect(head).toContain('margin: 0;');   // .popup-header:864 ships margin-bottom: 12px into this element
+    expect(head).toContain('padding: 16px 14px 15px 16px;');
+    expect(head).toContain('position: relative;');
+    expect(head).toContain('overflow: hidden;');
+    expect(head).toContain('flex: none;');
     expect(cssLF).toContain('.pe-mark {');
     expect(cssLF).toContain('.pe-eyebrow {');
     expect(cssLF).toContain('.pe-sect:not(:first-child) { margin-top: 20px; }');

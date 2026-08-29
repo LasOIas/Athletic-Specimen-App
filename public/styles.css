@@ -3352,6 +3352,10 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   display: flex;
   align-items: center;
   gap: 12px;
+  /* the handoff's own reset (_shared.css:943), which the spec's B2 block dropped. .popup-header (:864)
+     ships margin-bottom: 12px, and this element is class="popup-header pe-head", so without this a 12px
+     band of card white sits between the tinted strip's bottom border and .pe-body. */
+  margin: 0;
   padding: 16px 14px 15px 16px;
   background: var(--accent-soft);
   border-bottom: 1px solid var(--accent-bd);
@@ -3408,6 +3412,7 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   text-transform: uppercase;
 }
 .pe-x {
+  position: relative;   /* above the watermark */
   flex: none;
   display: grid;
   place-items: center;
@@ -3424,7 +3429,6 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   line-height: 1;
   cursor: pointer;
 }
-.pe-x { position: relative; }   /* above the watermark */
 .pe-x:hover { color: var(--accent); border-color: var(--accent); background: #fff; }
 .pe-body {
   flex: 1 1 auto;
