@@ -35,7 +35,7 @@ Write back to the master vault (routing rules:
 5. Write a `12-history\task-#<id>-<slug>.md` file BEFORE marking any task complete (Rule §30)
 
 ## Non-Negotiable Rules
-- Bump `APP_VERSION` in `public/app.js` (line ~22) with every code change
+- Bump `APP_VERSION` in `public/app.js` (line 34) with every code change
   Format: `'YYYY.MM.DD.N'` — N resets to 1 each new day
 - Commit and push after every fix — do not wait to be asked
 - Use `partialRender()` for all background Supabase syncs, never `render()`

@@ -1,7 +1,7 @@
 // NF-18 (2026-06-26): SINGLE SOURCE OF TRUTH for the version. app.js registers this worker as
 // `/sw.js?v=<APP_VERSION>` (updateViaCache:'none'), so the SW URL already carries the app version and a
 // bump activates a new worker. Derive the cache name from that ?v= param instead of a second hand-edited
-// const — so APP_VERSION (app.js, ~line 27) is the ONLY place to bump and the cache name can never drift
+// const — so APP_VERSION (app.js, line 34) is the ONLY place to bump and the cache name can never drift
 // (kills the old "forgot to bump SW_VERSION → same cache name → stale precache served" bug).
 const SW_VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
 const CACHE_NAME = 'athletic-specimen-cache-' + SW_VERSION;
