@@ -182,7 +182,7 @@ describe('relayoutPoolGamesOnNets — repairing nets mid-event stays collision-f
 });
 
 // The pure function is only worth anything if the shipped schedule path actually calls it.
-describe('app.js wires the fixed slotting into the real schedule path', () => {
+describe('the client wires the fixed slotting into the real schedule path', () => {
   const mgGuardSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
   const src = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
     + '\n' + mgGuardSrc;   // C102: the client is two files; a guard over one would pass vacuously
@@ -192,7 +192,7 @@ describe('app.js wires the fixed slotting into the real schedule path', () => {
   });
 
   it('no longer composes generateRoundRobin with distributeGamesOnNets by raw index', () => {
-    // The old two-call composition is what double-booked teams. Neither call should remain in app.js.
+    // The old two-call composition is what double-booked teams. Neither call should remain in the client.
     expect(src).not.toContain('distributeGamesOnNets(');
   });
 });

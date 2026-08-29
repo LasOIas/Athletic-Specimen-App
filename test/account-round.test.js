@@ -452,8 +452,12 @@ const count = (hay, needle) => hay.split(needle).length - 1;
 
 const css = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const mgGuardSrc = readFileSync(new URL('../public/manage.js', import.meta.url), 'utf8');
-const appSrc = (readFileSync(new URL('../public/app.js', import.meta.url), 'utf8')
-  + '\n' + mgGuardSrc).replace(/\r\n/g, '\n');   // C102: the client is two files; a guard over one would pass vacuously
+const appOnlySrc = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
+const appSrc = (appOnlySrc + '\n' + mgGuardSrc).replace(/\r\n/g, '\n');   // C102: the client is two files; a guard over one would pass vacuously
+// C102 fix round 1: PRESENCE order is not LOAD order. index.html loads manage.js BEFORE app.js, so a guard
+// that asserts what evaluates before what has to read the two files in THAT order. The presence guards keep
+// appSrc; the one ordering guard in this file (the claimIntent TDZ case) reads loadOrderSrc.
+const loadOrderSrc = (mgGuardSrc + '\n' + appOnlySrc).replace(/\r\n/g, '\n');
 // The words a control ships with, read out of the markup that declared it. The document stub keeps
 // innerHTML as a STRING and never parses it, so a control's textContent is only ever what code assigned;
 // a case that needs the label a real paint would have given it seeds it from here (Task 5 review).
@@ -2326,10 +2330,21 @@ describe('Account round Task 8 - Continue with Google', () => {
   it('the restore runs at boot, below the declaration', () => {
     // The bridge can call the function; only the SOURCE proves the app calls it, and the call MUST sit
     // below `let claimIntent` or the temporal dead zone throws at load and the whole app is dead.
-    const decl = appSrc.indexOf('let claimIntent = false');
-    const call = appSrc.indexOf('\nauthRestoreClaimIntent();');
+    // Read in LOAD order (manage.js, then app.js), NOT the presence order the rest of this file uses: this
+    // asserts what evaluates before what, and app.js + manage.js is the reverse of the truth, so a call that
+    // moved into manage.js would still read as "below the declaration" and the TDZ crash would ship. The
+    // load order is pinned right here, and again by client-files.test.js guard 1.
+    const indexHtml = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
+    const scripts = [...indexHtml.matchAll(/<script\b[^>]*\bsrc="(\/[^"?]*)"/g)].map((m) => m[1]);
+    expect(scripts.indexOf('/manage.js')).toBeLessThan(scripts.indexOf('/app.js'));
+    const decl = loadOrderSrc.indexOf('let claimIntent = false');
+    const call = loadOrderSrc.indexOf('\nauthRestoreClaimIntent();');
     expect(decl).toBeGreaterThan(-1);
     expect(call).toBeGreaterThan(decl);
+    // The cross-file direction is safe by that same load order: manage.js is fully evaluated before app.js
+    // starts, so an app.js top-level read of a manage.js top-level binding always finds it defined. What is
+    // left is an app.js top-level read of an app.js binding declared later, which is exactly the comparison
+    // above, and that comparison now also catches the call migrating into manage.js.
   });
 
   it('an absent or junk key leaves the flag alone', () => {

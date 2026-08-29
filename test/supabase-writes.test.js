@@ -14,6 +14,9 @@
 //   - .rpc() called with a DYNAMIC name (e.g. `rpc(inBtn ? 'check_in' : 'check_out')`) is not matched by
 //     the rpc branch (all such sites are guarded today); table writes — the higher corruption risk — are
 //     fully covered regardless of name.
+//   - a write assigned to a BUILDER variable and awaited separately (`const q = supabaseClient.from('x')
+//     .insert(y); await q;`) reads as guarded, because isGuarded only looks for an `=`. No such site
+//     exists in the client today (C102 review); if one appears, the scan will not catch it.
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 
