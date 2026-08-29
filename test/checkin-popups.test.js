@@ -156,12 +156,16 @@ function withDelegate(fn) {
   try { bridge.attachHandlers(); } catch (_) { /* nothing after the delegates matters here */ }
   finally { doc.getElementById = realGet; }
   if (!click) throw new Error('the #app-content click delegate was never bound');
+  // The resolved ancestor answers ONLY for the attribute its own selector matched. The looser shape this
+  // replaced answered for every hook in `list`, which let a branch read an attribute off a node that does
+  // not carry it: mutate the pencil branch to read data-mgck-id off the span it just resolved and the old
+  // stub still handed it 'id:p1', so the ordering guard below passed on a read the real DOM refuses. The
+  // final whole-branch review proved that hole (M9) and this two-line shape closes it.
   const target = (list, value) => ({
     tagName: 'BUTTON', dataset: {},
     classList: { contains: () => false },
-    closest: (sel) => (list.some((a) => sel === '[' + a + ']')
-      ? { getAttribute: (name) => (list.includes(name) ? (value == null ? '' : value) : null), dataset: {} }
-      : null),
+    closest: (sel) => { const hit = list.find((a) => sel === '[' + a + ']');
+      return hit ? { getAttribute: (name) => (name === hit ? (value == null ? '' : value) : null), dataset: {} } : null; },
   });
   const tap = (attrs, value) => click({
     target: target(Array.isArray(attrs) ? attrs : [attrs], value),

@@ -5,10 +5,17 @@
 -- this is the first. It drops NOTHING: no column, no table, no signature. It exists so the window between
 -- the client change and the drop cannot create a duplicate person on a live roster.
 --
+-- EVERY public/ LINE NUMBER BELOW IS READ AT 60e4e23, the commit these cites were written in, on the
+-- client this file was written against. That client is GONE at HEAD: the round's Tasks 9 and 10 deleted
+-- the group layer and both kiosk doors now send two keys, so a reader on the shipping tree greps these
+-- lines and finds nothing. `git show 60e4e23:public/app.js` is where they are. Same "at <sha>" anchor
+-- convention 0069 uses with its own "At 12f48bb".
+--
 -- WHY. The live register_player (0020_group_null_normalize.sql:39-44) dedups on
 --   lower(btrim(pl.name)) = lower(v_name) and coalesce(pl."group",'') = coalesce(v_group,'')
--- Both anon doors send 'Athletic Specimen' today (public/checkin.html:539, public/app.js:9788, sharing
--- CLUB_GROUP at public/supabase-config.js:12, whose comment at :8-11 records the exact bug it prevents).
+-- Both anon doors send 'Athletic Specimen' today (at 60e4e23: public/checkin.html:539,
+-- public/app.js:9788, sharing CLUB_GROUP at public/supabase-config.js:12, whose comment at :8-11
+-- records the exact bug it prevents).
 -- Change only one side of that comparison, in either direction, and the dedup misses: the insert is
 -- permitted because players_real_name_group_uidx keys on (lower(btrim(name)), coalesce("group",'')) (0012),
 -- and the same person becomes two rows with split attendance. Emptying the column AND making the function
@@ -16,10 +23,22 @@
 --
 -- WHAT DOES CHANGE for the still-deployed old client, from this apply until the client push: it keeps
 -- registering and checking players in correctly, because the dedup is now name-only for every caller. But
--- every roster surface that PRINTS a group reads the emptied column, so the 211 players whose group lived
--- only there show as Ungrouped, the group counter drops and the group filter empties. Verified null-safe
--- (public/app.js:1036-1058 and :5479-5493 go through parseRemotePlayerGroupDetails; nothing crashes and no
--- sentinel string surfaces). It is the end state Mike asked for, arriving early, and it is why the
+-- every roster surface that prints a group OFF THE COLUMN now reads it empty, so a player whose group
+-- lived only there shows as Ungrouped and the group filter empties.
+--
+-- Two corrections to the way that used to be written here, both read on the code rather than assumed:
+--   * 211 is the UPPER BOUND on who goes Ungrouped, not the count. parseRemotePlayerGroupDetails merges
+--     the players.tag payload WITH the column (at 60e4e23: public/app.js:1036-1058, called at
+--     :5479-5493), so a tag-grouped player keeps their groups through this apply. 0070 is what takes
+--     those, and only after 0069.
+--   * the players list's "N groups" COUNTER DOES NOT DROP. It counts state.groups (at 60e4e23:
+--     public/manage.js:1035 and :1050, through getAvailableGroups at public/app.js:4783-4785), and
+--     state.groups is filled from the `groups` CATALOG table whenever that table has rows
+--     (public/app.js:1152-1158, fetched at :5502 and :5772-5779). This file does not touch that table:
+--     0069 is what drops it. The counter reads the same number after this apply as before it.
+--
+-- Verified null-safe (the two paths above go through parseRemotePlayerGroupDetails; nothing crashes and
+-- no sentinel string surfaces). It is the end state Mike asked for, arriving early, and it is why the
 -- controller applies this file IMMEDIATELY BEFORE the client push rather than days ahead of it.
 --
 -- STEP 1 is a GATE ON THE ROUND OPENING, not a formality at the end: if two real rows already share a name,
@@ -33,8 +52,7 @@
 --   update public.players set "group" = <captured> where id = <captured id>;
 --   Nothing is dropped by this file, so the rollback is a function body plus a data restore.
 --
--- NOT YET APPLIED (the controller applies it before the first client push) via the Supabase MCP
--- (apply_migration), the check-in pop-ups round.
+-- APPLIED 2026-08-29 via the Supabase MCP (apply_migration), the check-in pop-ups round.
 
 -- STEP 1. A COMMENT: apply_migration does NOT run this. The controller runs it alone with execute_sql
 -- FIRST and READS the result. Zero rows required, or the round stops. It is the dry run; STEP 2b below is
@@ -95,9 +113,9 @@ $guard$;
 -- STEP 3. Every real row moves into the one slot a group-blind call will use. 0020's normalize trigger
 -- already turns '' into NULL on write, so NULL is the canonical empty. AT APPLY TIME that makes
 -- coalesce("group",'') = '' hold for every row. It is not a lasting invariant: the still-deployed admin
--- console writes the column directly (public/manage.js:1310, :1391, :1421), so an admin save before 0069
--- can repopulate a tag-grouped row. Harmless, because the function below is group-blind and 0069 drops the
--- column; the read-back count of 0 is a point-in-time check, not a standing one.
+-- console writes the column directly (at 60e4e23: public/manage.js:1310, :1391, :1421), so an admin save
+-- before 0069 can repopulate a tag-grouped row. Harmless, because the function below is group-blind and
+-- 0069 drops the column; the read-back count of 0 is a point-in-time check, not a standing one.
 update public.players set "group" = null where "group" is not null;
 
 -- STEP 4. register_player, SAME three-argument signature, group-blind. p_group is still accepted so every

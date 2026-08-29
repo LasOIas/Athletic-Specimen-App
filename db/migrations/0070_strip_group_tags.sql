@@ -6,9 +6,16 @@
 -- thing that knew what was in it. This file empties the part of that column that is group data. It drops
 -- no structure: no column, no table, no function, no grant. One UPDATE.
 --
+-- EVERY public/ LINE NUMBER IN THIS FILE IS READ AT 12f48bb, the branch head this file was written
+-- against, and it is the same anchor 0069 uses for the same code. That client is GONE at HEAD: Task 10
+-- deleted the group layer, so a reader on the shipping tree greps these lines and finds nothing, and
+-- `git show 12f48bb:public/app.js` is where they are. The statements below are true OF THE DEPLOYED
+-- PRE-.10 CLIENT, which is the client this file's ordering exists to protect against, so that is the
+-- correct referent even though it no longer sits at HEAD.
+--
 -- WHAT players.tag ACTUALLY HOLDS. tag is older than db/migrations: no migration in this folder creates
 -- it or writes it, and the only one that even names it is the anon column grant at 0010:9. Every reader
--- and writer lives in the client, and every one of them is group code:
+-- and writer lives in the client, and every one of them is group code (all at 12f48bb):
 --   written  serializePlayerGroupsTag (public/app.js:1069) returns GROUPS_TAG_PREFIX (public/app.js:48,
 --            the literal '__as_groups__:') followed by encodeURIComponent(JSON.stringify(<array of group
 --            names>)). That is the WHOLE value. It is never appended to existing content, and the
@@ -36,27 +43,31 @@
 -- for the same reason. 14 is the length of '__as_groups__:'.
 --
 -- The prefix test also means no row needs excluding by name. The sentinel rows the app still keeps
--- (`__as_tournament_state__`, public/app.js:49, excluded from every roster at :5530 and :6046) are
--- matched only if their tag actually carries the group payload, in which case it is group data and goes
--- with the rest. 0018 already deleted the `__as_group__:` catalog rows.
+-- (`__as_tournament_state__`, at 12f48bb: public/app.js:49, excluded from every roster at :5530 and
+-- :6046) are matched only if their tag actually carries the group payload, in which case it is group
+-- data and goes with the rest. 0018 already deleted the `__as_group__:` catalog rows.
 --
--- WHAT THIS FILE LEAVES, ON PURPOSE: a tag that does NOT carry the prefix. public/app.js:5815 writes a
--- bare group name into tag when the group column is absent, so some of those values are group data too.
--- But a bare string cannot be told apart from non-group content by inspection, and this column predates
--- every migration in this folder, so nulling it would be a guess on a live roster. PRE-FLIGHT below
--- captures every one of them and the READ-BACKS list them again afterwards. The decision goes to Mike
--- with the list in hand: either a 0071 that nulls the residue, or spec section 10's recommendation, which
--- is dropping the column outright. This file does not make that call, and it does not pretend to.
+-- WHAT THIS FILE LEAVES, ON PURPOSE: a tag that does NOT carry the prefix. At 12f48bb public/app.js:5815
+-- writes a bare group name into tag when the group column is absent, so some of those values are group
+-- data too. But a bare string cannot be told apart from non-group content by inspection, and this
+-- column predates every migration in this folder, so nulling it would be a guess on a live roster.
+-- PRE-FLIGHT below captures every one of them and the READ-BACKS list them again afterwards. The
+-- decision goes to Mike with the list in hand: either a 0071 that nulls the residue, or spec section
+-- 10's recommendation, which is dropping the column outright. This file does not make that call, and it
+-- does not pretend to.
 --
 -- ORDER. One statement, and it runs AFTER 0069. It must not run while the client group layer is still
--- deployed (0069's APPLY PRECONDITION P2): with the group column gone, detectPlayersSchema
--- (public/app.js:5778) sets HAS_GROUP false and public/app.js:5815 and :6094 write group names straight
--- back into tag, so an early apply cleans a column the running app immediately refills.
+-- deployed (0069's APPLY PRECONDITIONS P2 and P3): with the group column gone, detectPlayersSchema
+-- (at 12f48bb: public/app.js:5778) sets HAS_GROUP false and public/app.js:5815 and :6094 write group
+-- names straight back into tag, so an early apply cleans a column the running app immediately refills.
+-- P3 is the one that closes this for real, because a device that never reloads is still running exactly
+-- that code no matter what HEAD says.
 --
--- ALSO STILL OPEN, and not this file's call: attendance_sessions."group" (0015:16, "which group's night")
--- survived 0069 by design as a different column on a different table. No client code reads or writes it
--- (`grep -rn "attendance_sessions" public/` returns nothing). It is the same product concept Mike
--- deleted, so it belongs in the same question to Mike as the tag residue above.
+-- ALSO STILL OPEN, and not this file's call: attendance_sessions."group" (0015:16, the group column
+-- comment) survived 0069 by design as a different column on a different table. No client code reads or
+-- writes it (`grep -rn "attendance_sessions" public/` returns nothing, and that one holds at HEAD, not
+-- only at 12f48bb). It is the same product concept Mike deleted, so it belongs in the same question to
+-- Mike as the tag residue above.
 --
 -- PRE-FLIGHT. A COMMENT: apply_migration does NOT run this. The controller runs it alone with execute_sql
 -- BEFORE the update and saves the output VERBATIM into the round's 12-history file. It is the ONLY record
@@ -81,8 +92,9 @@ update public.players
 -- AFTER the update commits, and records every result in the round's history file.
 --   select count(*) from public.players where left(tag, 14) = '__as_groups__:';    -- 0
 --   select count(*) from public.players where tag is not null;
---     -- the residue this file deliberately left: the bare-name shape from public/app.js:5815. Subtract
---     -- it from the PRE-FLIGHT capture's row count and the difference is exactly what this file nulled.
+--     -- the residue this file deliberately left: the bare-name shape from public/app.js:5815 at
+--     -- 12f48bb. Subtract it from the PRE-FLIGHT capture's row count and the difference is exactly
+--     -- what this file nulled.
 --   select id, name, tag from public.players where tag is not null order by name;
 --     -- the list that goes to Mike with the question: a 0071 that nulls these, or drop the column.
 --   select count(*) from public.players where left(name, 5) <> '__as_';

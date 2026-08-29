@@ -25,6 +25,14 @@
 --       public/app.js:6094 doing the same on the insert path. An un-swept client REPOPULATES the one
 --       group store this file leaves standing. 0070_strip_group_tags.sql cleans tag, and it is equally
 --       pointless while the client is still writing to it.
+--   P3. EVERY DEVICE THAT REGISTERS IS ON .10. A version bump plus a network-first service
+--       worker updates a page that RELOADS; it does nothing for one already open, and the
+--       kiosk phone sits on a table with checkin.html open all day. The three-argument
+--       function is what that page still calls, and this file drops it: the first person at
+--       the door gets "Could not register you". Before applying, HARD-RELOAD and read the
+--       version on each of: the kiosk phone (checkin.html), the in-app Check In tab, and the
+--       admin console. All three must read 2026.08.29.10. A drive on one device is not this
+--       check. Nothing in this file can verify it, which is why it is written down here.
 --
 -- WHAT GOES:
 --   1. the `groups` catalog table (0017), with its unique index, its two RLS policies and its grants,
@@ -47,8 +55,9 @@
 --   players_real_name_group_uidx        0011:13, superseded by 0012:11-14  DROPPED, rebuilt name-only.
 --     Live definition confirmed 2026-08-29: UNIQUE (lower(btrim(name)), coalesce("group",''))
 --     WHERE left(name,5) <> '__as_'. Postgres would drop this index along with the column on its own,
---     so the ordering below is NOT about a dependency: the name-only rebuild has to replace it, and
---     building the new index BEFORE anything is destroyed is what makes a duplicate name abort harmlessly.
+--     so the ordering below is NOT about a dependency: the name-only rebuild has to replace it. What
+--     makes a duplicate name abort harmlessly is the TRANSACTION, not the statement order; see point 1
+--     of WHY THE STATEMENTS SIT IN THIS ORDER.
 --   the anon column-level select grant   0010:9                            goes with the column, silently
 --   tg_players_normalize_group()         0020:9-15                         DROPPED
 --   players_normalize_group (trigger)    0020:17-20                        DROPPED
@@ -93,12 +102,14 @@
 --
 -- WHY THE STATEMENTS SIT IN THIS ORDER, so one apply_migration transaction either wholly succeeds or
 -- wholly aborts:
---   1. the name-only unique index is BUILT FIRST, before anything is dropped. It is the only statement
---      here that can fail on DATA: it needs zero duplicate real names. 0068 STEP 1 read zero and 0068
---      STEP 2b enforced zero inside its own transaction, but the admin console writes players directly,
---      so a duplicate created between the two applies is possible. Building first means such a row aborts
---      this transaction with NOTHING yet dropped, and the rollback of that same transaction puts
---      players_real_name_group_uidx back.
+--   1. the name-only unique index is created before anything is dropped THAT IT COULD NOT REPLACE. It is
+--      the only statement here that can fail on DATA: it needs zero duplicate real names. 0068 STEP 1
+--      read zero and 0068 STEP 2b enforced zero inside its own transaction, but the admin console writes
+--      players directly, so a duplicate created between the two applies is possible. Read the statements,
+--      not the word FIRST: the (name, group) index is dropped one line ABOVE the create, so the create is
+--      not first in any literal sense. The safety holds by TRANSACTIONALITY, not by the order. A duplicate
+--      row aborts the single apply_migration batch, and that same rollback puts
+--      players_real_name_group_uidx back along with every other statement here.
 --   2. the trigger goes before the trigger function it depends on.
 --   3. the three-argument register_player is DROPPED BEFORE the two-argument one is created, so no point
 --      inside the transaction holds two overloads. A create-first order would briefly leave a database in
@@ -107,7 +118,10 @@
 --   4. the column drop comes after the index, the trigger and the old function are gone. plpgsql bodies
 --      are not dependency-tracked, so Postgres would have allowed the drop with the old function still
 --      standing and left a function that errors on its first call. This order makes that impossible.
---   5. the table drop is last, when nothing above still reads it.
+--   5. the table drop is last of the DDL, when nothing above still reads it.
+--   6. `notify pgrst, 'reload schema';` is the final statement of all, so what PostgREST re-reads is the
+--      finished shape rather than a half-applied one. NOTIFY is delivered on COMMIT, so an aborted apply
+--      cannot fire it and a rolled-back cache reload is not a thing that can happen.
 --
 -- ROLLBACK. STRUCTURES ONLY, and not even all of them. Read this before treating the file as reversible.
 --
@@ -276,6 +290,15 @@ alter table public.players drop column if exists "group";
 -- no cascade here either, and for the same reason
 drop table if exists public.groups;
 
+-- PostgREST caches the function catalog. The drop-and-create above changes register_player's
+-- signature, so a client's two-key call routes to nothing until the cache reloads. Supabase's
+-- pgrst_ddl_watch event trigger normally does this on its own; this is the belt to its braces,
+-- and it costs one statement. NOTIFY is delivered on commit, so it cannot fire on a rollback.
+-- The kiosk is the anon door: a stale cache means "nobody can check in" while every read-back
+-- in this file still passes, because every one of them is SQL and SQL never sees that cache.
+-- SMOKE 3 below is the read that does.
+notify pgrst, 'reload schema';
+
 -- READ-BACKS. Comments: apply_migration does NOT run these. The controller runs them with execute_sql
 -- AFTER this batch commits, and records every result in the round's history file.
 --   select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -312,10 +335,29 @@ drop table if exists public.groups;
 --       -- FALSE. The dedup hit. This is what stops the console's add card writing a rating over a
 --       -- player it did not create, so a false here is the whole guard working.
 --
---   THE CONTROLLER ROLLS BOTH SMOKES BACK, every row, or fake players are left on a live roster:
+--   SMOKE 3, THROUGH POSTGREST, with the ANON key, and the two smokes above cannot stand in for it:
+--   they are SQL, so they read the catalog and never the schema cache. This is the call the kiosk itself
+--   makes, from outside the database, as the same anonymous role, with the parameters in the NAMED
+--   notation PostgREST uses (the JSON keys ARE the argument names, which is how the overload resolves).
+--   The controller runs it from the repo root and deletes the row it creates:
+--     ANON=$(sed -n "s/^const SUPABASE_KEY = '\(.*\)';$/\1/p" public/supabase-config.js)
+--     curl -s -o /dev/null -w '%{http_code}\n' \
+--       -X POST 'https://mlzblkzflgylnjorgjcp.supabase.co/rest/v1/rpc/register_player' \
+--       -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
+--       -H 'Content-Type: application/json' \
+--       -d '{"p_name":"Zz Smoketest Three","p_checked_in":false}'
+--   Drop the -o /dev/null to read the body. EXPECT 200 and ONE row carrying four keys, is_new among
+--   them and true on this first call. A 404 with code PGRST202 ("Could not find the function
+--   public.register_player(p_checked_in, p_name) in the schema cache") does NOT mean the apply failed:
+--   it means the cache is stale. Re-issue `notify pgrst, 'reload schema';`, wait, and re-read. The apply
+--   is not done, and no client is pushed and no kiosk is handed back, until this returns 200.
+--
+--   THE CONTROLLER ROLLS ALL THREE SMOKES BACK, every row, or fake players are left on a live roster:
 --     delete from public.players
---      where lower(btrim(name)) in (lower('Zz Smoketest'), lower('Zz Smoketest Two'));
+--      where lower(btrim(name)) in (lower('Zz Smoketest'), lower('Zz Smoketest Two'),
+--                                   lower('Zz Smoketest Three'));
 --     delete from public.action_log
---      where action = 'register' and detail in ('Zz Smoketest', 'Zz Smoketest Two');
+--      where action = 'register'
+--        and detail in ('Zz Smoketest', 'Zz Smoketest Two', 'Zz Smoketest Three');
 --
 --   Then get_advisors for security and for performance: no class of finding that was not there before.
