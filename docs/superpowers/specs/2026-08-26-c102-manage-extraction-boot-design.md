@@ -135,9 +135,15 @@ is the same bug (the chip wears the email's letter until the next nav tap).
 
 ```js
 if (state.loaded && bootPaintDone) {
-  try { repaintAccountChip(); partialRender(); syncGatePage(); } catch {}
+  try { repaintAccountChip(); } catch (_) {}
+  try { syncGatePage(); } catch (_) {}          // closeGatePage ran above; this states the decision explicitly
+  try { partialRender(); } catch (_) {}         // the active tab, in place
+  try { repaintSignedInPanels(); } catch (_) {} // the hidden Tournament and My Team panels (built as Task 2 shipped)
 }
 ```
+
+Four separate trys so one failure never blocks the others; the order is chip, wall, active tab, hidden
+panels.
 
 - `repaintAccountChip()` because `partialRender()` never touches the header.
 - `partialRender()` because it already rebuilds the active tab in place: Home (`app.js:775-789`), Manage,
@@ -166,7 +172,8 @@ if (state.loaded && bootPaintDone) {
     // render() builds the shell. Otherwise the nav is byte-identical (its two inputs, checkinNavVisible()
     // and isAdmin, are untouched by this function), so an in-place repaint carries the refreshed
     // tournaments and teamMembers onto the Home hero and My Team.
-    if (wasAdmin !== state.isAdmin) render(); else partialRender();
+    if (wasAdmin !== state.isAdmin) render();
+    else { partialRender(); repaintSignedInPanels(); }   // teamMembers land on the My Team page too, which may be hidden
   } catch {}
 }
 ```
