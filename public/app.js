@@ -7273,8 +7273,11 @@ async function onNameFillSave(e) {
     accountName = { first: nm.first, last: nm.last };
     const el = document.getElementById('namefill-page');
     if (el) el.remove();
-    // C102: the chip alone, behind the same boot gate as every other post-boot repaint.
-    if (state.loaded && bootPaintDone) { try { repaintAccountChip(); } catch (_) {} }
+    // C102: the targeted repaints, behind the same boot gate as every other post-boot repaint.
+    if (state.loaded && bootPaintDone) {
+      try { repaintAccountChip(); } catch (_) {}
+      try { partialRender(); } catch (_) {}   // connectProfileByName can flip state.identityCollision, which the Tournament hub renders
+    }
   } catch (err) {
     console.error('connect_profile_by_name (name fill)', err);
     showErr("Couldn't save your name. Try again.");

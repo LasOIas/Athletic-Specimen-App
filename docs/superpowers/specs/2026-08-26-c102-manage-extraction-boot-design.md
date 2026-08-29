@@ -126,7 +126,9 @@ if (state.loaded && bootPaintDone) { try { repaintAccountChip(); } catch (_) {} 
 ```
 
 `onNameFillSave` (`app.js:7276`) calls `render()` with no guard today; it gets the same guarded line, so a
-repaint can never fire into a splash-only DOM. All three change in the same commit. A regression at any one
+repaint can never fire into a splash-only DOM. It also calls `partialRender()` beside the chip repaint,
+because `connectProfileByName` can set `state.identityCollision`, which the Tournament hub renders, and the
+old full render carried that row immediately. All three change in the same commit. A regression at any one
 is the same bug (the chip wears the email's letter until the next nav tap).
 
 **R2 (`app.js:7377`).** Replace `render()` with the three in-place repaints the sign-in actually needs:

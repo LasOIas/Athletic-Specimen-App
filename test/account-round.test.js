@@ -96,6 +96,8 @@ function mkNode(tag) {
     // render that did NOT declare a control from binding a handler to it anyway (the form state was
     // silently binding #auth-resend, so the sent screen's test fired the form state's stale closure).
     _owns(sel) {
+      // Only a BARE id is scoped to this element; a compound selector (C102's '#app-header .pd-hgrp')
+      // is deliberately GLOBAL in this stub - it falls through to the hooks map whoever asks for it.
       if (!isIdSel(sel)) return true;
       if (!this._html) return true;   // a bare fixture node that never had markup set
       return this._html.includes('id="' + sel.slice(1) + '"');
@@ -104,6 +106,9 @@ function mkNode(tag) {
     querySelectorAll(sel) { const r = this.querySelector(sel); return r ? [r] : []; },
     closest(sel) { return matches(this, sel) ? this : (this.parent ? this.parent.closest(sel) : null); },
     contains() { return false; },
+    // C102 Task 1: partialRender (public/app.js:736) falls back to a FULL render when #root reports no
+    // children, so a case that measures "no full render" has to be able to stage a root that has some.
+    hasChildNodes() { return this.children.length > 0; },
     get innerHTML() { return this._html; },
     set innerHTML(v) {
       const prev = this._html;
@@ -261,6 +266,12 @@ function loadApp() {
     render = function () { __renders += 1; return __render(); };
     // Task 8 spy: nothing may be claimed on a roster until the person taps Save, and
     // connect_profile_by_name is the call that would do it. The real function still runs; this counts.
+    // C102 Task 1: the targeted repaint's partner at onNameFillSave. connectProfileByName can flip
+    // state.identityCollision, which the Tournament hub renders, so the chip repaint is not the whole
+    // paint that site owes. Same shape as the render spy; Task 2 reuses it.
+    ;let __partials = 0;
+    const __partial = partialRender;
+    partialRender = function () { __partials += 1; return __partial(); };
     ;let __connects = 0;
     const __connect = connectProfileByName;
     connectProfileByName = async function (...a) { __connects += 1; return __connect(...a); };
@@ -313,7 +324,9 @@ function loadApp() {
       // itself is never rewritten (it also carries the PUBLIC badge and #js-sync-notice).
       repaintChip: () => repaintAccountChip(),
       chipHTML: () => accountChipHTML(),
+      headerHTML: () => buildPublicHeaderHTML(),
       nameFillSave: () => onNameFillSave({ preventDefault() {} }),
+      partialCount: () => __partials,
       // Task 5: the account overlay's own repaint, and the module var the pending screen names and
       // resends to. Repainting the same view is how a case proves a bind cannot stack.
       renderAcct: () => renderAcctPageInner(),
@@ -1212,7 +1225,7 @@ describe('Account round Task 3 - the account card and the sign-out confirm', () 
     const header = bridge.node('header'); header.id = 'app-header'; bridge.registry['app-header'] = header;
     header.innerHTML = '<span class="app-header-mode">PUBLIC</span><div class="pd-hgrp"></div><div id="js-sync-notice">x</div>';
     const grp = bridge.node('div'); bridge.hook('#app-header .pd-hgrp', grp);
-    const notice = bridge.node('div'); notice.id = 'js-sync-notice'; bridge.registry['js-sync-notice'] = notice;
+    bridge.registry['js-sync-notice'] = Object.assign(bridge.node('div'), { id: 'js-sync-notice' });
     bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, null);
     bridge.setPainted(true);
     expect(bridge.authInitial()).toBe('M');
@@ -1381,7 +1394,7 @@ describe('Account round Task 4 - Your name', () => {
     const header = bridge.node('header'); header.id = 'app-header'; bridge.registry['app-header'] = header;
     header.innerHTML = '<span class="app-header-mode">PUBLIC</span><div class="pd-hgrp"></div><div id="js-sync-notice">x</div>';
     const grp = bridge.node('div'); bridge.hook('#app-header .pd-hgrp', grp);
-    const notice = bridge.node('div'); notice.id = 'js-sync-notice'; bridge.registry['js-sync-notice'] = notice;
+    bridge.registry['js-sync-notice'] = Object.assign(bridge.node('div'), { id: 'js-sync-notice' });
     bridge.setPainted(true);
     const renders = bridge.renderCount();
     bridge.supaNext('profileUpdate', { data: [{ id: 'u1' }], error: null });
@@ -2642,12 +2655,21 @@ describe('C102 Task 1: the header chip repaints on its own', () => {
     return { header, grp, notice };
   }
 
+  // What HEAD's buildPublicHeaderHTML() returned for a signed-out viewer BEFORE the chip was factored
+  // out: captured from `git show f470795:public/app.js`, brace-extracted and evaluated against the same
+  // state / escapeHTML / authInitial. The round's section 38 exemption rests on "no rendered string changes",
+  // and nothing else in test/ pins this string, so an indentation change inside the chip fails here.
+  const HEADER_SIGNED_OUT_AT_f470795 = "\n    <div class=\"pd-wordmark\">\n      <div class=\"pd-wm-1\">ATHLETIC SPECIMEN</div>\n      <div class=\"pd-wm-2\">COLORADO</div>\n    </div>\n    <div class=\"pd-hgrp\">\n      <button type=\"button\" class=\"pd-avic\" id=\"pd-account\" aria-label=\"Sign in\">\n        <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"8\" r=\"4\"/><path d=\"M5.5 20a6.5 6.5 0 0 1 13 0\"/></svg>\n      </button>\n    </div>";
+
   it('accountChipHTML is exactly what the header builder inlines (signed out and signed in)', () => {
     // The shell string must not change by a byte: the chip builder is a factoring, not a redesign.
     bridge.setSignedOut();
     expect(bridge.chipHTML()).toContain('class="pd-avic" id="pd-account" aria-label="Sign in"');
+    expect(bridge.headerHTML()).toContain(bridge.chipHTML());
+    expect(bridge.headerHTML()).toBe(HEADER_SIGNED_OUT_AT_f470795);
     bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, null);
     expect(bridge.chipHTML()).toBe('<button type="button" class="pd-avic is-signedin" id="pd-account" aria-label="Account: signed in">M</button>');
+    expect(bridge.headerHTML()).toContain(bridge.chipHTML());
   });
 
   it('repaintAccountChip writes .pd-hgrp only and never the header element', () => {
@@ -2661,6 +2683,8 @@ describe('C102 Task 1: the header chip repaints on its own', () => {
   });
 
   it('repaintAccountChip is a no-op with no header on screen', () => {
+    // "No header" is true only because the beforeEach reset() clears the hooks map, so nothing answers
+    // '#app-header .pd-hgrp'. Drop that reset and this case passes for the wrong reason.
     bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, null);
     expect(() => bridge.repaintChip()).not.toThrow();
   });
@@ -2670,19 +2694,34 @@ describe('C102 Task 1: the header chip repaints on its own', () => {
     bridge.setSignedIn({ id: 'u1', email: 'morgan@email.com' }, null);
     bridge.registry['namefill-first'].value = 'Ada';
     bridge.registry['namefill-last'].value = 'Blake';
+    // partialRender() runs for real here. Without a #root that has children it degrades to a full
+    // render() (public/app.js:736) and the very thing this case measures would be invisible, so Home is
+    // staged as the surface it repaints and it takes its own short-circuit instead.
+    const root = bridge.node('div'); root.id = 'root'; bridge.registry['root'] = root;
+    root.appendChild(bridge.node('div'));
+    const panel = bridge.node('div'); panel.id = 'tab-home'; bridge.registry['tab-home'] = panel;
+    bridge.hook('.container', bridge.node('div'));
+    bridge.setActiveTab('home');
     bridge.setPainted(true);
     const before = bridge.renderCount();
+    const partials = bridge.partialCount();
     await bridge.nameFillSave();
     expect(bridge.authInitial()).toBe('A');
     expect(bridge.renderCount()).toBe(before);
     expect(grp.innerHTML).toContain('>A<');
-    // Before the paint the guard holds: no render, no throw, the cache still updates.
+    // connectProfileByName can flip state.identityCollision, which the Tournament hub renders, so the
+    // chip repaint is not the whole paint this site owes - partialRender() carries that row.
+    expect(bridge.partialCount()).toBe(partials + 1);
+    // Before the paint the guard holds: nothing paints, nothing throws, the cache still updates.
+    grp.innerHTML = '';            // so a pre-paint write would be visible
     bridge.setAccountName(null);
     bridge.setPainted(false);
     bridge.registry['namefill-first'].value = 'Ada';
     bridge.registry['namefill-last'].value = 'Blake';
     await bridge.nameFillSave();
+    expect(grp.innerHTML).toBe('');   // the gate held: nothing was painted before the boot paint
     expect(bridge.renderCount()).toBe(before);
+    expect(bridge.partialCount()).toBe(partials + 1);
     expect(bridge.authInitial()).toBe('A');
   });
 });
