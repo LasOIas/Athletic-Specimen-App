@@ -3534,6 +3534,10 @@ input.rf-pinput::placeholder { color: oklch(0.62 0.005 75); }
   cursor: pointer;
   transition: background-color .15s ease, border-color .15s ease, color .15s ease, transform .09s ease;
 }
+/* The 14px above never lands: the iOS zoom guard button { font-size: 16px !important } (styles.css:241)
+   holds the button at 16px and no specificity beats it, so the label span, which is not a button, carries
+   the handoff's size instead. Kept as its own rule so the block still reads as the design wrote it. */
+.pe-inbtn [data-pe-inlabel] { font-size: 14px; }
 .pe-inbtn:hover { background: oklch(0.92 0.06 150); }
 .pe-inbtn:active { transform: scale(.99); }
 .pe-inbtn .pe-ico { width: 17px; height: 17px; flex: none; }

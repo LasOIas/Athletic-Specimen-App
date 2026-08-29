@@ -240,7 +240,7 @@ describe('Task 5: the status button is a draft, not a write', () => {
   // There is no DOM here, so "nothing is written" is proved by READING the branch: a toggle that touches
   // no state, no RPC and no saveLocal cannot write. The live behaviour is a drive fact (spec 7.4).
   const branch = () => {
-    const s = slice(appSrc, 'function ensureSaveDelegationBound()', 'function ensureHeaderTapToTop()');
+    const s = slice(stripComments(appSrc), 'function ensureSaveDelegationBound()', 'function ensureHeaderTapToTop()');
     const a = s.indexOf("const inBtn = e.target.closest('[data-pe-in]');");
     const b = s.indexOf("const btn = e.target.closest('.btn-save-edit');", a + 1);
     if (a < 0 || b < 0) throw new Error('the [data-pe-in] branch is not above the save branch');
@@ -271,9 +271,26 @@ describe('Task 5: the status button is a draft, not a write', () => {
     expect(fn).toContain("s.textContent = 'IN';");
   });
 
-  it('the button is green while the player is out and quiet once they are in', () => {
-    expect(cssLF).toContain('.pe-inbtn {');
-    expect(cssLF).toContain('.pe-inbtn.is-in { border-color: var(--border); background: #fff; color: var(--ink); }');
+  it('the out-state block, the in-state swap and the label size are pinned by value, not by selector', () => {
+    // The block is SLICED, not scanned, the way the stepper case two describes above does it. A scan for
+    // '.pe-inbtn {' proves only that the selector exists: all three green values could go grey and stay
+    // green. [^}] spans newlines, so the match runs to the block's first closing brace, and the m flag
+    // keeps :hover, :active and the .is-in rules out, because they are separate blocks.
+    const inbtn = cssLF.match(/^\.pe-inbtn\s*\{[^}]*\}/gm) || [];
+    expect(inbtn).toHaveLength(1);
+    expect(inbtn[0]).toContain('border: 1px solid oklch(0.80 0.10 150);');
+    expect(inbtn[0]).toContain('background: oklch(0.95 0.045 150);');
+    expect(inbtn[0]).toContain('color: oklch(0.40 0.11 150);');
+    // The label's size lives on the SPAN, and this is the rule that makes it real. The button's own
+    // font-size cannot win: button { font-size: 16px !important } (styles.css:241, the iOS zoom guard)
+    // beats every specificity in the same origin, and a span declaring no size of its own inherits that
+    // computed 16px. Delete this rule and the label ships 2px over the approved design.
+    const inlabel = cssLF.match(/^\.pe-inbtn \[data-pe-inlabel\]\s*\{[^}]*\}/gm) || [];
+    expect(inlabel).toHaveLength(1);
+    expect(inlabel[0]).toContain('font-size: 14px;');
+    // Both halves of the icon swap, and the quiet in-state.
     expect(cssLF).toContain('.pe-inbtn .pe-ico-out,\n.pe-inbtn.is-in .pe-ico-in { display: none; }');
+    expect(cssLF).toContain('.pe-inbtn.is-in .pe-ico-out { display: block; }');
+    expect(cssLF).toContain('.pe-inbtn.is-in { border-color: var(--border); background: #fff; color: var(--ink); }');
   });
 });
