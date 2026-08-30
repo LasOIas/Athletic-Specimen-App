@@ -153,7 +153,7 @@
 --   here can show the current policy names. Then restore the rows from the PRE-FLIGHT 1 capture: 0017's
 --   own backfill cannot rebuild them, since it reads players."group", which 0068 emptied.
 --
--- NOT YET APPLIED (the controller applies it after the last client push, on Mike's tap) via the Supabase
+-- APPLIED 2026-08-30 ~01:30 UTC via the Supabase MCP (apply_migration), the check-in pop-ups round; read-backs and both smokes in 12-history task-#7 (the controller applies it after the last client push, on Mike's tap) via the Supabase
 -- MCP (apply_migration), the check-in pop-ups round.
 
 -- PRE-FLIGHT. Comments: apply_migration does NOT run these. The controller runs each one alone with

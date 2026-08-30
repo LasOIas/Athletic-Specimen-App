@@ -80,7 +80,7 @@
 --   column, its type, and the 0010:9 anon column grant that names it are all untouched. Without the
 --   capture the values are gone, and nothing in the database brings them back.
 --
--- NOT YET APPLIED (the controller applies it after 0069, on Mike's tap) via the Supabase MCP
+-- APPLIED 2026-08-30 ~01:30 UTC via the Supabase MCP (apply_migration), the check-in pop-ups round; read-backs and both smokes in 12-history task-#7 (the controller applies it after 0069, on Mike's tap) via the Supabase MCP
 -- (apply_migration), the check-in pop-ups round.
 
 update public.players
