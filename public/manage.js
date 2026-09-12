@@ -4094,7 +4094,9 @@ function buildMgScoreSheetHTML(match, winner) {
     + `</span>`
     + `<button type="button" class="mgv-scx pd-reg-sheetx" data-mgss="close" aria-label="Close">&times;</button></div>`;
   // One row per team doing BOTH jobs: tap the team to mark it the winner, use the stepper only if a score
-  // was kept. A finished game is a same-winner correction (the RPC refuses a flip), so its radio is inert.
+  // was kept. A finished BRACKET game is a same-winner correction (the RPC refuses a flip, which would need the
+  // cascade re-run), so its radio is inert. A finished POOL game has nothing downstream, so its radio stays
+  // live and the writer rewrites the row (2026-09-12, tournament day).
   // Round 2026-08-25 (screen 37): the name gained a seed/record sub-line and the pick gained a WINNER pill.
   // Both are ADDITIVE — every hook the sync loop and the click delegate read (data-mgss-winner, .mgv-scrow,
   // .mgv-scdot, .mgv-scname, .mgv-scstep, data-mgss-step, #mgss-a/#mgss-b) is untouched. The name and its
@@ -4102,13 +4104,14 @@ function buildMgScoreSheetHTML(match, winner) {
   // INSIDE the winner button at its right edge (the mockup's own place for it) rather than at the row's,
   // because production keeps the stepper on this row and the row's right edge is already spoken for; it is
   // absolutely positioned, so revealing it on .is-won never reflows the row.
+  const lockWinner = isFinal && match.phase === 'main';
   const row = (side, name, val) => {
     const won = pick === side;
     const sub = mgScoreSubLine(match, side);
     const pill = match.phase === 'main' ? `<span class="mgv-scwpill" aria-hidden="true">Winner</span>` : '';
     return `<div class="mgv-scrow${won ? ' is-won' : ''}">`
       + `<button type="button" class="mgv-scwin" data-mgss-winner="${side}" aria-pressed="${won ? 'true' : 'false'}"`
-        + ` aria-label="${escapeHTMLText(name)} won this game"${isFinal ? ' disabled' : ''}>`
+        + ` aria-label="${escapeHTMLText(name)} won this game"${lockWinner ? ' disabled' : ''}>`
         + `<span class="mgv-scdot" aria-hidden="true"></span>`
         + `<span class="mgv-scnb"><span class="mgv-scname">${escapeHTML(name)}</span>${sub}</span>${pill}</button>`
       + `<span class="mgv-scstep">`
@@ -4128,7 +4131,9 @@ function buildMgScoreSheetHTML(match, winner) {
   // Design round 2026-08-24: the rule sentence leads (derived, per tournament), then the instruction. A
   // bracket winner can be saved WITHOUT a score (the RPC allows it for phase 'main'); a pool game cannot.
   const hint = mgScoreHint(match, rules) + ' ' + (isFinal
-    ? 'Fixing the score. Same winner only. To change who won, clear the result first.'
+    ? (match.phase === 'main'
+      ? 'Fixing the score. Same winner only. To change who won, clear the result first.'
+      : 'Fixing the score. Tap the other team if they won.')
     : (match.phase === 'main' ? 'Tap the team that won. Add the score if you kept one.' : 'Tap a team to mark them the winner, then enter the score.'));
   // The primary is live when the save would be accepted: a bracket game needs a pick (score optional, a tied
   // non-zero score is still a tie); a pool game needs a decided score. Round 2026-08-25: a FINISHED bracket
@@ -4154,7 +4159,8 @@ function buildMgScoreSheetHTML(match, winner) {
   // secondary, the other the final-only one), and borrowing that class's geometry keeps the foot on one
   // rhythm AND inherits the font-size that already counters prod's button { font-size: 16px !important }
   // iOS guard, so this round adds no !important of its own. .mgv-scclear only repaints it.
-  const clear = (isFinal && state.isAdmin)
+  // Bracket only (2026-09-12): clear_bracket_atomic refuses a pool game, and a pool result is fixed by editing it.
+  const clear = (isFinal && state.isAdmin && match.phase === 'main')
     ? `<button type="button" class="mgv-sclive mgv-scclear" data-mgss="clear">Clear this result</button>` : '';
   return head + body + `<div class="mgv-scfoot">${primary}${quiet}${clear}</div>`;
 }
@@ -4280,7 +4286,7 @@ function openMgScoreSheet(matchId) {
     // two numbers swap so the button can never read "X wins 7–9" — the DB derives the winner from the score.
     const win = ev.target.closest('[data-mgss-winner]');
     if (win) {
-      if (isFinal) return; // edit mode is a same-winner correction; the RPC refuses a flip
+      if (isFinal && match.phase === 'main') return; // a finished bracket game is a same-winner correction (the RPC refuses a flip); a pool final can change hands (2026-09-12)
       const side = win.getAttribute('data-mgss-winner');
       pick = side;
       if (a !== b && ((side === 'a' && b > a) || (side === 'b' && a > b))) { const s = a; a = b; b = s; }

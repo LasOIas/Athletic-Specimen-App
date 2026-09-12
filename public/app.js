@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.09.11.1'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.09.12.1'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2228,11 +2228,32 @@ async function tdbSetLiveScore(match, a, b) {
 }
 
 // NF-4: edit a FINALIZED match's score in place (no cascade) via the edit_match_score RPC (migration
-// 0027). Same-winner corrections only — the RPC refuses a winner flip (that needs Clear, which re-opens
-// the next round). Used by the result modal's edit mode for a final match.
+// 0027). Same-winner corrections go through the RPC. The RPC refuses a score that flips the winner, and that
+// refusal exists for the bracket cascade only (Clear this result re-opens the next round). 2026-09-12,
+// tournament day (Mike: "I should be able to just edit it"): a POOL game has nothing downstream, so a flipped
+// pool result is written to the row directly under the organizer policy (the door tdbSetPoolNets already
+// uses), held to the tournament's own pool rule first, version-checked, and read back (a write the policy
+// filters to zero rows must not report success). A bracket flip still goes to the RPC, which refuses it.
 async function tdbEditMatchScore(match, scoreA, scoreB) {
   if (!supabaseClient || !match) throw new Error('No match.');
   const { sa, sb } = validateScores(scoreA, scoreB);
+  const newWinner = sa > sb ? match.team_a_id : (sb > sa ? match.team_b_id : null);
+  const poolFlip = match.phase !== 'main' && match.status === 'final' && !!newWinner && newWinner !== match.winner_team_id;
+  if (poolFlip) {
+    const t = (state.tournaments || []).find((x) => x.id === match.tournament_id) || {};
+    const check = gameScoreStatus(sa, sb, scoringRulesFor(match.phase, t, match));
+    if (!check.valid) throw new Error(check.reason);
+    const { data, error } = await supabaseClient.from('matches')
+      .update({
+        score_a: sa, score_b: sb, winner_team_id: newWinner,
+        loser_team_id: newWinner === match.team_a_id ? match.team_b_id : match.team_a_id,
+        version: (match.version || 0) + 1, updated_at: new Date().toISOString(),
+      })
+      .eq('id', match.id).eq('version', match.version || 0).eq('status', 'final').select();
+    if (error) throw error;
+    if (!data || data.length === 0) throw new Error('Another device just updated this game. Refresh.');
+    return data[0];
+  }
   const { data, error } = await supabaseClient.rpc('edit_match_score', {
     p_match: match.id, p_version: match.version || 0, p_score_a: sa, p_score_b: sb
   });

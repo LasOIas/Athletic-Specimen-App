@@ -1234,11 +1234,14 @@ describe('buildMgScoreSheetHTML — the shared score sheet (T7 defines, T8 reuse
     expect(html).toContain('disabled');
   });
 
-  it('a final row opens in EDIT mode (edit write, same-winner note, no live link)', () => {
+  // 2026-09-12: a finished POOL game's note invites the flip (the bracket keeps 'Same winner', locked in
+  // manage-round.test.js), and the card still offers no live-score link on a final.
+  it('a final row opens in EDIT mode (edit write, the pool flip note, no live link)', () => {
     setPoolsFixture();
     const html = bridge.buildScoreSheet(bridge.getState().tournamentMatches.find((m) => m.id === 'gA1'));
     expect(html).toContain('data-mgss="edit"');
-    expect(html).toContain('Same winner');
+    expect(html).toContain('Tap the other team if they won.');
+    expect(html).not.toContain('Same winner');
     expect(html).not.toContain('Just update the live score');
   });
 

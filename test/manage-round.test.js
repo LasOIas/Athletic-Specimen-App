@@ -287,6 +287,8 @@ function loadApp() {
       // a plain property, so it can be swapped for the length of one case. Returns its own undo.
       swapSupaRpc: (fn) => { const was = supabaseClient.rpc; supabaseClient.rpc = async (...a) => fn(...a); return () => { supabaseClient.rpc = was; }; },
       clearResult: (m) => tdbClearBracketResult(m),
+      // 2026-09-12: the finalized-score writer, driven directly so the pool flip's own door is provable.
+      editScore: (m, a, b) => tdbEditMatchScore(m, a, b),
       // C101 Task 6: the whole-bracket clear, its writer and its handler. mockBracketDanger swaps the
       // unlock prompt and both danger writers for recorders, so a test can prove WHICH handler a tap
       // reached and that a wrong typed name makes no call at all. Restored in a finally by every caller.
@@ -3380,5 +3382,156 @@ describe('Even team totals (Mike 2026-08-25)', () => {
     expect(gen).toContain('evenTeamCount(inNow, size)');
     const mk = appSrc.slice(appSrc.indexOf('async make_teams(args)'), appSrc.indexOf('async make_teams(args)') + 700);
     expect(mk).toContain('evenCount(');
+  });
+});
+
+// 2026-09-12, tournament day (Mike: "I need to change the score but it won't let me, I should be able to just
+// edit it"): a finished POOL game's winner could not change from any door. The card disabled the winner tap
+// on every final, edit_match_score refuses a score that flips the winner ("clear the result first"), and
+// clear_bracket_atomic refuses a pool game ("That is not a bracket game."). That refusal only protects the
+// bracket cascade; a pool game has nothing downstream. So the card keeps the winner tap live on a finished
+// pool game, and the writer rewrites the row itself under the organizer policy (the door tdbSetPoolNets
+// already uses), held to the tournament's own pool rule first, version-checked and read back. A bracket
+// final keeps every refusal it had.
+describe('a finished pool game can change its winner from the card (2026-09-12)', () => {
+  const poolFinal = () => { setPoolsFixture(); return bridge.getState().tournamentMatches.find((m) => m.id === 'gA1'); };
+  const bracketFinal = () => {
+    setMainBracketFixture();
+    const gf = bridge.getState().tournamentMatches.find((m) => m.id === 'gf');
+    Object.assign(gf, { status: 'final', team_a_id: 't1', team_b_id: 't2', score_a: 21, score_b: 18, winner_team_id: 't1', version: 3 });
+    return gf;
+  };
+  const rows = [];
+  // A fake PostgREST chain that records the update payload and its filters, then answers with the given reply.
+  const fakeFrom = (answer) => (table) => ({
+    update: (payload) => {
+      const rec = { table, payload, eq: [] };
+      rows.push(rec);
+      const chain = { eq: (k, v) => { rec.eq.push([k, v]); return chain; }, select: async () => answer };
+      return chain;
+    },
+  });
+  afterEach(() => { rows.length = 0; });
+
+  it('the card keeps both winner taps live on a finished pool game, says so, and stops offering Clear', () => {
+    const html = bridge.buildScoreSheet(poolFinal(), 'a');
+    expect(html).toContain('data-mgss="edit"');
+    expect(html).toContain('data-mgss-winner="a"');
+    expect(html).toContain('data-mgss-winner="b"');
+    expect(html).not.toMatch(/data-mgss-winner="[ab]"[^>]* disabled>/);
+    expect(html).toContain('Fixing the score. Tap the other team if they won.');
+    expect(html).not.toContain('clear the result first');
+    expect(html).not.toContain('data-mgss="clear"');   // clear_bracket_atomic refuses a pool game
+    expect(html).not.toMatch(/—|&mdash;/);
+  });
+
+  it('a finished bracket game keeps the same-winner rule, its inert taps and Clear', () => {
+    const html = bridge.buildScoreSheet(bracketFinal(), 'a');
+    expect(html).toMatch(/data-mgss-winner="a"[^>]* disabled>/);
+    expect(html).toMatch(/data-mgss-winner="b"[^>]* disabled>/);
+    expect(html).toContain('To change who won, clear the result first.');
+    expect(html).toContain('data-mgss="clear"');
+  });
+
+  it('a same-winner fix on a pool final still goes through edit_match_score', async () => {
+    const g = poolFinal();   // t1 beat t2 15-12
+    const seen = [];
+    const undoRpc = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return { data: { ...g, score_a: 15, score_b: 10 }, error: null }; });
+    const undoFrom = bridge.swapSupaFrom(fakeFrom({ data: [], error: null }));
+    try {
+      const out = await bridge.editScore(g, '15', '10');
+      expect(seen).toEqual([['edit_match_score', { p_match: 'gA1', p_version: 1, p_score_a: 15, p_score_b: 10 }]]);
+      expect(rows).toEqual([]);
+      expect(out.score_b).toBe(10);
+    } finally { undoRpc(); undoFrom(); }
+  });
+
+  it('a flipped winner on a pool final rewrites the row itself, version-checked, and never calls the RPC', async () => {
+    const g = poolFinal();
+    const seen = [];
+    const undoRpc = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return { data: null, error: { message: 'that score changes who won' } }; });
+    const undoFrom = bridge.swapSupaFrom(fakeFrom({ data: [{ ...g, score_a: 12, score_b: 15, winner_team_id: 't2', loser_team_id: 't1', version: 2 }], error: null }));
+    try {
+      const out = await bridge.editScore(g, '12', '15');
+      expect(seen).toEqual([]);
+      expect(rows.length).toBe(1);
+      expect(rows[0].table).toBe('matches');
+      expect(rows[0].payload).toMatchObject({ score_a: 12, score_b: 15, winner_team_id: 't2', loser_team_id: 't1', version: 2 });
+      expect(rows[0].payload.status).toBeUndefined();   // corrected, never re-opened
+      expect(rows[0].eq).toEqual([['id', 'gA1'], ['version', 1], ['status', 'final']]);
+      expect(out.winner_team_id).toBe('t2');
+    } finally { undoRpc(); undoFrom(); }
+  });
+
+  it("the flip is held to the tournament's own pool rule before anything is written", async () => {
+    const g = poolFinal();   // to 15, cap 20, win by 2
+    const seen = [];
+    const undoRpc = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return { data: null, error: null }; });
+    const undoFrom = bridge.swapSupaFrom(fakeFrom({ data: [], error: null }));
+    try {
+      await expect(bridge.editScore(g, '12', '14')).rejects.toThrow('The winner must reach 15.');
+      await expect(bridge.editScore(g, '14', '15')).rejects.toThrow('Must win by 2.');
+      await expect(bridge.editScore(g, '19', '21')).rejects.toThrow('Above the cap of 20.');
+      expect(seen).toEqual([]);
+      expect(rows).toEqual([]);
+    } finally { undoRpc(); undoFrom(); }
+  });
+
+  it('a row that moved under the write is refused, never a silent success', async () => {
+    const g = poolFinal();
+    const undoFrom = bridge.swapSupaFrom(fakeFrom({ data: [], error: null }));
+    try {
+      await expect(bridge.editScore(g, '12', '15')).rejects.toThrow('Another device just updated this game. Refresh.');
+    } finally { undoFrom(); }
+  });
+
+  it('a flipped winner on a bracket final still goes to the RPC, which refuses it', async () => {
+    const gf = bracketFinal();
+    const seen = [];
+    const undoRpc = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return { data: null, error: { message: 'that score changes who won' } }; });
+    const undoFrom = bridge.swapSupaFrom(fakeFrom({ data: [], error: null }));
+    try {
+      await expect(bridge.editScore(gf, '18', '21')).rejects.toThrow('that score changes who won');
+      expect(seen.map((s) => s[0])).toEqual(['edit_match_score']);
+      expect(rows).toEqual([]);
+    } finally { undoRpc(); undoFrom(); }
+  });
+
+  it('from a real tap on the other team the numbers swap, and Save writes the flipped result', async () => {
+    poolFinal();
+    const undoFrom = bridge.swapSupaFrom(fakeFrom({ data: [{ id: 'gA1', version: 2 }], error: null }));
+    const seen = [];
+    const undoRpc = bridge.swapSupaRpc((name, args) => { seen.push([name, args]); return { data: null, error: null }; });
+    const doc = bridge.doc;
+    const realCreate = doc.createElement;
+    let handler = null;
+    const scrim = {
+      id: '', className: '', style: {}, innerHTML: '',
+      addEventListener: (type, cb) => { if (type === 'click') handler = cb; },
+      querySelector: (sel) => (sel === '[data-mgss="close"]' ? { focus: () => {} } : null),
+      querySelectorAll: () => ({ forEach: () => {} }),
+    };
+    doc.createElement = () => scrim;
+    const realTimeout = bridge.swapTimeout((cb) => { cb(); return 0; });
+    let card = null;
+    try {
+      bridge.openScore('gA1');
+      if (!handler) throw new Error('the score card click handler was never bound');
+      card = bridge.mockScoreCard({ confirm: true });
+      const fire = (attr, value) => handler({
+        target: { closest: (sel) => (sel === attr ? { getAttribute: () => value } : null) },
+        preventDefault: () => {}, stopPropagation: () => {},
+      });
+      fire('[data-mgss-winner]', 'b');   // Sets and Reps won after all: 15-12 becomes 12-15
+      fire('[data-mgss]', 'edit');
+      for (let i = 0; i < 24; i++) await Promise.resolve();
+      expect(rows.length).toBe(1);
+      expect(rows[0].payload).toMatchObject({ score_a: 12, score_b: 15, winner_team_id: 't2', loser_team_id: 't1' });
+      expect(seen).toEqual([]);
+      expect(card.calls.map((c) => c[0])).toEqual(['refresh', 'close', 'after']);
+    } finally {
+      if (card) card.restore();
+      doc.createElement = realCreate; bridge.swapTimeout(realTimeout); undoFrom(); undoRpc();
+    }
   });
 });
