@@ -1676,6 +1676,8 @@ body.copilot-open #cop-chat {
 .bt-node { position: relative; width: 176px; background: var(--card); border: 1px solid var(--border);
   border-radius: 10px; box-shadow: var(--shadow-sm); overflow: hidden; }
 .bt-node.path { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+/* a bye's empty round-1 slot: the same box as a game card, invisible, so the column keeps its rows (2026-09-11) */
+.bt-gap { width: 176px; border: 1px solid transparent; visibility: hidden; }
 .bt-meta { font-size: 10.5px; color: var(--muted); padding: 5px 9px 2px; text-transform: uppercase;
   letter-spacing: .03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .bt-row { display: flex; align-items: center; gap: 6px; padding: 7px 9px; }

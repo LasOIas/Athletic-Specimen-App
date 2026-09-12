@@ -31,7 +31,7 @@ let authRecoveryPending = /[#&]type=recovery(&|$)/.test(location.hash || '');
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
 });
-const APP_VERSION = '2026.08.29.10'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
+const APP_VERSION = '2026.09.11.1'; // NF-18: the SINGLE version source - sw.js derives its cache name from the ?v= registration param
 const LS_TAB_KEY = 'athletic_specimen_tab';
 let activeMainTab = 'players';
 const LS_SUBTAB_KEY = 'athletic_specimen_skill_subtab';
@@ -2984,6 +2984,11 @@ function bracketLabelPart(m) {
   return ((m && m.round_label) || 'Match').replace(/ M\d+$/, '');
 }
 
+// An empty round-1 slot (a bye). The same box as a game card, invisible, NOT a .bt-node (layoutBracketTree
+// must neither centre nor connect it), so the column keeps every row and each surviving game sits on the
+// row of the game it feeds. See bracketRoundRows in pure.js (2026-09-11: "g13-g16 cards are overlapping").
+const BT_GAP_HTML = '<div class="bt-gap" aria-hidden="true"><div class="bt-meta">&nbsp;</div><div class="bt-row"><span class="bt-name">&nbsp;</span></div><div class="bt-vs">&nbsp;</div><div class="bt-row"><span class="bt-name">&nbsp;</span></div></div>';
+
 function buildBracketHTML(tournament, matches, teams, opts = {}) {
   const main = (matches || []).filter((m) => m.phase === 'main');
   if (!main.length) return '<div class="card"><p class="small" style="color:var(--muted);margin:0;">No bracket yet.</p></div>';
@@ -3045,9 +3050,11 @@ function buildBracketHTML(tournament, matches, teams, opts = {}) {
   };
   const cols = rounds.map((r) => {
     const rm = sideMatches.filter((m) => m.round === r).sort((a, b) => a.slot - b.slot);
+    // Laid out by SLOT: a bye's empty slot is an invisible gap box, so the surviving round-1 games sit on
+    // the rows of the games they feed (bracketRoundRows / bracketColumnSlots in pure.js).
     return `<div class="bt-col">
       <div class="bt-rlabel">${roundLabelHTML(r)}</div>
-      ${rm.map((m) => buildBracketNodeHTML(m, main, teams, !ro, pathIds, seedByTeam, gn, { readOnly: ro, champMatchId: opts.champMatchId })).join('')}
+      ${bracketColumnSlots(rm, bracketRoundRows(sideMatches, side, r)).map((m) => (m ? buildBracketNodeHTML(m, main, teams, !ro, pathIds, seedByTeam, gn, { readOnly: ro, champMatchId: opts.champMatchId }) : BT_GAP_HTML)).join('')}
     </div>`;
   }).join('');
 
@@ -3511,7 +3518,9 @@ function buildBracketPreviewHTML(show, teams) {
     const range = rm.length === 1 ? gOf(rm[0].key) : (gOf(rm[0].key) + '–' + gOf(rm[rm.length - 1].key));
     const name = side === 'grand_final' ? (r === 1 ? 'Championship' : '') : ((r === maxRound && sideDefs.length > 1) ? 'Semifinals' : '');
     const label = name ? `${name}<span class="bk-gid">${escapeHTML(range)}</span>` : escapeHTML(range);
-    return `<div class="bt-col"><div class="bt-rlabel">${label}</div>${rm.map((m) => {
+    // Laid out by SLOT (the same rule as the drawn tree): a bye's empty slot is an invisible gap box.
+    return `<div class="bt-col"><div class="bt-rlabel">${label}</div>${bracketColumnSlots(rm, bracketRoundRows(sideMatches, side, r)).map((m) => {
+      if (!m) return BT_GAP_HTML;
       const next = (m.winnerNext && m.winnerNext.key) ? ` data-next="${escapeHTML(m.winnerNext.key)}"` : '';
       return `<div class="bt-node" data-mid="${escapeHTML(m.key)}"${next}><div class="bt-meta">${escapeHTML(gOf(m.key))}${m.isReset ? ' · if necessary' : ''}</div>
         <div class="bt-row"><span class="bt-name bt-tbd">${escapeHTML(src(m.aSource))}</span></div><div class="bt-vs">vs</div><div class="bt-row"><span class="bt-name bt-tbd">${escapeHTML(src(m.bSource))}</span></div></div>`;

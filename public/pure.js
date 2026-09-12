@@ -1112,6 +1112,31 @@ function teamNetRange(teamId, matches) {
 // so games read G1, G2, … GN start to finish. Render-only (no DB): derived from the match list each render.
 // Returns { byId:{matchId:g}, byRoundLabel:{round_label:g} }. byRoundLabel keys keep the FULL stored label
 // (incl. " M#") so the stored source refs ("Winner of WB R1 M1") can be rewritten to "Winner of G{n}".
+// Round-1 columns are laid out by SLOT, not by count (2026-09-11, Mike: "g13-g16 cards are overlapping").
+// A bye erases a round-1 game, and a column that only stacks its surviving games (flex space-around) drifts
+// off the rows those games feed into, so layoutBracketTree's centring pass lands a fed game on top of its
+// neighbour: for 14 teams the losers side keeps G7 and G8 of four round-1 slots, G14 (fed by G7) moved onto
+// G13 and G16 (fed by G8) onto G15. Only the two round-1 columns can be sparse (every later game is real),
+// and their row count follows from round 2: winners round 1 has twice round 2's games, losers round 1 has as
+// many as losers round 2. bracketColumnSlots then puts each game at its slot and leaves null for the byes.
+function bracketRoundRows(sideMatches, side, round) {
+  const count = (r) => (sideMatches || []).filter((m) => Number(m.round) === r).length;
+  const here = count(Number(round));
+  if (Number(round) !== 1 || side === 'grand_final') return here;
+  const next = count(2);
+  return Math.max(here, side === 'winners' ? next * 2 : next);
+}
+function bracketColumnSlots(roundMatches, rows) {
+  const list = (roundMatches || []).slice();
+  const out = new Array(Math.max(Number(rows) || 0, list.length)).fill(null);
+  list.forEach((m) => {
+    const s = Number(m.slot);
+    const at = (Number.isInteger(s) && s >= 0 && s < out.length && out[s] === null) ? s : out.indexOf(null);
+    out[at] = m;
+  });
+  return out;
+}
+
 function bracketGameNumbers(mainMatches) {
   // Number games in the actual PLAY ORDER, not all-winners-then-all-losers. The winners + losers brackets run
   // CONCURRENTLY (interleaved by round in time), so a player's game number should tell them WHEN they play —
@@ -2167,7 +2192,7 @@ if (typeof module !== "undefined" && module.exports) {
     splitNetsAcrossPools, distributeGamesOnNets, pickPoolCurrentGames,
     layoutRoundsOnNets, assignPoolGameSlots, relayoutPoolGamesOnNets, poolNetRange, teamNetRange,
     poolMovePlan,
-    bracketGameNumbers, bracketSourceLabel,
+    bracketGameNumbers, bracketSourceLabel, bracketRoundRows, bracketColumnSlots,
     bracketClearPlan,
     shouldAutoPromptBracket, assignBracketNets,
     shapeStandingsByPool, computeAllTimeLeaderboard,

@@ -201,12 +201,12 @@ const BK_POOL = [
   { id: 'gA2', phase: 'pool', status: 'scheduled', team_a_id: 't3', team_b_id: 't4' },
 ];
 
-function bkSetState(tournament, matches) {
+function bkSetState(tournament, matches, teams = BK_TEAMS) {
   const st = bridge.getState();
   Object.assign(st, {
     tournaments: [tournament],
     activeTournamentId: tournament.id,
-    tournamentTeams: BK_TEAMS,
+    tournamentTeams: teams,
     tournamentMatches: matches,
     tournamentPools: [],
     account: null, teamMembers: [], isAdmin: false, bracketSide: null,
@@ -311,5 +311,82 @@ describe('buildBracketPageHTML — completed state (champions strip, de-carded)'
 
   it('emits no live status line when there is no live game', () => {
     expect(html).not.toContain('<b>Live</b>');
+  });
+});
+
+// ── Round-1 columns hold their bye slots (2026-09-11, Mike: "g13-g16 cards are overlapping") ────────────
+// A bye erases a round-1 game. A column that only stacks its surviving games (flex space-around) drifts off
+// the rows those games feed into, so layoutBracketTree's centring pass lands G14 on G13 and G16 on G15 for
+// 14 teams. Round-1 columns are laid out by SLOT: an invisible .bt-gap box holds every empty slot, so each
+// surviving game sits on the row of the game it feeds and the centring pass moves nothing onto a neighbour.
+const bkTeams = (n) => Array.from({ length: n }, (_, i) => ({ id: 't' + (i + 1), name: 'Team ' + (i + 1) }));
+// the .bt-col whose round label is `label` (up to the next column)
+const bkCol = (html, label) => {
+  const i = html.indexOf(`<div class="bt-rlabel">${label}</div>`);
+  if (i < 0) return null;
+  const end = html.indexOf('<div class="bt-col">', i);
+  return html.slice(i, end < 0 ? undefined : end);
+};
+// the column's boxes in order: 'gap' or the game's data-mid
+const bkBoxes = (col) => {
+  const out = []; const re = /class="bt-gap"|data-mid="([^"]+)"/g; let m;
+  while ((m = re.exec(col))) out.push(m[1] || 'gap');
+  return out;
+};
+const SEPT = { id: 'T', name: 'September 12th 2026 Tournament', status: 'setup', registration_open: true };
+
+describe('sample bracket — round-1 columns hold their bye slots so no fed game lands on a neighbour', () => {
+  it('14 teams, losers side: round 1 reads gap · G7 · gap · G8, round 2 is four games with no gap', () => {
+    bkSetState(SEPT, [], bkTeams(14));
+    bridge.getState().bracketSide = 'losers';
+    const html = bridge.build();
+    const col = bkCol(html, 'G7–G8');
+    expect(col).not.toBeNull();
+    expect(bkBoxes(col)).toEqual(['gap', 'L1-1', 'gap', 'L1-3']);
+    expect(bkBoxes(bkCol(html, 'G13–G16'))).toEqual(['L2-0', 'L2-1', 'L2-2', 'L2-3']);
+  });
+
+  it('14 teams, winners side: round 1 is eight slots with the two byes (seeds 1 and 2) as gaps', () => {
+    bkSetState(SEPT, [], bkTeams(14));
+    bridge.getState().bracketSide = 'winners';
+    const html = bridge.build();
+    expect(bkBoxes(bkCol(html, 'G1–G6'))).toEqual(['gap', 'W1-1', 'W1-2', 'W1-3', 'gap', 'W1-5', 'W1-6', 'W1-7']);
+    expect(bkBoxes(bkCol(html, 'G9–G12'))).toEqual(['W2-0', 'W2-1', 'W2-2', 'W2-3']);
+  });
+
+  it('16 teams: no byes, so no gap on either side', () => {
+    bkSetState(SEPT, [], bkTeams(16));
+    bridge.getState().bracketSide = 'losers';
+    expect(bridge.build()).not.toContain('bt-gap');
+    bridge.getState().bracketSide = 'winners';
+    expect(bridge.build()).not.toContain('bt-gap');
+  });
+
+  it('the gap is not a .bt-node (layoutBracketTree must never centre or connect it) and is hidden from a11y', () => {
+    bkSetState(SEPT, [], bkTeams(14));
+    bridge.getState().bracketSide = 'losers';
+    const html = bridge.build();
+    expect(html).toContain('<div class="bt-gap" aria-hidden="true">');
+    expect(html).not.toContain('bt-node bt-gap');
+    expect(html).not.toContain('bt-gap bt-node');
+  });
+});
+
+describe('live bracket — the drawn tree lays its round-1 columns out by slot too', () => {
+  // The same 14-team shape as DB rows (side / round / slot / winner_next_match_id), the way tdbGenerateBracket
+  // stores it: buildBracketHTML must place the two surviving losers round-1 games on rows 1 and 3.
+  const liveShape = () => pure.generateDoubleElim(14, true).realMatches.map((m) => ({
+    id: m.key, phase: 'main', side: m.side, round: m.round, slot: m.slot, status: 'scheduled',
+    team_a_id: null, team_b_id: null, winner_next_match_id: m.winnerNext ? m.winnerNext.key : null,
+  }));
+  it('14 teams, losers side: gap · L1-1 · gap · L1-3; winners round 1: gaps at slots 0 and 4', () => {
+    bkSetState({ id: 'T', name: 'Sept', status: 'bracket' }, liveShape(), bkTeams(14));
+    bridge.getState().bracketSide = 'losers';
+    let html = bridge.build();
+    expect(html).toContain('pd-bk-statusline'); // the live state, buildBracketHTML
+    expect(bkBoxes(bkCol(html, 'G7–G8'))).toEqual(['gap', 'L1-1', 'gap', 'L1-3']);
+    bridge.getState().bracketSide = 'winners';
+    html = bridge.build();
+    expect(bkBoxes(bkCol(html, 'G1–G6'))).toEqual(['gap', 'W1-1', 'W1-2', 'W1-3', 'gap', 'W1-5', 'W1-6', 'W1-7']);
   });
 });
