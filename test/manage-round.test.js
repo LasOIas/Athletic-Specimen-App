@@ -289,6 +289,23 @@ function loadApp() {
       clearResult: (m) => tdbClearBracketResult(m),
       // 2026-09-12: the finalized-score writer, driven directly so the pool flip's own door is provable.
       editScore: (m, a, b) => tdbEditMatchScore(m, a, b),
+      // 2026-09-12 (second ask): the bracket re-draw behind a pool score saved after the draw. The three
+      // writers it sequences are swapped for recorders that share ONE timeline with the caller's RPC recorder,
+      // so the order (score first, then reset, then generate) is provable. Restored in a finally by every caller.
+      bracketHasResult: (ms) => mgBracketHasResult(ms),
+      mockRedraw: (o) => {
+        o = o || {};
+        const calls = o.calls || [];
+        const was = { tdbResetBracket, tdbGenerateBracket, tdbSetTournamentFields };
+        tdbResetBracket = async (t) => { calls.push(['reset', t && t.id]); if (o.reset) return o.reset(t); };
+        tdbSetTournamentFields = async (id, f) => { calls.push(['fields', id, f]); if (o.fields) return o.fields(id, f); };
+        tdbGenerateBracket = async (t, order) => { calls.push(['generate', t && t.id, order]); if (o.generate) return o.generate(t, order); };
+        return { calls, restore: () => {
+          tdbResetBracket = was.tdbResetBracket;
+          tdbGenerateBracket = was.tdbGenerateBracket;
+          tdbSetTournamentFields = was.tdbSetTournamentFields;
+        } };
+      },
       // C101 Task 6: the whole-bracket clear, its writer and its handler. mockBracketDanger swaps the
       // unlock prompt and both danger writers for recorders, so a test can prove WHICH handler a tap
       // reached and that a wrong typed name makes no call at all. Restored in a finally by every caller.
@@ -3533,5 +3550,130 @@ describe('a finished pool game can change its winner from the card (2026-09-12)'
       if (card) card.restore();
       doc.createElement = realCreate; bridge.swapTimeout(realTimeout); undoFrom(); undoRpc();
     }
+  });
+});
+
+// 2026-09-12, tournament day, second ask (Mike: "I need to be able to edit the pools plays scores after all
+// games are done and then it updates the rest of the tournament"): the bracket is a snapshot of the pool
+// standings at draw time. A pool score saved while the tournament is in 'bracket' with NO bracket result yet
+// re-draws the bracket from the corrected standings (reset, drop the manual seed order, generate from the
+// computed seeding). With a bracket result on the board the pool edit is refused before any write, so the
+// standings and the seeds can never disagree: Clear every result first, then fix the score.
+describe('a pool score saved after the draw re-draws the bracket (2026-09-12)', () => {
+  const SCHED = { id: 'w1', tournament_id: 'T', phase: 'main', side: 'winners', round: 1, slot: 0, round_label: 'WB R1 M1', net: 1, queue_order: 0, status: 'scheduled', team_a_id: 't1', team_b_id: 't2', version: 0 };
+  const PLAYED = { ...SCHED, status: 'final', score_a: 21, score_b: 10, winner_team_id: 't1', version: 1 };
+  const drawn = (bracketRows) => {
+    setPoolsFixture();
+    const st = bridge.getState();
+    st.tournaments[0].status = 'bracket';
+    st.tournamentMatches.push(...bracketRows);
+    return st.tournamentMatches.find((m) => m.id === 'gA1');
+  };
+  const REDRAW_LINE = 'The bracket re-draws from the new standings when you save.';
+  const LOCK_LINE = 'The bracket has started, so this score is locked. Clear every result on the bracket first.';
+
+  it('a bracket result is a final or live bracket game, never a pool one', () => {
+    expect(bridge.bracketHasResult([SCHED])).toBe(false);
+    expect(bridge.bracketHasResult([PLAYED])).toBe(true);
+    expect(bridge.bracketHasResult([{ ...SCHED, status: 'live' }])).toBe(true);
+    expect(bridge.bracketHasResult([{ ...PLAYED, phase: 'pool' }])).toBe(false);
+    expect(bridge.bracketHasResult([])).toBe(false);
+    expect(bridge.bracketHasResult(null)).toBe(false);
+  });
+
+  it('the card says the bracket re-draws on save, and locks the score once the bracket has a result', () => {
+    let html = bridge.buildScoreSheet(drawn([SCHED]), 'a');
+    expect(html).toContain(REDRAW_LINE);
+    expect(html).toContain('class="mgv-scfinal" data-mgss="edit">');
+    expect(html).not.toMatch(/—|&mdash;/);
+    html = bridge.buildScoreSheet(drawn([PLAYED]), 'a');
+    expect(html).toContain(LOCK_LINE);
+    expect(html).not.toContain(REDRAW_LINE);
+    expect(html).toMatch(/class="mgv-scfinal" data-mgss="edit" disabled/);
+    setPoolsFixture();   // during pool play neither sentence appears
+    html = bridge.buildScoreSheet(bridge.getState().tournamentMatches.find((m) => m.id === 'gA1'), 'a');
+    expect(html).not.toContain('re-draws');
+    expect(html).not.toContain('is locked');
+  });
+
+  // The real card, its handler captured off the scrim it binds to, every writer swapped for a recorder on
+  // one shared timeline.
+  async function withDrawnCard(matchId, mocks, fn) {
+    const doc = bridge.doc;
+    const realCreate = doc.createElement;
+    let handler = null;
+    const scrim = {
+      id: '', className: '', style: {}, innerHTML: '',
+      addEventListener: (type, cb) => { if (type === 'click') handler = cb; },
+      querySelector: (sel) => (sel === '[data-mgss="close"]' ? { focus: () => {} } : null),
+      querySelectorAll: () => ({ forEach: () => {} }),
+    };
+    doc.createElement = () => scrim;
+    const realTimeout = bridge.swapTimeout((cb) => { cb(); return 0; });
+    const timeline = [];
+    const undoRpc = bridge.swapSupaRpc((name, args) => { timeline.push([name, args && args.p_match]); return { data: { id: args && args.p_match }, error: null }; });
+    let card = null, redraw = null;
+    try {
+      bridge.openScore(matchId);
+      if (!handler) throw new Error('the score card click handler was never bound');
+      card = bridge.mockScoreCard({ confirm: true });
+      redraw = bridge.mockRedraw({ ...mocks, calls: timeline });
+      const fire = (attr, value) => handler({
+        target: { closest: (sel) => (sel === attr ? { getAttribute: () => value } : null) },
+        preventDefault: () => {}, stopPropagation: () => {},
+      });
+      return await fn(fire, timeline, card);
+    } finally {
+      if (redraw) redraw.restore();
+      if (card) card.restore();
+      doc.createElement = realCreate; bridge.swapTimeout(realTimeout); undoRpc();
+    }
+  }
+  const settle = async () => { for (let i = 0; i < 32; i++) await Promise.resolve(); };
+
+  it('Save writes the score, then resets, drops the manual seed order and re-draws, in that order', async () => {
+    drawn([SCHED]);
+    await withDrawnCard('gA1', {}, async (fire, timeline, card) => {
+      fire('[data-mgss]', 'edit');
+      await settle();
+      expect(timeline).toEqual([
+        ['edit_match_score', 'gA1'],
+        ['reset', 'T'],
+        ['fields', 'T', { seed_override: null }],
+        ['generate', 'T', null],
+      ]);
+      expect(card.calls.map((c) => c[0])).toEqual(['refresh', 'close', 'after']);
+      expect(bridge.getState().seedOverride).toBe(null);
+    });
+  });
+
+  it('with a bracket result on the board Save writes nothing and re-draws nothing', async () => {
+    drawn([PLAYED]);
+    await withDrawnCard('gA1', {}, async (fire, timeline, card) => {
+      fire('[data-mgss]', 'edit');
+      await settle();
+      expect(timeline).toEqual([]);
+      expect(card.calls).toEqual([]);
+    });
+  });
+
+  it('a re-draw that fails after the score is saved keeps the score, repaints, and leaves the card open on the reason', async () => {
+    drawn([SCHED]);
+    await withDrawnCard('gA1', { generate: () => { throw new Error('No pool play to seed from.'); } }, async (fire, timeline, card) => {
+      fire('[data-mgss]', 'edit');
+      await settle();
+      expect(timeline.map((c) => c[0])).toEqual(['edit_match_score', 'reset', 'fields', 'generate']);
+      expect(card.calls.map((c) => c[0])).toEqual(['refresh', 'after']);   // no 'close': the card carries the message
+    });
+  });
+
+  it('during pool play a save re-draws nothing', async () => {
+    setPoolsFixture();
+    await withDrawnCard('gA1', {}, async (fire, timeline, card) => {
+      fire('[data-mgss]', 'edit');
+      await settle();
+      expect(timeline).toEqual([['edit_match_score', 'gA1']]);
+      expect(card.calls.map((c) => c[0])).toEqual(['refresh', 'close', 'after']);
+    });
   });
 });

@@ -4058,6 +4058,32 @@ function mgScoreHint(match, rules) {
   return who + ' to ' + rules.target + (rules.winBy2 ? ', win by 2' : '') + (rules.cap != null ? ', cap ' + rules.cap + '.' : ', no cap.');
 }
 
+// 2026-09-12 (Mike, live at the September 12th tournament: "I need to be able to edit the pools plays scores
+// after all games are done and then it updates the rest of the tournament"): the bracket is a snapshot of
+// the pool standings at draw time. A pool score saved while the tournament is in 'bracket' with NO bracket
+// result yet re-draws the bracket from the corrected standings: reset (tdbResetBracket drops to 'pools'),
+// drop the manual seed order (it ranked standings that no longer exist), then generate from computeSeeding.
+// With a bracket result on the board the pool edit is refused BEFORE any write, so the standings and the
+// seeds can never disagree: Clear every result first, then fix the score.
+function mgBracketHasResult(matches) {
+  return (Array.isArray(matches) ? matches : []).some((m) => m && m.phase === 'main' && (m.status === 'final' || m.status === 'live'));
+}
+// 'redraw' while the bracket is drawn and untouched, 'locked' once it has a result, '' during pool play or for
+// a bracket game. Read from state.tournamentMatches at call time, so a save re-checks what the poll brought.
+function mgPoolEditMode(match, t) {
+  if (!match || match.phase === 'main' || !t || t.status !== 'bracket') return '';
+  return mgBracketHasResult(state.tournamentMatches) ? 'locked' : 'redraw';
+}
+const MG_POOL_REDRAW_LINE = 'The bracket re-draws from the new standings when you save.';
+const MG_POOL_LOCK_LINE = 'The bracket has started, so this score is locked. Clear every result on the bracket first.';
+async function mgRedrawBracketAfterPoolEdit(t) {
+  await tdbResetBracket(t);
+  await tdbSetTournamentFields(t.id, { seed_override: null });
+  await tdbGenerateBracket(t, null);
+  state.seedOverride = null;
+  state.tournamentPickedTeamId = null; state.bracketSide = null; state.bracketRound = null;
+}
+
 // Match-generic: handles phase 'pool' | 'main'. Content builder is pure (like buildMgTeamSheetHTML); the
 // interactive steppers, the winner radio + the writes live in openMgScoreSheet. Writes: pool final →
 // tdbSubmitResult, bracket final → tdbSubmitBracketResult, edit-final → tdbEditMatchScore, live →
@@ -4074,6 +4100,7 @@ function buildMgScoreSheetHTML(match, winner) {
   const t = (Array.isArray(state.tournaments) ? state.tournaments : []).find((x) => x.id === match.tournament_id) || mgActiveTournament() || {};
   // Pass the match so the championship (grand final set 1) gets its published no-cap rule.
   const rules = scoringRulesFor(match.phase, t, match);
+  const editMode = mgPoolEditMode(match, t);
   const bits = [];
   if (match.phase === 'main') {
     bits.push(mgBracketMatchLabel(match));
@@ -4134,12 +4161,14 @@ function buildMgScoreSheetHTML(match, winner) {
     ? (match.phase === 'main'
       ? 'Fixing the score. Same winner only. To change who won, clear the result first.'
       : 'Fixing the score. Tap the other team if they won.')
-    : (match.phase === 'main' ? 'Tap the team that won. Add the score if you kept one.' : 'Tap a team to mark them the winner, then enter the score.'));
+    : (match.phase === 'main' ? 'Tap the team that won. Add the score if you kept one.' : 'Tap a team to mark them the winner, then enter the score.'))
+    + (editMode === 'redraw' ? ' ' + MG_POOL_REDRAW_LINE : editMode === 'locked' ? ' ' + MG_POOL_LOCK_LINE : '');
   // The primary is live when the save would be accepted: a bracket game needs a pick (score optional, a tied
   // non-zero score is still a tie); a pool game needs a decided score. Round 2026-08-25: a FINISHED bracket
   // game with no score on it is the one case the pick alone cannot save. edit_match_score derives the winner
   // from the scores, so re-submitting 0-0 is refused; the primary stays dead until a point goes in.
-  const canFinal = match.phase === 'main' ? (!!pick && !(a === b && a > 0) && !(isFinal && a === 0 && b === 0)) : a !== b;
+  const canFinal = (match.phase === 'main' ? (!!pick && !(a === b && a > 0) && !(isFinal && a === 0 && b === 0)) : a !== b)
+    && editMode !== 'locked';
   const body = `<div class="mgv-scbody">`
     + `<div class="mgv-scbox">${row('a', aName, a)}${row('b', bName, b)}</div>`
     + `<div class="mgv-schint">${escapeHTML(hint)}</div>`
@@ -4174,6 +4203,7 @@ function openMgScoreSheet(matchId) {
   const aName = teamNameById(state.tournamentTeams, match.team_a_id) || 'Team A';
   const bName = teamNameById(state.tournamentTeams, match.team_b_id) || 'Team B';
   const isFinal = match.status === 'final';
+  const tourn = (Array.isArray(state.tournaments) ? state.tournaments : []).find((x) => x.id === match.tournament_id) || mgActiveTournament() || null;
   let a = Math.max(0, Number(match.score_a) || 0);
   let b = Math.max(0, Number(match.score_b) || 0);
   // Which team is marked the winner (round 2026-08-03). Seeded from the recorded winner on a finished game,
@@ -4221,9 +4251,9 @@ function openMgScoreSheet(matchId) {
       // C101 Task 5: brought into line with the build-time expression at buildMgScoreSheetHTML. A FINISHED
       // bracket game with no score on it cannot be re-submitted (edit_match_score derives the winner from
       // the scores and refuses 0-0), so the primary must stay dead until a point goes in.
-      const canFinal = match.phase === 'main'
+      const canFinal = (match.phase === 'main'
         ? (!!pick && !(a === b && a > 0) && !(isFinal && a === 0 && b === 0))
-        : a !== b;
+        : a !== b) && mgPoolEditMode(match, tourn) !== 'locked';
       if (canFinal) btn.removeAttribute('disabled'); else btn.setAttribute('disabled', 'true');
       btn.textContent = mgScoreFinalLabel(aName, bName, a, b, isFinal, pick);
     }
@@ -4235,6 +4265,8 @@ function openMgScoreSheet(matchId) {
     if (submitting) return;
     const scoreless = match.phase === 'main' && !isFinal && a === 0 && b === 0 && !!pick;
     if (!scoreless && a === b) { fail('A game can\'t end in a tie.'); return; }
+    const editMode = mgPoolEditMode(match, tourn);   // re-read at save time, not at open time
+    if (editMode === 'locked') { fail(MG_POOL_LOCK_LINE); return; }
     submitting = true;
     try {
       if (scoreless) {
@@ -4244,6 +4276,17 @@ function openMgScoreSheet(matchId) {
         if (isFinal) await tdbEditMatchScore(match, String(a), String(b));
         else if (match.phase === 'main') await tdbSubmitBracketResult(match, a > b ? 'a' : 'b', String(a), String(b));
         else await tdbSubmitResult(match, String(a), String(b));
+      }
+      if (editMode === 'redraw') {
+        try { await mgRedrawBracketAfterPoolEdit(tourn); }
+        catch (e) {
+          // The score is saved; the bracket is not. Repaint what is true and leave the card open on the reason.
+          try { await tdbRefreshTournaments(); } catch (_) {}
+          afterSave();
+          fail('The score is saved. The bracket did not re-draw. ' + ((e && e.message) || 'Try again.') + ' Open Bracket and tap Seed bracket.');
+          submitting = false;
+          return;
+        }
       }
       await tdbRefreshTournaments();
       closeMgScoreSheet();
